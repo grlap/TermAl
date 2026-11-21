@@ -126,11 +126,23 @@ struct FederationAttemptState {
 }
 
 impl FederationAttemptState {
+    fn observe_failure(&self, reason: &'static str, error: &ApiError) {
+        self.observe_failure_at(None, reason, error);
+    }
+
+    fn observe_failure_at(&self, stage: Option<&'static str>, reason: &'static str, error: &ApiError) {
+        if let Some(reporter) = &self.reporter {
+            reporter.failure(stage, reason, error);
+        }
+    }
+
     fn check_material(&mut self, actual: [u8; 32]) -> Result<(), ApiError> {
         match self.material {
             Some(expected) if expected != actual => {
                 self.material_changed = true;
-                Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY))
+                let error = ApiError::conflict(FEDERATION_STALE_AUTHORITY);
+                self.observe_failure("credentialMaterialChanged", &error);
+                Err(error)
             }
             None => {
                 self.material = Some(actual);

@@ -32,11 +32,46 @@ impl FederationWorkerObservation {
     }
 }
 
+struct FederationFailedAttempt {
+    worker_id: String,
+    server_instance_id: String,
+    attempt: u64,
+    enrollment: u64,
+    transport: u64,
+    started_at: String,
+    failed_at: String,
+    stage: &'static str,
+    reason: &'static str,
+    status: u16,
+    ssh: Option<Value>,
+}
+
+impl FederationFailedAttempt {
+    fn project(&self, peer: &FederationPeerRecord) -> Value {
+        json!({
+            "workerId": self.worker_id,
+            "serverInstanceId": self.server_instance_id,
+            "attempt": self.attempt,
+            "enrollmentGeneration": self.enrollment,
+            "transportGeneration": self.transport,
+            "currentBasis": self.enrollment == peer.enrollment_generation
+                && self.transport == peer.transport_generation,
+            "startedAt": self.started_at,
+            "failedAt": self.failed_at,
+            "stage": self.stage,
+            "reason": self.reason,
+            "status": self.status,
+            "ssh": self.ssh,
+        })
+    }
+}
+
 struct FederationWorkerReporter {
     app: AppState,
     basis: Arc<FederationTransportBasis>,
     worker_id: String,
     attempt: u64,
+    failed: AtomicBool,
 }
 
 impl FederationWorkerReporter {
@@ -46,11 +81,13 @@ impl FederationWorkerReporter {
             basis,
             worker_id: Uuid::new_v4().to_string(),
             attempt: 0,
+            failed: AtomicBool::new(false),
         }
     }
 
     fn begin(&mut self) {
         self.attempt = self.attempt.saturating_add(1);
+        *self.failed.get_mut() = false;
         self.update(true, |_, _| {});
     }
 
@@ -70,6 +107,47 @@ impl FederationWorkerReporter {
 
     fn ssh(&self, ssh: Option<FederationSshDiagnostics>) {
         self.update(false, |worker, _| worker.ssh = ssh);
+    }
+
+    fn failure(&self, stage: Option<&'static str>, reason: &'static str, error: &ApiError) {
+        if self.failed.load(Ordering::Relaxed) {
+            return;
+        }
+        let host_id = match self.basis.read() {
+            Ok(basis) => basis.peer.host_id.clone(),
+            Err(_) => return,
+        };
+        let Ok(mut inner) = self.app.inner.lock() else {
+            return;
+        };
+        let Some(observed) = inner.federation_attestation.get_mut(&host_id) else {
+            return;
+        };
+        // The recorded worker can retain its failure as historical when its
+        // authority changes. A replacing worker owns its own observations.
+        let Some(worker) = observed.worker.as_ref().filter(|worker| {
+            worker.worker_id == self.worker_id && worker.attempt == self.attempt
+        }) else {
+            return;
+        };
+        if self.failed.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        observed.last_failed_attempt = Some(FederationFailedAttempt {
+            worker_id: worker.worker_id.clone(),
+            server_instance_id: worker.server_instance_id.clone(),
+            attempt: worker.attempt,
+            enrollment: worker.enrollment,
+            transport: worker.transport,
+            started_at: worker.started_at.clone(),
+            failed_at: chrono::Utc::now().to_rfc3339(),
+            stage: stage.unwrap_or(worker.stage),
+            reason,
+            status: error.status.as_u16(),
+            ssh: worker.ssh.as_ref().map(|ssh| {
+                ssh.lock().unwrap_or_else(std::sync::PoisonError::into_inner).project()
+            }),
+        });
     }
 
     fn update(

@@ -13,6 +13,7 @@ struct FederationAttestationObservation {
     attempt_owner: u64,
     attempt_channel: Option<String>,
     worker: Option<FederationWorkerObservation>,
+    last_failed_attempt: Option<FederationFailedAttempt>,
 }
 
 impl FederationAttestationObservation {
@@ -24,6 +25,7 @@ impl FederationAttestationObservation {
         value["currentBasis"] = json!(attempted.then_some(current));
         if !current && self.last_stage.is_some() { value["state"] = json!("historical"); }
         value["worker"] = self.worker.as_ref().map(|worker| worker.project(peer)).unwrap_or(Value::Null);
+        value["lastFailedAttempt"] = self.last_failed_attempt.as_ref().map(|attempt| attempt.project(peer)).unwrap_or(Value::Null);
         value
     }
 

@@ -21,11 +21,13 @@ async fn federation_hostname_update_preserves_enrollment_and_fences_old_transpor
         StatusCode::OK,
     )
     .await;
+    assert_eq!(before["peers"][0]["liveLinkPresent"], true);
     let mut expected = before["peers"][0].clone();
     expected["endpoint"]["sshHost"] = json!("satellite.local");
     expected["recordGeneration"] = json!(old.record_generation + 1);
     expected["transportGeneration"] = json!(old.transport_generation + 1);
     expected["verificationCurrent"] = json!(false);
+    expected["liveLinkPresent"] = json!(false);
     assert_eq!(
         after["peers"][0], expected,
         "only the locator and local fences change; identity, enrollment and keys survive"

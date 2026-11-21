@@ -145,22 +145,44 @@ fn agent_status_attestation(source: &Value) -> Result<Value> {
                 "recoveryReason",
             ],
         )?;
-        agent_status_optional(&mut out, worker, "ssh", |ssh| {
-            agent_status_fields(
-                ssh,
-                &[
-                    "class",
-                    "stderrComplete",
-                    "truncated",
-                    "exited",
-                    "exitCode",
-                    "cleanupRequested",
-                ],
-            )
-        })?;
+        agent_status_optional(&mut out, worker, "ssh", agent_status_ssh)?;
+        Ok(out)
+    })?;
+    agent_status_optional(&mut out, source, "lastFailedAttempt", |attempt| {
+        let mut out = agent_status_fields(
+            attempt,
+            &[
+                "workerId",
+                "serverInstanceId",
+                "attempt",
+                "enrollmentGeneration",
+                "transportGeneration",
+                "currentBasis",
+                "startedAt",
+                "failedAt",
+                "stage",
+                "reason",
+                "status",
+            ],
+        )?;
+        agent_status_optional(&mut out, attempt, "ssh", agent_status_ssh)?;
         Ok(out)
     })?;
     Ok(out)
+}
+
+fn agent_status_ssh(source: &Value) -> Result<Value> {
+    agent_status_fields(
+        source,
+        &[
+            "class",
+            "stderrComplete",
+            "truncated",
+            "exited",
+            "exitCode",
+            "cleanupRequested",
+        ],
+    )
 }
 
 fn agent_status_peer(source: &Value) -> Result<Value> {
@@ -174,6 +196,7 @@ fn agent_status_peer(source: &Value) -> Result<Value> {
             "arch",
             "state",
             "verificationCurrent",
+            "liveLinkPresent",
         ],
     )?;
     agent_status_optional(&mut out, source, "host", agent_status_identity)?;

@@ -77,10 +77,7 @@ async fn federation_pending_credential_read_keeps_stop_bounded_without_quarantin
     assert!(!quarantined.lock().unwrap().contains(&id));
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn federation_worker_reports_retry_with_current_attempt_and_basis() {
-    let mut fixture = Fixture::new().await;
-    fixture.io.credentials = Arc::new(|_| Err(federation_credential_error()));
+async fn observe_first_worker_retry(mut fixture: Fixture) -> Value {
     let app = fixture.app.clone();
     let id = fixture.id.clone();
     let (observed, result) = tokio::sync::oneshot::channel();
@@ -104,6 +101,30 @@ async fn federation_worker_reports_retry_with_current_attempt_and_basis() {
         .unwrap()
         .unwrap();
     fixture.finish(runtime).await;
+    observed
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_worker_reports_retry_with_current_attempt_and_basis() {
+    let mut fixture = Fixture::new().await;
+    let released = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let release_on_failure = ReleaseRead(released.clone());
+    let release_on_pending = released.clone();
+    fixture.io.credential_reporting_deadline = Duration::ZERO;
+    fixture.io.credential_observed = Arc::new(move |state| {
+        if state.starts_with("pending;") {
+            drop(ReleaseRead(release_on_pending.clone()));
+        }
+    });
+    fixture.io.credentials = Arc::new(move |_| {
+        let mut ready = released.0.lock().unwrap();
+        while !*ready {
+            ready = released.1.wait(ready).unwrap();
+        }
+        Err(federation_credential_error())
+    });
+    let observed = observe_first_worker_retry(fixture).await;
+    drop(release_on_failure);
     let worker = &observed["attestation"]["worker"];
     assert!(observed["attestation"]["currentBasis"].is_null());
     assert_eq!(observed["attestation"]["state"], "unverified");
@@ -123,6 +144,82 @@ async fn federation_worker_reports_retry_with_current_attempt_and_basis() {
             .as_u64()
             .is_some_and(|delay| (1000..=2000).contains(&delay))
     );
+    let terminal = &observed["attestation"]["lastFailedAttempt"];
+    assert_eq!(
+        terminal["stage"], "credentialRead",
+        "retry backoff must retain the credential failure's terminal phase"
+    );
+    assert_eq!(terminal["reason"], "credentialsUnavailable");
+    assert_eq!(terminal["status"], StatusCode::SERVICE_UNAVAILABLE.as_u16());
+    for field in [
+        "workerId",
+        "attempt",
+        "enrollmentGeneration",
+        "transportGeneration",
+    ] {
+        assert_eq!(terminal[field], worker[field]);
+    }
+    assert!(terminal["ssh"].is_null());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_worker_reports_retry_with_a_registered_live_link() {
+    let mut fixture = Fixture::new().await;
+    let app = fixture.app.clone();
+    let credentials_read = Arc::new(AtomicBool::new(false));
+    let read = credentials_read.clone();
+    fixture.io.credentials = Arc::new(move |_| {
+        read.store(true, Ordering::SeqCst);
+        Err(federation_credential_error())
+    });
+    let basis = app.federation_peer_snapshot(&fixture.id).unwrap();
+    let incarnation = Uuid::new_v4().to_string();
+    let installed = app
+        .federation_peer_connected(&basis, incarnation.clone())
+        .unwrap();
+    let observed = observe_first_worker_retry(fixture).await;
+    assert!(app.federation_peer_disconnected(&installed, &incarnation));
+    let registry = app.federation_registry_view().unwrap();
+    let after = &registry["peers"][0];
+
+    assert!(!credentials_read.load(Ordering::SeqCst));
+    assert_eq!(observed["attestation"]["worker"]["stage"], "retryBackoff");
+    let terminal = &observed["attestation"]["lastFailedAttempt"];
+    assert_eq!(
+        terminal["reason"], "liveLinkStillRegistered",
+        "reconnect must identify the live-link guard before credentials"
+    );
+    assert_eq!(terminal["stage"], "basisValidation");
+    assert_eq!(terminal["status"], StatusCode::CONFLICT.as_u16());
+    assert_eq!(observed["liveLinkPresent"], true);
+    assert_eq!(after["liveLinkPresent"], false);
+    assert_eq!(observed["lastObserved"]["linkIncarnation"], incarnation);
+    assert_eq!(after["lastObserved"], observed["lastObserved"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn federation_worker_reports_retry_with_listener_bind_refusal() {
+    let mut fixture = Fixture::new().await;
+    let occupant = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut peer = fixture.app.inner.lock().unwrap().federation.peers[&fixture.id].clone();
+    peer.endpoint.central_federation_port = occupant.local_addr().unwrap().port();
+    fixture.app.enroll_federation_peer(peer).unwrap();
+    let started_ssh = Arc::new(AtomicBool::new(false));
+    let started = started_ssh.clone();
+    fixture.io.ssh = Arc::new(move |_, _, _, _| {
+        started.store(true, Ordering::SeqCst);
+        Err(federation_transport_unavailable())
+    });
+
+    let observed = observe_first_worker_retry(fixture).await;
+    drop(occupant);
+    assert!(!started_ssh.load(Ordering::SeqCst));
+    assert_eq!(observed["attestation"]["worker"]["stage"], "retryBackoff");
+    let failure = &observed["attestation"]["lastFailedAttempt"];
+    assert_eq!(failure["stage"], "listenerBind");
+    assert_eq!(failure["reason"], "listenerAddressInUse");
+    assert_eq!(failure["status"], StatusCode::SERVICE_UNAVAILABLE.as_u16());
+    assert!(failure["ssh"].is_null());
 }
 
 #[test]
@@ -138,6 +235,15 @@ fn federation_worker_old_basis_and_owner_cannot_publish_fresh_attempt() {
     let mut old = FederationWorkerReporter::new(app.clone(), basis);
     old.begin();
     old.stage("controlStartup");
+    old.failure(
+        None,
+        "controlStreamUnavailable",
+        &federation_transport_unavailable(),
+    );
+    let failure =
+        app.federation_registry_view().unwrap()["peers"][0]["attestation"]["lastFailedAttempt"]
+            .clone();
+    assert_eq!(failure["currentBasis"], true);
     let channel = FederationChannel::for_app(
         snapshot,
         FederationPairCapability::new("a".repeat(64)).unwrap(),
@@ -164,6 +270,11 @@ fn federation_worker_old_basis_and_owner_cannot_publish_fresh_attempt() {
     successor.stage("credentialRead");
     drop(old);
     late.stage("authenticated");
+    late.failure(
+        None,
+        "controlMonitorFailed",
+        &federation_transport_unavailable(),
+    );
     drop(late);
     let view = app.federation_registry_view().unwrap();
     assert_eq!(
@@ -174,6 +285,10 @@ fn federation_worker_old_basis_and_owner_cannot_publish_fresh_attempt() {
         view["peers"][0]["attestation"]["worker"]["currentBasis"],
         true
     );
+    let historical = &view["peers"][0]["attestation"]["lastFailedAttempt"];
+    assert_eq!(historical["workerId"], failure["workerId"]);
+    assert_eq!(historical["reason"], "controlStreamUnavailable");
+    assert_eq!(historical["currentBasis"], false);
     channel.invalidate();
 }
 

@@ -15,7 +15,9 @@ async fn federation_central_monitor(
     if *stop.borrow() || stop.has_changed().is_err() {
         return Ok(());
     }
-    client.channel.current_authority()?;
+    if let Some(reporter) = &attempt.reporter { reporter.stage("sshAuthority"); }
+    client.channel.current_authority()
+        .inspect_err(|error| attempt.observe_failure("sshAuthorityRefused", error))?;
     let process_snapshot = snapshot.clone();
     let start = io.ssh.clone();
     let start_channel = client.channel.clone();
@@ -42,6 +44,7 @@ async fn federation_central_monitor(
     )
     .await
     .map_err(|error| {
+        attempt.observe_failure("sshStartFailed", &error);
         federation_attestation_error(
             &client.channel,
             None,
@@ -56,11 +59,17 @@ async fn federation_central_monitor(
         reporter.stage("controlStartup");
     }
     let outcome = async {
-        let mut control = process.take_control_stream().map_err(|error| federation_attestation_error(
-            &client.channel, None, "startup", "controlStreamUnavailable", error, false))?;
+        let mut control = process.take_control_stream().map_err(|error| {
+            attempt.observe_failure("controlStreamUnavailable", &error);
+            federation_attestation_error(
+                &client.channel, None, "startup", "controlStreamUnavailable", error, false)
+        })?;
+        if let Some(reporter) = &attempt.reporter { reporter.stage("controlAttestation"); }
         let (context, guard) = tokio::select! {
             _ = federation_wait_stop(stop) => return Ok(()),
-            result = federation_attest_central_started(&client.channel, &mut control, started) => result?,
+            result = federation_attest_central_started(&client.channel, &mut control, started) => {
+                result.inspect_err(|error| attempt.observe_failure("controlAttestationFailed", error))?
+            },
         };
         let (control_stop, control_stop_rx) = tokio::sync::watch::channel(false);
         let (ready, ready_rx) = tokio::sync::oneshot::channel();
@@ -68,15 +77,20 @@ async fn federation_central_monitor(
         let mut task = tokio::spawn(federation_control_central(client.channel.clone(), control, context, guard, control_stop_rx, ready));
         let mut joined = false;
         let outcome = async {
+            if let Some(reporter) = &attempt.reporter { reporter.stage("controlReady"); }
             tokio::select! {
                 _ = federation_wait_stop(stop) => return Ok(()),
                 result = tokio::time::timeout(Duration::from_secs(5), ready_rx) => {
                     result.map_err(|_| {
                         client.channel.observe_terminal(&terminal_context, "monitor", "controlReadyExpired");
-                        federation_transport_unavailable()
+                        let error = federation_transport_unavailable();
+                        attempt.observe_failure("controlReadyExpired", &error);
+                        error
                     })?.map_err(|_| {
                         client.channel.observe_terminal(&terminal_context, "monitor", "controlReadyClosed");
-                        federation_transport_unavailable()
+                        let error = federation_transport_unavailable();
+                        attempt.observe_failure("controlReadyClosed", &error);
+                        error
                     })?;
                 },
             }
@@ -121,12 +135,14 @@ async fn federation_central_monitor(
                 }
             }
         }.await;
+        if let Err(error) = &outcome { attempt.observe_failure("controlMonitorFailed", error); }
         control_stop.send_replace(true);
         if !joined {
             if let Err(error) = task.await { eprintln!("federation control task failed: {error}"); }
         }
         outcome
     }.await;
+    if let Err(error) = &outcome { attempt.observe_failure("controlStartupFailed", error); }
     client.channel.invalidate();
     if let Some(reporter) = &attempt.reporter { reporter.stage("sshCleanup"); }
     if let Err(error) = federation_os_cleanup(
@@ -136,6 +152,7 @@ async fn federation_central_monitor(
     )
     .await
     {
+        attempt.observe_failure("sshCleanupFailed", &error);
         return Err(error);
     }
     outcome

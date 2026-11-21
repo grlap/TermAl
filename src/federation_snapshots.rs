@@ -92,6 +92,7 @@ impl AppState {
 
     /// Reconnect only the caller's unchanged installed transport basis after
     /// its link is gone. Membership may advance; configuration cannot be adopted.
+    #[cfg(test)]
     fn federation_reconnect_snapshot(
         &self,
         expected: &FederationPeerSnapshot,
@@ -107,14 +108,7 @@ impl AppState {
         inner: &StateInner,
         expected: &FederationPeerSnapshot,
     ) -> Result<FederationPeerSnapshot, ApiError> {
-        expected.validate()?;
-        let current = federation_snapshot_locked(inner, &expected.peer.host_id)?;
-        if !expected.same_transport_as(&current)
-            || inner.federation.links.contains_key(&expected.peer.host_id)
-        {
-            return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
-        }
-        Ok(current)
+        federation_reconnect_cut(inner, expected).map_err(|(error, _)| error)
     }
 
     /// Refresh membership bookkeeping only for this channel's unchanged
@@ -228,4 +222,26 @@ impl AppState {
         }
         Ok(())
     }
+}
+
+fn federation_reconnect_cut(
+    inner: &StateInner,
+    expected: &FederationPeerSnapshot,
+) -> Result<FederationPeerSnapshot, (ApiError, &'static str)> {
+    expected.validate().map_err(|error| (error, "invalidExpectedBasis"))?;
+    let current = federation_snapshot_locked(inner, &expected.peer.host_id).map_err(|error| {
+        let reason = if error.status == StatusCode::LOCKED {
+            "persistenceSettling"
+        } else {
+            "currentBasisUnavailable"
+        };
+        (error, reason)
+    })?;
+    if !expected.same_transport_as(&current) {
+        return Err((ApiError::conflict(FEDERATION_STALE_AUTHORITY), "transportBasisChanged"));
+    }
+    if inner.federation.links.contains_key(&expected.peer.host_id) {
+        return Err((ApiError::conflict(FEDERATION_STALE_AUTHORITY), "liveLinkStillRegistered"));
+    }
+    Ok(current)
 }

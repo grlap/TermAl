@@ -18,6 +18,7 @@ impl AppState {
                 "allocatedBuildSlots":allocated.iter().map(|row|u64::from(row.build_slots)).sum::<u64>(),
                 "allocatedGateSlots":allocated.iter().map(|row|u64::from(row.gate_slots)).sum::<u64>(),
                 "verificationCurrent":peer.verified_on(inner.federation.links.get(&peer.identity.host_id)),
+                "liveLinkPresent":inner.federation.links.contains_key(&peer.identity.host_id),
                 "lastObserved":peer.last_observed,
                 "attestation":inner.federation_attestation.get(&peer.identity.host_id)
                     .map(|observation| observation.project_for(peer)).unwrap_or_else(|| FederationAttestationObservation::default().project_for(peer))})

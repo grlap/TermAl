@@ -356,7 +356,11 @@ async fn federation_run_peer(
             .expect("federation basis lock poisoned")
             .clone();
         if let Some(reporter) = &mut attempt.reporter { reporter.begin(); }
-        let result = match app.federation_reconnect_snapshot(&expected) {
+        let reconnect = {
+            let inner = app.inner.lock().expect("state mutex poisoned");
+            federation_reconnect_cut(&inner, &expected)
+        };
+        let result = match reconnect {
             Ok(snapshot) => {
                 federation_serve_peer(
                     &app,
@@ -370,11 +374,15 @@ async fn federation_run_peer(
                 )
                 .await
             }
-            Err(error) => Err(error),
+            Err((error, reason)) => {
+                attempt.observe_failure(reason, &error);
+                Err(error)
+            }
         };
         #[cfg(test)]
         let mut reported = false;
         if let Err(ref error) = result {
+            attempt.observe_failure("attemptFailed", error);
             // Do not log request bodies, raw SSH stderr, secret references or
             // externally supplied error bodies. Typed status is sufficient.
             eprintln!(

@@ -41,8 +41,12 @@ fn agent_federation_status_preserves_peer_states_without_making_link_claims() {
         {"host":identity("unverified"),"state":"enrolled","verificationCurrent":false,
             "attestation":{"state":"unverified","worker":null}},
         {"host":identity("disconnected"),"state":"active","verificationCurrent":false,
+            "liveLinkPresent":false,
             "lastObserved":{"linkIncarnation":"historical"},
-            "attestation":{"worker":{"stage":"retryBackoff","currentBasis":false}}}
+            "attestation":{"worker":{"stage":"retryBackoff","currentBasis":false},
+                "lastFailedAttempt":{"attempt":7,"stage":"listenerBind","status":503,
+                    "reason":"listenerAddressInUse","detail":"private detail",
+                    "ssh":{"class":"unknown","stderr":"private stderr"}}}}
     ]);
     let out = agent_federation_status(&fed, &roster(), Some(200), None).unwrap();
     let peers = &out["federation"]["peers"];
@@ -60,7 +64,13 @@ fn agent_federation_status_preserves_peer_states_without_making_link_claims() {
     assert_eq!(peers[3]["verificationCurrent"], false);
     assert_eq!(peers[4]["attestation"]["worker"]["currentBasis"], false);
     assert!(peers[4].get("linkConnected").is_none());
+    assert_eq!(peers[4]["liveLinkPresent"], false);
     assert_eq!(peers[4]["lastObserved"]["linkIncarnation"], "historical");
+    assert_eq!(
+        peers[4]["attestation"]["lastFailedAttempt"],
+        json!({"attempt":7,"stage":"listenerBind","status":503,
+            "reason":"listenerAddressInUse","ssh":{"class":"unknown"}})
+    );
 }
 
 #[test]

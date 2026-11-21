@@ -12,9 +12,11 @@ async fn federation_serve_peer(
     io: &FederationRuntimeIo,
 ) -> Result<(), ApiError> {
     if let Some(reporter) = &attempt.reporter { reporter.stage("credentialRead"); }
-    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    federation_validate_credential_basis(app, snapshot, &basis, stop)
+        .inspect_err(|error| attempt.observe_failure("credentialBasisRefused", error))?;
     let read = FederationCredentialRead::start(snapshot.clone(), &basis, io.credentials.clone())
-        .inspect_err(|_| {
+        .inspect_err(|error| {
+            attempt.observe_failure("credentialReadStartFailed", error);
             eprintln!(
                 "federation peer {} credential read: could not start",
                 snapshot.peer.host_id
@@ -32,13 +34,19 @@ async fn federation_serve_peer(
             #[cfg(test)]
             (io.credential_observed)(state);
         })
-        .await?
+        .await
+        .inspect_err(|error| attempt.observe_failure("credentialResultUnavailable", error))?
     else {
         return Ok(());
     };
     let FederationCredentialResult { result, settlement } = completed;
-    let credentials = result?;
-    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    let credentials = result.inspect_err(|error| {
+        // The progress observer may be reporting settlement of this result.
+        // The error itself belongs to the credential read.
+        attempt.observe_failure_at(Some("credentialRead"), "credentialsUnavailable", error);
+    })?;
+    federation_validate_credential_basis(app, snapshot, &basis, stop)
+        .inspect_err(|error| attempt.observe_failure("credentialBasisRefused", error))?;
     attempt.check_material(credentials.material_fingerprint)?;
     let port = match snapshot.local_role {
         FederationRole::Central => snapshot.endpoint.central_federation_port,
@@ -48,8 +56,19 @@ async fn federation_serve_peer(
     if let Some(reporter) = &attempt.reporter { reporter.stage("listenerBind"); }
     let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port)))
         .await
-        .map_err(|_| federation_transport_unavailable())?;
-    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+        .map_err(|io_error| {
+            let reason = match io_error.kind() {
+                std::io::ErrorKind::AddrInUse => "listenerAddressInUse",
+                std::io::ErrorKind::PermissionDenied => "listenerBindPermissionDenied",
+                _ => "listenerBindFailed",
+            };
+            let error = federation_transport_unavailable();
+            attempt.observe_failure(reason, &error);
+            error
+        })?;
+    if let Some(reporter) = &attempt.reporter { reporter.stage("listenerSetup"); }
+    federation_validate_credential_basis(app, snapshot, &basis, stop)
+        .inspect_err(|error| attempt.observe_failure("credentialBasisRefused", error))?;
     attempt.check_material(credentials.material_fingerprint)?;
     disable_socket_inheritance(&listener);
     let channel = FederationChannel::for_app(snapshot.clone(), credentials.capability, app.clone());
@@ -89,12 +108,14 @@ async fn federation_serve_peer(
     } else {
         snapshot.endpoint.satellite_reverse_forward_port
     };
-    let client = FederationRpcClient::new(forward_port, channel.clone(), ensure_current.clone())?;
+    let client = FederationRpcClient::new(forward_port, channel.clone(), ensure_current.clone())
+        .inspect_err(|error| attempt.observe_failure("listenerClientSetupFailed", error))?;
     let (listener_stop, listener_stop_rx) = tokio::sync::watch::channel(false);
     let directory = app
         .persistence_path
         .parent()
-        .ok_or_else(federation_transport_unavailable)?
+        .ok_or_else(federation_transport_unavailable)
+        .inspect_err(|error| attempt.observe_failure("listenerDirectoryUnavailable", error))?
         .to_path_buf();
     let router = federation_router(channel.clone(), ensure_current).layer(axum::Extension(
         FederationOnboardingHost {
@@ -103,9 +124,11 @@ async fn federation_serve_peer(
             io: FederationOnboardingIo::local(directory),
         },
     ));
-    federation_validate_credential_basis(app, snapshot, &basis, stop)?;
+    if let Some(reporter) = &attempt.reporter { reporter.stage("listenerPublication"); }
+    federation_validate_credential_basis(app, snapshot, &basis, stop)
+        .inspect_err(|error| attempt.observe_failure("credentialBasisRefused", error))?;
     attempt.check_material(credentials.material_fingerprint)?;
-    let server = {
+    let server = (|| {
         // Serialize publication with configuration changes and stop signals.
         // The preceding async bind may have yielded to either of them.
         let inner = app.inner.lock().expect("state mutex poisoned");
@@ -136,8 +159,9 @@ async fn federation_serve_peer(
                     rpc: client.clone(),
                 }),
             );
-        server
-    };
+        Ok(server)
+    })()
+        .inspect_err(|error| attempt.observe_failure("listenerPublicationRefused", error))?;
     // Material is adopted on the validated captured basis. Pending connection
     // commits take their own settlement guards as before.
     drop(settlement);
@@ -163,6 +187,9 @@ async fn federation_serve_peer(
     } else {
         federation_satellite_monitor(&client, stop, retry, &server, io).await
     };
+    if let Err(error) = &result {
+        attempt.observe_failure("peerMonitorFailed", error);
+    }
     channel.invalidate();
     peers
         .lock()
@@ -171,10 +198,16 @@ async fn federation_serve_peer(
     listener_stop.send_replace(true);
     match server.await {
         Ok(Ok(())) => {}
-        Ok(Err(_)) => return Err(federation_transport_unavailable()),
+        Ok(Err(_)) => {
+            let error = federation_transport_unavailable();
+            attempt.observe_failure("listenerServeFailed", &error);
+            return Err(error);
+        }
         Err(error) => {
             eprintln!("federation listener failed: {error}");
-            return Err(federation_transport_unavailable());
+            let error = federation_transport_unavailable();
+            attempt.observe_failure("listenerTaskFailed", &error);
+            return Err(error);
         }
     }
     result
