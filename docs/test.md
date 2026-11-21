@@ -955,7 +955,7 @@ application's `TERMAL_NOFILE_LIMIT` startup policy. The latter defaults to 8192,
 caps overrides at 1,048,576, and is inherited by newly spawned agent runtimes.
 See [runtime descriptor capacity](architecture.md#process-descriptor-capacity)
 and the [shared Codex app-server](features/shared-codex-app-server.md#descriptor-capacity).
-The `process_limit_tests` Rust filter exercises injected limit reads/writes,
+The `process_limits::tests::nofile_` Rust filter exercises injected limit reads/writes,
 environment selection and diagnostics on every platform, including Windows;
 it never changes the test process's real resource limit or environment.
 That proves policy, not a native macOS syscall or live app-server capacity.

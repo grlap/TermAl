@@ -90,7 +90,7 @@ const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 #[tokio::main]
 async fn main() {
     capture_federation_process_image();
-    configure_process_open_file_limit();
+    process_limits::configure_process_open_file_limit();
     ignore_sigpipe();
     if let Err(err) = run().await {
         eprintln!("fatal: {err:#}");
@@ -976,7 +976,7 @@ impl Mode {
 }
 
 include!("host_log.rs");
-include!("process_limits.rs");
+mod process_limits;
 include!("remote_authority.rs");
 include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");
