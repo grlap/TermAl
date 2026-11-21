@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc19-8a56-7811-9577-b0f29e3cfee5",
+  "external_ref": null,
+  "title": "Numeric-ack domain test should assert the central-domain refusal message, not only 400",
+  "outcome": "numeric_ack_is_rejected_for_domain_members_but_standalone_behavior_remains (src/tests/federation_mailboxes.rs) also asserts the response names the central-domain refusal (\"central domain acknowledgement requires only the unchanged issued receipt\"), so a 400 from the mailbox-id check cannot satisfy it.",
+  "acceptance": [
+    "Numeric-ack domain test should assert the central-domain refusal message, not only 400 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "mailbox",
+    "review-low",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

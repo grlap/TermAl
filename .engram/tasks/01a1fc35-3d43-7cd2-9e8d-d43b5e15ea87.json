@@ -1,0 +1,29 @@
+{
+  "id": "01a1fc35-3d43-7cd2-9e8d-d43b5e15ea87",
+  "external_ref": null,
+  "title": "Let an authorized coordinator resume a root session queue paused only by a provider refusal (no operator UI needed)",
+  "outcome": "When a root session's turn ends in a terminal provider refusal (for example OpenAI's 'flagged for possible cybersecurity risk') and its queue is paused, an explicitly authorized coordinator or root can resume that existing queue through the supported agent surface, with a reason. It is an explicit agent action, never an automatic resume, and it never retries the refused content. The failed turn and the queued messages are preserved, and the next queued continuation runs exactly once. No watcher. Case: Termal::Sol-d50d at 02:49Z on 2026-11-21. Its queue was paused (wakes heldBehindPausedQueue), no agent tool could resume it, and work waited for the operator. Source: Kimi::Consultant's design read (TermAl mailbox 852a55c9 #504), after Greg's „WOGOLE, CZEMU MAMY ZASTOJE!” (Asistant #2173). Design-first: identify the existing queue-resume operation and the authorization model before code.",
+  "acceptance": [
+    "Let an authorized coordinator resume a root session queue paused only by a provider refusal (no operator UI needed) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "mailbox",
+    "queue",
+    "stalls"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

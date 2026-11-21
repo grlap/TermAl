@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc4b-a6a5-7e20-8336-eafda1adc1ab",
+  "external_ref": null,
+  "title": "Launcher --notify with a bare session id on a federated runner resolves to that runner's own host and fails 404 at completion",
+  "outcome": "A detached launcher run started on a federated runner host with --notify naming a session on another host either delivers its completion to that session or is refused at launch, before any stage runs. It never accepts a bare id that resolves to the runner's own local host and then fails at completion.",
+  "acceptance": [
+    "Launcher --notify with a bare session id on a federated runner resolves to that runner's own host and fails 404 at completion is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "remote-runner",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

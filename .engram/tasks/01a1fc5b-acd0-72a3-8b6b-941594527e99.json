@@ -1,0 +1,30 @@
+{
+  "id": "01a1fc5b-acd0-72a3-8b6b-941594527e99",
+  "external_ref": null,
+  "title": "Markdown-only changesets land after the link check instead of the full gate (Greg's TAK)",
+  "outcome": "TermAl's standing landing rule (CLAUDE.md and AGENTS.md, Commit and push, condition 2) lets a changeset that touches only `.md` files land after the link check on exactly that input instead of the full gate, as Engram already does. Both reviewers still review it. Greg's widening word, verbatim with its source: Engram::Asistant, TermAl mailbox 588693a8 #2185 (2026-11-21 04:26Z), relaying Greg's answer in its session to the question 'czy zmiany wyłącznie w plikach Markdown w TermAl mogą przechodzić po sprawdzeniu linków, bez pełnego zestawu testów — tak jak w Engram?': 'TAK'. This is an authority-text change. It lands only after (a) both coordinators concur on the exact wording, recorded on this item, (b) Greg has been sent the exact wording and its consequence, and (c) the final-diff audit is recorded as passed. Proposed wording: in both files, condition 2 gains, after 'every landing whether or not a commit prompt is shown.': 'A changeset that touches only `.md` files (docs, AGENTS.md, CLAUDE.md, skills and commands) instead passes the link check on exactly that input, run as `node scripts/test-launcher.mjs focused --input commit -- node scripts/check-doc-links.mjs`; both reviewers still review it, and the landing still installs as described below. Any other changed path needs the full gate.'",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md condition 2 each carry the exact wording recorded on this item, with no other change to authority text.",
+    "Both coordinators' concurrence on that exact wording, Greg's verbatim TAK with its source, the wording sent to Greg, and a passed final-diff audit are recorded on this item before the landing.",
+    "The review pair has no outstanding Medium-or-higher finding, and the landing gate passes on the exact landed input (the full gate, since the new rule takes effect only once landed)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority-text",
+    "greg-directed",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

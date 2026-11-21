@@ -1,0 +1,37 @@
+{
+  "id": "01a1fc3e-5ae7-7323-8dc3-ba1a8582bd9f",
+  "external_ref": null,
+  "title": "include! → mod, slice 2: process_limits as a real module (after host_log lands)",
+  "outcome": "The process_limits fragment becomes an ordinary Rust module with private state and a minimal pub(crate) facade, in a behaviour-preserving pure move with existing behaviour tests and no source-shape tests, following the w-6296abac468a host_log pattern. Owner Sol-a7bb, as the single owner of src/main.rs declaration-boundary edits. It starts only after host_log (w-6296abac468a) has landed, with a short design (boundary, facade, test count) for coordinator and Kimi review before code. Source: Kimi::Consultant's staged plan (TermAl mailbox 852a55c9 #510) and Greg via Asistant #390.",
+  "acceptance": [
+    "The process file-limit policy lives in an ordinary Rust module with no include bridge. Its sole crate-visible operation is configure_process_open_file_limit, called at the original startup point. All policy helpers, constants, result types and OS adapters are private.",
+    "The extraction preserves Unix open-file limit configuration, diagnostic and cap behavior, and the non-Unix no-op. All 26 existing nofile tests pass on the exact candidate with their assertions unchanged.",
+    "The exact landed change is a behavior-preserving module move with no source-shape tests. The independent review pair has no outstanding in-scope finding of Medium or higher, and the exact landed input passes the standard full gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

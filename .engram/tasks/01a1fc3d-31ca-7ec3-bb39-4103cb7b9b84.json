@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc3d-31ca-7ec3-bb39-4103cb7b9b84",
+  "external_ref": null,
+  "title": "Linked-worktree provider association: accept a Windows case-only spelling difference of the same directory instead of refusing",
+  "outcome": "Raised as a Medium by the R3 review of w-5c8b45a10439 (candidate f19fa528) and downgraded to Low by the coordinator. In src/delegation_git_boundary.rs:416-422, the checked handles can refer to the same case-insensitive Windows directory, yet raw path equality refuses the Git backlink and common pointer when the provider spells the casing differently. The result is a fail-closed explicit refusal of association, which w-5c8b45a10439's outcome ('preserve OR explicitly refuse') allows; it is not a wrong association. Improvement: compare verified native identities of the exact backlink marker and common directory through the existing no-follow path walk, keep real distinct entries on case-sensitive directories, and add a Windows same-object association test with a Windows run.",
+  "acceptance": [
+    "Linked-worktree provider association: accept a Windows case-only spelling difference of the same directory instead of refusing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "test-runs",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

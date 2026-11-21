@@ -1,0 +1,27 @@
+{
+  "id": "01a1fc05-6563-7542-a671-ec7b71b43584",
+  "external_ref": null,
+  "title": "Domain route-miss 404 echo fallback for a non-canonical mailbox id is unreachable behind the 400 check",
+  "outcome": "describe_mailbox_route_miss either drops its non-canonical echo fallback, with a comment saying the 400 check guarantees a canonical id there, or keeps it as a stated guard for future callers, with the route-miss test's claim matching what it actually exercises.",
+  "acceptance": [
+    "Domain route-miss 404 echo fallback for a non-canonical mailbox id is unreachable behind the 400 check is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1fc35-5513-70e0-87b6-ddb9097937b9",
+  "external_ref": null,
+  "title": "Durable hold records: lanes read current hold state at execution time instead of reconstructing it from mailbox prose",
+  "outcome": "One authoritative durable hold record exists per existing scope or lane, with its current state and generation. Admission for the protected action (for example an install) reads that record at execution time, and ending the hold updates it. Mailbox messages carry only the record's identity and generation plus a wake; on startup or any later wake a lane reads the current state rather than reconstructing it from prose history. No polling. Acceptance: a lane that never received the old release message still observes the released state before its next protected action. Case: on 2026-11-21 the Mac Engram runner (session-6201) still enforced Engram rollback hold #561, which both coordinators had ended on 2026-11-13, because the 'ended' messages never reached that lane; an install waited until both re-sent them. Source: Kimi::Consultant design read (TermAl mailbox 852a55c9 #504). It is cross-project: decide with Engram::Fable whether the record lives in TermAl or in Engram before any code. Design-first.",
+  "acceptance": [
+    "Durable hold records: lanes read current hold state at execution time instead of reconstructing it from mailbox prose is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "greg-reported",
+    "stalls"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not needed: no new mechanism. Agreed with Engram::Fable (TermAl mailbox ebe242f7 #8458), in line with Greg's rules against new protective state and procedures. A durable hold already exists as an Engram item blocker (update --blocked with its text, then unblock), which is readable at execution time by any lane. The practice rule: 'A hold that should outlive a message is a blocker on the item it holds; mail only points to it; a hold with no item blocker has no force once its stated review time has passed.' Engram::Fable adds it to the shared rules-waits-and-wakes.",
+  "completion": null
+}

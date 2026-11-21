@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc19-89f1-7ce2-abc1-d5e51094d40c",
+  "external_ref": null,
+  "title": "Move the mailbox-id validation and echo helpers out of src/mailboxes.rs",
+  "outcome": "MAILBOX_ID_ECHO_CHARS, mailbox_id_echo, decode_mailbox_relay_locator and require_canonical_mailbox_id live in a small mailbox-id module, or beside valid_mailbox_relay_id in src/mailbox_relay_protocol.rs, with a provenance header. The move is pure, with behaviour unchanged, and src/mailboxes.rs stops growing past about 4,300 lines.",
+  "acceptance": [
+    "Move the mailbox-id validation and echo helpers out of src/mailboxes.rs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "file-size",
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

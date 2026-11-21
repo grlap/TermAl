@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-ssh-ban-2026-11-21",
+    "revision_id": "db0e06e84edf4fa8af6ce54067c7cbc9",
+    "previous": "9f062b8848fc4ac3a1577bc775adfce7",
+    "body_sha256": "be3d33a5944d42df487ad3d2fc64e6c1645de159ff747671d7bd083f8b83335c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:55:14.902346500Z"
+    }
+  },
+  "body": "Greg's standing ban on SSH (2026-11-21 ~02:40Z, relayed via Asistant #2153 and Fable2 #7000), verbatim: „zakaz uzywania SSH, wlasnie to jest problem / pozniej tworzymy pierdolniete procedury / po to mamy remote sesje, po to mamy git branche aby tak pracowac / A NIE URUCHAMIAC SSH NA BOKU / JESTEM WSCIEKLY”.\nFollow-up from Greg (via Asistant #1665), verbatim: „WIECEJ, MAC CALY CZAS BYL W FEDERACJI, SPRAWDZILEM LOGI / PO PROSTU KTOS PROBOWAL SIE POLACZYC PO STAREMU SSH / PRZEJRZEC PAMIEC SKASOWAC / jestem wsciekly”.\nRule:\n- No agent runs ssh or scp to any machine, not even as a fallback. A broken remote step goes to the TermAl coordinator or to Greg (Engram memory rules-greg-no-agent-ssh-2026-11-21).\n- Satellite work (Mac, Windows B, DL560) goes only through remote TermAl sessions, as named mailbox GOs over federation; inputs travel only as Git branches (author-test or test refs). The remote session acts locally on its own host.\n- Put the ban, verbatim, at the top of the next GO to each runner lane (Fable2 #7006).\n- Never offer or propose SSH as an option. I (Opus2) did once, for a Mac test, and that was a mistake.\n- The repo's old ssh/scp wording is cleaned up under w-d112b42a94df.\nMac federation route: root session Codex 6205 (host:abf8bda6-1ac7-485c-91ce-5a06ac453653::session-6205) works only inside its own session repository's .tmp. Its rules forbid writes outside that repository, and it has no Engram claim on the Mac."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-relay-id-extraction-2026-11-21",
+    "revision_id": "7e665fb235b447aa9aa636a2222590ee",
+    "previous": null,
+    "body_sha256": "6987883bea5b4e9a40af9e13c6e2dac1d66bf3878b265cb87e308568c6e2d83a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T04:15:46.431279300Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-21 04:15Z, my own slip). I sent s4 a named GO whose request message id was EMPTY, then corrected it. Cause: I extracted a relay-message id by grepping for a base64 substring I had guessed. Base64 alignment depends on the surrounding JSON, so the substring never appeared and the shell variable came out empty. Rule: take the id from its labelled field (for example 'messageId relay-message-...'), decode the part after 'relay-message-' with base64 -d to confirm the inner mailbox-message-<uuid>, and grep the outgoing file for that uuid before sending. Never send a GO whose id field was not checked as non-empty."
+}

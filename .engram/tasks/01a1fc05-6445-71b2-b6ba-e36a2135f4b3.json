@@ -1,0 +1,27 @@
+{
+  "id": "01a1fc05-6445-71b2-b6ba-e36a2135f4b3",
+  "external_ref": null,
+  "title": "Mailbox id check refuses the nil UUID with 400 where it previously reached lookup and returned 404",
+  "outcome": "The read/acknowledge mailbox id contract treats \"mailbox-00000000-0000-0000-0000-000000000000\" deliberately: either it is accepted as a canonical lowercase UUID and reaches lookup (404 when unknown), or the non-nil requirement is stated in the 400 message and documented and tested.",
+  "acceptance": [
+    "Mailbox id check refuses the nil UUID with 400 where it previously reached lookup and returned 404 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "mailbox",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

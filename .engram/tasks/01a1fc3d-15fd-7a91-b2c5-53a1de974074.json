@@ -1,0 +1,37 @@
+{
+  "id": "01a1fc3d-15fd-7a91-b2c5-53a1de974074",
+  "external_ref": null,
+  "title": "A turn with no edits after a focus change records an assumed source change that voids the evaluation it spawned",
+  "outcome": "A root session that changes focus to an item and spawns an acceptance evaluator in a turn with no repository edits gets a valid evaluation: TermAl does not record an unadmitted source change (assumed_missing_baseline) for that turn, so Engram does not void the evaluation as stale.",
+  "acceptance": [
+    "When the evaluator measures a settled unnamed Git workdir on its own active turn and exact judged claim, the first close can compare that existing canonical workspace and complete source identity. The comparison stays bound to that store, work, run, claim, fence, revision, turn and root provenance; an incompatible or missing baseline keeps existing conservative behavior.",
+    "Deterministic tests show an unchanged settled unnamed workdir (including an untracked entry) preserves its closing sighting without an assumed_missing_baseline, a real edit after the evaluation request records a content comparison, and an unrelated binding or later turn cannot reuse the comparison. The named-root regression cases continue to pass.",
+    "The exact landed candidate has a clean independent review pair at Medium or higher and passes the standard full gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

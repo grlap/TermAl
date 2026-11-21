@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "pending-residual-dirs-after-restart-2026-11-19",
+    "revision_id": "8fe5a9ab8d5445a294daf39a28af26e6",
+    "previous": "459c67b8306142d783905c4b9d0e2c4e",
+    "body_sha256": "dbb8991924446d0d1b78d9f8dcb30646e0d6b79d391393b80ce80d96edcf2275",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T03:02:25.894538Z"
+    }
+  },
+  "body": "Residual-directory cleanup status (Fable2, updated 2026-11-20 ~18:37Z, after Greg's restart at ~18:29Z).\nDONE: Sol-03d4 removed, non-forced and non-recursive, the three empty handle-held residuals .tmp/wt-b912-9474, .tmp/freeze-docsb2-2bdaf394 and .tmp/freeze-b12-c33b9326, after checking each was inside the repo, unregistered, had no reparse point and was empty (note a8724bfcb9e247058fcc725398d4081d on w-f1559f4bd64c).\nSTILL PENDING: .tmp/9f88-measure (Sol-a7bb #3400, 2026-11-20 ~08:47Z). Its non-forced Remove-Item failed on hidden, system or read-only Git metadata (Hidden probe/x/.git; 13 files, 17,298,445 bytes; note dccbb2af on w-9f8823dd96fe). It is not a handle hold, so it needs a forced form, which requires Greg's per-case word under AGENTS.md \"Cleanup deletions\". Codex executes. When more such residuals accumulate, ask Greg ONCE for a per-case forced-removal word listing each exact absolute path. Until then it stays; it is small and harmless.\n\nAdded 2026-11-21 ~03:03Z (Sol-a7bb #3412): .tmp/wt-da52-9474, the empty, unregistered residual of closed DA52's worktree. After path, link and empty checks, a non-forced, non-recursive Remove-Item was refused with 'used by another process'; the holder is unknown, likely a session or evaluator shell. Handle it like the 2026-11-19 entries: leave it until the next TermAl restart releases the handle, then remove it non-forced (Codex executes) and record the result. It needs no forced form and no process stop."
+}

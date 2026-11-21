@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed as 915cfd56 on master: parent-packet review retention. get_delegation_result_selected resolves the canonical parent once, for both branches, so a padded parent can neither write custody under the padded id nor skip the parent check. Behavioural tests cover the packet path's terminal gate for a Failed attempt, a non-current attempt and storage disabled. A persistently failing retention is remembered per (parent, delegation, attempt) against the record's status, completion and current-attempt identity. It is retried once per record change; overlapping reads may each attempt once; and a stale writer never removes a newer read's failure. The bound is documented in docs/features/review-attempt-retention.md. Review pair 3 was clean; the full gate passed on the exact tree (test-5a7759bc); the post-landing evaluation passed all four criteria.",
+    "completed_at": "2026-11-21T02:59:41.304438400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

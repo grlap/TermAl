@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "frozen-scope-immutable-crossing-messages-2026-11-21",
+    "revision_id": "9a7bc81a1e5b4bacba4506859ee11966",
+    "previous": null,
+    "body_sha256": "0abb0649c796374db51c498b12495ae3cea92a452f5ac09f95ce3a3bf85546cc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T03:45:17.083695800Z"
+    }
+  },
+  "body": "Procedure rule (Fable2, 2026-11-21, from Kimi::Consultant's design read, TermAl mailbox 852a55c9 #504, after Greg's „WOGOLE, CZEMU MAMY ZASTOJE!”): a frozen input's scope is immutable. A later addition becomes a separate item, and the receiver answers with the ACTUAL current candidate and scope instead of assuming the message applied. Examples on 21.11: D112 froze before the skill sentence (t5), which became w-623638d17cb7; my HOLD reached Mac Codex 6205 after it had already started. Late holds are covered by durable hold records (the item 'Durable hold records…'), not by another freeze mechanism. No product item for scope crossing alone."
+}
