@@ -70,7 +70,17 @@ in Engram::Advisor's session, recorded verbatim):
      to an unavailable Codex, and Greg's word of 2026-10-15 above widened
      it to an unavailable Codex or Claude.
   2. The full gate is green on exactly that input, compiled from it, before
-     every landing whether or not a commit prompt is shown.
+     every landing whether or not a commit prompt is shown. A changeset that
+     touches only `.md` files (docs, AGENTS.md, CLAUDE.md, skills and
+     commands) instead passes the link check on exactly that input, run as
+     `node scripts/test-launcher.mjs focused --input commit -- node scripts/check-doc-links.mjs`;
+     both reviewers still review it, and the landing still installs as
+     described below. Any other changed path needs the full gate. Wherever
+     this section requires the full gate on a candidate or a replacement
+     candidate, a Markdown-only changeset runs this link check instead, on
+     a clean checkout of that candidate, and no full run, local or on a test
+     ref, replaces it; Markdown-only work therefore lands as a candidate
+     commit, not through the staged-tree lane.
   3. The tasks carry the evidence needed to close them. A criterion that
      only the landing itself can satisfy, namely that the change is
      committed, pushed, on master or installed, counts as carried when
