@@ -1706,6 +1706,47 @@ fn claude_bash_is_read_only_for_test(command: &str, cwd: &str) -> bool {
 }
 
 #[test]
+fn read_only_engram_source_checks_review_root_and_options_when_dirty() {
+    let fixture = TestTempRoot::create("engram-review");
+    let review_root = fixture.join("review root");
+    let outside_root = fixture.join("review root sibling");
+    fs::create_dir(&review_root).unwrap();
+    fs::create_dir(&outside_root).unwrap();
+    init_git_document_test_repo(&review_root);
+    let tracked = review_root.join("tracked.txt");
+    fs::write(&tracked, "original\n").unwrap();
+    run_git_test_command(&review_root, &["add", "tracked.txt"]);
+    run_git_test_command(
+        &review_root,
+        &["-c", "commit.gpgsign=false", "commit", "-qm", "fixture"],
+    );
+
+    let cwd = review_root.to_str().unwrap();
+    let allowed = format!("engram source --root '{cwd}' --json");
+    assert!(claude_bash_is_read_only_for_test(&allowed, cwd));
+
+    fs::write(&tracked, "staged change\n").unwrap();
+    run_git_test_command(&review_root, &["add", "tracked.txt"]);
+    fs::write(&tracked, "unstaged change\n").unwrap();
+    assert_eq!(
+        run_git_test_command_output(&review_root, &["--no-optional-locks", "status", "--short"]),
+        "MM tracked.txt"
+    );
+    assert!(claude_bash_is_read_only_for_test(&allowed, cwd));
+
+    for denied in [
+        format!("engram work --root '{cwd}' --json"),
+        format!("engram source --root '{}' --json", outside_root.display()),
+        format!("{allowed} --timeout-ms 1000"),
+        format!("engram source --root '{cwd}'"),
+        format!("{allowed} > source.json"),
+        "engram source --root . --json".to_owned(),
+    ] {
+        assert!(!claude_bash_is_read_only_for_test(&denied, cwd), "{denied}");
+    }
+}
+
+#[test]
 fn claude_read_only_auto_approve_allows_literal_read_only_for_loop() {
     let cwd = "/Users/greg/GitHub/Personal/rincon-common";
     for command in [

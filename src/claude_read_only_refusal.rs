@@ -221,7 +221,7 @@ fn claude_bash_refusal_rule(command: &str, cwd: &str) -> String {
                 }
             }
             [head, ..] => {
-                if !claude_bash_tokens_are_read_only(&tokens) {
+                if !claude_bash_tokens_are_read_only(&tokens, Some(cwd)) {
                     let head = claude_refusal_quote_text(head);
                     return if CLAUDE_READ_ONLY_BASH_COMMANDS.contains(&head.as_str())
                         || CLAUDE_OPTION_CHECKED_BASH_COMMANDS.contains(&head.as_str())

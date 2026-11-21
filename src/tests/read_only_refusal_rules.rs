@@ -257,12 +257,15 @@ fn the_refusals_command_lists_match_what_the_checker_allows() {
             "{command}"
         );
     }
+    let review_root = env!("CARGO_MANIFEST_DIR");
+    let engram_source = format!("engram source --root '{review_root}' --json");
     let option_checked = [
         ("date", "date +%Y"),
         ("rg", "rg -n refusal src"),
         ("find", "find src -name x.rs"),
         ("sed", "sed -n 1p src/main.rs"),
         ("git", "git status"),
+        ("engram", engram_source.as_str()),
     ];
     assert_eq!(
         option_checked
@@ -273,7 +276,7 @@ fn the_refusals_command_lists_match_what_the_checker_allows() {
     );
     for (_, command) in option_checked {
         assert!(
-            claude_bash_command_is_read_only(command, WORKSPACE),
+            claude_bash_command_is_read_only(command, review_root),
             "{command}"
         );
     }

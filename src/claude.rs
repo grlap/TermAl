@@ -873,7 +873,7 @@ fn claude_bash_command_is_read_only_with_git_policy(
                 return false;
             }
         }
-        if !claude_bash_tokens_are_read_only(&tokens) {
+        if !claude_bash_tokens_are_read_only(&tokens, allow_object_queries.then_some(cwd)) {
             return false;
         }
     }
@@ -1452,9 +1452,10 @@ const CLAUDE_READ_ONLY_BASH_COMMANDS: &[&str] = &[
 ];
 
 /// Commands allowed only with the arguments their own checks below accept.
-const CLAUDE_OPTION_CHECKED_BASH_COMMANDS: &[&str] = &["date", "rg", "find", "sed", "git"];
+const CLAUDE_OPTION_CHECKED_BASH_COMMANDS: &[&str] =
+    &["date", "rg", "find", "sed", "git", "engram"];
 
-fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
+fn claude_bash_tokens_are_read_only(tokens: &[&str], engram_review_root: Option<&str>) -> bool {
     let Some(command) = tokens.first().copied() else {
         return false;
     };
@@ -1483,7 +1484,27 @@ fn claude_bash_tokens_are_read_only(tokens: &[&str]) -> bool {
         return claude_git_tokens_are_read_only(tokens);
     }
 
+    if command == "engram" {
+        return engram_review_root
+            .is_some_and(|cwd| claude_engram_source_is_read_only(tokens, cwd));
+    }
+
     false
+}
+
+fn claude_engram_source_is_read_only(tokens: &[&str], cwd: &str) -> bool {
+    let ["engram", "source", "--root", root, "--json"] = tokens else {
+        return false;
+    };
+    let root = FsPath::new(root);
+    let review_root = FsPath::new(cwd);
+    if !root.is_absolute() || !review_root.is_absolute() {
+        return false;
+    }
+    let (Ok(root), Ok(review_root)) = (root.canonicalize(), review_root.canonicalize()) else {
+        return false;
+    };
+    root.is_dir() && root.starts_with(review_root)
 }
 
 fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
