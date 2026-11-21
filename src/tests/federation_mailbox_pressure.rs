@@ -253,3 +253,83 @@ async fn unusable_successful_central_reply_is_an_unknown_mailbox_outcome() {
     .into();
     assert!(termal_delegation_outcome_is_unknown(&raw), "{raw:#}");
 }
+
+/// A request whose counter the receiver's replay window refuses gets the
+/// signed UNKNOWN "counter refused" answer even while every per-peer slot is
+/// busy: an earlier delivery of that counter may have committed, so a busy
+/// receiver must not turn it into a definite capacity refusal.
+#[tokio::test]
+async fn replayed_mailbox_counter_stays_unknown_while_every_slot_is_busy() {
+    let channel = federation_link::channel(FederationRole::Satellite, 'a');
+    let (peer, _proof) = federation_control_fixture::establish(&channel).await;
+    let lease = channel.current_lease().unwrap();
+    let central = channel.snapshot.central.clone();
+    // The receiver already holds the counter the client sends next.
+    let next = channel
+        .security_context()
+        .unwrap()
+        .sender
+        .lock()
+        .unwrap()
+        .next;
+    peer.security_context()
+        .unwrap()
+        .received
+        .lock()
+        .unwrap()
+        .reserve(next)
+        .unwrap();
+    let busy = (0..4)
+        .map(|_| peer.bound.try_acquire().unwrap())
+        .collect::<Vec<_>>();
+    let reached = Arc::new(AtomicBool::new(false));
+    let handler_reached = reached.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (stop, mut stopped) = tokio::sync::watch::channel(false);
+    let server = tokio::spawn(async move {
+        let router = federation_control_fixture::authenticated_router(
+            peer,
+            Router::new().route(
+                "/federation/v1/mailbox",
+                post(move || {
+                    handler_reached.store(true, Ordering::SeqCst);
+                    async { (StatusCode::OK, "unreachable") }
+                }),
+            ),
+        );
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move {
+                federation_wait_stop(&mut stopped).await;
+            })
+            .await
+            .unwrap();
+    });
+    let client = FederationRpcClient::new(port, channel, federation_link::allowed()).unwrap();
+    let error = client
+        .request::<FederationMailboxResponse>(FederationRpcRoute::Mailbox(
+            lease,
+            FederationMailboxRequest {
+                protocol_version: FEDERATION_MAILBOX_WIRE_VERSION,
+                schema_version: FEDERATION_MAILBOX_SCHEMA_VERSION.to_owned(),
+                central,
+                actor: None,
+                operation: FederationMailboxOperation::Protocol,
+            },
+        ))
+        .await
+        .unwrap_err();
+    stop.send_replace(true);
+    server.await.unwrap();
+    drop(busy);
+    assert!(
+        !reached.load(Ordering::SeqCst),
+        "a replayed counter never reaches the handler"
+    );
+    assert_eq!(
+        error.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a replayed counter stays UNKNOWN, not a capacity refusal: {}",
+        error.message
+    );
+}
