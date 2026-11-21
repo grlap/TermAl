@@ -129,7 +129,8 @@ impl AppState {
                     "completion_ready_original_identity_changed",
                 ));
             }
-            self.causal_test_completion_plan_current(&plan)?;
+            self.causal_test_completion_plan_current(&plan)
+                .map_err(|failure| failure.error)?;
             current()?;
             let mut queue = self
                 .federation_executor_wake_signal

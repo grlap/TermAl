@@ -2,6 +2,7 @@
 // completion and final receipts remain with their existing owners.
 const CAUSAL_PENDING_DIAGNOSTICS: usize = 64;
 const CAUSAL_PENDING_METADATA_REASON: &str = "pending_metadata_decode";
+const CAUSAL_PENDING_METADATA_RELEASE: &str = "pending_metadata_readable";
 
 fn causal_pending_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
@@ -39,6 +40,36 @@ enum CausalPendingReason {
 }
 
 impl CausalPendingReason {
+    fn release_condition(self) -> &'static str {
+        match self {
+            Self::AwaitingReceipt => "original_send_receipt_available",
+            Self::AwaitingCompletion => "origin_completion_available",
+            Self::TestRequestDecode => "original_request_readable",
+            Self::RowIdentityDecode => "original_row_identity_readable",
+            Self::ReceiptDecode => "original_send_receipt_readable",
+            Self::SelectorValidate => "original_selector_valid",
+            Self::ScopeDecode => "original_sender_scope_readable",
+            Self::PeerDecode => "original_peer_custody_readable",
+            Self::SettlementDecodeOrValidate => "original_settlement_valid",
+            Self::OriginalCustodyChanged => "original_custody_matches",
+            Self::CurrentnessCheckFailed | Self::PostReadCurrentnessCheckFailed => {
+                "original_custody_read_succeeds"
+            }
+            Self::RunnerUnavailable => "origin_peer_available",
+            Self::LeaseUnavailable => "origin_lease_current",
+            Self::RouteChanged | Self::PostReadRouteChanged => "original_route_current",
+            Self::OriginTimeout | Self::OriginReadFailed => "origin_read_succeeds",
+            Self::CompletionValidate => "origin_completion_valid",
+            Self::CompletionNotTerminal => "origin_completion_terminal",
+            Self::CompletionOriginMismatch => "completion_matches_original_runner",
+            Self::CompletionRunMismatch => "completion_matches_requested_run",
+            Self::CompletionInputUnsupported => "completion_has_supported_input_identity",
+            Self::CompletionModeMismatch => "completion_matches_requested_mode",
+            Self::AdmissionPending => "original_admission_settles",
+            Self::AdmissionFailed => "original_settlement_read_and_save_succeed",
+        }
+    }
+
     fn custody_failure(self) -> bool {
         matches!(
             self,
@@ -106,6 +137,7 @@ impl CausalPendingState {
     fn diagnostic(&self) -> Value {
         // Private quarantine fingerprints never enter the public diagnostic.
         json!({"schemaVersion":self.schema_version,"reason":self.reason,
+            "releaseCondition":self.reason.release_condition(),
             "attempts":self.attempts,"firstPendingAt":self.first_pending_at,
             "lastAttemptAt":self.last_attempt_at,"migrated":self.migrated})
     }
@@ -138,6 +170,7 @@ impl CausalPendingMetadata {
             Self::Readable(state) => Some(state.diagnostic()),
             Self::Malformed => Some(json!({
                 "schemaVersion":null,"reason":CAUSAL_PENDING_METADATA_REASON,
+                "releaseCondition":CAUSAL_PENDING_METADATA_RELEASE,
                 "attempts":null,"firstPendingAt":null,"lastAttemptAt":null,"migrated":null
             })),
         }
@@ -310,6 +343,9 @@ impl MailboxStore {
         let connection = self.connection()?;
         let transaction = connection.unchecked_transaction()?;
         let mut records = Vec::new();
+        let mut details = Vec::new();
+        let mut detail_bytes_left = CAUSAL_SETTLEMENT_MAX_BYTES;
+        let mut admission_details_limited = false;
         let mut total = 0_u64;
         for intents in [false, true] {
             let row = CausalPendingRow { intents, row_id: 0 };
@@ -326,24 +362,67 @@ impl MailboxStore {
                 row.table()))?;
             let mut rows = statement.query([CAUSAL_PENDING_DIAGNOSTICS as i64])?;
             while let Some(record) = rows.next()? {
-                let Some(mut state) = CausalPendingMetadata::from_column(record, 1)?.diagnostic()
-                else {
+                let metadata = CausalPendingMetadata::from_column(record, 1)?;
+                let admission_pending = matches!(
+                    &metadata,
+                    CausalPendingMetadata::Readable(state)
+                        if state.reason == CausalPendingReason::AdmissionPending
+                );
+                let Some(mut state) = metadata.diagnostic() else {
                     continue;
                 };
+                let row_id = record.get::<_, i64>(0)?;
                 if causal_pending_order(record, 2)?.is_none() {
                     state["reason"] = json!(CAUSAL_PENDING_METADATA_REASON);
+                    state["releaseCondition"] = json!(CAUSAL_PENDING_METADATA_RELEASE);
+                } else if admission_pending && records.len() < CAUSAL_PENDING_DIAGNOSTICS {
+                    // Read only returned pending rows, with a byte budget that
+                    // can fit any one valid settlement. No scan of retained
+                    // completions or allocation for an oversized value.
+                    let (present, encoded) = transaction.query_row(
+                        &format!(
+                            "SELECT test_request_settlement_json IS NOT NULL,
+                         CASE WHEN typeof(test_request_settlement_json)='text'
+                           AND length(CAST(test_request_settlement_json AS BLOB)) <= ?2
+                           THEN test_request_settlement_json END
+                         FROM {} WHERE rowid=?1",
+                            row.table(),
+                        ),
+                        rusqlite::params![row_id, detail_bytes_left as i64],
+                        |row| {
+                            let encoded = match row.get_ref(1)? {
+                                rusqlite::types::ValueRef::Text(bytes)
+                                    if bytes.len() <= detail_bytes_left =>
+                                {
+                                    std::str::from_utf8(bytes).ok().map(str::to_owned)
+                                }
+                                _ => None,
+                            };
+                            Ok((row.get::<_, bool>(0)?, encoded))
+                        },
+                    )?;
+                    if let Some(encoded) = encoded {
+                        detail_bytes_left -= encoded.len();
+                        details.push((records.len(), encoded));
+                    } else if present {
+                        admission_details_limited = true;
+                    }
                 }
-                records.push(
-                    json!({"table":row.table(),"rowId":record.get::<_,i64>(0)?,"state":state}),
-                );
+                records.push(json!({"table":row.table(),"rowId":row_id,"state":state}));
             }
         }
+        transaction.commit()?;
+        drop(connection);
         records.truncate(CAUSAL_PENDING_DIAGNOSTICS);
+        for (index, encoded) in details {
+            project_causal_admission_checks(&mut records[index]["state"], &encoded);
+        }
         Ok(
             json!({"records":records,"total":total,"limited":total > records.len() as u64,
+            "admissionDetailsLimited":admission_details_limited,
             "resetOnRestart":false,
             "disposition":"original row retained; targeted authenticated pull only; no completion or receipt inferred",
-            "remedy":"report table, rowId and reason to the coordinator; do not edit the live store"}),
+            "remedy":"report table, rowId, reason and check to the coordinator; do not edit the live store"}),
         )
     }
 }

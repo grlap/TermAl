@@ -127,13 +127,20 @@ ledger, and private sender mappings remain local.
 `GET /api/diagnostics/mailbox-relay-wakes` exposes `causalCompletionPending`:
 `records` (at most 64 table/row-id records), `total`, `limited`,
 `resetOnRestart: false`, `disposition` and `remedy`. Each record's `state` contains
-a closed reason, attempt count, first-pending and last-attempt UTC timestamps,
-and whether it came from the one-time migration. Custody changes, unavailable
+a closed reason, a `releaseCondition` identifying what must become true,
+attempt count, first-pending and last-attempt UTC timestamps, and whether it
+came from the one-time migration. Custody changes, unavailable
 runner/lease, route changes, origin timeout/read failure, absent or invalid
 completion and admission failures remain distinguishable. These records live on
 the original rows, survive restart, and expose no send key, payload, private
-scope or peer data. The bounded projection does not evict durable pending state.
-Report table, rowId and reason for diagnosis; do not edit the live store.
+scope or peer data. Pending admission states can include `check` and
+`admissionChecks` with an ordinal, the check and its release condition for each
+outstanding target. These distinguish destination resolution, capability,
+transport and receipt failures. Before a specific admission check is available,
+the row carries its general pending reason. The projection caps the bytes it
+reads for these details and reports `admissionDetailsLimited` if it omits them.
+The bound does not evict durable pending state. Report the table, rowId,
+reason and any check to the coordinator without editing the live store.
 Undecodable scheduling metadata reports `pending_metadata_decode`; unavailable
 state fields are `null`, rather than inferred counters or timestamps. Recovery
 preserves malformed metadata bytes and original custody while rotating retry
