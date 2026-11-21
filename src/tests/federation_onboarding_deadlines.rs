@@ -63,13 +63,15 @@ async fn federation_onboarding_proof_expiry_maps_to_authentication_refusal() {
     assert_eq!(observed["lastReason"], "attestExpired");
 }
 
+// No timeout tears down the authenticated link: an expired request is an
+// UNKNOWN outcome for that request only, and the same lease serves the next.
 #[tokio::test]
-async fn federation_onboarding_rpc_expiry_fences_the_link_before_the_next_request() {
+async fn federation_onboarding_rpc_expiry_keeps_the_link_for_the_next_request() {
     rpc_expiry(false).await;
 }
 
 #[tokio::test]
-async fn federation_onboarding_receiver_expiry_also_maps_to_a_stale_next_link() {
+async fn federation_onboarding_receiver_expiry_also_keeps_the_link_for_the_next_request() {
     rpc_expiry(true).await;
 }
 
@@ -84,19 +86,26 @@ async fn rpc_expiry(expire_receiver: bool) {
     let clock = channel.control.clock.clone();
     let entered = Arc::new(tokio::sync::Notify::new());
     let release = Arc::new(tokio::sync::Notify::new());
+    let holding = Arc::new(AtomicBool::new(true));
     let handler_entered = entered.clone();
     let handler_release = release.clone();
+    let handler_holding = holding.clone();
     let router = federation_control_fixture::authenticated_router(
         pair.satellite_channel.clone(),
         Router::new().route(
             "/federation/v1/health",
-            get(move || {
+            get(move |peer: axum::Extension<FederationAuthenticatedPeer>| {
                 let entered = handler_entered.clone();
                 let release = handler_release.clone();
+                let holding = handler_holding.clone();
                 async move {
-                    entered.notify_one();
-                    release.notified().await;
-                    StatusCode::NO_CONTENT
+                    if holding.load(Ordering::SeqCst) {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                    // The real authenticated health answer, which the
+                    // client decodes and validates.
+                    federation_health(peer).await
                 }
             }),
         ),
@@ -138,33 +147,40 @@ async fn rpc_expiry(expire_receiver: bool) {
             .unwrap()
             .err()
     } else {
-        clock.advance(Duration::from_secs(10));
-        match std::future::poll_fn(|cx| Poll::Ready(request.as_mut().poll(cx))).await {
-            Poll::Ready(Err(error)) => Some(error),
-            _ => None,
-        }
+        // Past the client's unchanged 10 s request limit.
+        clock.advance(Duration::from_secs(11));
+        tokio::time::timeout(phase_sync::DEADLOCK_GUARD, &mut request)
+            .await
+            .unwrap()
+            .err()
     };
     drop(request);
-    let next_error = if error.is_some() {
-        client.authenticated_health(&lease).await.err()
-    } else {
-        None
-    };
-    let receiver_fenced = pair.satellite_channel.current_lease().is_err();
+    holding.store(false, Ordering::SeqCst);
     release.notify_waiters();
+    let next = tokio::time::timeout(
+        phase_sync::DEADLOCK_GUARD,
+        client.authenticated_health(&lease),
+    )
+    .await
+    .unwrap();
+    let sender_current = lease.with_incarnation(|| Ok(())).is_ok();
+    let receiver_current = pair.satellite_channel.current_lease().is_ok();
     stop.send_replace(true);
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, server)
         .await
         .unwrap()
         .unwrap();
     pair.finish().await;
-    let error = error.expect("logical request expiry must fence without waiting for wall time");
-    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
-    let next_error = next_error.expect("a fenced lease must refuse the next request locally");
-    assert_eq!(next_error.status, StatusCode::CONFLICT);
-    assert_eq!(receiver_fenced, expire_receiver);
+    let error = error.expect("logical request expiry must surface without waiting for wall time");
     assert_eq!(
-        next_error.message,
-        "federation link changed; reconnect and reconcile the original operation"
+        error.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "an expired request is an UNKNOWN outcome"
+    );
+    assert!(sender_current, "the sender's link survives the expiry");
+    assert!(receiver_current, "the receiver's link survives the expiry");
+    assert!(
+        next.is_ok(),
+        "the same lease serves the next request: {next:?}"
     );
 }

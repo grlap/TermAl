@@ -420,6 +420,15 @@ async fn federation_prompt_policy_verified_reply_local_authority_deadline_does_n
             .contains_key(&counter),
         "authenticated receipt settles its transport watchdog before a local owner wait"
     );
+    assert!(
+        !security
+            .sender_events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.counter == counter),
+        "the verified receipt settled the counter; nothing retired it as UNKNOWN"
+    );
     assert!(Arc::ptr_eq(&security, &channel.security_context().unwrap()));
     lease.with_current(&fixture.central, |_, _| Ok(())).unwrap();
     fixture.server.finish().await;

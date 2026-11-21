@@ -83,8 +83,11 @@ impl FederationRpcClient {
 
     fn retain_health_refusal(&self, lease: &FederationLinkLease, error: &ApiError) -> bool {
         if lease.with_incarnation(|| Ok(())).is_err() {
-            // MAC, transport and replay failures already retire their context
-            // in the authenticated RPC owner; never revive that connection.
+            // MAC, verify, authority and incarnation failures, and unsigned or
+            // over-limit replies, already fenced this context in the
+            // authenticated RPC owner; never revive that connection. A
+            // timeout or transport failure leaves the lease current and is
+            // kept below as a diagnostic.
             return false;
         }
         if let Err(authority) = self.channel.current_authority_checked(false) {
