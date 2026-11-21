@@ -41,6 +41,9 @@ impl AppState {
         // An off-lock callback cannot rewrite a newer row or an established
         // association, including the exact image held by a receipt's fence.
         if current.artifact.is_some()
+            || current.native_completion_refusal.as_ref().is_some_and(|refusal| {
+                refusal.code == TestRunNativeCompletionRefusalCode::ProviderPlacementUnconfirmed
+            })
             || !test_run_artifact_observation_matches_snapshot(current, expected)
         {
             return;
@@ -343,9 +346,15 @@ impl AppState {
             refuse(ArtifactWorktreeUnavailable, &[(WorktreePresent, false)]);
             return;
         }
-        let Some(expected_parent) =
-            EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
-        else {
+        let worktree = FsPath::new(&row.summary.worktree);
+        // A linked fallback placement re-validates its worktree's Git layout
+        // here, opening the run parent without following links.
+        let parent = if row.linked_placement {
+            delegation_git_boundary::ProviderLinkedWorktree::artifact_parent(worktree).ok()
+        } else {
+            EngramHost::run_artifact_directory(worktree)
+        };
+        let Some(expected_parent) = parent else {
             refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
             return;
         };
