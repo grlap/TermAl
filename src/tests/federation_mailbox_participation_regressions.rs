@@ -301,3 +301,264 @@ fn catalog_steps_bound_inventory_work_and_preserve_every_eligible_root() {
     }
     assert_eq!(seen, ids);
 }
+
+/// Reads a central-domain page through the public route, as the MCP and CLI
+/// bridges do, and returns it with its issued receipt.
+async fn routed_domain_page(
+    state: &AppState,
+    native: &str,
+    mailbox: &str,
+    after_sequence: Option<u64>,
+) -> MailboxReadResponse {
+    routed_read(state, native, mailbox, after_sequence)
+        .await
+        .expect("the reader's domain page is readable")
+}
+
+async fn routed_read(
+    state: &AppState,
+    native: &str,
+    mailbox: &str,
+    after_sequence: Option<u64>,
+) -> Result<MailboxReadResponse, ApiError> {
+    read_mailbox(
+        AxumPath((native.to_owned(), mailbox.to_owned())),
+        State(state.clone()),
+        Json(ReadMailboxRequest {
+            read_key: None,
+            issue_receipt: true,
+            after_sequence,
+            limit: 20,
+        }),
+    )
+    .await
+    .map(|page| page.0)
+}
+
+/// A central store with one root bound to the central domain and one native
+/// root created after discovery, so it stays unbound.
+async fn domain_and_native_roots() -> (AppState, String, String) {
+    let state = federation_mailboxes::central_store();
+    let domain = test_session_id(&state, Agent::Codex);
+    activate(&state, &domain);
+    directory(&state, &domain).await;
+    assert!(state.federation_mailbox_actor(&domain).unwrap().is_some());
+    let native = test_session_id(&state, Agent::Codex);
+    activate(&state, &native);
+    assert!(state.federation_mailbox_actor(&native).unwrap().is_none());
+    (state, domain, native)
+}
+
+fn activate(state: &AppState, native: &str) {
+    let mut inner = state.inner.lock().unwrap();
+    let index = inner.find_session_index(native).unwrap();
+    inner.session_mut_by_index(index).unwrap().session.status = SessionStatus::Active;
+}
+
+/// A mailbox id that is neither the minted shape nor a valid relay locator is
+/// refused with 400, naming the received value escaped and bounded, on the
+/// read and the acknowledge route, for a native root and for a central-domain
+/// root. The shown text is cut on a whole escape sequence at 96 characters.
+#[tokio::test]
+async fn malformed_mailbox_ids_are_refused_with_the_received_value() {
+    let (state, domain, native) = domain_and_native_roots().await;
+    let cases = [
+        (
+            "mailbox-93903743-d329-4a85-bb31-4aa20538567a ".to_owned(),
+            "\"mailbox-93903743-d329-4a85-bb31-4aa20538567a \"".to_owned(),
+        ),
+        ("mailbox-\u{7}".to_owned(), "\"mailbox-\\u{7}\"".to_owned()),
+        (
+            format!("mailbox-{}", "a".repeat(5000)),
+            format!("\"mailbox-{}\"… (5008 characters)", "a".repeat(88)),
+        ),
+        (
+            format!("mailbox-{}", "\u{7}".repeat(96)),
+            format!("\"mailbox-{}\"… (104 characters)", "\\u{7}".repeat(17)),
+        ),
+        (
+            "relay-mailbox-garbage".to_owned(),
+            "invalid mailbox relay locator: mailboxId \"relay-mailbox-garbage\"".to_owned(),
+        ),
+    ];
+    for caller in [&native, &domain] {
+        for (id, shown) in &cases {
+            let read = routed_read(&state, caller, id, None).await.unwrap_err();
+            let acknowledged = routed_domain_ack(&state, caller, id, "receipt", false)
+                .await
+                .unwrap_err();
+            for (route, error) in [("read", read), ("acknowledge", acknowledged)] {
+                assert_eq!(
+                    error.status,
+                    StatusCode::BAD_REQUEST,
+                    "{route} by {caller}: {}",
+                    error.message
+                );
+                assert!(
+                    error.message.contains(shown.as_str()),
+                    "{route} names the received id: {}",
+                    error.message
+                );
+                assert!(
+                    !error.message.contains('\u{7}'),
+                    "control characters are escaped"
+                );
+                assert!(
+                    error.message.chars().count() < 512,
+                    "the echo is bounded: {} characters",
+                    error.message.chars().count()
+                );
+            }
+        }
+    }
+}
+
+/// A well-formed id that names no mailbox of the caller still reaches the
+/// central-domain lookup, and its 404 names the id received.
+#[tokio::test]
+async fn an_unknown_canonical_mailbox_id_is_named_in_the_domain_not_found() {
+    let (state, domain, _) = domain_and_native_roots().await;
+    let unknown = "mailbox-00000000-0000-4000-8000-000000000002";
+    let read = routed_read(&state, &domain, unknown, None)
+        .await
+        .unwrap_err();
+    let acknowledged = routed_domain_ack(&state, &domain, unknown, "receipt", false)
+        .await
+        .unwrap_err();
+    for (route, error) in [("read", read), ("acknowledge", acknowledged)] {
+        assert_eq!(
+            error.status,
+            StatusCode::NOT_FOUND,
+            "{route}: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains(&format!("and mailbox {unknown} in")),
+            "{route} names the received id: {}",
+            error.message
+        );
+    }
+}
+
+async fn routed_domain_ack(
+    state: &AppState,
+    native: &str,
+    mailbox: &str,
+    receipt: &str,
+    no_continuation: bool,
+) -> Result<MailboxSummary, ApiError> {
+    acknowledge_mailbox(
+        AxumPath((native.to_owned(), mailbox.to_owned())),
+        State(state.clone()),
+        Json(AcknowledgeMailboxRequest {
+            receipt: Some(receipt.to_owned()),
+            expected_processed_through: None,
+            processed_through: None,
+            no_continuation,
+        }),
+    )
+    .await
+    .map(|summary| summary.0)
+}
+
+/// The reported sequence: a page of the other side's mail is acknowledged,
+/// then the reader's own reply is the only row of a page read from the
+/// previous cursor. That page is acknowledged too, after the refused
+/// noContinuation attempt the reporter made first. Runs for an automatic
+/// and an explicit binding.
+#[tokio::test]
+async fn a_domain_page_holding_only_the_readers_own_send_is_acknowledged() {
+    for explicit in [false, true] {
+        let state = federation_mailboxes::central_store();
+        let (reader, writer, reader_key, writer_key) = if explicit {
+            let (reader, reader_row) = federation_mailboxes::local_participant(&state, "Reader");
+            let (writer, writer_row) = federation_mailboxes::local_participant(&state, "Writer");
+            (reader, writer, reader_row.session_id, writer_row.session_id)
+        } else {
+            let reader = test_session_id(&state, Agent::Codex);
+            let writer = test_session_id(&state, Agent::Codex);
+            {
+                let mut inner = state.inner.lock().unwrap();
+                for native in [&reader, &writer] {
+                    let index = inner.find_session_index(native).unwrap();
+                    inner.session_mut_by_index(index).unwrap().session.status =
+                        SessionStatus::Active;
+                }
+            }
+            let rows = directory(&state, &reader).await;
+            let key = |native: &str| {
+                rows.iter()
+                    .find(|row| row.binding.identity.session_id == native)
+                    .expect("both roots participate automatically")
+                    .session_id
+                    .clone()
+            };
+            let (reader_key, writer_key) = (key(&reader), key(&writer));
+            (reader, writer, reader_key, writer_key)
+        };
+        let send = |from: String, target: String, key: &'static str| {
+            let state = state.clone();
+            async move {
+                state
+                    .federation_mailbox_operation::<MailboxAppendReceipt>(
+                        &from,
+                        FederationMailboxOperation::Send {
+                            target,
+                            message: format!("body of {key}"),
+                            key: key.to_owned(),
+                            topic: None,
+                            state_stamp: None,
+                        },
+                    )
+                    .await
+                    .expect("the domain send is admitted")
+            }
+        };
+
+        let inbound = send(writer.clone(), reader_key.clone(), "inbound").await;
+        let mailbox = inbound.mailbox_id.clone();
+        let first = routed_domain_page(&state, &reader, &mailbox, None).await;
+        assert_eq!(first.messages.len(), 1);
+        let first_receipt = first.receipt.expect("the inbound page issues a receipt");
+        routed_domain_ack(&state, &reader, &mailbox, &first_receipt, false)
+            .await
+            .expect("the inbound page is acknowledged");
+
+        let own = send(reader.clone(), writer_key.clone(), "own-reply").await;
+        assert_eq!(own.mailbox_id, mailbox);
+        // With nothing unread, the send moves the reader's own cursor past
+        // its reply, so a default read is empty. The reported page holding
+        // that reply was read from the previous cursor explicitly.
+        assert!(own.sender_cursor_advanced, "explicit: {explicit}");
+        let second = routed_domain_page(&state, &reader, &mailbox, Some(inbound.sequence)).await;
+        assert_eq!(
+            second
+                .messages
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<Vec<_>>(),
+            vec![own.message_id.clone()],
+            "the next page holds only the reader's own send (explicit: {explicit})"
+        );
+        let receipt = second.receipt.expect("the own-send page issues a receipt");
+        let refused = routed_domain_ack(&state, &reader, &mailbox, &receipt, true)
+            .await
+            .unwrap_err();
+        assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+        let summary = routed_domain_ack(&state, &reader, &mailbox, &receipt, false)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "the own-send page must be acknowledged (explicit: {explicit}): {} {}",
+                    error.status, error.message
+                )
+            });
+        assert!(
+            summary
+                .participants
+                .iter()
+                .any(|row| row.session_id == reader_key && row.processed_through == own.sequence),
+            "the reader's cursor reaches its own send (explicit: {explicit})"
+        );
+    }
+}
