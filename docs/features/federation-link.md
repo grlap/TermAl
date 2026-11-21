@@ -62,9 +62,15 @@ responses additionally bind that request, status and response metadata. The
 receiver verifies the MAC before reserving a counter in a 64-position replay
 window. The sender cannot allocate more than 63 positions beyond its oldest
 outstanding counter. Only a matching authenticated response or refusal settles
-an attempt. Cancellation, timeout, unsigned refusal or malformed response leaves
-the application outcome unknown and fences the incarnation within the request
-bound; application reconciliation retains the original idempotency key.
+an attempt. Cancellation, a timeout, a transport failure, an undecodable
+response or the receiver's unsigned 408 (its own deadline) leaves that
+request's outcome unknown: its counter is retired with one bounded record
+naming the fixed operation, the link stays up, and the replay window still
+refuses any late duplicate. No timeout disconnects the link. A MAC or verify
+failure, any other unsigned or malformed reply, a replay or authentication
+refusal, an authority or incarnation mismatch, and counter exhaustion fence
+the incarnation. Application reconciliation retains the original idempotency
+key.
 
 Requests and replies retain the exact enrollment, host generation and link
 incarnation. Disconnect immediately withdraws that incarnation's availability;

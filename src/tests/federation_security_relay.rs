@@ -89,6 +89,21 @@ impl TestChild {
                     4 => { headers.remove(AUTH_HEADER); },
                     5 => { headers.append(AUTH_HEADER, HeaderValue::from_static("duplicate")); },
                     6 => { status = StatusCode::CONFLICT; headers.remove(AUTH_HEADER); },
+                    // The receiver's own deadline answer: a 408 with no MAC.
+                    7 => { status = StatusCode::REQUEST_TIMEOUT; headers.remove(AUTH_HEADER); },
+                    // A 408 that still carries a (duplicated) MAC header.
+                    8 => { status = StatusCode::REQUEST_TIMEOUT; headers.append(AUTH_HEADER, HeaderValue::from_static("duplicate")); },
+                    // The authentic headers arrive, then the body stream fails.
+                    9 => {
+                        headers.remove(axum::http::header::CONTENT_LENGTH);
+                        let stream = async_stream::stream! {
+                            yield Ok::<_, std::io::Error>(body.slice(..body.len().min(1)));
+                            yield Err(std::io::Error::other("relay fault: body stream failed"));
+                        };
+                        return (status, headers, axum::body::Body::from_stream(stream)).into_response();
+                    }
+                    // The connection drops before any response arrives.
+                    10 => panic!("relay fault: drop the connection before responding"),
                     _ => {},
                 }
                 (status, headers, body).into_response()

@@ -235,35 +235,61 @@ async fn mailbox_deadline_keeps_link_and_worker_capacity_until_worker_settlement
     );
 }
 
+/// A health handler past its deadline answers 408, an UNKNOWN outcome for
+/// that request only. No timeout tears down the authenticated link.
 #[tokio::test]
-async fn health_deadline_still_invalidates_its_exact_link_incarnation() {
-    let channel = federation_link::channel(FederationRole::Central, 'a');
+async fn health_deadline_answers_408_and_keeps_its_link_incarnation() {
+    let mut channel = federation_link::channel(FederationRole::Central, 'a');
     let (sender, _proof) = federation_control_fixture::establish(&channel).await;
+    // The request deadline runs on logical time: the test steps past the
+    // unchanged five seconds instead of waiting in real time.
+    channel.control.clock = FederationControlClock::scripted_io();
+    let clock = channel.control.clock.clone();
     let lease = channel.current_lease().unwrap();
     let listener = FederationListenerState {
         channel: channel.clone(),
         ensure_current: federation_link::allowed(),
     };
+    let (entered, entered_rx) = tokio::sync::oneshot::channel::<()>();
+    let entered = Arc::new(Mutex::new(Some(entered)));
     let router = Router::new()
         .route(
             "/federation/v1/health",
-            get(|| async { std::future::pending::<StatusCode>().await }),
+            get(move || {
+                let entered = entered.clone();
+                async move {
+                    if let Some(entered) = entered.lock().unwrap().take() {
+                        let _ = entered.send(());
+                    }
+                    std::future::pending::<StatusCode>().await
+                }
+            }),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             listener.clone(),
             federation_authenticate,
         ))
         .with_state(listener);
-    let response = router
-        .oneshot(authenticated(
-            &sender,
-            1,
-            "GET",
-            "/federation/v1/health",
-            &[],
-        ))
+    let running = tokio::spawn(router.oneshot(authenticated(
+        &sender,
+        1,
+        "GET",
+        "/federation/v1/health",
+        &[],
+    )));
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered_rx)
         .await
+        .unwrap()
+        .unwrap();
+    clock.advance(Duration::from_secs(5));
+    let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+        .await
+        .unwrap()
+        .unwrap()
         .unwrap();
     assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
-    assert!(lease.with_incarnation(|| Ok(())).is_err());
+    assert!(
+        lease.with_incarnation(|| Ok(())).is_ok(),
+        "the deadline does not tear down the link"
+    );
 }

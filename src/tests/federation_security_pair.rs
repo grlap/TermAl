@@ -20,14 +20,21 @@ impl Pair {
     }
 
     pub async fn with_central_control_timeout(control_timeout: Duration) -> Self {
-        Self::with_options(control_timeout, None, None).await
+        Self::with_options(control_timeout, None, None, false).await
+    }
+
+    /// Like `with_central_control_timeout`, but the central's request and I/O
+    /// deadlines also run on its scripted clock, so a test that steps that
+    /// clock never waits on host time.
+    pub async fn with_scripted_central_io(control_timeout: Duration) -> Self {
+        Self::with_options(control_timeout, None, None, true).await
     }
 
     pub async fn with_starter(
         starter: FederationSshStarter,
         prepare: Arc<dyn Fn(&FederationPeerSnapshot) -> Result<u16, ApiError> + Send + Sync>,
     ) -> Self {
-        Self::with_options(Duration::from_secs(45), Some(starter), Some(prepare)).await
+        Self::with_options(Duration::from_secs(45), Some(starter), Some(prepare), false).await
     }
 
     async fn with_options(
@@ -36,6 +43,7 @@ impl Pair {
         prepare: Option<
             Arc<dyn Fn(&FederationPeerSnapshot) -> Result<u16, ApiError> + Send + Sync>,
         >,
+        scripted_central_io: bool,
     ) -> Self {
         let central = super::super::federation_registry::central();
         let satellite = super::super::federation_registry::domain_state();
@@ -144,7 +152,11 @@ impl Pair {
             central_io.ssh = starter;
             central_io.prepare_forward = prepare;
         }
-        let central_clock = FederationControlClock::scripted();
+        let central_clock = if scripted_central_io {
+            FederationControlClock::scripted_io()
+        } else {
+            FederationControlClock::scripted()
+        };
         let observer_clock = central_clock.clone();
         let control_ready = Arc::new(AtomicBool::new(false));
         let observed_ready = control_ready.clone();

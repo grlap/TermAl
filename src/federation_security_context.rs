@@ -31,9 +31,42 @@ impl FederationReplayWindow {
     }
 }
 
+/// The unchanged sender window. An unsettled request is given an UNKNOWN
+/// outcome and its counter retired after this long. No timeout tears down the
+/// authenticated link: the receiver's replay window still refuses a duplicate
+/// or too-old counter.
+const FEDERATION_SENDER_RETIREMENT: Duration = Duration::from_secs(10);
+
 struct FederationSenderWindow {
     next: u64,
-    outstanding: std::collections::BTreeMap<u64, std::time::Instant>,
+    outstanding: std::collections::BTreeMap<u64, FederationSenderDeadline>,
+}
+
+/// One unsettled counter, allocated by a fixed local operation.
+struct FederationSenderDeadline {
+    started: std::time::Instant,
+    retire_at: std::time::Instant,
+    operation: &'static str,
+}
+
+impl FederationSenderDeadline {
+    fn new(now: std::time::Instant, operation: &'static str) -> Self {
+        Self {
+            started: now,
+            retire_at: now + FEDERATION_SENDER_RETIREMENT,
+            operation,
+        }
+    }
+}
+
+/// A bounded record of a retired request. It names only the fixed
+/// operation, the counter and the elapsed time, never a payload or path.
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FederationSenderEvent {
+    kind: &'static str,
+    operation: &'static str,
+    counter: u64,
 }
 
 impl Default for FederationSenderWindow {
@@ -64,6 +97,8 @@ struct FederationSecurityContext {
     terminal_logged: AtomicBool,
     last_control_sequence: std::sync::atomic::AtomicU64,
     retired: tokio::sync::watch::Sender<bool>,
+    #[cfg(test)]
+    sender_events: Mutex<Vec<FederationSenderEvent>>,
 }
 
 impl FederationSecurityContext {
@@ -109,16 +144,76 @@ impl FederationSecurityContext {
             terminal_logged: AtomicBool::new(false),
             last_control_sequence: std::sync::atomic::AtomicU64::new(0),
             retired: tokio::sync::watch::channel(false).0,
+            #[cfg(test)]
+            sender_events: Mutex::default(),
         })
     }
 
-    fn settle(&self, counter: u64) {
-        self.sender
+    /// Settles a counter by its verified reply. Returns false if it was no
+    /// longer outstanding, because it had already been retired as UNKNOWN: the
+    /// caller then keeps that UNKNOWN outcome, so caller and record agree.
+    fn settle(&self, counter: u64) -> bool {
+        let settled = self
+            .sender
             .lock()
             .expect("sender window poisoned")
             .outstanding
-            .remove(&counter);
+            .remove(&counter)
+            .is_some();
         self.changed.notify_waiters();
+        settled
+    }
+
+    /// Gives an unsettled counter an UNKNOWN outcome without touching the
+    /// link, and records that once. Returns false if it had already settled
+    /// or been retired, so a racing caller records nothing.
+    fn retire_unknown(&self, counter: u64, reason: &'static str, now: std::time::Instant) -> bool {
+        let Some(entry) = self
+            .sender
+            .lock()
+            .expect("sender window poisoned")
+            .outstanding
+            .remove(&counter)
+        else {
+            return false;
+        };
+        // Record before waking waiters, so a woken waiter sees the record.
+        self.record_sender_event(
+            "retiredUnknown",
+            reason,
+            entry.operation,
+            entry.started,
+            counter,
+            now,
+        );
+        self.changed.notify_waiters();
+        true
+    }
+
+    fn record_sender_event(
+        &self,
+        kind: &'static str,
+        reason: &'static str,
+        operation: &'static str,
+        started: std::time::Instant,
+        counter: u64,
+        now: std::time::Instant,
+    ) {
+        eprintln!(
+            "federation request {kind} incarnation={} operation={operation} counter={counter} reason={reason} elapsedMs={} retireAfterMs={}",
+            self.incarnation,
+            now.saturating_duration_since(started).as_millis(),
+            FEDERATION_SENDER_RETIREMENT.as_millis(),
+        );
+        #[cfg(test)]
+        self.sender_events
+            .lock()
+            .expect("sender events poisoned")
+            .push(FederationSenderEvent {
+                kind,
+                operation,
+                counter,
+            });
     }
 
     fn retire(&self) {

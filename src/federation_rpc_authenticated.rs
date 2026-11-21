@@ -2,9 +2,21 @@
 // Does not settle application intents or retry with fresh keys. Split from federation_rpc.rs.
 
 impl FederationRpcClient {
+    #[cfg(test)]
     async fn allocate_authenticated_counter(
         &self,
         context: &Arc<FederationSecurityContext>,
+    ) -> Result<u64, ApiError> {
+        self.allocate_authenticated_counter_for(context, "test")
+            .await
+    }
+
+    /// Allocates the next sender counter for one request; `operation` is the
+    /// request's fixed local name, which its retirement record names.
+    async fn allocate_authenticated_counter_for(
+        &self,
+        context: &Arc<FederationSecurityContext>,
+        operation: &'static str,
     ) -> Result<u64, ApiError> {
         loop {
             let changed = context.changed.notified();
@@ -27,7 +39,7 @@ impl FederationRpcClient {
                     sender.next += 1;
                     sender.outstanding.insert(
                         counter,
-                        self.channel.control.clock.now() + Duration::from_secs(10),
+                        FederationSenderDeadline::new(self.channel.control.clock.now(), operation),
                     );
                     context.changed.notify_waiters();
                     return Ok(counter);
@@ -160,13 +172,39 @@ impl FederationRpcClient {
         }
         let mut rpc_stage = "counter";
         let mut rpc_status = None;
+        // Only a reply with no MAC header at all, such as the receiver's own
+        // unsigned 408, is unanswered. A present but malformed, duplicate or
+        // foreign MAC header is a security event.
+        let mut mac_header_absent = false;
         let telemetry = matches!(&route, FederationRpcRoute::HostUtilization(_));
-        let mut allocated_counter = None;
+        let operation = route.operation();
+        // A cancelled caller drops this guard, which retires its unsettled
+        // counter as UNKNOWN, so it never holds the allocation floor.
+        let mut allocated = FederationCounterGuard {
+            context: &context,
+            clock: &self.channel.control.clock,
+            counter: None,
+        };
         let request = async {
-            let counter = self.allocate_authenticated_counter(&context).await?;
-            allocated_counter = Some(counter);
-            // A cancelled caller is not settlement. The independent watchdog
-            // also fences abandoned futures, preserving the allocation floor.
+            let counter = self
+                .allocate_authenticated_counter_for(&context, operation)
+                .await?;
+            allocated.counter = Some(counter);
+            // A verified reply settles its counter. If the watchdog already
+            // retired it as UNKNOWN, the caller keeps that outcome, so the
+            // caller's result and the retirement record agree.
+            let mut settled_early = false;
+            macro_rules! settle_verified {
+                () => {
+                    if !settled_early && !context.settle(counter) {
+                        rpc_stage = "retired";
+                        return Err(federation_transport_unavailable());
+                    }
+                };
+            }
+            let mut early_decoded: Option<T> = None;
+            // The independent watchdog, as a backstop, retires a counter still
+            // unsettled past the unchanged sender window. It never fences.
             if !context.watchdog_started.swap(true, Ordering::SeqCst) {
                 tokio::spawn(federation_sender_watchdog(
                     self.channel.clone(),
@@ -218,8 +256,19 @@ impl FederationRpcClient {
                 .map_err(|_| federation_transport_unavailable())?;
             let status = response.status();
             rpc_status = Some(status.as_u16());
-            rpc_stage = "responseBody";
             let response_headers = response.headers().clone();
+            // The MAC header and its counter are checked as soon as the
+            // headers arrive, so a later body failure cannot hide a malformed,
+            // duplicate or foreign header. Only a reply with no MAC header at
+            // all, the receiver's unsigned 408, is unanswered.
+            rpc_stage = "macParse";
+            mac_header_absent = !response_headers.contains_key(FEDERATION_MAC_HEADER);
+            let (returned, tag) = federation_parse_mac(&response_headers, &context, direction)?;
+            rpc_stage = "counter";
+            if returned != counter {
+                return Err(federation_auth_refused());
+            }
+            rpc_stage = "responseBody";
             let mut bytes = Vec::new();
             while let Some(chunk) = response
                 .chunk()
@@ -241,12 +290,6 @@ impl FederationRpcClient {
                 }
                 bytes.extend_from_slice(&chunk);
             }
-            rpc_stage = "macParse";
-            let (returned, tag) = federation_parse_mac(&response_headers, &context, direction)?;
-            rpc_stage = "counter";
-            if returned != counter {
-                return Err(federation_auth_refused());
-            }
             rpc_stage = "responseEncode";
             let authenticated = federation_response_representation(
                 &context,
@@ -264,7 +307,7 @@ impl FederationRpcClient {
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     // A verified read-only proof cannot survive local lease
                     // retirement. Preserve its typed stale-authority refusal.
-                    context.settle(counter);
+                    settle_verified!();
                     return Ok(Err(error));
                 }
                 return Err(error);
@@ -274,7 +317,18 @@ impl FederationRpcClient {
                 // The MAC/counter and current security context already prove
                 // receipt. A later local owner wait must not leave a watchdog
                 // outstanding or turn its deadline into a pair-link failure.
-                context.settle(counter);
+                // An undecodable success is decided first, while the counter
+                // is still outstanding, so it is retired with a record.
+                if status.is_success() {
+                    rpc_stage = "decode";
+                    early_decoded = Some(
+                        serde_json::from_slice(&bytes)
+                            .map_err(|_| federation_transport_unavailable())?,
+                    );
+                    rpc_stage = "authority";
+                }
+                settle_verified!();
+                settled_early = true;
                 let check = self.ensure_current.clone();
                 let job_permit = _permit.clone();
                 run_blocking_api(move || {
@@ -286,11 +340,11 @@ impl FederationRpcClient {
             };
             if let Err(error) = current {
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
-                    context.settle(counter);
+                    settle_verified!();
                     return Ok(Err(error));
                 }
                 if error.status == StatusCode::LOCKED {
-                    context.settle(counter);
+                    settle_verified!();
                     // Dispatch may already have committed. A local durability
                     // hold cannot turn the authenticated receipt into a known
                     // negative application result or consume its recovery key.
@@ -301,7 +355,7 @@ impl FederationRpcClient {
             if !status.is_success() {
                 // An authenticated transport refusal settles only this attempt;
                 // application uncertainty and its idempotency key remain owned.
-                context.settle(counter);
+                settle_verified!();
                 if let FederationRpcRoute::MailboxRelay(_, relay_request) = &route {
                     return Ok(Err(if status == StatusCode::NOT_FOUND && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok() {
                         ApiError::not_found("authenticated native mailbox resource or membership not found")
@@ -334,10 +388,14 @@ impl FederationRpcClient {
                     _ => federation_transport_unavailable(),
                 }));
             }
-            rpc_stage = "decode";
-            let decoded =
-                serde_json::from_slice(&bytes).map_err(|_| federation_transport_unavailable())?;
-            context.settle(counter);
+            let decoded = match early_decoded {
+                Some(decoded) => decoded,
+                None => {
+                    rpc_stage = "decode";
+                    serde_json::from_slice(&bytes).map_err(|_| federation_transport_unavailable())?
+                }
+            };
+            settle_verified!();
             Ok(Ok(decoded))
         };
         #[cfg(test)]
@@ -348,34 +406,58 @@ impl FederationRpcClient {
         } else {
             self.channel.control.clock.timeout(timeout, request).await
         };
+        let timed_out = result.is_err();
+        // The receiver's own deadline answers with an unsigned 408: no
+        // authenticated reply arrived, which proves nothing either way.
+        let unanswered = timed_out
+            || matches!(rpc_stage, "execute" | "responseBody" | "decode" | "retired")
+            || (rpc_stage == "macParse"
+                && mac_header_absent
+                && rpc_status == Some(StatusCode::REQUEST_TIMEOUT.as_u16()));
         match result {
             Ok(Ok(result)) => result,
             failure if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() => {
                 // The blocking authority job still owns its permit. Its late
                 // result cannot supply policy to the expired caller.
+                allocated.retire("timeout");
                 Err(federation_prompt_policy_unknown_outcome())
             }
             failure if telemetry && (failure.is_err()
-                || matches!(rpc_stage, "execute" | "responseBody" | "decode")) => {
-                // This GET has no application outcome to recover. Settle its
-                // counter on a bounded read failure; it must not retire a
-                // healthy pair merely because telemetry was unavailable.
-                // MAC/replay/authority failures still use the security fence.
-                if let Some(counter) = allocated_counter { context.settle(counter); }
+                || matches!(rpc_stage, "execute" | "responseBody" | "decode" | "retired")) => {
+                // This GET has no application outcome to recover. Its counter
+                // is retired with a record on a bounded read failure; it must
+                // not retire a healthy pair merely because telemetry was
+                // unavailable. MAC/replay/authority failures still fence.
+                allocated.retire(if timed_out { "timeout" } else { "transport" });
                 Err(federation_transport_unavailable())
             }
-            _failure => {
-                self.channel.observe_rpc_terminal(&context, if _failure.is_err() {
-                    "rpcDeadlineExpired"
+            _ if unanswered => {
+                // A slow, unanswered, unreadable or undecodable ordinary
+                // request is an UNKNOWN outcome for that request only. It
+                // never tears down the authenticated link; its counter is
+                // retired with a record, and the replay window still refuses
+                // any late duplicate. Security failures fence below.
+                allocated.retire(if timed_out {
+                    "timeout"
+                } else if rpc_stage == "macParse" {
+                    "receiverDeadline"
                 } else {
-                    "rpcError"
-                }, path, rpc_stage, rpc_status);
+                    "transport"
+                });
+                Err(route.response_failure(federation_transport_unavailable()))
+            }
+            _failure => {
+                // A MAC, replay, counter, authority or incarnation failure.
+                // The fence below retires the whole incarnation instead.
+                allocated.counter = None;
+                self.channel
+                    .fence_rpc_security_failure(&context, "rpcError", path, rpc_stage, rpc_status);
                 #[cfg(test)]
                 {
                     let reason = if let Ok(Err(error)) = &_failure {
                         format!("inner_error status={} error={}", error.status, error.message)
                     } else {
-                        "deadline_expired".to_owned()
+                        "unexpected".to_owned()
                     };
                     eprintln!(
                         "FEDERATION_RPC_FENCED peer={} path={path} elapsed_ms={} reason={reason}",
@@ -383,11 +465,53 @@ impl FederationRpcClient {
                         request_started_at.elapsed().as_millis()
                     );
                 }
-                self.channel
-                    .fence_security(context.owner, &context.incarnation);
                 Err(route.response_failure(federation_transport_unavailable()))
             }
         }
+    }
+}
+
+impl FederationRpcRoute {
+    /// The fixed local name of this request's operation. It never carries a
+    /// path, query or payload, so a bounded record may repeat it.
+    fn operation(&self) -> &'static str {
+        match self {
+            Self::Health(_) => "health",
+            Self::PromptPolicy(_, _) => "promptPolicy",
+            Self::HostUtilization(_) => "hostUtilization",
+            Self::Onboarding(_, _) => "onboarding",
+            Self::Mailbox(_, _) => "mailbox",
+            Self::ExecutorWake(_, _) => "executorWake",
+            Self::ExecutorOutcome(_, _) => "executorOutcome",
+            Self::NativeBinding(_, _) => "nativeBinding",
+            Self::Binding(_, _) => "binding",
+            Self::Participation(_, _) => "participation",
+            Self::MailboxRelay(_, _) => "mailboxRelay",
+        }
+    }
+}
+
+/// Holds one request's sender counter until it is settled or fenced. Dropped
+/// with a counter still unsettled, as when the caller is cancelled, it
+/// retires that counter as UNKNOWN; retiring a settled counter does nothing.
+struct FederationCounterGuard<'a> {
+    context: &'a FederationSecurityContext,
+    clock: &'a FederationControlClock,
+    counter: Option<u64>,
+}
+
+impl FederationCounterGuard<'_> {
+    fn retire(&mut self, reason: &'static str) {
+        if let Some(counter) = self.counter.take() {
+            self.context
+                .retire_unknown(counter, reason, self.clock.now());
+        }
+    }
+}
+
+impl Drop for FederationCounterGuard<'_> {
+    fn drop(&mut self) {
+        self.retire("dropped");
     }
 }
 
@@ -408,23 +532,35 @@ async fn federation_sender_watchdog(
             .expect("sender window poisoned")
             .outstanding
             .values()
-            .min()
-            .copied();
+            .map(|entry| entry.retire_at)
+            .min();
         if let Some(deadline) = deadline {
             tokio::select! {
                 _ = &mut changed => {},
                 _ = channel.control.clock.deadline(deadline) => {
-                    let expired = context.sender.lock().expect("sender window poisoned").outstanding
-                        .values().any(|deadline| *deadline <= channel.control.clock.now());
-                    if expired {
-                        channel.observe_terminal(&context, "rpc", "senderDeadlineExpired");
-                        channel.fence_security(context.owner, &context.incarnation);
-                        return;
-                    }
+                    federation_sender_window_tick(&context, channel.control.clock.now());
                 },
             }
         } else {
             changed.await;
         }
+    }
+}
+
+/// Retires each counter unsettled past the unchanged sender window as
+/// UNKNOWN, a backstop to the request's own limit and drop guard. Nothing here
+/// touches the link.
+fn federation_sender_window_tick(context: &FederationSecurityContext, now: std::time::Instant) {
+    let expired: Vec<u64> = context
+        .sender
+        .lock()
+        .expect("sender window poisoned")
+        .outstanding
+        .iter()
+        .filter(|(_, entry)| entry.retire_at <= now)
+        .map(|(counter, _)| *counter)
+        .collect();
+    for counter in expired {
+        context.retire_unknown(counter, "unsettled", now);
     }
 }
