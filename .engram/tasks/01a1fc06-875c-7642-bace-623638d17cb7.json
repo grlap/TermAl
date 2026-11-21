@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Updated coder-test-execution step 3 with the agreed two-sentence remote-mailbox route. The byte-identical original review pair had no Medium or higher findings. The exact Markdown link gate test-4f13933f-389d-40cc-96f2-6ca39fd7eea3 passed with zero unresolved links. Opus2 fast-forwarded and verified origin/master at 1fd1e156269d00d23c26496a3186ee2e1f870d9a. Fresh independent post-landing evaluation 4542af4a16a549a497005f89512c3ea7 passed both criteria at acceptance revision 3 on that commit and tree bc7440d5a8fcaa97caf2518ed98a0ac2cb09c24c.",
+    "completed_at": "2026-11-21T16:53:53.659188200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
