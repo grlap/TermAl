@@ -128,17 +128,43 @@ impl FederationSecurityContext {
 }
 
 impl FederationChannel {
+    fn authenticated_link_state(
+        &self,
+        active_test_runs: bool,
+    ) -> Result<std::sync::MutexGuard<'_, FederationLinkState>, ApiError> {
+        if active_test_runs {
+            return self
+                .state
+                .try_lock()
+                .map_err(|_| active_test_runs_unavailable());
+        }
+        Ok(self.state.lock().expect("federation link mutex poisoned"))
+    }
+
     fn security_context(&self) -> Result<Arc<FederationSecurityContext>, ApiError> {
-        self.state
-            .lock()
-            .expect("federation link mutex poisoned")
+        self.security_context_for_rpc(false)
+    }
+
+    fn security_context_for_rpc(
+        &self,
+        active_test_runs: bool,
+    ) -> Result<Arc<FederationSecurityContext>, ApiError> {
+        self.authenticated_link_state(active_test_runs)?
             .security
             .clone()
             .ok_or_else(federation_auth_refused)
     }
 
     fn security_current(&self, context: &Arc<FederationSecurityContext>) -> Result<(), ApiError> {
-        let state = self.state.lock().expect("federation link mutex poisoned");
+        self.security_current_for_rpc(context, false)
+    }
+
+    fn security_current_for_rpc(
+        &self,
+        context: &Arc<FederationSecurityContext>,
+        active_test_runs: bool,
+    ) -> Result<(), ApiError> {
+        let state = self.authenticated_link_state(active_test_runs)?;
         if state
             .security
             .as_ref()

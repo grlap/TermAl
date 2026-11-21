@@ -5,6 +5,7 @@
 // proof requests use the actual MAC-authenticated domain HTTP listener.
 use super::*;
 
+mod active_test_runs;
 mod alias_grammar;
 mod causal_test_admission;
 mod causal_test_completion;

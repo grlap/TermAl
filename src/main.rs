@@ -1098,6 +1098,7 @@ include!("federation_rpc_authenticated.rs");
 include!("federation_protocol.rs");
 include!("federation_channel_authority.rs");
 include!("federation_listener.rs");
+include!("federation_active_test_runs.rs");
 include!("federation_listener_io.rs");
 include!("federation_rpc.rs");
 include!("federation_credentials.rs");

@@ -5,6 +5,7 @@
 
 struct TestRunHistoryProjection {
     version: u64,
+    captured_at: String,
     cut: TestRunProjectionCut,
     value: std::sync::OnceLock<TestRunHistoryValue>,
     // Derived metadata DTOs only, never SessionRecord/runtime ownership.
@@ -14,6 +15,7 @@ struct TestRunHistoryProjection {
 
 struct TestRunHistoryValue {
     runs: Vec<TestRunSummary>,
+    active: ActiveTestRunProjection,
     overview: TestRunOverview,
     activity: BTreeMap<String, SessionTestRunActivity>,
 }
@@ -23,7 +25,19 @@ impl TestRunHistoryProjection {
         self.value.get_or_init(|| {
             let mut runs = test_run_project_history(&self.cut, true);
             let mut seen = HashSet::new();
-            runs.retain(|run| seen.insert(run.run_id.clone()));
+            let mut active = ActiveTestRunProjection::default();
+            runs.retain(|run| {
+                if !seen.insert(run.run_id.clone()) {
+                    return false;
+                }
+                if self.cut.active_peer_view
+                    && self.cut.projection_index().scanned_once
+                    && run.state == TestRunState::Running
+                {
+                    active.include(run, &self.cut);
+                }
+                true
+            });
             let (overview, activity) = test_run_overview(
                 &runs,
                 self.cut.projection_index().scanned_once,
@@ -32,6 +46,7 @@ impl TestRunHistoryProjection {
             );
             TestRunHistoryValue {
                 runs,
+                active,
                 overview,
                 activity,
             }
@@ -86,6 +101,7 @@ impl AppState {
             .expect("test-run projection version exhausted");
         let projection = Arc::new(TestRunHistoryProjection {
             version: cache.test_run_version,
+            captured_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             cut: TestRunProjectionCut::capture_history(inner),
             value: std::sync::OnceLock::new(),
             activity_rows: Mutex::new(HashMap::new()),

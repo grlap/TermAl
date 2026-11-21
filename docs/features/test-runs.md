@@ -12,6 +12,24 @@ verdict itself.
 Declared test commands (`termal-tests.toml`, TRX/JUnit artifacts) use the existing
 artifact adapter: see [Declared Test Commands](declared-test-commands.md).
 
+## Active runs on a federated host
+
+The host-private `GET /federation/v1/test-runs/active` runs over the
+authenticated pair link from Central to one directly enrolled Satellite. It
+returns at most 20 running rows from the Satellite's last materialized Test
+Runs snapshot. The response is capped at 32 KiB. Each row has an opaque run
+ID, state, and, where known, a local project label, visible local session
+label and start time. The endpoint reads the in-memory snapshot and has no
+access to run logs, paths, terminal history, or verification credit.
+
+Version 1 identifies the origin and snapshot version. `ready: false` means
+the origin is warming up. A ready snapshot can have no rows, and its `asOf`
+is the capture time. `truncated: true` means some running rows were omitted.
+The caller treats an authenticated 404 or 405 as unsupported. A busy origin,
+an unavailable snapshot or a read deadline leaves the result unavailable. The
+caller makes one bounded read for the selected host and discards the reply
+if its current pair authority has changed.
+
 ## Shared registration and command visibility
 
 ### Selecting an original test request

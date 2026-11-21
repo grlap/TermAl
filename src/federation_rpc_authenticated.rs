@@ -2,15 +2,24 @@
 // Does not settle application intents or retry with fresh keys. Split from federation_rpc.rs.
 
 impl FederationRpcClient {
+    #[cfg(test)]
     async fn allocate_authenticated_counter(
         &self,
         context: &Arc<FederationSecurityContext>,
+    ) -> Result<u64, ApiError> {
+        self.allocate_rpc_counter(context, false).await
+    }
+
+    async fn allocate_rpc_counter(
+        &self,
+        context: &Arc<FederationSecurityContext>,
+        active_test_runs: bool,
     ) -> Result<u64, ApiError> {
         loop {
             let changed = context.changed.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            self.channel.security_current(context)?;
+            self.channel.security_current_for_rpc(context, active_test_runs)?;
             let blocked = {
                 let mut sender = context.sender.lock().expect("sender window poisoned");
                 if sender.next == u64::MAX {
@@ -67,6 +76,7 @@ impl FederationRpcClient {
     }
 
     async fn request_once<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
+        let active_test_runs = matches!(&route, FederationRpcRoute::ActiveTestRuns(_));
         let policy_deadline = matches!(&route, FederationRpcRoute::PromptPolicy(_, _))
             .then(|| tokio::time::Instant::from_std(self.channel.control.clock.now() + Duration::from_secs(10)));
         let policy_permit = if matches!(&route, FederationRpcRoute::PromptPolicy(_, _)) {
@@ -80,6 +90,8 @@ impl FederationRpcClient {
                 })).await
                 .map_err(|_| federation_prompt_policy_unknown_outcome())??;
             Some(permit)
+        } else if active_test_runs {
+            None
         } else {
             (self.ensure_current)()?;
             None
@@ -92,6 +104,7 @@ impl FederationRpcClient {
             FederationRpcRoute::Health(lease) => (lease, "/federation/v1/health"),
             FederationRpcRoute::PromptPolicy(lease, _) => (lease, FEDERATION_PROMPT_POLICY_ROUTE),
             FederationRpcRoute::HostUtilization(lease) => (lease, "/federation/v1/host-utilization"),
+            FederationRpcRoute::ActiveTestRuns(lease) => (lease, FEDERATION_ACTIVE_TEST_RUNS_ROUTE),
             FederationRpcRoute::Onboarding(lease, probe) => (lease, probe.path()),
             FederationRpcRoute::Mailbox(lease, request) => (lease,
                 if matches!(request.operation, FederationMailboxOperation::Directory { alias_basis: true }) {
@@ -106,8 +119,15 @@ impl FederationRpcClient {
             FederationRpcRoute::Participation(lease, _) => (lease, "/federation/v1/mailbox/participation"),
             FederationRpcRoute::MailboxRelay(lease, _) => (lease, MAILBOX_RELAY_RPC_ROUTE),
         };
-        lease.with_incarnation(|| Ok(()))?;
-        let context = self.channel.security_context()?;
+        if active_test_runs {
+            if !Arc::ptr_eq(&self.channel.state, &lease.channel.state) {
+                return Err(federation_auth_refused());
+            }
+            lease.try_with_active_test_runs_authority(|_| Ok(()))?;
+        } else {
+            lease.with_incarnation(|| Ok(()))?;
+        }
+        let context = self.channel.security_context_for_rpc(active_test_runs)?;
         if context.incarnation != lease.incarnation {
             return Err(federation_auth_refused());
         }
@@ -128,6 +148,7 @@ impl FederationRpcClient {
             FederationRpcRoute::Health(_) => self.client.get(url),
             FederationRpcRoute::PromptPolicy(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::HostUtilization(_) => self.client.get(url),
+            FederationRpcRoute::ActiveTestRuns(_) => self.client.get(url),
             FederationRpcRoute::Onboarding(_, probe) => probe.request(&self.client, url),
             FederationRpcRoute::Mailbox(_, body) => self.client.post(url).json(body),
             FederationRpcRoute::ExecutorWake(_, body) => self.client.post(url).json(body),
@@ -160,10 +181,13 @@ impl FederationRpcClient {
         }
         let mut rpc_stage = "counter";
         let mut rpc_status = None;
-        let telemetry = matches!(&route, FederationRpcRoute::HostUtilization(_));
+        let bounded_snapshot_read = matches!(
+            &route,
+            FederationRpcRoute::HostUtilization(_) | FederationRpcRoute::ActiveTestRuns(_)
+        );
         let mut allocated_counter = None;
         let request = async {
-            let counter = self.allocate_authenticated_counter(&context).await?;
+            let counter = self.allocate_rpc_counter(&context, active_test_runs).await?;
             allocated_counter = Some(counter);
             // A cancelled caller is not settlement. The independent watchdog
             // also fences abandoned futures, preserving the allocation floor.
@@ -241,6 +265,14 @@ impl FederationRpcClient {
                 }
                 bytes.extend_from_slice(&chunk);
             }
+            if active_test_runs
+                && status == StatusCode::SERVICE_UNAVAILABLE
+                && !response_headers.contains_key(FEDERATION_MAC_HEADER)
+            {
+                // The origin may refuse before it can acquire the link MAC
+                // context. This is transport loss, never a trusted response.
+                return Err(federation_transport_unavailable());
+            }
             rpc_stage = "macParse";
             let (returned, tag) = federation_parse_mac(&response_headers, &context, direction)?;
             rpc_stage = "counter";
@@ -260,10 +292,12 @@ impl FederationRpcClient {
             rpc_stage = "verify";
             federation_verify_mac(&context.keys[key + 1], &[&authenticated], &tag)?;
             rpc_stage = "securityCurrent";
-            if let Err(error) = self.channel.security_current(&context) {
-                if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
-                    // A verified read-only proof cannot survive local lease
-                    // retirement. Preserve its typed stale-authority refusal.
+            if let Err(error) = self.channel.security_current_for_rpc(&context, active_test_runs) {
+                if matches!(&route, FederationRpcRoute::NativeBinding(_, _))
+                    || (active_test_runs && error.status == StatusCode::SERVICE_UNAVAILABLE)
+                {
+                    // A verified read-only reply still needs a usable local
+                    // context. Settle the attempt while refusing its contents.
                     context.settle(counter);
                     return Ok(Err(error));
                 }
@@ -281,11 +315,13 @@ impl FederationRpcClient {
                     let _permit = job_permit;
                     check()
                 }).await
+            } else if active_test_runs {
+                lease.try_with_active_test_runs_authority(|_| Ok(()))
             } else {
                 (self.ensure_current)()
             };
             if let Err(error) = current {
-                if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
+                if active_test_runs || matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     context.settle(counter);
                     return Ok(Err(error));
                 }
@@ -302,6 +338,11 @@ impl FederationRpcClient {
                 // An authenticated transport refusal settles only this attempt;
                 // application uncertainty and its idempotency key remain owned.
                 context.settle(counter);
+                if matches!(&route, FederationRpcRoute::ActiveTestRuns(_))
+                    && matches!(status, StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED)
+                {
+                    return Ok(Err(ApiError::not_found("peer does not support remote Test Runs")));
+                }
                 if let FederationRpcRoute::MailboxRelay(_, relay_request) = &route {
                     return Ok(Err(if status == StatusCode::NOT_FOUND && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok() {
                         ApiError::not_found("authenticated native mailbox resource or membership not found")
@@ -342,7 +383,7 @@ impl FederationRpcClient {
         };
         #[cfg(test)]
         let request_started_at = std::time::Instant::now();
-        let timeout = if telemetry { host_utilization::PEER_DEADLINE } else { Duration::from_secs(10) };
+        let timeout = if bounded_snapshot_read { host_utilization::PEER_DEADLINE } else { Duration::from_secs(10) };
         let result = if let Some(deadline) = policy_deadline {
             self.channel.control.clock.timeout_at(deadline, request).await
         } else {
@@ -350,16 +391,20 @@ impl FederationRpcClient {
         };
         match result {
             Ok(Ok(result)) => result,
+            Ok(Err(error)) if active_test_runs && error.status == StatusCode::SERVICE_UNAVAILABLE => {
+                if let Some(counter) = allocated_counter { context.settle(counter); }
+                Err(error)
+            }
             failure if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() => {
                 // The blocking authority job still owns its permit. Its late
                 // result cannot supply policy to the expired caller.
                 Err(federation_prompt_policy_unknown_outcome())
             }
-            failure if telemetry && (failure.is_err()
+            failure if bounded_snapshot_read && (failure.is_err()
                 || matches!(rpc_stage, "execute" | "responseBody" | "decode")) => {
                 // This GET has no application outcome to recover. Settle its
                 // counter on a bounded read failure; it must not retire a
-                // healthy pair merely because telemetry was unavailable.
+                // healthy pair merely because a snapshot was unavailable.
                 // MAC/replay/authority failures still use the security fence.
                 if let Some(counter) = allocated_counter { context.settle(counter); }
                 Err(federation_transport_unavailable())

@@ -90,7 +90,12 @@ impl RunFixture {
 }
 
 /// Writes a run directory the way the launcher lays one out.
-fn write_run(runs_dir: &FsPath, run_id: &str, request: Value, results: Option<Value>) -> PathBuf {
+pub(super) fn write_run(
+    runs_dir: &FsPath,
+    run_id: &str,
+    request: Value,
+    results: Option<Value>,
+) -> PathBuf {
     let run_dir = runs_dir.join(run_id);
     fs::create_dir_all(&run_dir).expect("run dir should exist");
     let mut request = request;
@@ -103,7 +108,7 @@ fn write_run(runs_dir: &FsPath, run_id: &str, request: Value, results: Option<Va
     run_dir
 }
 
-fn full_request(root: &FsPath, started: &str) -> Value {
+pub(super) fn full_request(root: &FsPath, started: &str) -> Value {
     json!({
         "root": root.to_string_lossy(),
         "full": true,
@@ -112,7 +117,7 @@ fn full_request(root: &FsPath, started: &str) -> Value {
     })
 }
 
-fn passed_results() -> Value {
+pub(super) fn passed_results() -> Value {
     json!({
         "state": "passed",
         "exitCode": 0,
@@ -519,7 +524,7 @@ async fn raw_results_route_refuses_above_one_mib_with_named_413() {
     assert_eq!(serde_json::to_value(fixture.summaries()).unwrap(), before);
 }
 
-fn running_results(pid: Option<u32>) -> Value {
+pub(super) fn running_results(pid: Option<u32>) -> Value {
     let mut results = json!({
         "state": "running",
         "stages": [

@@ -9,6 +9,7 @@ struct TestRunProjectionSession {
     name: String,
     hidden: bool,
     child: bool,
+    local: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -17,6 +18,7 @@ struct TestRunProjectionSessionRef<'a> {
     name: &'a str,
     hidden: bool,
     child: bool,
+    local: bool,
 }
 
 struct TestRunProjectionCarried {
@@ -76,6 +78,7 @@ impl TestRunProjectionSource for StateInner {
             name: &record.session.name,
             hidden: record.hidden,
             child: false,
+            local: record.is_local_session(),
         })
     }
     fn projection_sessions(&self) -> impl Iterator<Item = TestRunProjectionSessionRef<'_>> {
@@ -91,6 +94,7 @@ impl TestRunProjectionSource for StateInner {
                 name: &record.session.name,
                 hidden: record.hidden,
                 child: children.contains(record.session.id.as_str()),
+                local: record.is_local_session(),
             })
     }
     fn projection_carried(&self) -> impl Iterator<Item = TestRunProjectionCarriedRef<'_>> {
@@ -249,6 +253,7 @@ fn test_run_selected_set_matches<T: Eq + std::hash::Hash>(
 
 struct TestRunProjectionCut {
     attention_ids: HashSet<String>,
+    active_peer_view: bool,
     scope: TestRunProjectionScope,
     observation_ids: HashSet<String>,
     observation_presence: BTreeMap<String, bool>,
@@ -257,7 +262,7 @@ struct TestRunProjectionCut {
     registrations: BTreeMap<String, TestRunRegistration>,
     observations: BTreeMap<String, TestRunCommandObservation>,
     compacted: BTreeMap<String, TestRunCompacted>,
-    projects: Vec<String>,
+    projects: Vec<(String, Option<String>)>,
     sessions: Vec<TestRunProjectionSession>,
     carried: Vec<TestRunProjectionCarried>,
 }
@@ -277,6 +282,7 @@ impl TestRunProjectionCut {
     }
 
     fn capture(inner: &StateInner, mut scope: TestRunProjectionScope) -> Self {
+        let active_peer_view = scope.complete && active_test_run_origin_enabled(inner);
         // Candidate rows are selected by artifact run id before the shared
         // exact association predicates run. Validation repeats that selection
         // over live rows, so a previously absent/newly relevant association
@@ -329,7 +335,7 @@ impl TestRunProjectionCut {
                     .map(|row| (id.clone(), row.clone()))
             })
             .collect();
-        let project_ids: HashSet<_> = registrations
+        let mut project_ids: HashSet<_> = registrations
             .values()
             .filter_map(|row| row.project_id.clone())
             .collect();
@@ -374,8 +380,28 @@ impl TestRunProjectionCut {
             scanned_once: inner.test_runs.scanned_once,
             ..TestRunIndex::default()
         };
+        if active_peer_view {
+            // Active rows can be discovered from disk or observed by the host
+            // without having a launcher registration.
+            project_ids.extend(
+                index
+                    .entries
+                    .iter()
+                    .filter(|entry| entry.summary.state == TestRunState::Running)
+                    .filter_map(|entry| entry.discovered_project_id.clone()),
+            );
+            project_ids.extend(
+                observations
+                    .values()
+                    .map(|row| &row.summary)
+                    .chain(compacted.values().map(|row| &row.summary))
+                    .filter(|summary| summary.state == TestRunState::Running)
+                    .filter_map(|summary| summary.project_id.clone()),
+            );
+        }
         Self {
             index,
+            active_peer_view,
             attention_ids: if scope.complete { test_run_attention_ids(inner) } else { HashSet::new() },
             registrations,
             observations,
@@ -384,7 +410,13 @@ impl TestRunProjectionCut {
                 .projects
                 .iter()
                 .filter(|row| project_ids.contains(&row.id))
-                .map(|row| row.id.clone())
+                .map(|row| {
+                    let label = (active_peer_view && row.remote_id == LOCAL_REMOTE_ID)
+                        .then(|| active_test_run_label(&row.name))
+                        .flatten()
+                        .map(str::to_owned);
+                    (row.id.clone(), label)
+                })
                 .collect(),
             sessions: inner
                 .projection_sessions()
@@ -394,6 +426,7 @@ impl TestRunProjectionCut {
                     name: row.name.to_owned(),
                     hidden: row.hidden,
                     child: row.child,
+                    local: row.local,
                 })
                 .collect(),
             carried: inner
@@ -414,6 +447,9 @@ impl TestRunProjectionCut {
     }
 
     fn matches(&self, inner: &StateInner) -> bool {
+        if self.active_peer_view != (self.scope.complete && active_test_run_origin_enabled(inner)) {
+            return false;
+        }
         let live = &inner.test_runs;
         if self.scope.complete && (
             self.registrations.len() != inner.test_run_registrations.len()
@@ -472,11 +508,16 @@ impl TestRunProjectionCut {
                 .observation_presence
                 .iter()
                 .all(|(id, present)| *present == inner.test_run_observations.contains_key(id))
-            && self.projects.iter().map(String::as_str).eq(inner
+            && self.projects.iter().map(|(id, label)| (id.as_str(), label.as_deref())).eq(inner
                 .projects
                 .iter()
                 .filter(|row| self.project_ids.contains(&row.id))
-                .map(|row| row.id.as_str()))
+                .map(|row| {
+                    let label = (self.active_peer_view && row.remote_id == LOCAL_REMOTE_ID)
+                        .then(|| active_test_run_label(&row.name))
+                        .flatten();
+                    (row.id.as_str(), label)
+                }))
             && self.projection_sessions().eq(inner
                 .projection_sessions()
                 .filter(|row| self.scope.session(*row)))
@@ -500,7 +541,7 @@ impl TestRunProjectionSource for TestRunProjectionCut {
         &self.compacted
     }
     fn projection_project_exists(&self, id: &str) -> bool {
-        self.projects.iter().any(|project| project == id)
+        self.projects.iter().any(|(project, _)| project == id)
     }
     fn projection_has_observation(&self, id: &str) -> bool {
         self.observations.contains_key(id)
@@ -512,6 +553,7 @@ impl TestRunProjectionSource for TestRunProjectionCut {
             name: &row.name,
             hidden: row.hidden,
             child: row.child,
+            local: row.local,
         })
     }
     fn projection_carried(&self) -> impl Iterator<Item = TestRunProjectionCarriedRef<'_>> {

@@ -27,6 +27,12 @@ impl FederationTransportBasis {
         self.snapshot.write()
     }
 
+    fn try_read(
+        &self,
+    ) -> std::sync::TryLockResult<std::sync::RwLockReadGuard<'_, FederationPeerSnapshot>> {
+        self.snapshot.try_read()
+    }
+
     fn is_settling(&self) -> bool {
         self.settling.load(Ordering::Acquire) != 0
     }

@@ -234,7 +234,14 @@ enum TestRunJson {
     TooLarge,
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_TEST_RUN_ARTIFACT_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn test_run_read_json(path: &FsPath) -> TestRunJson {
+    #[cfg(test)]
+    TEST_TEST_RUN_ARTIFACT_READS.with(|reads| reads.set(reads.get() + 1));
     if fs::metadata(path).is_ok_and(|metadata| metadata.len() > TEST_RUN_JSON_MAX_BYTES as u64) {
         return TestRunJson::TooLarge;
     }

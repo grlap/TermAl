@@ -11,9 +11,13 @@ struct FederationRpcClient {
     allocation_blocked: Arc<dyn Fn(u64) + Send + Sync>,
 }
 
+const FEDERATION_ACTIVE_TEST_RUNS_ROUTE: &str = "/federation/v1/test-runs/active";
+const FEDERATION_ACTIVE_TEST_RUNS_RESPONSE_BYTES: usize = 32 * 1024;
+
 enum FederationRpcRoute {
     Health(FederationLinkLease),
     HostUtilization(FederationLinkLease),
+    ActiveTestRuns(FederationLinkLease),
     Onboarding(FederationLinkLease, FederationOnboardingRpc),
     Mailbox(FederationLinkLease, FederationMailboxRequest),
     NativeBinding(FederationLinkLease, FederationNativeBindingRequest),
