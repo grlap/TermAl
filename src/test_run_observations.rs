@@ -46,6 +46,10 @@ struct TestRunCommandObservation {
     evidence: Vec<TestRunEvidenceAssociation>,
     #[serde(default)]
     artifact: Option<TestRunObservedArtifact>,
+    // A linked fallback START verified this worktree's Git layout; artifact
+    // association validates that layout again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    linked_placement: bool,
     // Kept separately from start-placement diagnostics. Only the original
     // provider event's later artifact correlation may update this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -233,6 +237,20 @@ struct TestRunCommandOrigin {
     work_binding: Option<EngramControlWorkBinding>,
     source_root: Option<EngramWorkSourceRoot>,
     validated_unbound: bool,
+    placement_refusal: Option<TestRunNativeCompletionRefusal>,
+    linked_placement: bool,
+}
+
+#[derive(Default)]
+struct TestRunHistoryPlacement {
+    worktree: String,
+    refusal: Option<TestRunNativeCompletionRefusal>,
+    linked_placement: bool,
+}
+
+enum TestRunPlacementFrame<'a> {
+    Start(Option<(&'a EngramCheckCommand, &'a EngramCheckTarget)>),
+    Description,
 }
 
 // Only provider starts whose command text is not available yet. Process-local
@@ -328,6 +346,76 @@ impl TestRunCommandOrigin {
             validated_unbound: owns_current
                 && project.is_some_and(|project| project.engram.is_none())
                 && record.engram.work_binding.is_none(),
+            placement_refusal: None,
+            linked_placement: false,
+        }
+    }
+
+    // Direct starts and delayed descriptions resolve location off the state
+    // lock. A validated target belongs to the same command and keeps its
+    // original named-root semantics. Only an original start can establish
+    // linked placement for a validated unbound run with Engram disabled.
+    fn history_placement(
+        &self,
+        command: &EngramCheckCommand,
+        workdir: &FsPath,
+        places: Option<&[Option<String>]>,
+        frame: TestRunPlacementFrame<'_>,
+    ) -> TestRunHistoryPlacement {
+        if let TestRunPlacementFrame::Start(Some((validated_command, target))) = frame {
+            return TestRunHistoryPlacement {
+                worktree: (validated_command == command)
+                    .then(|| test_run_display_path(&target.root))
+                    .unwrap_or_default(),
+                ..TestRunHistoryPlacement::default()
+            };
+        }
+        if let Some(target) = engram_check_worktree_from(command, workdir, places, None) {
+            return TestRunHistoryPlacement {
+                worktree: test_run_display_path(&target.root),
+                ..TestRunHistoryPlacement::default()
+            };
+        }
+        if command.kind != EngramVerificationKind::Test || !self.validated_unbound {
+            return TestRunHistoryPlacement::default();
+        }
+        let explicit = command.directory.as_deref().or(match places {
+            Some([Some(directory)]) => Some(directory.as_str()),
+            _ => None,
+        });
+        let Some(directory) = explicit else {
+            return TestRunHistoryPlacement::default();
+        };
+        let linked = match frame {
+            TestRunPlacementFrame::Start(_) => {
+                // Inspect the reported path before canonicalization can hide a link.
+                let directory = engram_msys_drive_path(directory);
+                delegation_git_boundary::ProviderLinkedWorktree::resolve(
+                    workdir,
+                    FsPath::new(directory.as_ref()),
+                )
+                .ok()
+                .and_then(|linked| {
+                    engram_check_worktree_in(command, &linked.root, Some(directory.as_ref()), None)
+                })
+            }
+            // A late description's directory can already belong to a replacement.
+            TestRunPlacementFrame::Description => None,
+        };
+        match linked {
+            Some(target) => TestRunHistoryPlacement {
+                worktree: test_run_display_path(&target.root),
+                refusal: None,
+                linked_placement: true,
+            },
+            None => TestRunHistoryPlacement {
+                refusal: Some(TestRunNativeCompletionRefusal::new(
+                    TestRunNativeCompletionPhase::ArtifactAssociation,
+                    TestRunNativeCompletionRefusalCode::ProviderPlacementUnconfirmed,
+                    &[(TestRunNativeCompletionFact::WorktreePresent, false)],
+                )),
+                ..TestRunHistoryPlacement::default()
+            },
         }
     }
 }
@@ -586,19 +674,17 @@ impl AppState {
         if command.kind != EngramVerificationKind::Test {
             return TestCommandOriginalStart::ThisTurn;
         }
-        let worktree = engram_check_worktree_from(
+        let placement = pending.origin.history_placement(
             command,
             FsPath::new(&pending.workdir),
             places.as_deref(),
-            None,
-        )
-        .map(|target| test_run_display_path(&target.root))
-        .unwrap_or_default();
+            TestRunPlacementFrame::Description,
+        );
         let id = pending.origin.execution_id();
         self.observe_test_command_start(
             pending.origin,
             command,
-            &worktree,
+            placement,
             &pending.started_at,
             declared.as_ref().map(|(_, _, binding)| binding),
         );
@@ -613,13 +699,17 @@ impl AppState {
 
     fn observe_test_command_start(
         &self,
-        origin: TestRunCommandOrigin,
+        mut origin: TestRunCommandOrigin,
         command: &EngramCheckCommand,
-        worktree: &str,
+        placement: TestRunHistoryPlacement,
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
     ) {
-        self.observe_test_command_start_with_native(origin, command, worktree, started_at, declared, None);
+        origin.placement_refusal = placement.refusal;
+        origin.linked_placement = placement.linked_placement;
+        self.observe_test_command_start_with_native(
+            origin, command, &placement.worktree, started_at, declared, None,
+        );
     }
 
     fn observe_test_command_start_with_native(
@@ -641,6 +731,8 @@ impl AppState {
             work_binding,
             source_root,
             validated_unbound,
+            placement_refusal,
+            linked_placement,
         } = origin;
         let execution_id = format!(
             "observed-{}",
@@ -670,7 +762,8 @@ impl AppState {
             final_unbound_proof: None,
             declared_verdict_pending: false,
             evidence: Vec::new(),
-            native_completion_refusal: None,
+            native_completion_refusal: placement_refusal,
+            linked_placement,
             artifact: native.as_ref().map(|start| TestRunObservedArtifact {
                 run_id: start.run_id.clone(), run_directory: start.run_directory.clone(),
                 request_identity: Some(start.request_identity.clone()), terminal_digest: None,

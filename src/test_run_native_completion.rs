@@ -44,6 +44,7 @@ enum TestRunNativeCompletionRefusalCode {
     ArtifactLocatorMissing,
     ArtifactRunIdInvalid,
     ArtifactWorktreeUnavailable,
+    ProviderPlacementUnconfirmed,
     ArtifactRootUnavailable,
     ArtifactDirectoryUnavailable,
     ArtifactDirectoryMismatch,
@@ -159,6 +160,10 @@ enum TestRunNativeCompletionRemedy {
         rename = "Inspect the original provider start and its single explicit RUN locator in the validated worktree; do not substitute a copied or foreign artifact."
     )]
     InspectOriginalLocator,
+    #[serde(
+        rename = "Run from a verified worktree of the session's repository and report the command and its directory at start."
+    )]
+    UseVerifiedProviderWorktree,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -224,6 +229,7 @@ impl TestRunNativeCompletionRefusal {
             | ProviderTerminalMismatch
             | TerminalFactsInvalid => InspectOriginalTerminal,
             ModeUnsupported => UseSupportedMode,
+            ProviderPlacementUnconfirmed => UseVerifiedProviderWorktree,
             ArtifactObservationChanged | ArtifactAlreadyAssociated => InspectCurrentObservation,
             ArtifactObservationTimeUnavailable
             | ArtifactRequestTimeUnavailable
