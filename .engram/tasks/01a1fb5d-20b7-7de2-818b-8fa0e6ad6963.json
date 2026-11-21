@@ -1,0 +1,31 @@
+{
+  "id": "01a1fb5d-20b7-7de2-818b-8fa0e6ad6963",
+  "external_ref": null,
+  "title": "Test Runs: show active runs on other federated machines (simple, bounded, read-only)",
+  "outcome": "From the Test Runs panel the user can see the test runs on the other machines joined to this host (DL560, Windows B, Mac), at least the active ones with their state, project, owner and start time, read-only, without scanning history. Greg, 2026-11-20, relayed in TermAl mailbox 588693a8 #2136: '2. czy jest mozliwosc zobaczenie test runnow na innych maszynach ?', with the ask to organise it in a simple way, with no heavy history scanning. Current support (docs/features/test-runs.md): the panel indexes only this host's runs ('Remote projects are not indexed in slice 1'). A caller can wait on one remote run by an explicit host:<host UUID>::<native run id> through the existing authenticated native relay, and start, cancel or rerun for a remote project returns 501. No listing of another host's runs exists. A design must come first and be concurred before code: preferably the remote host's own bounded active-run overview fetched on demand over the existing authenticated relay, with no new durable storage, no polling loop and no history walk.",
+  "acceptance": [
+    "On Central, Test Runs defaults to local behavior and offers its joined direct machines. Selecting one or choosing Refresh shows only that machine’s currently sampled active runs, with machine, state, project, owner and start time where known, read-only. Ready-empty, warming up, unavailable and unsupported peer states are distinct, and a late response from a different or replaced peer cannot overwrite the selected machine.",
+    "The read uses the current authenticated enrolled Central-to-peer pair, returns only a versioned origin-bound snapshot with at most 20 rows and 32 KiB, and reports truncation. It serves an existing in-memory image with no request-time history projection or scan, no new durable state, no peer fan-out, and no automatic polling or retries. Local Test Runs, wait, mutation and verification behavior are unchanged.",
+    "Behavioral tests exercise the real authenticated pair for active/terminal transitions (including observation/launcher aliasing), bounded output, old/disconnected and revoked or replaced peer behavior, and prove a remote read works without any local UI subscriber and performs zero history projections or disk/durable reads. UI tests exercise selection and Refresh request counts, the distinct states and late-response isolation, and confirm local behavior and remote read-only behavior. No test depends on elapsed time."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "greg-requested",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

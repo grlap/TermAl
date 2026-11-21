@@ -6,7 +6,7 @@
   "acceptance": [
     "For sequential named live runs, the launcher pairs each libtest test-name prefix with its completed ok or FAILED status even when diagnostics split them across lines; it still requires every requested name exactly once and matching terminal counts.",
     "Focused Node regression checks cover split successful and failed statuses, missing or truncated statuses, unrelated test names, duplicate results, count mismatches, and executeRun PASS/FAIL accounting without weakening child-exit or exact-selection checks.",
-    "Both original B16 runs (test-da554d1a and test-8f8af9ff) remain preserved with the runner diagnosis; this repair lands under its own required reviews and standard full gate, and after it lands the pinned live 25 is rerun on the landed master and recognized by the launcher as PASS before any B16 acceptance evaluation or gated-control enable."
+    "The original B16 runs (test-da554d1a and test-8f8af9ff) remain preserved with the runner diagnosis. The repair landed with its own required review pair and standard full gate, and the post-landing rerun of the pinned 25 live tests was recognized by the launcher as PASS."
   ],
   "acceptance_bindings": [
     {
@@ -29,12 +29,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Closed the already-landed ordinary launcher split-status repair. dd3b2fef877d3774665fa0229e74933f95be94ac landed with the clean independent review pair and FULL test-85f150b8-464e-430a-8f25-1ab45070fd96. Original B16 failures remain preserved; subsequent historical test-38cf7824-ffdc-415c-a4a8-bb8fa5f3c981 was recognized as 25/25 PASS. No source edits for this reconciliation. At clean current e077c996, native committed focused test-ae0747cb-8c77-4496-aa2a-104fba19db4f passed 4/4 and typed record 3589878485b34ff2b83236470d71bd0d satisfied C2. Fresh independent evaluation 3acd841b0c83468f9620696712f1e961 passed all 3 criteria at cut 97 and work revision 4.",
+    "completed_at": "2026-11-21T01:05:15.004177800Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

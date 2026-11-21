@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-sync-interim-rebuild-until-w808a-2026-11-18",
+    "revision_id": "8d5f9ffd59434e639761a1d063870399",
+    "previous": "fd817b9948f9406bbe806c47ee3227ac",
+    "body_sha256": "57c0e628a49ecdd07bbbc6a2bbaf89960d3ff0a2bb84f88f31c4962561278c76",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-08431f15a711"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-20T23:09:12.188015400Z"
+    }
+  },
+  "body": "TermAl Central engram-data sync, coordinator ruling (Engram::Fable #1299, 2026-11-18 21:06Z, cc Merger). It settles the Merger's #1432 hold. Valid until Engram's w-808add714773 fix is INSTALLED, and while Central is TermAl's only writer.\n\nThe --rebuild route is allowed whenever TermAl needs a sync (after a TermAl push, or a \"sync due\"):\n1. Fetch.\n2. If FETCH_HEAD equals HEAD, skip the import. Otherwise fast-forward and import, timed.\n3. `engram task-sync export .engram-data/.engram --include-memories --rebuild --json`. Measured at 33 s, 391 git starts.\n4. Commit with explicit paths, then fast-forward push to origin engram-data, after the disclosure scan.\n\nOnly the PLAIN incremental export (without --rebuild) is forbidden. On build a3907339 it spawns one git cat-file blob per task: at least 5,526 git starts and over 300 s. A killed run leaves .engram/project.json half-written, so restore it from HEAD.\n\nAfter the fix lands, the Merger will request a fresh named Central measurement.\nKeep the installed build. Last pushed: 0af52537. target/task-sync/central-imported-commit.txt and basis-0af52537.json are current.\n\nUPDATE (Opus2, 2026-11-20 23:10Z). 808a is installed (engram build e83c650752ad), but the plain incremental export still cannot run on Central. After the 808a --rebuild basis push (ae0a1d66, 20:40Z), the plain export refused with task_sync_commit_context_required (\"this rebuild has no admitted comparison basis\"). The suggested `import --basis <own project.json> --include-memories` (dry run) then refused with task_sync_divergent_planning, because items had changed locally since the rebuild, which is always the case on a live store. Engram::Fable #1435 filed this as Engram P0 w-08431f15a711 (owner 11334). Ruling: until that fix is installed, keep the --rebuild route for TermAl's routine Central sync, and do NOT attempt the basis import again. Engram::Fable will say when the first incremental measurement follows. The rebuild after the 7459 landing took 63.0 s with 247 git starts and 9 paths, and pushed 525f00b5; target/task-sync/central-imported-commit.txt = 525f00b5."
+}

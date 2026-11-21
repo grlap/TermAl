@@ -1,0 +1,31 @@
+{
+  "id": "01a1fb5d-18f5-7e80-84de-0cd17f49aeb3",
+  "external_ref": null,
+  "title": "Test Runs panel opens on the Active view by default",
+  "outcome": "When the Test Runs panel opens, the View selector starts on Active rather than History; the user can still switch to History or Needs attention. Opening the panel for a specific run (from a transcript card) still shows that run's details even when it is finished. Greg, 2026-11-20, relayed by Engram::Asistant in TermAl mailbox 588693a8 #2136: '1. czy default moze byc Active ?'. Today ui/src/panels/TestRunsPanel.tsx:22 initialises the view to \"history\".",
+  "acceptance": [
+    "Opening the Test Runs panel shows the Active view selected and lists only active runs; History and Needs attention remain selectable and behave as before.",
+    "Opening the panel for a specific run (initialRun from a transcript card) still shows that run's details, including a finished run that the Active view does not list.",
+    "Behavioural vitest tests cover the default view and the initialRun case; `cd ui && npx tsc --noEmit` is clean.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "greg-requested",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -21,12 +21,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed expandable nested folders in the submodule Git status groups on origin/master e077c996. Single-line ellipsis, read-only accessible full paths, ordinary controls and fallback messages preserved. Focused 50/50 Vitest, TypeScript, exact-tree FULL and independent post-landing acceptance 5/5 passed.",
+    "completed_at": "2026-11-20T23:06:35.145682Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

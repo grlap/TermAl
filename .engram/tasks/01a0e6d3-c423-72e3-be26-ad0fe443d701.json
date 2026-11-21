@@ -2,9 +2,11 @@
   "id": "01a0e6d3-c423-72e3-be26-ad0fe443d701",
   "external_ref": "tm-85im",
   "title": "Remove pre-field Engram queued-row compatibility paths (513018d)",
-  "outcome": "Post-audit (2026-09-05) regression against the no-legacy policy, introduced by commit 513018d (2026-09-22). Three load-time acceptance/migration paths for queued-prompt rows persisted by pre-field TermAl development builds: (1) src/engram_queued_admission.rs:141-159 and :524-535 parse legacy idempotency-key formats ('termal-evaluate:'/'termal-stale-reevaluate:'/'termal-reevaluate:') to recover an operation generation — comment literally says 'Compatibility for prepared rows written before the explicit field'; (2) src/persisted_state.rs:470-491 'Migrate older retained entries… missing legacy evidence' reconstructs promotion_disposition_known at load; its test src/tests/engram_retained_disposition.rs:2027-2089 rewrites stored SQLite JSON to remove the field then loads; (3) src/state_accessors.rs:655-656 retains the old embedded projection for 'legacy/test-local records' instead of rejecting. TermAl is unreleased: per the tm-7p9z policy these rows should be rejected with reset guidance, not reconstructed. Found in Kimi's no-legacy re-audit 2026-09-25 (session-7706).",
+  "outcome": "A local session's public queue and projection identity derive from the authoritative queued records, including when that queue is empty. Preserve the remote proxy's received queue and passive historical-store recovery.",
   "acceptance": [
-    "The three load-time paths are removed; obsolete queued-row shapes fail closed with reset guidance; companion legacy-shape tests are deleted or converted to rejection tests; cargo check and cargo test --bin termal green."
+    "A local session with an empty authoritative queue exposes no queued prompts, regardless of stale embedded Session pendingPrompts. Public projection identity and cache validity derive from the same authoritative queue, and populated local queues keep their order and disposition.",
+    "A remote proxy still exposes its received pendingPrompts and queueProjectionHash. The historical persisted-row reader continues to distinguish proven promotion from unknown delivery and never automatically replays an unknown head.",
+    "Behavioral Rust regressions cover the empty local queue and warm cache, and focused committed checks pass for queue projection and retained-row recovery. The independent review pair and FULL pass on the exact landed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
