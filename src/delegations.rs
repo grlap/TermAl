@@ -1094,9 +1094,7 @@ impl AppState {
                 inner.revision
             };
             let record = &inner.delegations[index];
-            let result = record.result.as_ref().map(|result| {
-                delegation_result_for_policy(result, &record.write_policy).into_owned()
-            });
+            let result = delegation_result_for_record(record).map(std::borrow::Cow::into_owned);
             let acceptance_evaluation = inner.delegations[index]
                 .acceptance_evaluation
                 .as_ref()
@@ -3369,10 +3367,7 @@ fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
 }
 
 fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
-    let normalized = delegation
-        .result
-        .as_ref()
-        .map(|result| delegation_result_for_policy(result, &delegation.write_policy));
+    let normalized = delegation_result_for_record(delegation);
     let result = normalized.as_deref();
     let summary = result
         .map(|result| result.summary.trim())
@@ -3405,7 +3400,7 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let findings = result
+    let mut findings = result
         .map(|result| {
             result
                 .findings
@@ -3424,6 +3419,12 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
         })
         .unwrap_or_default();
 
+    if result.is_some_and(|result| result.findings_incomplete == Some(true)) {
+        findings.insert(0, format!(
+            "- Findings incomplete. Read the original with `termal_get_session_result` using `{{\"delegationId\":\"{}\",\"outputOffset\":0,\"outputLimit\":4096}}`, then page until `complete`.",
+            delegation.id
+        ));
+    }
     let findings = if findings.is_empty() {
         "- None".to_owned()
     } else {
@@ -3779,6 +3780,7 @@ fn refresh_delegation_from_child_locked(
         DelegationChildOutcome::Completed {
             summary,
             findings,
+            findings_incomplete,
             changed_files,
             files_inspected,
             commands_run,
@@ -3818,6 +3820,7 @@ fn refresh_delegation_from_child_locked(
                         line: None,
                         message: unavailable_finding.to_owned(),
                     }],
+                    findings_incomplete: None,
                     changed_files: Vec::new(),
                     observed_workspace_changes: Vec::new(),
                     observed_workspace_changes_omitted: 0,
@@ -3867,6 +3870,7 @@ fn refresh_delegation_from_child_locked(
                 status: DelegationStatus::Completed,
                 summary,
                 findings,
+                findings_incomplete: Some(findings_incomplete),
                 changed_files,
                 observed_workspace_changes: Vec::new(),
                 observed_workspace_changes_omitted: 0,
@@ -3911,9 +3915,15 @@ fn refresh_delegation_from_child_locked(
                 parent_card_delta,
             })
         }
-        DelegationChildOutcome::Failed { summary } => {
-            mark_delegation_failed_locked(inner, delegation_index, &summary)
-        }
+        DelegationChildOutcome::Failed {
+            summary,
+            findings_incomplete,
+        } => mark_delegation_failed_with_findings_state_locked(
+            inner,
+            delegation_index,
+            &summary,
+            findings_incomplete,
+        ),
         DelegationChildOutcome::IdleWithoutResult => mark_delegation_failed_locked(
             inner,
             delegation_index,
@@ -4204,6 +4214,15 @@ fn mark_delegation_failed_locked(
     delegation_index: usize,
     detail: &str,
 ) -> Option<DelegationLifecycleDelta> {
+    mark_delegation_failed_with_findings_state_locked(inner, delegation_index, detail, false)
+}
+
+fn mark_delegation_failed_with_findings_state_locked(
+    inner: &mut StateInner,
+    delegation_index: usize,
+    detail: &str,
+    findings_incomplete: bool,
+) -> Option<DelegationLifecycleDelta> {
     let delegation = inner.delegations.get(delegation_index)?.clone();
     if delegation_is_terminal(delegation.status) {
         return None;
@@ -4257,6 +4276,7 @@ fn mark_delegation_failed_locked(
         status: DelegationStatus::Failed,
         summary: summary.to_owned(),
         findings: Vec::new(),
+        findings_incomplete: Some(findings_incomplete),
         changed_files: Vec::new(),
         observed_workspace_changes: Vec::new(),
         observed_workspace_changes_omitted: 0,
@@ -4318,6 +4338,7 @@ fn mark_delegation_canceled_locked(
         status: DelegationStatus::Canceled,
         summary: raw_summary.to_owned(),
         findings: Vec::new(),
+        findings_incomplete: None,
         changed_files: Vec::new(),
         observed_workspace_changes: Vec::new(),
         observed_workspace_changes_omitted: 0,
@@ -4950,6 +4971,7 @@ enum DelegationChildOutcome {
     Completed {
         summary: String,
         findings: Vec<DelegationFinding>,
+        findings_incomplete: bool,
         changed_files: Vec<String>,
         files_inspected: Vec<String>,
         commands_run: Vec<DelegationCommandResult>,
@@ -4957,6 +4979,7 @@ enum DelegationChildOutcome {
     },
     Failed {
         summary: String,
+        findings_incomplete: bool,
     },
     IdleWithoutResult,
     Missing,
@@ -4966,6 +4989,7 @@ struct ParsedDelegationResult {
     status: DelegationStatus,
     summary: String,
     findings: Vec<DelegationFinding>,
+    findings_incomplete: bool,
     files_inspected: Vec<String>,
     notes: Vec<String>,
 }
@@ -4993,6 +5017,7 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
             delegation_child_result_for_status(child).unwrap_or_else(|| {
                 DelegationChildOutcome::Failed {
                     summary: delegation_child_missing_runtime_summary(child),
+                    findings_incomplete: false,
                 }
             })
         }
@@ -5004,6 +5029,7 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
             delegation_child_result_for_status(child).unwrap_or_else(|| {
                 DelegationChildOutcome::Failed {
                     summary: child.session.preview.clone(),
+                    findings_incomplete: false,
                 }
             })
         }
@@ -5045,12 +5071,14 @@ fn delegation_child_outcome_from_result(
     if result.status == DelegationStatus::Failed {
         return DelegationChildOutcome::Failed {
             summary: result.summary,
+            findings_incomplete: result.findings_incomplete || !result.findings.is_empty(),
         };
     }
 
     DelegationChildOutcome::Completed {
         summary: result.summary,
         findings: result.findings,
+        findings_incomplete: result.findings_incomplete,
         changed_files: child_workspace_observed_changes(&child.session),
         files_inspected: result.files_inspected,
         commands_run: child_commands_run(&child.session),
@@ -5536,6 +5564,26 @@ fn child_workspace_observed_changes(session: &Session) -> Vec<String> {
         }
     }
     files.into_iter().collect()
+}
+
+fn delegation_result_for_record(
+    record: &DelegationRecord,
+) -> Option<std::borrow::Cow<'_, DelegationResult>> {
+    let result = record.result.as_ref()?;
+    let mut result = delegation_result_for_policy(result, &record.write_policy);
+    if matches!(
+        record.mode,
+        DelegationMode::Explorer | DelegationMode::Worker
+    ) && matches!(
+        result.status,
+        DelegationStatus::Completed | DelegationStatus::Failed
+    ) && result.findings_incomplete.is_none()
+    {
+        // Older prose results cannot establish that their compact parser
+        // accounted for every finding. Keep the original record intact.
+        result.to_mut().findings_incomplete = Some(true);
+    }
+    Some(result)
 }
 
 /// Older read-only packets persisted watcher paths as changedFiles. Reclassify

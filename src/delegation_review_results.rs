@@ -626,6 +626,7 @@ fn delegation_result_from_review_envelope(
         status: envelope.status,
         summary: envelope.summary.clone(),
         findings: envelope.findings.clone(),
+        findings_incomplete: None,
         changed_files: Vec::new(),
         observed_workspace_changes: Vec::new(),
         observed_workspace_changes_omitted: 0,
@@ -733,7 +734,7 @@ fn validate_delegation_review_text(
 fn post_submission_transport_error(outcome: &DelegationChildOutcome) -> Option<String> {
     match outcome {
         DelegationChildOutcome::Running | DelegationChildOutcome::Completed { .. } => None,
-        DelegationChildOutcome::Failed { summary } => {
+        DelegationChildOutcome::Failed { summary, .. } => {
             let detail = summary.trim();
             Some(if detail.is_empty() {
                 "Child runtime failed after structured result submission.".to_owned()

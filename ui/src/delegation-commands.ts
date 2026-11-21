@@ -1073,6 +1073,9 @@ function delegationResultPacket(
   if (result.workerOutputUnavailable !== undefined) {
     packet.workerOutputUnavailable = result.workerOutputUnavailable;
   }
+  if (result.findingsIncomplete === true) {
+    packet.findingsIncomplete = true;
+  }
   // Same rule as the status summary: present only for an evaluator.
   if (metadata.acceptanceEvaluation) {
     packet.acceptanceEvaluation = metadata.acceptanceEvaluation;

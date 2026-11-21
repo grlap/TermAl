@@ -1684,6 +1684,9 @@ struct DelegationResult {
     summary: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     findings: Vec<DelegationFinding>,
+    /// The compact findings do not account for all of the original output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    findings_incomplete: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     changed_files: Vec<String>,
     /// Watcher observations during the run, never attribution to the child.
@@ -2848,21 +2851,16 @@ where
         client.attempt.pending_start = false;
         client.attempt.hold_generation = 0;
     }
-    if record.write_policy == DelegationWritePolicy::ReadOnly
-        && [&record.result, &record.submitted_review_result]
-            .into_iter()
-            .flatten()
-            .any(|result| {
-                !result.changed_files.is_empty() || !result.observed_workspace_changes.is_empty()
-            })
+    if let Some(std::borrow::Cow::Owned(result)) = delegation_result_for_record(record) {
+        client_record.get_or_insert_with(|| record.clone()).result = Some(result);
+    }
+    if let Some(submitted) = &record.submitted_review_result
+        && let std::borrow::Cow::Owned(result) =
+            delegation_result_for_policy(submitted, &record.write_policy)
     {
-        let client = client_record.get_or_insert_with(|| record.clone());
-        for result in [&mut client.result, &mut client.submitted_review_result]
-            .into_iter()
-            .flatten()
-        {
-            *result = delegation_result_for_policy(result, &record.write_policy).into_owned();
-        }
+        client_record
+            .get_or_insert_with(|| record.clone())
+            .submitted_review_result = Some(result);
     }
     ApiDelegationRecord {
         record: client_record.as_ref().unwrap_or(record),

@@ -13,11 +13,12 @@ function formatPrompt(
     Partial<
       Pick<
         DelegationPromptResult,
-        "findings" | "changedFiles" | "observedWorkspaceChanges" | "observedWorkspaceChangesOmitted" | "filesInspected" | "commandsRun" | "notes"
+        "findings" | "findingsIncomplete" | "changedFiles" | "observedWorkspaceChanges" | "observedWorkspaceChangesOmitted" | "filesInspected" | "commandsRun" | "notes"
       >
     >,
 ) {
   return formatDelegationResultPrompt({
+    delegationId: "delegation-1",
     findings: [],
     changedFiles: [],
     filesInspected: [],
@@ -45,6 +46,17 @@ function expectedPrompt(
 }
 
 describe("formatDelegationResultPrompt", () => {
+  it("points to full output when the compact findings are incomplete", () => {
+    const prompt = formatPrompt({
+      childSessionId: "child-1",
+      status: "completed",
+      summary: "Design issues remain.",
+      findingsIncomplete: true,
+    });
+    expect(prompt).toContain("Findings incomplete.");
+    expect(prompt).toContain('{"delegationId":"delegation-1","outputOffset":0}');
+  });
+
   it("reports omitted observations even when no path fits the result budget", () => {
     const prompt = formatPrompt({
       childSessionId: "child-1", status: "completed", summary: "Reviewed.",

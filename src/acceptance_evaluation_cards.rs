@@ -129,6 +129,7 @@ fn acceptance_evaluator_terminal_outcome(
             .map(acceptance_evaluation_outcome_line)
             .unwrap_or_else(|| "Evaluator finished without an acceptance target.".to_owned()),
         findings: Vec::new(),
+        findings_incomplete: false,
         changed_files,
         files_inspected,
         commands_run,

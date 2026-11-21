@@ -12,6 +12,7 @@ import type { DelegationResultPacket } from "./delegation-result-types";
 
 export type DelegationPromptResult = Pick<
   DelegationResultPacket,
+  | "delegationId"
   | "childSessionId"
   | "baseRevision"
   | "worktreePath"
@@ -19,6 +20,7 @@ export type DelegationPromptResult = Pick<
   | "status"
   | "summary"
   | "findings"
+  | "findingsIncomplete"
   | "changedFiles"
   | "observedWorkspaceChanges"
   | "observedWorkspaceChangesOmitted"
@@ -106,6 +108,13 @@ export function formatDelegationResultPrompt(result: DelegationPromptResult) {
   }
   if (findings.length > 0) {
     bodySections.push("", "Findings:", ...findings.map(formatFinding));
+  }
+  if (result.findingsIncomplete === true) {
+    const request = JSON.stringify({ delegationId: result.delegationId, outputOffset: 0 });
+    bodySections.push(
+      "",
+      `Findings incomplete. Read the original with termal_get_session_result using ${request}, then page until complete.`,
+    );
   }
   const changedFiles = result.changedFiles ?? [];
   if (changedFiles.length > 0) {

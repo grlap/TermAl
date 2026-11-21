@@ -1,0 +1,23 @@
+## Result
+
+Status: completed
+
+Summary: The design can proceed after three revisions.
+
+### Findings:
+
+- **High · Reject an invalid device field.** Preserve this finding when sending the result to the parent.
+- **Medium · Record the exact final spelling.** Keep its original severity.
+- **High · Preserve the predecessor's recorded scope.** Keep this separate from the first finding.
+
+**Details reviewed**
+
+- All source inspection was read-only.
+
+### Commands Run:
+
+- Inspected the design notes.
+
+### Files Inspected:
+
+- The design notes and runtime code, grouped by component.

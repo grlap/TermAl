@@ -18,98 +18,154 @@ fn test_app_state() -> AppState {
 
 #[test]
 fn explorer_numbered_findings_reach_result_endpoint_and_resume_wake() {
-    for (output, expected_severities) in [
+    assert_explorer_result_delivery(
+        include_str!("fixtures/explorer-numbered-bold-findings.txt"),
+        &[
+            "Medium", "Medium", "Medium", "Medium", "Medium", "Low", "Note", "Note", "Note",
+        ],
+    );
+    assert_explorer_result_delivery(
+        "## Result\nStatus: completed\nSummary: Clean exploration.\nFindings:\n- None\nFiles Inspected:\n- None\nVerdict: **proceed.**",
+        &[],
+    );
+}
+
+#[test]
+fn explorer_middle_dot_findings_reach_result_endpoint_and_resume_wake() {
+    assert_explorer_result_delivery(
+        include_str!("fixtures/explorer-middle-dot-findings.txt"),
+        &["High", "Medium", "High"],
+    );
+}
+
+#[test]
+fn explorer_unparsed_findings_are_explicitly_incomplete() {
+    let output = "## Result\nStatus: completed\nSummary: Design issues remain.\n### Findings:\n- *Priority medium* | Missing validation of the file header.";
+    let (response, wake) = explorer_result_and_resume_wake(output);
+    let compact = serde_json::to_value(&response.result).unwrap();
+    assert_eq!(
         (
-            include_str!("fixtures/explorer-numbered-bold-findings.txt"),
-            vec![
-                "Medium", "Medium", "Medium", "Medium", "Medium", "Low", "Note", "Note", "Note",
-            ],
+            compact["findingsIncomplete"].as_bool(),
+            wake.contains("Findings:\n- None")
         ),
-        (
-            "## Result\nStatus: completed\nSummary: Clean exploration.\nFindings:\n- None\nFiles Inspected:\n- None\nVerdict: **proceed.**",
-            vec![],
-        ),
-    ] {
-        let state = test_app_state();
-        let parent_id = test_session_id(&state, Agent::Codex);
-        let created = state
-            .create_read_only_delegation(
-                &parent_id,
-                CreateDelegationRequest {
-                    prompt: "Explore the implementation and report findings.".to_owned(),
-                    title: Some("Explorer result delivery".to_owned()),
-                    cwd: None,
-                    agent: Some(Agent::Codex),
-                    model: None,
-                    mode: Some(DelegationMode::Explorer),
-                    write_policy: Some(DelegationWritePolicy::ReadOnly),
-                },
-            )
-            .unwrap();
-        state
-            .create_delegation_wait(
-                &parent_id,
-                CreateDelegationWaitRequest {
-                    delegation_ids: vec![created.delegation.id.clone()],
-                    mode: DelegationWaitMode::All,
-                    title: Some("Explorer result wake".to_owned()),
-                },
-            )
-            .unwrap();
-        finish_delegation_child_with_assistant_text(
-            &state,
-            &created.delegation.child_session_id,
-            output,
-        );
-        state
-            .refresh_delegation_for_child_session(&created.delegation.child_session_id)
-            .unwrap();
-        let response = state
-            .get_delegation_result(&parent_id, &created.delegation.id)
-            .unwrap();
-        assert_eq!(
-            response
-                .result
-                .findings
-                .iter()
-                .map(|finding| finding.severity.as_str())
-                .collect::<Vec<_>>(),
-            expected_severities
-        );
-        assert!(response.result.files_inspected.is_empty());
-        let inner = state.inner.lock().unwrap();
-        let parent = inner
-            .sessions
+        (Some(true), false),
+        "unparsed findings must be explicit in the compact packet and fan-in: {wake}"
+    );
+    assert!(wake.contains("Findings incomplete"));
+    assert!(wake.contains(&response.result.delegation_id));
+    assert!(wake.contains("termal_get_session_result"));
+    assert!(wake.contains("\"outputOffset\":0"));
+
+    let mixed = format!("{output}\n- **High · Preserve the finding that was parsed.**");
+    let (response, wake) = explorer_result_and_resume_wake(&mixed);
+    assert_eq!(response.result.findings_incomplete, Some(true));
+    let [finding] = response.result.findings.as_slice() else {
+        panic!("expected one parsed finding alongside the incomplete marker");
+    };
+    assert_eq!(finding.severity, "High");
+    assert!(wake.contains("Findings incomplete"));
+    assert!(wake.contains(&format_delegation_finding(finding)));
+
+    let failed = mixed.replace("Status: completed", "Status: failed");
+    let (response, wake) = explorer_result_and_resume_wake(&failed);
+    assert_eq!(response.result.status, DelegationStatus::Failed);
+    assert_eq!(response.result.findings_incomplete, Some(true));
+    assert!(wake.contains("Findings incomplete"));
+}
+
+fn assert_explorer_result_delivery(output: &str, expected_severities: &[&str]) {
+    let (response, wake) = explorer_result_and_resume_wake(output);
+    assert_eq!(
+        response
+            .result
+            .findings
             .iter()
-            .find(|record| record.session.id == parent_id)
-            .unwrap();
-        let wake = parent
-            .session
-            .messages
-            .iter()
-            .find_map(|message| match message {
-                Message::Text {
-                    author: Author::You,
-                    text,
-                    ..
-                } if text.contains("Explorer result wake") => Some(text),
-                _ => None,
-            })
-            .expect("the terminal explorer should wake its waiting parent");
-        if expected_severities.is_empty() {
-            assert!(wake.contains("Findings:\n- None"));
-        } else {
-            assert!(!wake.contains("Findings:\n- None"));
-            for finding in &response.result.findings {
-                assert!(
-                    wake.contains(&format_delegation_finding(finding)),
-                    "wake must retain {}",
-                    finding.message
-                );
-            }
+            .map(|finding| finding.severity.as_str())
+            .collect::<Vec<_>>(),
+        expected_severities,
+        "the compact result must preserve all severities; fan-in wake: {wake}"
+    );
+    assert!(response.result.files_inspected.is_empty());
+    if expected_severities.is_empty() {
+        assert_eq!(response.result.findings_incomplete, Some(false));
+        assert!(wake.contains("Findings:\n- None"));
+    } else {
+        assert!(!wake.contains("Findings:\n- None"));
+        for finding in &response.result.findings {
+            assert!(
+                wake.contains(&format_delegation_finding(finding)),
+                "wake must retain {}",
+                finding.message
+            );
         }
-        assert!(wake.contains("inspected files: 0"));
     }
+    assert!(wake.contains("inspected files: 0"));
+}
+
+fn explorer_result_and_resume_wake(output: &str) -> (DelegationResultResponse, String) {
+    let state = test_app_state();
+    let parent_id = test_session_id(&state, Agent::Codex);
+    let created = state
+        .create_read_only_delegation(
+            &parent_id,
+            CreateDelegationRequest {
+                prompt: "Explore the implementation and report findings.".to_owned(),
+                title: Some("Explorer result delivery".to_owned()),
+                cwd: None,
+                agent: Some(Agent::Codex),
+                model: None,
+                mode: Some(DelegationMode::Explorer),
+                write_policy: Some(DelegationWritePolicy::ReadOnly),
+            },
+        )
+        .unwrap();
+    state
+        .create_delegation_wait(
+            &parent_id,
+            CreateDelegationWaitRequest {
+                delegation_ids: vec![created.delegation.id.clone()],
+                mode: DelegationWaitMode::All,
+                title: Some("Explorer result wake".to_owned()),
+            },
+        )
+        .unwrap();
+    finish_delegation_child_with_assistant_text(
+        &state,
+        &created.delegation.child_session_id,
+        output,
+    );
+    state
+        .refresh_delegation_for_child_session(&created.delegation.child_session_id)
+        .unwrap();
+    let response = state
+        .get_delegation_result(&parent_id, &created.delegation.id)
+        .unwrap();
+    let raw = state
+        .get_delegation_result_output(&parent_id, &created.delegation.id, 0, 8192)
+        .unwrap();
+    assert_eq!(raw.output, output);
+    assert!(raw.complete);
+    assert!(!raw.summary_fallback);
+    let inner = state.inner.lock().unwrap();
+    let parent = inner
+        .sessions
+        .iter()
+        .find(|record| record.session.id == parent_id)
+        .unwrap();
+    let wake = parent
+        .session
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            Message::Text {
+                author: Author::You,
+                text,
+                ..
+            } if text.contains("Explorer result wake") => Some(text),
+            _ => None,
+        })
+        .expect("the terminal explorer should wake its waiting parent");
+    (response, wake.clone())
 }
 
 #[test]
@@ -197,6 +253,15 @@ fn delegation_wait_fan_in_reports_unfinished_and_unknown_command_statuses() {
     assert!(prompt.contains("termal_get_session_result"));
     assert!(!prompt.contains("successful command"));
     assert!(!prompt.contains("failed command"));
+    assert!(prompt.contains("Findings incomplete"));
+    assert!(
+        record
+            .result
+            .as_ref()
+            .unwrap()
+            .findings_incomplete
+            .is_none()
+    );
     assert!(!prompt.contains("unfinished command"));
     assert!(!prompt.contains("unclassified command"));
 }
@@ -688,6 +753,7 @@ fn removing_delegation_parent_consumes_already_satisfied_wait_with_parent_remove
             status: DelegationStatus::Completed,
             summary: "Completed before parent removal.".to_owned(),
             findings: Vec::new(),
+            findings_incomplete: None,
             changed_files: Vec::new(),
             observed_workspace_changes: Vec::new(),
             observed_workspace_changes_omitted: 0,

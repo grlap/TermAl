@@ -128,7 +128,8 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     // bold severities, and so on). Prefer that structured review parser before
     // falling back to the compact one-line packet format.
     let findings_review = format!("## Findings\n{}", finding_lines.join("\n"));
-    let mut findings = parse_delegation_review_findings_impl(&findings_review, true);
+    let (mut findings, mut findings_incomplete) =
+        parse_delegation_review_findings_impl(&findings_review, true);
     let findings_explicitly_empty = delegation_result_findings_explicitly_empty(&finding_lines);
     let findings_refer_to_prior_sections = findings
         .iter()
@@ -147,18 +148,27 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
         && delegation_result_summary_reports_findings(&summary, DelegationSummaryReading::AsBefore);
     let contradiction_note = findings_explicitly_empty
         && delegation_result_summary_reports_findings(&summary, DelegationSummaryReading::ForNote);
+    let (mut preamble_findings, preamble_incomplete) =
+        parse_delegation_review_findings_impl(preamble, false);
+    findings_incomplete |= preamble_incomplete;
     if (!findings_explicitly_empty || contradictory_empty_findings)
         && (findings.is_empty() || findings_refer_to_prior_sections)
     {
-        let preamble_findings = parse_delegation_review_findings(preamble);
         if !preamble_findings.is_empty() {
-            let mut merged_findings = preamble_findings;
-            merged_findings.extend(findings);
-            findings = dedupe_delegation_findings(merged_findings);
+            preamble_findings.extend(findings);
+            findings = preamble_findings;
+            findings_incomplete |= dedupe_and_bound_delegation_findings(&mut findings);
         } else if findings_refer_to_prior_sections && findings.is_empty() {
             return None;
         }
+    } else {
+        findings_incomplete |= preamble_findings
+            .iter()
+            .any(|finding| !findings.contains(finding));
     }
+    findings_incomplete |= search_window.len() != text.len()
+        || findings_refer_to_prior_sections
+        || (findings.is_empty() && (!findings_explicitly_empty || contradiction_note));
 
     let mut notes = note_lines
         .iter()
@@ -171,7 +181,8 @@ fn parse_delegation_result_packet(text: &str) -> Option<ParsedDelegationResult> 
     Some(ParsedDelegationResult {
         status,
         summary: compact_delegation_result_summary(&summary),
-        findings: dedupe_delegation_findings(findings),
+        findings,
+        findings_incomplete,
         files_inspected,
         notes,
     })
@@ -968,9 +979,11 @@ fn synthesize_delegation_result_from_assistant_output(
     // In the plain-output fallback, an idle child that produced any non-stop
     // assistant text completed its turn. Preserve that output as a completed
     // degraded result even when the text describes a soft failure.
+    let (findings, incomplete) = parse_delegation_review_findings_impl(&summary, false);
     Some(ParsedDelegationResult {
         status: DelegationStatus::Completed,
-        findings: parse_delegation_review_findings(&summary),
+        findings_incomplete: incomplete || findings.is_empty(),
+        findings,
         files_inspected: Vec::new(),
         summary: compact_delegation_result_summary(&summary),
         notes: Vec::new(),
@@ -1118,23 +1131,33 @@ fn delegation_message_is_prior_section_reference(message: &str) -> bool {
     .any(|prefix| message.starts_with(prefix))
 }
 
+#[cfg(test)]
 fn parse_delegation_review_findings(text: &str) -> Vec<DelegationFinding> {
-    parse_delegation_review_findings_impl(text, false)
+    parse_delegation_review_findings_impl(text, false).0
 }
 
 fn parse_delegation_review_findings_impl(
     text: &str,
     allow_compact_packet_lines: bool,
-) -> Vec<DelegationFinding> {
+) -> (Vec<DelegationFinding>, bool) {
     let mut findings = Vec::new();
+    let mut incomplete = false;
     let mut in_findings = false;
     for line in text.lines() {
         let cleaned = line.trim();
         if let Some(is_findings_section) = delegation_review_findings_section_heading(cleaned) {
+            incomplete |= allow_compact_packet_lines && in_findings && !is_findings_section;
             in_findings = is_findings_section;
             continue;
         }
-        if !in_findings || line.chars().next().is_some_and(char::is_whitespace) {
+        if !in_findings
+            || cleaned.is_empty()
+            || is_delegation_no_findings_marker(normalize_delegation_result_list_item(line))
+        {
+            continue;
+        }
+        if line.chars().next().is_some_and(char::is_whitespace) {
+            incomplete = true;
             continue;
         }
         let finding = parse_delegation_review_actionable_finding_line(line)
@@ -1146,9 +1169,12 @@ fn parse_delegation_review_findings_impl(
             });
         if let Some(finding) = finding {
             findings.push(finding);
+        } else {
+            incomplete = true;
         }
     }
-    dedupe_delegation_findings(findings)
+    incomplete |= dedupe_and_bound_delegation_findings(&mut findings);
+    (findings, incomplete)
 }
 
 fn parse_delegation_review_compact_finding_line(line: &str) -> Option<DelegationFinding> {
@@ -1159,20 +1185,19 @@ fn parse_delegation_review_compact_finding_line(line: &str) -> Option<Delegation
     parse_delegation_finding_line(line)
 }
 
-fn dedupe_delegation_findings(findings: Vec<DelegationFinding>) -> Vec<DelegationFinding> {
+fn dedupe_and_bound_delegation_findings(findings: &mut Vec<DelegationFinding>) -> bool {
+    let original_count = findings.len();
     let mut seen = std::collections::HashSet::new();
-    findings
-        .into_iter()
-        .filter(|finding| {
-            seen.insert((
-                finding.severity.clone(),
-                finding.file.clone(),
-                finding.line,
-                finding.message.clone(),
-            ))
-        })
-        .take(MAX_DELEGATION_RESULT_FINDINGS)
-        .collect()
+    findings.retain(|finding| {
+        seen.insert((
+            finding.severity.clone(),
+            finding.file.clone(),
+            finding.line,
+            finding.message.clone(),
+        ))
+    });
+    findings.truncate(MAX_DELEGATION_RESULT_FINDINGS);
+    findings.len() != original_count
 }
 
 fn delegation_review_findings_section_heading(cleaned: &str) -> Option<bool> {
@@ -1221,19 +1246,24 @@ fn parse_delegation_review_actionable_finding_line(line: &str) -> Option<Delegat
     // Ordinary explorers also put severity and title inside one bold span,
     // without a source location: `1. **Medium — Title.** Details.`
     if let Some((headline, details)) = text.strip_prefix("**").and_then(|s| s.split_once("**"))
-        && let Some((severity, title)) = split_delegation_review_location_and_message(headline)
+        && let Some((severity, title)) = headline
+            .split_once(" · ")
+            .filter(|(severity, title)| {
+                is_delegation_review_severity(severity) && !title.trim().is_empty()
+            })
+            .or_else(|| split_delegation_review_location_and_message(headline))
         && is_delegation_review_severity(severity)
     {
         let details = details.trim();
         let (file, line) = leading_delegation_review_location(details).unwrap_or((None, None));
         return Some(DelegationFinding {
-            severity: severity.to_owned(),
+            severity: severity.trim().to_owned(),
             file,
             line,
             message: if details.is_empty() {
-                title.to_owned()
+                title.trim().to_owned()
             } else {
-                format!("{title} {details}")
+                format!("{} {details}", title.trim())
             },
         });
     }
