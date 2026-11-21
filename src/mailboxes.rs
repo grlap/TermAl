@@ -1859,17 +1859,66 @@ async fn list_mailboxes_with_availability(
     Ok(relays)
 }
 
+/// The most characters, after escaping, of a received mailbox id that an
+/// error message repeats.
+const MAILBOX_ID_ECHO_CHARS: usize = 96;
+
+/// The received mailbox id as an error message shows it: quoted, with control
+/// and format characters escaped, and cut on a whole escape sequence once the
+/// shown text would exceed `MAILBOX_ID_ECHO_CHARS`, with the received length
+/// in characters stated.
+fn mailbox_id_echo(id: &str) -> String {
+    let mut shown = String::new();
+    let mut shown_chars = 0;
+    for escaped in id.chars().map(char::escape_debug) {
+        if shown_chars + escaped.len() > MAILBOX_ID_ECHO_CHARS {
+            return format!("\"{shown}\"… ({} characters)", id.chars().count());
+        }
+        shown_chars += escaped.len();
+        shown.extend(escaped);
+    }
+    format!("\"{shown}\"")
+}
+
+/// Decodes a relay locator as `MailboxRelayLocator::decode` does, and adds the
+/// received value, escaped and bounded, to its refusal of a malformed one.
+fn decode_mailbox_relay_locator(id: &str) -> Result<Option<MailboxRelayLocator>, ApiError> {
+    MailboxRelayLocator::decode(id, false).map_err(|mut error| {
+        error.message = format!("{}: mailboxId {}", error.message, mailbox_id_echo(id));
+        error
+    })
+}
+
+/// Refuses, before any lookup, a mailbox id other than the shape the store
+/// mints: "mailbox-" followed by a canonical lowercase UUID. Relay locators
+/// are decoded before this check. A malformed id would otherwise surface as
+/// a bare "mailbox not found" that hides what was received. Every canonical
+/// id passes, the nil UUID included, so its lookup result is unchanged.
+fn require_canonical_mailbox_id(id: &str) -> Result<(), ApiError> {
+    let canonical = id
+        .strip_prefix("mailbox-")
+        .is_some_and(|text| Uuid::parse_str(text).is_ok_and(|parsed| parsed.to_string() == text));
+    if canonical {
+        return Ok(());
+    }
+    Err(ApiError::bad_request(format!(
+        "mailboxId {} is not a mailbox id: expected \"mailbox-\" followed by a lowercase UUID, exactly as the mailbox listing shows it",
+        mailbox_id_echo(id)
+    )))
+}
+
 async fn read_mailbox(
     AxumPath((session_id, mailbox_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<ReadMailboxRequest>,
 ) -> Result<Json<MailboxReadResponse>, ApiError> {
-    if let Some(locator) = MailboxRelayLocator::decode(&mailbox_id, false)? {
+    if let Some(locator) = decode_mailbox_relay_locator(&mailbox_id)? {
         return state
             .read_native_mailbox_relay(&session_id, locator, request)
             .await
             .map(Json);
     }
+    require_canonical_mailbox_id(&mailbox_id)?;
     let original = state
         .lookup_original_mailbox_resource(&session_id, &mailbox_id, false)
         .await?;
@@ -1964,12 +2013,13 @@ async fn acknowledge_mailbox(
     State(state): State<AppState>,
     Json(request): Json<AcknowledgeMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
-    if let Some(locator) = MailboxRelayLocator::decode(&mailbox_id, false)? {
+    if let Some(locator) = decode_mailbox_relay_locator(&mailbox_id)? {
         return state
             .acknowledge_native_mailbox_relay(&session_id, locator, request)
             .await
             .map(Json);
     }
+    require_canonical_mailbox_id(&mailbox_id)?;
     let original = state
         .lookup_original_mailbox_resource(&session_id, &mailbox_id, false)
         .await?;

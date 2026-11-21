@@ -50,11 +50,17 @@ async fn federation_shutdown_cancels_four_incomplete_header_connections() {
 #[tokio::test]
 async fn federation_incomplete_authenticated_body_has_a_request_deadline() {
     let central = channel(FederationRole::Central, 'a');
-    let satellite = channel(FederationRole::Satellite, 'a');
+    let mut satellite = channel(FederationRole::Satellite, 'a');
     let _proof = super::federation_control_fixture::attest(&central, &satellite).await;
+    // The request deadline runs on logical time: the test steps past it
+    // instead of waiting in real time.
+    satellite.control.clock = FederationControlClock::scripted_io();
+    let clock = satellite.control.clock.clone();
     let bound = satellite.bound.clone();
+    let (stalled, stalled_rx) = tokio::sync::oneshot::channel::<()>();
     let stream = async_stream::stream! {
         yield Ok::<_, std::io::Error>("{");
+        let _ = stalled.send(());
         std::future::pending::<()>().await;
     };
     let mut request = super::federation_control_fixture::signed(
@@ -66,13 +72,17 @@ async fn federation_incomplete_authenticated_body_has_a_request_deadline() {
         b"{}",
     );
     *request.body_mut() = Body::from_stream(stream);
-    let response = tokio::time::timeout(
-        phase_sync::DEADLOCK_GUARD,
-        federation_router(satellite, allowed()).oneshot(request),
-    )
-    .await
-    .unwrap()
-    .unwrap();
+    let running = tokio::spawn(federation_router(satellite, allowed()).oneshot(request));
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, stalled_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    clock.advance(FEDERATION_HANDLER_DEADLINE);
+    let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
     assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
     assert_eq!(response.headers()["connection"], "close");
     assert_eq!(bound.permits.available_permits(), 4);

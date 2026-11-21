@@ -272,7 +272,9 @@ async fn numeric_ack_is_rejected_for_domain_members_but_standalone_behavior_rema
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/api/sessions/{a}/mailboxes/unknown/acknowledge"))
+                .uri(format!(
+                    "/api/sessions/{a}/mailboxes/mailbox-00000000-0000-4000-8000-000000000001/acknowledge"
+                ))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     r#"{"expectedProcessedThrough":0,"processedThrough":1}"#,
