@@ -2,40 +2,78 @@
 // connection. Original mailbox send rows own all durable request/receipt state;
 // the joined federation supervisor owns only this disposable scheduling worker.
 
+enum CausalAdmissionFailure {
+    Pending(CausalAdmissionCheck),
+    Refused(&'static str),
+}
+
+impl CausalAdmissionFailure {
+    fn from_transport(error: EngramTransportError, capability_read: bool) -> Self {
+        use CausalAdmissionCheck as Check;
+        use EngramTransportErrorKind as Kind;
+        if error.kind == Kind::Remote {
+            match error.code.as_deref() {
+                Some("invalid_request") => return Self::Refused("invalid_request"),
+                Some("control_operation_idempotency_conflict") => {
+                    return Self::Refused("control_operation_idempotency_conflict");
+                }
+                _ => {}
+            }
+        }
+        Self::Pending(if capability_read {
+            Check::CapabilityReadFailed
+        } else {
+            match error.kind {
+                Kind::LocalState => Check::LocalConnectionUnavailable,
+                Kind::Deadline => Check::AdmissionDeadline,
+                Kind::Transport => Check::AdmissionTransportFailed,
+                Kind::Protocol => Check::AdmissionProtocolFailed,
+                Kind::Remote => Check::AdmissionDeferred,
+                #[cfg(test)]
+                Kind::Backoff => Check::AdmissionUnconfirmed,
+            }
+        })
+    }
+}
+
 impl AppState {
     fn causal_test_admission_target(
         &self,
         delivery: &CausalTestCompletionDelivery,
-    ) -> Option<EngramBindingTarget> {
-        let scope = delivery.scope.as_ref()?;
+    ) -> Result<EngramBindingTarget, CausalAdmissionCheck> {
+        use CausalAdmissionCheck as Check;
+        let scope = delivery
+            .scope
+            .as_ref()
+            .ok_or(Check::SenderScopeUnavailable)?;
+        let requester = &delivery.selector.payload.requester;
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let record = federation_mailbox_root_locked(
-            &inner,
-            &delivery.selector.payload.requester.native_session_id,
-        )
-        .ok()?;
-        if record.federation_native_creation_id
-            != delivery.selector.payload.requester.native_creation_id
-            || inner.federation.local.as_ref() != Some(&delivery.selector.payload.requester.host)
-        {
-            return None;
+        let record = federation_mailbox_root_locked(&inner, &requester.native_session_id)
+            .map_err(|_| Check::RequesterRootUnavailable)?;
+        if record.federation_native_creation_id != requester.native_creation_id {
+            return Err(Check::RequesterCreationChanged);
         }
-        let target = Self::engram_source_root_target_locked(
-            &inner,
-            &delivery.selector.payload.requester.native_session_id,
-        )
-        .ok()
-        .flatten()?;
-        if target.project_id != scope.project_id
-            || target.settings.authority_store_key.as_ref() != Some(&scope.store)
-            || target.connection.session_id != delivery.selector.payload.requester.native_session_id
-        {
-            return None;
+        if inner.federation.local.as_ref() != Some(&requester.host) {
+            return Err(Check::RequesterHostChanged);
         }
-        Some(target)
+        let target = Self::engram_source_root_target_locked(&inner, &requester.native_session_id)
+            .map_err(|_| Check::DestinationTargetInvalid)?
+            .ok_or(Check::DestinationTargetUnavailable)?;
+        if target.project_id != scope.project_id {
+            return Err(Check::DestinationProjectChanged);
+        }
+        if target.settings.authority_store_key.as_ref() != Some(&scope.store) {
+            return Err(Check::DestinationStoreChanged);
+        }
+        if target.connection.session_id != requester.native_session_id {
+            return Err(Check::DestinationSessionChanged);
+        }
+        Ok(target)
     }
 
     fn settle_causal_test_completion(&self, delivery: &CausalTestCompletionDelivery) -> Result<()> {
+        use CausalAdmissionCheck as Check;
+        use CausalAdmissionFailure as Failure;
         let store = &self.mailbox_store;
         let selector = &delivery.selector;
         let scope = delivery.scope.as_ref();
@@ -77,36 +115,39 @@ impl AppState {
                 continue;
             }
             let before = saved.clone();
-            let Some(target) = self.causal_test_admission_target(delivery) else {
-                saved.admissions[index].pending =
-                    Some("original destination connection unavailable".into());
-                if before != saved {
-                    store.save_causal_test_settlement(selector, scope, Some(&before), &saved)?;
-                    eprintln!(
-                        "engram> remote run={} target={} admission=pending (original destination unavailable)",
-                        saved.completion.run_id,
-                        index + 1
-                    );
+            let target = self
+                .causal_test_admission_target(delivery)
+                .and_then(|target| {
+                    if saved.admissions[index]
+                        .connection
+                        .as_ref()
+                        .is_some_and(|original| original != &target.connection)
+                    {
+                        return Err(Check::DestinationConnectionChanged);
+                    }
+                    Ok(target)
+                });
+            let target = match target {
+                Ok(target) => target,
+                Err(check) => {
+                    let code = check.stored();
+                    saved.admissions[index].pending = Some(code.clone());
+                    if before != saved {
+                        store.save_causal_test_settlement(
+                            selector,
+                            scope,
+                            Some(&before),
+                            &saved,
+                        )?;
+                        eprintln!(
+                            "engram> remote run={} target={} admission=pending ({code})",
+                            saved.completion.run_id,
+                            index + 1
+                        );
+                    }
+                    continue;
                 }
-                continue;
             };
-            if saved.admissions[index]
-                .connection
-                .as_ref()
-                .is_some_and(|original| original != &target.connection)
-            {
-                saved.admissions[index].pending =
-                    Some("original destination connection changed; no route replacement".into());
-                if before != saved {
-                    store.save_causal_test_settlement(selector, scope, Some(&before), &saved)?;
-                    eprintln!(
-                        "engram> remote run={} target={} admission=pending (original connection changed)",
-                        saved.completion.run_id,
-                        index + 1
-                    );
-                }
-                continue;
-            }
             if saved.admissions[index].connection.is_none() {
                 saved.admissions[index].connection = Some(target.connection.clone());
                 store.save_causal_test_settlement(selector, scope, Some(&before), &saved)?;
@@ -119,39 +160,41 @@ impl AppState {
                 .expect("validated original request");
             let reply = (|| {
                 let scope = scope.expect("validated destination scope");
-                target.adapter.read_work_session(
-                    &target.connection,
-                    &scope.store,
-                    target.settings.call_timeout(),
-                )?;
+                target
+                    .adapter
+                    .read_work_session(
+                        &target.connection,
+                        &scope.store,
+                        target.settings.call_timeout(),
+                    )
+                    .map_err(|error| Failure::from_transport(error, true))?;
                 if !target
                     .adapter
                     .remote_verification_record_route_support(&target.connection)
                     .is_supported()
                 {
-                    return Err(EngramTransportError::protocol(
-                        "remote verification capability unavailable",
-                    ));
+                    return Err(Failure::Pending(Check::CapabilityUnavailable));
                 }
                 // This snapshot revalidation fences settings, actor, store and
                 // runtime after capability I/O, without refreshing the captured
                 // claim/root association. Engram judges NEW association currency.
-                let now = self.causal_test_admission_target(delivery).ok_or_else(|| {
-                    EngramTransportError::protocol("original destination unavailable")
-                })?;
+                let now = self
+                    .causal_test_admission_target(delivery)
+                    .map_err(Failure::Pending)?;
                 if now.connection != target.connection
                     || !now.settings.same_work_service_settings(&target.settings)
                     || now.runtime_snapshot != target.runtime_snapshot
                 {
-                    return Err(EngramTransportError::protocol(
-                        "original destination changed before write",
-                    ));
+                    return Err(Failure::Pending(Check::DestinationSnapshotChanged));
                 }
-                target.adapter.request(
-                    &target.connection,
-                    &request.clone().into_control_request(),
-                    target.settings.call_timeout(),
-                )
+                target
+                    .adapter
+                    .request(
+                        &target.connection,
+                        &request.clone().into_control_request(),
+                        target.settings.call_timeout(),
+                    )
+                    .map_err(|error| Failure::from_transport(error, false))
             })();
             match reply {
                 Ok(value) => match request.receipt(value.clone()) {
@@ -160,31 +203,15 @@ impl AppState {
                         admission.pending = None;
                     }
                     Err(_) => {
-                        admission.pending = Some("unconfirmed malformed remote receipt".into());
+                        admission.pending = Some(Check::AdmissionReceiptInvalid.stored());
                     }
                 },
-                Err(error)
-                    if error.kind == EngramTransportErrorKind::Remote
-                        && matches!(
-                            error.code.as_deref(),
-                            Some("invalid_request" | "control_operation_idempotency_conflict")
-                        ) =>
-                {
-                    admission.refusal = error.code.clone();
+                Err(Failure::Refused(code)) => {
+                    admission.refusal = Some(code.into());
                     admission.pending = None;
                 }
-                Err(error) => {
-                    // Only a bounded code is made visible; no received text,
-                    // private association, command line or path reaches logs.
-                    admission.pending = Some(
-                        match error.kind {
-                            EngramTransportErrorKind::Remote => {
-                                "remote verification deferred; retry original operation"
-                            }
-                            _ => "remote verification unavailable; original operation unconfirmed",
-                        }
-                        .into(),
-                    );
+                Err(Failure::Pending(check)) => {
+                    admission.pending = Some(check.stored());
                 }
             }
             // Persist the actual ORIGINAL receipt before ending retry custody.
@@ -204,9 +231,10 @@ impl AppState {
                         }
                     });
                 eprintln!(
-                    "engram> remote run={} target={} admission={decision}",
+                    "engram> remote run={} target={} admission={decision} check={}",
                     saved.completion.run_id,
-                    index + 1
+                    index + 1,
+                    admission.pending.as_deref().unwrap_or("none")
                 );
             }
             // At most one external admission per completion per bounded pass.
@@ -232,6 +260,8 @@ struct CausalTestCompletionRecovery {
     task: Option<tokio::task::JoinHandle<()>>,
     observed_kick: u64,
     fallback_owed: bool,
+    #[cfg(test)]
+    stop_after_settlement: bool,
 }
 
 impl CausalTestCompletionRecovery {
@@ -258,6 +288,8 @@ impl CausalTestCompletionRecovery {
         }
         self.observed_kick = generation;
         let fallback = std::mem::take(&mut self.fallback_owed);
+        #[cfg(test)]
+        let stop_after_settlement = std::mem::take(&mut self.stop_after_settlement);
         let app = app.clone();
         self.task = Some(tokio::spawn(async move {
             match app.read_ready_causal_test_completions(fallback).await {
@@ -269,6 +301,12 @@ impl CausalTestCompletionRecovery {
                         let worker = app.clone();
                         let result = run_blocking_api(move || {
                             let result = worker.settle_causal_test_completion(&delivery);
+                            #[cfg(test)]
+                            if stop_after_settlement {
+                                // Simulate interruption after the settlement commit,
+                                // before the worker publishes the outcome marker.
+                                return result.map(|()| false).map_err(mailbox_api_error);
+                            }
                             let reason = if result.is_err() {
                                 CausalPendingReason::AdmissionFailed
                             } else {
@@ -282,15 +320,17 @@ impl CausalTestCompletionRecovery {
                                     reason,
                                 )
                                 .map_err(mailbox_api_error)?;
-                            result.map_err(|_| {
-                                ApiError::conflict("causal remote admission remains pending")
-                            })
+                            Ok(result.is_err())
                         })
                         .await;
-                        if result.is_err() {
-                            eprintln!(
+                        match result {
+                            Ok(false) => {}
+                            Ok(true) => eprintln!(
                                 "causal completion recovery: admission_failed; inspect durable pending diagnostics"
-                            );
+                            ),
+                            Err(_) => eprintln!(
+                                "causal completion recovery: admission_worker_or_pending_write_failed; original rows retained"
+                            ),
                         }
                     }
                 }

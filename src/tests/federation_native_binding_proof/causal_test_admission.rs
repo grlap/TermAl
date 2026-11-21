@@ -9,6 +9,7 @@ mod completion_ready;
 mod completion_ready_notification_custody;
 mod completion_ready_recovery;
 mod completion_ready_scheduling;
+mod diagnostics;
 mod scan;
 
 fn source() -> Value {

@@ -1,6 +1,25 @@
 // Owns bounded sender counters and MAC-verified machine-to-machine replies.
 // Does not settle application intents or retry with fresh keys. Split from federation_rpc.rs.
 
+enum FederationRpcRequestError {
+    AfterReplyAuthority(ApiError),
+    Other(ApiError),
+}
+
+impl From<ApiError> for FederationRpcRequestError {
+    fn from(error: ApiError) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl FederationRpcRequestError {
+    fn into_api_error(self) -> ApiError {
+        match self {
+            Self::AfterReplyAuthority(error) | Self::Other(error) => error,
+        }
+    }
+}
+
 impl FederationRpcClient {
     #[cfg(test)]
     async fn allocate_authenticated_counter(
@@ -63,13 +82,16 @@ impl FederationRpcClient {
             _ => None,
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let first = self.request_once(route).await;
+        let first = self
+            .request_once(route)
+            .await
+            .map_err(FederationRpcRequestError::into_api_error);
         if first.as_ref().err().is_some_and(|error| matches!(error.kind,
             Some(ApiErrorKind::FederationMailboxWriterAdmission | ApiErrorKind::FederationMailboxDirectoryFence))) {
             if let Some((lease, request)) = retry {
                 return match tokio::time::timeout_at(deadline,
                     self.request_once(FederationRpcRoute::Mailbox(lease, request))).await {
-                    Ok(result) => result,
+                    Ok(result) => result.map_err(FederationRpcRequestError::into_api_error),
                     Err(_) => Err(federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE,
                         "central mailbox transport_loss during exact retry")),
                 };
@@ -78,7 +100,10 @@ impl FederationRpcClient {
         first
     }
 
-    async fn request_once<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
+    async fn request_once<T: DeserializeOwned>(
+        &self,
+        route: FederationRpcRoute,
+    ) -> Result<T, FederationRpcRequestError> {
         let policy_deadline = matches!(&route, FederationRpcRoute::PromptPolicy(_, _))
             .then(|| tokio::time::Instant::from_std(self.channel.control.clock.now() + Duration::from_secs(10)));
         let policy_permit = if matches!(&route, FederationRpcRoute::PromptPolicy(_, _)) {
@@ -121,7 +146,7 @@ impl FederationRpcClient {
         lease.with_incarnation(|| Ok(()))?;
         let context = self.channel.security_context()?;
         if context.incarnation != lease.incarnation {
-            return Err(federation_auth_refused());
+            return Err(federation_auth_refused().into());
         }
         // Local install precedes central install on a satellite. Refuse before
         // allocating a counter or sending HTTP; this is not a link failure.
@@ -131,7 +156,8 @@ impl FederationRpcClient {
             return Err(ApiError::from_status(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "federation peer handshake is completing; retry the original operation",
-            ));
+            )
+            .into());
         }
         // Serialize before allocating a transport counter. Local size/encoding
         // refusals have not started an application operation on the peer.
@@ -168,10 +194,12 @@ impl FederationRpcClient {
             return Err(ApiError::from_status(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "federation request exceeds negotiated size",
-            ));
+            )
+            .into());
         }
         let mut rpc_stage = "counter";
         let mut rpc_status = None;
+        let mut after_reply_authority_refused = false;
         // Only a reply with no MAC header at all, such as the receiver's own
         // unsigned 408, is unanswered. A present but malformed, duplicate or
         // foreign MAC header is a security event.
@@ -312,6 +340,7 @@ impl FederationRpcClient {
             federation_verify_mac(&context.keys[key + 1], &[&authenticated], &tag)?;
             rpc_stage = "securityCurrent";
             if let Err(error) = self.channel.security_current(&context) {
+                after_reply_authority_refused = true;
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     // A verified read-only proof cannot survive local lease
                     // retirement. Preserve its typed stale-authority refusal.
@@ -347,6 +376,7 @@ impl FederationRpcClient {
                 (self.ensure_current)()
             };
             if let Err(error) = current {
+                after_reply_authority_refused = true;
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     settle_verified!();
                     return Ok(Err(error));
@@ -422,7 +452,7 @@ impl FederationRpcClient {
             || (rpc_stage == "macParse"
                 && mac_header_absent
                 && rpc_status == Some(StatusCode::REQUEST_TIMEOUT.as_u16()));
-        match result {
+        let result = match result {
             Ok(Ok(result)) => result,
             failure if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() => {
                 // The blocking authority job still owns its permit. Its late
@@ -475,6 +505,13 @@ impl FederationRpcClient {
                 }
                 Err(route.response_failure(federation_transport_unavailable()))
             }
+        };
+        // The counter may already have been retired when the local check
+        // refused. Keep that outcome and the caller's original API error.
+        if after_reply_authority_refused && rpc_stage != "retired" {
+            result.map_err(FederationRpcRequestError::AfterReplyAuthority)
+        } else {
+            result.map_err(FederationRpcRequestError::Other)
         }
     }
 }
