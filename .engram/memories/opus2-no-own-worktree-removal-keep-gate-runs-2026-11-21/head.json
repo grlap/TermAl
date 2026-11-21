@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-no-own-worktree-removal-keep-gate-runs-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c81c779d20694c0ca8da971119aede6a",
+      "a0323adf8b674c3cad65546b3e4bf315"
+    ]
+  }
+}

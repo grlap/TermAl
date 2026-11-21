@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-federation-mailbox-participation-guard-2026-11-21",
+    "revision_id": "357ce851787143cfb185619a95e093fc",
+    "previous": null,
+    "body_sha256": "eabffaf44e2572e11fa9c3a08c15b1580d239555563117e0315a331e57992208",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fda5-56da-79f0-8a9a-d6078c293a75",
+      "work_ref": "w-d6078c293a75"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T10:42:08.854337800Z"
+    }
+  },
+  "body": "Placement rule (Opus2, 2026-11-21, from Fable2 #5831 via Opus3 #2214), until TermAl w-d6078c293a75 lands.\n\nThe test tests::federation_mailbox_participation::qualified_existing_roots_exchange_read_and_ack_without_join_or_activation sits close to the 2 MiB debug test-thread stack:\n- it overflows at 1.5 MiB even on master;\n- 8d1d without its fix overflowed it at 2 MiB, which failed the C88 FULL.\n\nRULE: every GREEN and focused set for a candidate that touches federation code, or is stacked on 8d1d (679c9da4 or later), must include:\n1. that exact test at the DEFAULT stack;\n2. the whole tests::federation_mailbox_participation:: module.\n\nw-d6078c293a75 (the pre-existing depth, P1, Opus3) lands right after 8d1d and before any other federation work that grows that path. Never \"fix\" it by raising RUST_MIN_STACK (Fable2 #7136)."
+}

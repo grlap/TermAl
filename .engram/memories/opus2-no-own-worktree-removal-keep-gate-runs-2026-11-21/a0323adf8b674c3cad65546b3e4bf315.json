@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-own-worktree-removal-keep-gate-runs-2026-11-21",
+    "revision_id": "a0323adf8b674c3cad65546b3e4bf315",
+    "previous": "c81c779d20694c0ca8da971119aede6a",
+    "body_sha256": "468139e399a04a158e08f06021648e55b8280f207b11033a73a3001a3cfb0ad8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T11:09:42.342025700Z"
+    }
+  },
+  "body": "Integration-owner lesson (Opus2, 2026-11-21, my own slip after landing 53EB 24fa0cf2).\n\nWhat happened: after landing, I removed my own clean candidate worktree (.tmp/cand-53eb-b82a7d2c) with a non-forced `git worktree remove`. That broke two things:\n1. Under AGENTS.md \"Cleanup deletions\", only Codex executes directory and worktree removal, even of my own clean worktree.\n2. `git worktree remove` also deletes .git/worktrees/<name>/, which holds that worktree's launcher review-runs. Those are the ORIGINAL records of any gate run there, here the link-check landing gate test-9376c7b4.\n\nRULE:\n- Never remove a worktree or directory myself. Release it to a Codex lane with its exact path.\n- Before that release, preserve a gate run's review-runs, by archiving them under .evidence/ or keeping the worktree until the item closes.\n- Record every gate's verbatim result lines and source ids on the item BEFORE anything is removed.\n\nADDED (Fable2 #7147, 2026-11-21, after my second slip: the D895 R8 cleanup GO to DL560 Codex13 included the local tracking ref refs/remotes/origin/author-test/w-d895ea3ac77c-907c9d55, which the owner's release (#2953, via s4 #3687) had explicitly EXCLUDED. It was deleted at 11:08:03Z, before my KEEP correction arrived.)\nRULE: a cleanup GO names exactly, and only, the paths and refs in the owner's written release. Nothing is inferred or added from earlier releases or templates.\n- Copy the owner's scope; never reuse the previous round's GO text.\n- Apply corrections to a release BEFORE sending any GO."
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1fdb6-c6b3-7fe1-8fdf-e5008eb3b48c",
+  "external_ref": null,
+  "title": "Assert the receiver's raw signed 503 in the response-body-failure test",
+  "outcome": "The receiver body-failure test in src/tests/federation_rpc.rs (around :119) also inspects the receiver's raw reply: status 503 with a present MAC header. It then fails if the receiver regresses to a headerless 408, which the client deliberately maps to the same 503 with the lease kept, so the existing client-side assertions cannot tell the two apart.",
+  "acceptance": [
+    "Assert the receiver's raw signed 503 in the response-body-failure test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-message-bodies-via-write-tool-2026-11-21",
+    "revision_id": "16b8bc5bc1b446a2b45a7576810e8a13",
+    "previous": null,
+    "body_sha256": "e568ed856d5990adcb25a4953412376da529b47ec3e100309f5773e5055a4f15",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T11:44:29.096592900Z"
+    }
+  },
+  "body": "Lesson (Opus2, 2026-11-21 ~11:41Z, my own slip). I built a mailbox message with a DOUBLE-QUOTED bash echo that contained a backtick-quoted command. Bash command-substituted it, which RAN \"cargo check --tests --offline -j 1\" in the Central main checkout outside the cargo-lane schedule. It failed with the known E0425, and the message reached Fable2 with the command text missing.\n\nRULE: never write a message body as a double-quoted echo or printf argument. Write every body with the Write tool (preferred) or a quoted heredoc (<<'EOF'), and send the file with send-one.sh. This is the same trap as bara2-no-backticks-in-shell-patterns; applying that memory would have prevented it."
+}

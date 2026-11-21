@@ -1,0 +1,27 @@
+{
+  "id": "01a1fdb6-b8bd-72c2-93c8-24ebc9222c85",
+  "external_ref": null,
+  "title": "Drive the telemetry retirement test's client deadline with the scripted clock",
+  "outcome": "The telemetry case in src/tests/federation_rpc.rs (around :69) no longer waits for the real 2 s client deadline. A scripted client clock is advanced once the held handler has signalled entry, so the protocol expiry and the retirement-record assertions are both driven by logical time. The test keeps its observable assertions.",
+  "acceptance": [
+    "Drive the telemetry retirement test's client deadline with the scripted clock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

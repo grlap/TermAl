@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd9f-20dd-71d3-a7f9-fe9f22243b71",
+  "external_ref": null,
+  "title": "Registered launcher run with a cargo clippy lint stage reports \"unclassified_stages / native verification not granted\", twice",
+  "outcome": "The host recognises the launcher's lint stage (`cargo clippy … -D warnings`) on a registered committed-input run, and reports its credit disposition precisely: a passed lint check credited as lint, a failed one as a failed lint. It does not treat it as unclassified, and it emits each notice once.",
+  "acceptance": [
+    "A registered committed-input launcher run whose original stage kind is lint, with the command `cargo clippy --locked -j 1 --all-targets --all-features -- -D warnings`, is classified as a lint check, and its credit disposition (passed, failed or not eligible, with reason) is reported instead of `unclassified_stages`.",
+    "The host emits that disposition notice once per run, not twice; a behaviour test that fails before the fix shows a single notice for one terminal lint run.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1fda5-56da-79f0-8a9a-d6078c293a75",
+  "external_ref": null,
+  "title": "Federation mailbox participation test path needs 1.5–2 MiB of stack on master; box the large futures",
+  "outcome": "On master, tests::federation_mailbox_participation::qualified_existing_roots_exchange_read_and_ack_without_join_or_activation needs between 1.5 and 2 MiB of test-thread stack in the debug build, so any small growth of a future on that path overflows the default 2 MiB stack. The large future or futures on that path (the qualified pair's sends, reads and acknowledgements through the federation RPC client and receiver, awaited inline on a current_thread runtime) are found and moved to the heap, for example with Box::pin, with no behaviour, timeout or limit change and without raising any stack size. Afterwards the test passes at the default stack and, as evidence of reclaimed headroom, also under RUST_MIN_STACK=1572864.",
+  "acceptance": [
+    "Federation mailbox participation test path needs 1.5–2 MiB of stack on master; box the large futures is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "federation",
+    "mailbox",
+    "stack"
+  ],
+  "assigned_to": "Termal::Opus3",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

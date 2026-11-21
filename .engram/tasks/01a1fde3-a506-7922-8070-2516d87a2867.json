@@ -1,0 +1,30 @@
+{
+  "id": "01a1fde3-a506-7922-8070-2516d87a2867",
+  "external_ref": null,
+  "title": "Keep the parent’s Stop control visible while a settled delegation result is runnable",
+  "outcome": "Expose the backend Stop eligibility in the composer for a visible idle parent with a settled, runnable, unpaused delegation fan-in. A user can Stop during the interval between wait settlement and queue promotion from either composer footer.",
+  "acceptance": [
+    "An idle parent with a runnable, unpaused settled delegation result can invoke Stop from both relevant composer footer modes after its wait row disappears.",
+    "A paused or non-runnable retained result does not show an active Stop affordance based on that fan-in alone, and existing active-turn, test-run-wait and capacity Stop controls remain usable.",
+    "A focused UI regression drives the settlement-to-promotion state and verifies the actual Stop action."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "delegation",
+    "review-follow-up",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
