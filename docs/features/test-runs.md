@@ -212,6 +212,16 @@ start time and work ownership; that late description creates no retroactive
 verification check. Visibility is independent of the owner's active or open
 session. Unknown PIDs, stages and locations remain unknown.
 
+When Engram is disabled, TermAl records the worktree at command start for a
+recognized test with an explicit directory in a registered linked worktree of
+the session's repository. The original command's launcher locator can then
+associate its request, artifact and native completion through the normal
+registration and settlement checks. The launcher locator must still belong to
+the Git admin directory verified at command start. A later command description
+cannot establish linked placement. The provider run's detail explains when
+placement cannot be verified or that directory no longer matches.
+The recorded worktree alone grants no test credit.
+
 A terminal Claude background-task notification settles the observation for its
 exact session, runtime and tool use, including after the originating prompt
 ends. Without a test verdict or exit code it records `unknown`, an end time and
