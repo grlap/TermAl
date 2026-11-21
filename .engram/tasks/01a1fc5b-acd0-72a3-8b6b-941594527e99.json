@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the Markdown-only committed-input link-check rule in AGENTS.md and CLAUDE.md condition 2. The exact landing passed the then-required FULL, independent review and final-diff audit. Fresh post-landing evaluation cf05eafe63ad4fd0aede9df27de03b6f passed all three criteria on the settled named source. No separate installation was needed for this Markdown-only landing under the integration disposition.",
+    "completed_at": "2026-11-21T10:14:42.724493300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
