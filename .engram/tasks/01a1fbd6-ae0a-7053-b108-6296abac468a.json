@@ -1,0 +1,38 @@
+{
+  "id": "01a1fbd6-ae0a-7053-b108-6296abac468a",
+  "external_ref": null,
+  "title": "Replace include! fragments with real Rust modules: design pass and first non-overlapping component",
+  "outcome": "TermAl starts moving off the include!() build (src/main.rs assembles the backend from about 450 include!( lines; docs/features/host-architecture.md section 3.1 option 1) toward real Rust modules with private state and small pub(crate) facades, one component at a time with behaviour preserved. Step A is a read-only design and ownership pass that picks the first component, chosen against the lanes active at the time so no running review or test work is disturbed. It covers the boundary, the pub(crate) facade, which fragments move, what stays shared, the test plan and the commit split (pure move separate from any behaviour change, per CLAUDE.md). Kimi::Consultant reviews the design. Step B converts that one component into a real module. No big-bang rewrite, no include!-inside-mod bridge presented as the goal, and no claim that mod alone reduces compile memory unless measured. Greg's request, relayed by Kimi::Consultant in TermAl mailbox 852a55c9 #492 (2026-11-21): start fixing the include! architecture now. It grants no commit or restart authority beyond the standing rule. Related: w-8597a0e17af3 (host-architecture step 1, written before the EO gating removal; its tests list gated-era files, so the design pass states whether it is obsolete or should be re-cut).",
+  "acceptance": [
+    "Host console logging is an ordinary Rust module. Its only crate-visible operations are writing a formatted log line and enabling server-mode logging. The mode flag, limiter and reentry state are private to the module.",
+    "The extraction preserves the existing server-mode stderr formatting, suppression and error behavior, and non-server passthrough. All seven existing host console logging behavior tests pass on the exact candidate, with their assertions unchanged.",
+    "The exact landed contribution is a behavior-preserving move limited to host console logging and its wiring, with no new include bridge. The independent review pair has no outstanding Medium-or-higher finding and the exact landed input passes the standard full gate."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "file-size",
+    "greg-directed",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

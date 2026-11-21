@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "remote-test-ref-gates-status-r9-2026-10-30",
+    "revision_id": "c9e5e90367a04ee4b5210aad7259b693",
+    "previous": "8745014e0b5145ebb786eb147029bf91",
+    "body_sha256": "b38b41d1c9fb28ea9328c08669a95c052e7abf8415046cc02899be70e84b1afc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:41:51.959300500Z"
+    }
+  },
+  "body": "STATUS NOW, rev 9, for the joint remote-test-ref gate record. It supersedes the STATUS NOW section of remote-test-ref-gates-evidence-only-2026-10-28 rev 8; that record's TARGET, UNCHANGED, RETIRED and NOT REOPENED sections stay in force. Agreed by Engram::Fable (#5475) and Termal::Fable2 on 2026-10-30.\n- A full gate run by the standard launcher on the exact test ref counts as the landing gate for that tree on any host, with the same weight as one run on Windows. It must record the same fingerprint before and after, and the integration owner must record on the item the run id, host, commit, tree id and both fingerprints. It gates only a landing whose master commit has that tree id.\n- So Windows B, the Mac and DL560 can give a landing gate through a test ref plus those recorded facts. For TermAl, the integration owner (Termal::Opus2) pushes the test ref and records the facts. No manual import or bundle.\n- A Windows-only change still needs a Windows gate, and Windows B counts.\n- Automatic remote admission (TermAl K3 w-48c4a207f226, Engram w-180d6f507470) is still not shipped.\n- Remote session mail, an agent `gate` assertion or a hand-carried bundle do not count as the gate.\nLaunch route (2026-10-31; tightened 2026-11-21): host-qualified native mail to a satellite root session, which starts the standard launcher LOCALLY (`--detach --notify`) through its own test-runs route. TermAl owns the run, the logs and the wake; the agent only submits input and reads terminal metadata. The durableButNotWoken disposition means only 'unconfirmed at send time'. If the local call refuses, record the exact error on TermAl w-c3f102d77999. Never duplicate a run: reconcile by exact-message read and the ACK cursor. There is NO SSH fallback: Greg banned agent SSH to other machines on 2026-11-21 (memory satellite-work-via-federation-not-ssh-2026-11-21). The federation's own internal transport is product code and is unaffected."
+}

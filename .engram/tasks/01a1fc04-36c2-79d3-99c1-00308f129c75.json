@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc04-36c2-79d3-99c1-00308f129c75",
+  "external_ref": null,
+  "title": "Test launcher refuses even a default-mode focused run (409 'source owner metadata refused') in a TermAl session whose project has Engram disabled",
+  "outcome": "An agent in a TermAl session can run a plain evidence-only focused test even when its project has Engram disabled. If a run truly can't be admitted, the refusal says why in terms that fit the mode used. Observed on the Mac (host abf8bda6, TermAl build of 381acc63) by Codex 6205, TermAl relay 601e1b38 #9 at 02:50Z on 2026-11-21. Inside a fresh clean linked worktree of the session's repository at f19fa528, ONE invocation of `node scripts/test-launcher.mjs focused -- cargo test --bin termal <one test>` WITHOUT --input commit exited 1 before any test: 'FAIL launcher: source owner metadata refused (409); no tests started; register at start with --input commit in the claim's named root'. The same refusal had occurred with --input commit (MAC-TERMAL-2 #4). Read-only GET /api/projects/project-1/work on that host reports Engram 'disabled by operator'. Open questions: whether default-mode runs inside a TermAl session are meant to need a registered named root at all, and whether the remedy text is right for a non-commit run. docs/test.md says a default staged or freeze run sends no verification record, so admission refusing it looks wrong.",
+  "acceptance": [
+    "Test launcher refuses even a default-mode focused run (409 'source owner metadata refused') in a TermAl session whose project has Engram disabled is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "launcher",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

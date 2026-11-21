@@ -3,9 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "opus3-windows-ssh-cannot-see-credential-vault",
   "head": {
-    "state": "active",
-    "chain": [
-      "011e47b7074144ba86353202dd756b15"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-21T02:40:30.631102Z"
+    }
   }
 }

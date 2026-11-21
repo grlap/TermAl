@@ -3,10 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "opus3-winb-ssh-no-inline-vars",
   "head": {
-    "state": "active",
-    "chain": [
-      "b07572fb56d7486582d1773cb2b8c7c7",
-      "2b85298b26fe470b95f4c28b17254062"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-21T02:40:30.326481300Z"
+    }
   }
 }

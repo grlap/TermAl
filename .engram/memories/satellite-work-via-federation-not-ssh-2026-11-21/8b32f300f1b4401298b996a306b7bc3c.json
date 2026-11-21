@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "satellite-work-via-federation-not-ssh-2026-11-21",
+    "revision_id": "8b32f300f1b4401298b996a306b7bc3c",
+    "previous": null,
+    "body_sha256": "7453646e6529c4c4a9d496127153f6406d80a3b33acd805d1fdfb1970ab8170a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:39:01.485606800Z"
+    }
+  },
+  "body": "Coordinator rule (Fable2, 2026-11-21 ~02:39Z, after Greg's challenge relayed by Engram::Asistant, TermAl mailbox 588693a8 #2151: „WTF, to co mamy remote sesje i federacje?”): run work on a satellite (Mac, Windows B, DL560) through federation, never by direct SSH from Central. Send a mailbox GO to a root session on that host, which wakes it through the authenticated federation link, exactly as for DL560 s4/C6/C7. Federation re-authenticates on its own after a reboot or address change (the Mac re-authenticated at 02:35:06Z after Greg's restart, with a new IP), so no fixed IP or ~/.ssh edit is needed. Why it happened: the last Mac TermAl gate (test-bf74aad3, 30.10) ran over SSH, and the Mac runner's procedure covered only Engram checkouts. That procedure scope is not a technical limit; the coordinator can extend it per job. Two SSH attempts to the stale 192.168.50.59 failed on 21.11 before the switch. Never edit ~/.ssh/config or known_hosts (user configuration; Greg's call)."
+}

@@ -1,0 +1,31 @@
+{
+  "id": "01a1fbd8-37a8-7783-a8c7-6f449905cc3f",
+  "external_ref": null,
+  "title": "Cover remaining authenticated refusals for federated active Test Runs",
+  "outcome": "Behavioral tests cover the peer Test Runs read's remaining reply-shape and admission refusals. They confirm no rows escape and a healthy pair remains usable after malformed but authenticated read responses.",
+  "acceptance": [
+    "A fixture sends signed replies with inconsistent readiness, duplicate or excessive rows, invalid state, or malformed labels or timestamps, and asserts the documented refusal and retained pair.",
+    "Production-shaped fixtures exercise the Satellite-side Central revocation or replacement and a disallowed caller. Include hidden and control-character owner label cases."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "greg-requested",
+    "test-runs",
+    "tests",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fb5d-20b7-7de2-818b-8fa0e6ad6963",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

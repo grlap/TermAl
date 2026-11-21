@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-decision-2026-10-20-start-s3-pilot",
+    "revision_id": "e1d20d93cd82466f89ea68c09bcd8988",
+    "previous": "1e1875a807a945acabf44d84e4c74be6",
+    "body_sha256": "657ea980aa4a222d2866b62764f4cca3a59ad9b228df7ed372a6768711e85c62",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:41:56.842390700Z"
+    }
+  },
+  "body": "Greg's direction, relayed verbatim by Engram::Advisor (TermAl mailbox b9d13887 #1311, 2026-10-20 00:02:43Z): \"Greg explicitly authorizes START S3 after Engram S2.4 lands: support the fresh two-host pilot stores and use native M4→M6 mailbox coordination for every cross-host handoff. Do not enroll existing operational stores. Keep Mac/Win2 onboarding independent and report the first mailbox-coordinated Git-folder exchange with exact evidence.\"\nStill current: pilot stores are FRESH, never the live operational stores; every cross-host handoff goes through native federation mailbox coordination; Engram owns the pilot store spec, enrollment and the dry-run-first rule, and TermAl owns transport over native federation mailboxes. The narrow CLAUDE.md 'S3 pilot lane' bullet limits writes to the Engram checkout's target/s3-pilot/.\nSUPERSEDED on 2026-11-21: the 2026-10-20 choice (option c) to push and fetch a private bare repo 'over the existing Windows↔Mac SSH path' is no longer an allowed agent route. Greg banned agent SSH to other machines (memory satellite-work-via-federation-not-ssh-2026-11-21: „zakaz uzywania SSH … po to mamy remote sesje, po to mamy git branche”). Any further pilot exchange uses remote sessions, federation mail and Git branches; ask Engram::Fable before resuming the pilot."
+}

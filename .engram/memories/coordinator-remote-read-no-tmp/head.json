@@ -3,9 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "coordinator-remote-read-no-tmp",
   "head": {
-    "state": "active",
-    "chain": [
-      "ba468f4513d24e39b84b9f23b8a71086"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-21T02:41:39.088472600Z"
+    }
   }
 }

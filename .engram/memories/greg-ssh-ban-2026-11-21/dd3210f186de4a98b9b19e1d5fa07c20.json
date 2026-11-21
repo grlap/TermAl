@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-ssh-ban-2026-11-21",
+    "revision_id": "dd3210f186de4a98b9b19e1d5fa07c20",
+    "previous": null,
+    "body_sha256": "cb63271aa0ab462cc309e57691a155eb7ae0b85854c2f6dc01e07ddde4ad56ae",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:41:20.172551100Z"
+    }
+  },
+  "body": "Greg's standing ban on SSH (2026-11-21 ~02:40Z, relayed via Asistant #2153 and Fable2 #7000), verbatim: „zakaz uzywania SSH, wlasnie to jest problem / pozniej tworzymy pierdolniete procedury / po to mamy remote sesje, po to mamy git branche aby tak pracowac / A NIE URUCHAMIAC SSH NA BOKU / JESTEM WSCIEKLY”.\nRule:\n- No agent runs ssh or scp to any other machine.\n- Satellite work (Mac, Windows B, DL560) goes only through remote TermAl sessions, as named mailbox GOs over federation. Inputs travel only as Git branches (author-test or test refs). The remote session acts locally on its own host.\n- GO templates, runner procedures and satellite checks must never ask anyone to SSH.\n- The federation's internal transport is untouched.\n- Repo cleanup of the old ssh/scp wording (AGENTS.md, docs/test.md) is w-d112b42a94df.\nContext: on 2026-11-21 Opus3 reached the Mac (pilot-mac, new IP 10.0.0.234) by SSH under an earlier ruling, for the 5C8B R3 macOS test. Mac root sessions reachable through federation include Codex 6205 (host:abf8bda6-1ac7-485c-91ce-5a06ac453653::session-6205) and Codex 6186. The Mac TermAl runner checkout is /Users/greg/GitHub/Personal/TermAl-runner; the Mac host checkout is /Users/greg/GitHub/Personal/termal."
+}

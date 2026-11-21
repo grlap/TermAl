@@ -1,0 +1,28 @@
+{
+  "id": "01a1fbe7-2420-7223-a6b1-a452b772a77a",
+  "external_ref": null,
+  "title": "Run the macOS-only physical-alias test for the 5C8B placement fix on the Mac once SSH reaches it",
+  "outcome": "The macOS-only test delegation_git_boundary::provider_git_pointer_parent_uses_the_physical_system_alias, added by the w-5c8b45a10439 R3 fix for /tmp -> /private/tmp parent resolution, passes in a registered focused --input commit run on the Mac (pilot-mac, /Users/greg/GitHub/Personal/TermAl-runner) on the landed commit or its exact candidate, with a non-zero test count. Background: at about 02:19Z on 2026-11-21 Opus3's read-only `ssh -o BatchMode=yes -o ConnectTimeout=10 pilot-mac` from Central timed out on 192.168.50.59:22 (exit 255), so nothing ran (TermAl mailbox 03723eab #5714). The federation link to the Mac (host abf8bda6) was authenticated at 22:04Z, so the Mac may be up with a changed address or SSH disabled. The input was author-test ref refs/heads/author-test/w-5c8b45a10439-f19fa528 = f19fa5282843dc1b5f1d3d8f1c2f1f496e5f6a4e. Restoring SSH needs Greg or someone at the Mac; no agent changes network or SSH configuration.",
+  "acceptance": [
+    "Run the macOS-only physical-alias test for the 5C8B placement fix on the Mac once SSH reaches it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "macos",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

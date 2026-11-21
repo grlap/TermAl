@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "satellite-work-via-federation-not-ssh-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "8b32f300f1b4401298b996a306b7bc3c",
+      "3dad3c5420ed42e5ac57356faab51326"
+    ]
+  }
+}

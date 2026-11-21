@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "satellite-work-via-federation-not-ssh-2026-11-21",
+    "revision_id": "3dad3c5420ed42e5ac57356faab51326",
+    "previous": "8b32f300f1b4401298b996a306b7bc3c",
+    "body_sha256": "e5f3e55f9b5891fa447972511993ecb1c4dae2abebb5e27a213d503eb8e68af8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:40:06.860015500Z"
+    }
+  },
+  "body": "STANDING BAN (Greg, 2026-11-21 ~02:39Z, verbatim via Engram::Asistant, TermAl mailbox 588693a8 #2153, also addressed to Kimi): „zakaz uzywania SSH, wlasnie to jest problem / pozniej tworzymy pierdolniete procedury / po to mamy remote sesje, po to mamy git branche aby tak pracowac / A NIE URUCHAMIAC SSH NA BOKU / JESTEM WSCIEKLY”.\nRule: no agent runs ssh or scp to another machine (Mac, Windows B, DL560 or any satellite), for checks, tests, reads or anything else. Satellite work goes ONLY through its remote TermAl root sessions (a mailbox GO, woken over federation, as for DL560 s4/C6/C7) and Git branches (author-test or test refs pushed to origin and fetched by the remote session). Federation re-authenticates on its own after a reboot or address change (the Mac at 02:35:06Z on 21.11 with a new IP), so no fixed IP or ~/.ssh edit is needed. Never edit ~/.ssh/config or known_hosts.\nScope: this bans agent actions. TermAl federation's own internal OpenSSH transport is product code and is not changed on guesswork.\nHistory: on 21.11 Opus3 made two direct SSH attempts to the stale Mac IP under Fable2's assignment, copying the 30.10 Mac lane (test-bf74aad3). Greg was furious. Procedure cleanup is w-d112b42a94df (AGENTS.md 'Other commands that may prompt' ssh/scp lines; docs/test.md SSH-shell wording). Older memories describing SSH lanes (opus3-winb-ssh-no-inline-vars, opus3-windows-ssh-cannot-see-credential-vault, opus3-remote-launches-detach-from-central, opus3-remote-waiter-pgrep-self-match, coordinator-remote-read-no-tmp, fable2-codex-backstop-per-request) are obsolete as procedures."
+}

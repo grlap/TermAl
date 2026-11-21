@@ -1,0 +1,29 @@
+{
+  "id": "01a1fbf9-9108-7ad2-a689-d112b42a94df",
+  "external_ref": null,
+  "title": "Remove direct-SSH agent procedures: satellite work only through remote sessions, federation and Git branches",
+  "outcome": "No agent procedure in this repository tells an agent to run commands on another machine by direct SSH. Work on a satellite goes through its remote TermAl sessions (mailbox GOs over federation) and Git branches (author-test or test refs). Greg's words, 2026-11-21, relayed verbatim by Engram::Asistant in TermAl mailbox 588693a8 #2153: „zakaz uzywania SSH, wlasnie to jest problem / pozniej tworzymy pierdolniete procedury / po to mamy remote sesje, po to mamy git branche aby tak pracowac / A NIE URUCHAMIAC SSH NA BOKU / JESTEM WSCIEKLY”. Scope, from the coordinator's read-only search at 61bb80ec+: AGENTS.md around line 457 ('Other commands that may prompt' lists ssh and scp with BatchMode tips; replace them with the ban and the federation route), and docs/test.md around line 143 ('An interactive or SSH shell can select a different executable', to be reworded for a remote runner session). The federation link's own internal OpenSSH transport (docs/features/satellite-onboarding.md, federation-link.md, project-scoped-remotes.md, native-mailbox-relay.md and similar) is product transport and is NOT changed by this item; no transport mechanism changes on guesswork. Agent memories describing SSH lanes are retired separately by their owners.",
+  "acceptance": [
+    "Remove direct-SSH agent procedures: satellite work only through remote sessions, federation and Git branches is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "docs",
+    "greg-directed",
+    "procedure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -3,9 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "opus3-remote-waiter-pgrep-self-match",
   "head": {
-    "state": "active",
-    "chain": [
-      "f86b807ece904ad7ab110244a9de5f9e"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-21T02:40:31.446399Z"
+    }
   }
 }

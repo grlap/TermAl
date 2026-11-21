@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-ssh-ban-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "dd3210f186de4a98b9b19e1d5fa07c20",
+      "9f062b8848fc4ac3a1577bc775adfce7"
+    ]
+  }
+}

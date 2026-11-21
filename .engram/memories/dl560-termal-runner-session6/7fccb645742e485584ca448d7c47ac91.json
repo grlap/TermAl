@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-termal-runner-session6",
+    "revision_id": "7fccb645742e485584ca448d7c47ac91",
+    "previous": "22e4fefa05c841f78f4185a1fade09eb",
+    "body_sha256": "891ba0ed92eda5420435a230acc625ccb64835403ce1172c4bc54f77642dbe24",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T02:41:46.066021500Z"
+    }
+  },
+  "body": "The second DL560 TermAl runner is session-6 \"Codex 6\", address host:e83d08f4-22ac-4655-a84d-941fc0eeb4f1::session-6, relay principal relay-principal-557b1d0fda0cdfa4a08e3424915ba854e10e701ccf676e42ca4e0d89ef400b16. Created 2026-11-04 on Greg's word „Utwórz poprawnie nową sesję” (relayed by Engram::Asistant), with settings like Codex 3: Codex, gpt-6.1-terra, high, approval never, danger-full-access, workdir /home/greg/github/TermAl, project-b7327333-6e78-4e54-9196-fc63ab99937b. session-5 on DL560 is held at an MCP approval prompt; don't use it.\nWorking rules: never detach a job with nohup and end the turn, because nothing wakes the session on completion. A message can't reach a runner in the middle of a FULL unless it was told to check mail between steps, so don't route new requests to a runner inside a FULL. Check its state from Central only: the session listing, termal_read_mailbox_message on the GO's message id, or the runner's own START and END mail.\nRevised 2026-11-21 under Greg's SSH ban (memory satellite-work-via-federation-not-ssh-2026-11-21): the earlier text described creating and checking the session 'over ssh dl560'. That route is banned for agents; work reaches DL560 only through its remote sessions and federation mail."
+}

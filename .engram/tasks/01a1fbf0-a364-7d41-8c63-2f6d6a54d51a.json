@@ -1,0 +1,28 @@
+{
+  "id": "01a1fbf0-a364-7d41-8c63-2f6d6a54d51a",
+  "external_ref": null,
+  "title": "Derive the local project digest queue count from authoritative rows",
+  "outcome": "A local session's project digest counts the queued prompt records, so a confirmed federation runtime receipt that removes a queued record also clears its contribution to the digest count. Remote proxy digests keep the count of the received queue.",
+  "acceptance": [
+    "A local project digest reports the authoritative queued row count even when the embedded session projection differs, including after federation receipt reconciliation removes the last row.",
+    "Remote proxy digests still report their received queue count. Behavioral tests cover both authorities."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "project-digest",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

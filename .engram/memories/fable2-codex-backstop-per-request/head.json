@@ -3,9 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "fable2-codex-backstop-per-request",
   "head": {
-    "state": "active",
-    "chain": [
-      "56a36958f58b47b9b2d020524ddaf44f"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-21T02:41:39.338088500Z"
+    }
   }
 }
