@@ -1,0 +1,38 @@
+{
+  "id": "01a1fc7a-9f97-7070-ad8c-bd85090dc418",
+  "external_ref": null,
+  "title": "Name the expired RPC in federation sender-deadline terminal link records",
+  "outcome": "A diagnostic slice of w-70d8b360cdc3. When the federation sender watchdog fences a link because an authenticated RPC's sender window expired, the first terminal link event names the bounded, fixed local operation, the stage and the deadline policy. The next DL560 drop then identifies which request expired. Design by Sol-c593 (TermAl mailbox 1a9f6a77 #2191):\n- Carry fixed operation names in the per-counter sender window (federation_rpc_authenticated.rs).\n- On expiry, snapshot the earliest still-expired counter's metadata, drop the sender lock, and write it through the existing first terminal event (federation_attestation_status.rs and federation_link_diagnostics.rs) as rpcMethod, rpcStage=senderAwaitSettlement, rpcDeadlineKind=senderWindow and rpcDeadlineBudgetMs=10000.\nExcluded: request payloads, queries or peer text; new persistent shapes; budget or behaviour changes. Link fencing on an unresolved authenticated counter is deliberate: it bounds the 64-counter replay window, and it stays. Retiring a single RPC without closing the link would need a separate design.",
+  "acceptance": [
+    "When a sender window expires, the first senderDeadlineExpired terminal link event for that incarnation carries the bounded operation name, stage, deadline kind and 10000 ms budget, and no request payload, query or peer-supplied text.",
+    "A real authenticated pair test holds one request, cancels the caller, advances the scripted clock and asserts exactly one such terminal event with the correct fields, while the fence, the budget and the 409/unknown-outcome and same-key recovery behaviour stay unchanged. It fails on the pre-change code because the fields are missing. It uses no wall-clock timing assertion.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "federation",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

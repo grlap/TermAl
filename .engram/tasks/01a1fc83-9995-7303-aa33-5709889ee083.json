@@ -1,0 +1,29 @@
+{
+  "id": "01a1fc83-9995-7303-aa33-5709889ee083",
+  "external_ref": null,
+  "title": "Define outgoing link coverage for root instructions, skills and commands",
+  "outcome": "Record whether the Markdown landing check should validate outgoing relative links in root instruction files and Markdown skills and commands as well as docs/. If the scope grows, verify it with fixture Markdown. Otherwise describe the existing docs/ scan boundary where the gate is documented. Treat any change to standing authority wording under the existing authority-text process.",
+  "acceptance": [
+    "Define outgoing link coverage for root instructions, skills and commands is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "docs",
+    "greg-directed",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc5b-acd0-72a3-8b6b-941594527e99",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

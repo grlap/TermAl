@@ -4,12 +4,32 @@
   "title": "Launcher's source-owner refusal drops the host's reason and names the wrong remedy",
   "outcome": "When the TermAl host refuses the session's source-owner metadata, the launcher's refusal states the host's reason and the remedy that fits it. Admission still stops on any refused request, as docs/test.md specifies (no hostless fallback).",
   "acceptance": [
-    "When the source-owner GET returns a non-2xx status whose bounded JSON body carries an `error` string, the launcher reports \"source owner metadata refused (<status>: <reason>); no tests started\", with the host's `code` included when it is a lowercase snake_case identifier. <reason> has control and format characters escaped and is cut at 512 characters with the received length stated. A missing, non-JSON or oversized body, or one without `error`, keeps today's \"(<status>)\" form, and no other body content is echoed. Shown by behavioural launcher tests, RED first, with a fake host returning 409 with {\"error\":\"Engram source owner binaryPath is not configured for this project\"}, a reason containing control characters that is over 512 characters, and a malformed body.",
-    "For that refusal, in default (automatic), --input commit and --input plain modes alike, the message names the remedy: configure the project's Engram binaryPath, or run hostless (TERMAL_BASE_URL, TERMAL_SESSION_ID and TERMAL_CLI unset, with an absolute ENGRAM_SOURCE_BINARY) for evidence only, without verification credit. It does not append \"register at start with --input commit in the claim's named root\". Other refusals keep their current remedies, including an unreachable host and malformed metadata. Shown by behavioural tests in the three modes.",
-    "Product semantics are unchanged: any refused source-owner GET still stops admission before a run directory exists; pinned admission, registration and input selection are untouched; docs/test.md changes only where it describes this refusal's text; and the existing launcher tests pass.",
+    "When the source-owner GET returns a non-2xx status whose bounded JSON body carries a non-empty `error` string, the launcher reports \"source owner metadata refused (<status>: <reason>); no tests started\", with the host's `code` included when it is a lowercase snake_case identifier. <reason> has control and format characters escaped and is cut on a whole escape at 512 shown characters, with the received length in characters stated. A missing, non-JSON or oversized body, or one without `error`, keeps today's \"(<status>)\" form, and no other body content is echoed. Shown by behavioural launcher tests, RED first, covering: a 409 with {\"error\":\"Engram source owner binaryPath is not configured for this project\",\"code\":\"engram_source_owner_unconfigured\"}; a reason of exactly 512 characters (not cut); an escape that would straddle the limit (not split); an astral-character reason (the stated count is in characters); a reason with control characters; and malformed, error-less and oversized bodies.",
+    "Only for a refusal carrying the host's code engram_source_owner_unconfigured, in default (automatic), --input commit and --input plain modes alike, the message names the remedy: configure the project's Engram binaryPath or, for evidence only without verification credit, a separate foreground hostless run (TERMAL_BASE_URL, TERMAL_SESSION_ID and TERMAL_CLI unset, an absolute ENGRAM_SOURCE_BINARY, no --notify or request id). It does not append \"register at start with --input commit in the claim's named root\". Every other refusal keeps its existing correction: an explained one without that code (such as 429 \"source owner probe busy\"), an unexplained one, an unreachable host, or malformed metadata. Default and commit modes still end with \"register at start …\". Shown by behavioural tests: the coded 409 in the three modes, and a 429 busy reply in default and commit modes keeping \"register at start\" while showing its reason.",
+    "The TermAl host's source-owner metadata refusals for a project with no Engram binaryPath configured carry the JSON code \"engram_source_owner_unconfigured\", following the existing typed-code pattern in src/wire.rs. These are the two \"Engram source owner binaryPath is not configured for this project\" refusals. No other refusal, status or message changes. Shown by a Rust test against the route.",
+    "Product semantics are unchanged: any refused source-owner GET still stops admission before a run directory exists; pinned admission, registration and input selection are untouched; docs/test.md changes only where it describes this refusal's text; the existing launcher tests pass.",
     "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
   ],
-  "acceptance_bindings": [],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
   "evaluation_mode": null,
   "kind": "bug",
   "priority": 2,

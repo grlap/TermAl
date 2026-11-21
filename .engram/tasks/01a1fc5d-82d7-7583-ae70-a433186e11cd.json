@@ -1,0 +1,30 @@
+{
+  "id": "01a1fc5d-82d7-7583-ae70-a433186e11cd",
+  "external_ref": null,
+  "title": "review_identity capture hits its 40 s deadline on a Flutter repo with submodules, blocking a review from starting",
+  "outcome": "No TermAl code change. Ordinary TermAl review already uses committed Git identity. The opt-in raw capture stays unchanged. Comovo owns its separate procedure change to committed BASE + COMMIT review under Greg's authority.",
+  "acceptance": [
+    "A note, with source evidence, states that TermAl's ordinary review and resume paths use the candidate's Git commit/tree and changed status, and never call the raw full-environment review identity.",
+    "The Comovo unblock is recorded as Comovo's own procedure change (committed BASE + COMMIT review) under Greg's word, with its owner.",
+    "No new scanner, gate or capture variant is added; the raw tool stays an unchanged explicit opt-in."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

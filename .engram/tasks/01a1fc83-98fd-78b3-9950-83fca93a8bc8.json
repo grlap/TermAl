@@ -1,0 +1,30 @@
+{
+  "id": "01a1fc83-98fd-78b3-9950-83fca93a8bc8",
+  "external_ref": null,
+  "title": "Make committed-input doc-link target checks independent of ignored files",
+  "outcome": "At the same committed input, the existence and anchor outcome for a repository-relative docs link is unchanged by ignored worktree files. Prove it using a synthetic repository and generated ignored target with the same Git identity, then retain current tracked file and anchor validation. Use fixture Markdown only.",
+  "acceptance": [
+    "Make committed-input doc-link target checks independent of ignored files is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "docs",
+    "greg-directed",
+    "instructions",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc5b-acd0-72a3-8b6b-941594527e99",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

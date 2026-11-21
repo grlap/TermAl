@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc6b-2a0b-7c40-b5be-348bbf7f969b",
+  "external_ref": null,
+  "title": "Linked-worktree artifact revalidation: compare review-runs directory identity, not only its canonical path",
+  "outcome": "Proposed hardening, raised by Opus3 while planning w-5c8b45a10439 R4 (TermAl mailbox 03723eab #5738). It is kept out of R4's frozen scope, which is the no-follow child check only. Today, revalidation of a linked provider's review-runs parent compares canonical paths. A real directory swapped in at the same path between first read and revalidation would still match. Comparing the opened directory's file identity (Unix dev/inode, or the Windows file ID) at both points would catch that. Decide whether this is a credible threat for host-recorded test artifacts before doing any work. If it is, add a behaviour test and a fix in the owning mechanism.",
+  "acceptance": [
+    "The threat is judged in a note: credible or not, and why.",
+    "If credible: a behaviour test fails before the fix, the fix compares directory identity at first read and at revalidation, the review pair has no Medium or higher, and the full gate passes. If not credible: the item is cancelled, citing that note."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "hardening",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

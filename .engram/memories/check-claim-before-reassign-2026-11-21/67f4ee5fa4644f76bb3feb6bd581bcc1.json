@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "check-claim-before-reassign-2026-11-21",
+    "revision_id": "67f4ee5fa4644f76bb3feb6bd581bcc1",
+    "previous": null,
+    "body_sha256": "874ad9ead775430e7fb4bea32f0ceabe0094d2e42d3c310c9997df0b6a33d1ac",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T04:45:23.238867700Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-21 04:45Z). Before reassigning an item, read its current holder with engram show or ls; a mail assignment can cross with a claim. On w-ea62eb7ebd60, three owner changes within 8 minutes (Opus3, then Sol-license, then Sol-a7bb, then back to Sol-license) happened because messages crossed and the claim was not checked. Each change cost the receivers a turn. Rule: one assignment per item, made only after confirming the item is unclaimed or held by the intended owner. If a crossing happens anyway, accept the current holder's state rather than flipping again."
+}

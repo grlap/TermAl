@@ -1,0 +1,30 @@
+{
+  "id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
+  "external_ref": null,
+  "title": "DL560 federation control link repeatedly closes with controlEof (three drops in 15 minutes); in-flight sends get 409 or unknown outcome",
+  "outcome": "The Central–DL560 federation control channel stays up during ordinary operation, or the cause of each close is identified and fixed in its owning mechanism. Evidence so far: Central recorded two terminal events for DL560 e83d08f4-22ac-4655-a84d-941fc0eeb4f1, channel=control, reason=controlEof (EOF before a frame begins): at 04:20:27.960Z (incarnation 6bf4b8c7, transport 112, link up 1,087,752 ms, lastSequence 72) and at 04:22:10.075Z (incarnation 596140c4, transport 113, up 90,891 ms, lastSequence 6). Worker attempt 3 then authenticated at 04:22:21Z (incarnation 954dfc15, transport 114). s4 (DL560 Engram Runner) reports a third drop at about 04:35:20Z (relay mail to Termal::Fable2, #316). Each drop failed in-flight sends with 409 'federation link changed' or 'receipt not received; outcome unknown'; same-key retries reconciled them. The Windows B and Mac links were stable over the same period. Source: Architect2's diagnosis on w-ea62eb7ebd60 (note 64b49659), which kept the EOFs there until their cause is known. This item now owns them; w-ea62eb7ebd60 keeps the durability holds. The cause is unknown: neither a network failure nor a remote restart follows from timing.",
+  "acceptance": [
+    "The DL560-side terminal records for the closed incarnations are read through supported routes (the DL560 TermAl session's own local diagnostics or federation, never SSH), and the side and reason of each close are stated with evidence or recorded as unknown.",
+    "If a TermAl defect causes the close: a behaviour test that fails before the fix, a fix in the owning mechanism with no weakened authentication, the review pair with no Medium or higher, and the full gate. If the cause is external: a bounded disposition naming it.",
+    "In-flight sends across a link change keep their explicit outcome (409 or unknown) and reconcile on a same-key retry, with no silent loss."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

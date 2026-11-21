@@ -4,14 +4,23 @@
   "title": "Central mailbox authority transiently 'not durable': session list refused 409 twice, recovers by itself",
   "outcome": "It is established from source and available diagnostics what sets federation_durable false on a healthy Central and how long it stays false, and whether that explains the transient relay failures. Any confirmed defect is fixed in its owning mechanism; otherwise the disposition and remaining unknown cause are recorded.",
   "acceptance": [
-    "A source trace names every path that clears federation_durable and every path that restores it, and states which of them can fire during ordinary operation on a healthy Central.",
-    "The refusal's relationship to the transient relay 503s and 423s in w-d55fadb8c0b2 is stated with evidence, or recorded as unknown. No cause is claimed from timing alone.",
-    "If a defect is confirmed: a behaviour test that fails before the fix, the fix in the owning mechanism with no weakening of durability or authority checks, a review pair with no Medium or higher, and the normal gate. If not: a bounded no-change disposition naming what evidence is missing."
+    "A holder note states the source trace: every path that clears federation_durable and every path that restores it, which of them fire in ordinary operation on a healthy Central, and how durability recovery is scheduled. Restated from Architect2's note 64b49659 and this design.",
+    "The relationship to the relay 503 and 423 failures is stated with evidence, or recorded as unknown, in a holder note. ACK 503 handler-deadline cases stay with w-3bddbf73af2a.",
+    "A behaviour test that fails before the fix shows the following. With the supervisor's periodic reconciliation pass made long, an initiating federation mutation whose exact fence expires leaves durability held. The single recovery job then starts, and durability is restored by the same exact-image fence, with no further periodic pass. The test uses no wall-clock timing assertion.",
+    "The fix lives in the supervisor and its recovery owner: the supervisor wakes at the recovery's own due time and serves recovery on wake notifications; an expired or failed initiating fence, and a finished recovery job, notify it; there is exactly one recovery job at a time; exact-image and binding checks, backoff, budgets and authority are unchanged; the existing durability, recovery-ownership and supervisor-wait tests pass.",
+    "The independent review pair has no Medium-or-higher finding, and the full gate passes on the exact landed input."
   ],
-  "acceptance_bindings": [],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 2,
+  "priority": 1,
   "labels": [
     "cross-machine",
     "federation",

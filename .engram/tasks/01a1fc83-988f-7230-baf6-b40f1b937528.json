@@ -1,0 +1,28 @@
+{
+  "id": "01a1fc83-988f-7230-baf6-b40f1b937528",
+  "external_ref": null,
+  "title": "Align the review-changes workflow with the Markdown-only landing gate",
+  "outcome": "After the standing Markdown-only gate rule lands, make review-changes consistently invoke the gate condition 2 requires, with the exact committed-input docs-link command for Markdown-only candidates and FULL for other changes. Preserve two reviewers, exact-input boundaries, and authority audit. Obtain exact authority-text concurrence and complete the existing audit and gate before landing this workflow update.",
+  "acceptance": [
+    "Align the review-changes workflow with the Markdown-only landing gate is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "greg-directed",
+    "instructions"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc5b-acd0-72a3-8b6b-941594527e99",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

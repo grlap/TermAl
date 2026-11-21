@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the three-file direct SSH/SCP agent-procedure cleanup on origin/master as b811df6150daaf6d32904c03e7385a656d533f3d, tree 920a4cfe61ebc940a3f991c82eb273b9f3fd8a58. Removes the S3 pilot exception and BatchMode tips and documents federation-mailbox remote runner handoff and the runner's own shell and repository directory. The original evaluation's shell joined a deliberate no-match grep to ls-remote; the parent ran ls-remote independently at completion and verified exact origin/master and absence of the test ref. Source unchanged and worktree clean. Independent post-landing evaluation 23e7a3a743164aa4b5304bda9408a615 is fresh, revision 2 cut 52, 3/3 pass. Clean review pair 79c2eebbd9be4a139a14ce3f632b5c8a, final-diff audit and exact-tree DL560 FULL test-60ae3d11-bef7-42d4-8c5c-22c70cc43a7a are quoted in holder note 97afcf1bf5364b2b82a6efe589ed0b4e; landing and test-ref coverage in 63a76ec6ba374d8ab3edbdd21625d923. All six FULL stages passed. The docs-only landing did not install a replacement binary.",
+    "completed_at": "2026-11-21T04:30:24.087851900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
