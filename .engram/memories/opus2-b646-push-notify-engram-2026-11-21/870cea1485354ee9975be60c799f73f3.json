@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-b646-push-notify-engram-2026-11-21",
+    "revision_id": "870cea1485354ee9975be60c799f73f3",
+    "previous": null,
+    "body_sha256": "344bb1d7ad62cb117b580173ed668ed4c45c3027e64b47a911caafaf552d9f81",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+      "work_ref": "w-b646ed9ef817"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T19:34:52.589445500Z"
+    }
+  },
+  "body": "Fable2 #7267 (2026-11-21 19:34Z), on Greg's word „tak, kiedy restart ?”: d895 lands on Engram master only AFTER B646 is on TermAl master. The moment Opus2 pushes B646 to TermAl master, Opus2 mails Engram::Merger (session-11859) and Engram::Fable (session-5135) with the TermAl master commit id and the push time. The current B646 candidate is R4 818d2a70 (it carries the w-87d4 Windows fix 75f17072)."
+}

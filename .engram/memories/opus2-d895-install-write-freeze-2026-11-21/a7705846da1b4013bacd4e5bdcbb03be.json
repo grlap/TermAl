@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-d895-install-write-freeze-2026-11-21",
+    "revision_id": "a7705846da1b4013bacd4e5bdcbb03be",
+    "previous": null,
+    "body_sha256": "131ba15fc64e5f188a746275de9b8c0437d60dca87616148e8d02d8b48c24fde",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+      "work_ref": "w-b646ed9ef817"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T21:11:55.612886300Z"
+    }
+  },
+  "body": "Fable2 #7289 (2026-11-21 21:08Z), from Engram #8638: old engram MCP servers may fail to decode rows in d895's new source_id shape. From the moment the Engram::Merger installs d895's engram.exe (immediately before Greg's joint restart) until the restart, there is a WRITE FREEZE on both projects. For TermAl: no new termal_evaluate_acceptance requests, no registered launcher runs (focused or full), and no done or gate from any TermAl session. Reads are fine. Fable2 sends Opus2 the exact freeze start; Opus2 relays it verbatim to every TermAl coder and runner and schedules nothing registered after it, so that no registered run is in flight at the install. The freeze lifts at the restart. Also tonight (Fable2 #7293): B646 R5's Windows legs run on Windows B session-5, and Central runs no cold build for B646."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-restart-verify-links-only-no-process-checks-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "35c07dfc9a8746cb9c21054eecf4dc3f"
+    ]
+  }
+}

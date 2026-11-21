@@ -1,0 +1,30 @@
+{
+  "id": "01a20003-12b7-7061-ba0e-c4c0aea15c8a",
+  "external_ref": null,
+  "title": "Read-only Claude reviewers cannot run `engram source --root ROOT --json`, so they cannot read the candidate's source_id",
+  "outcome": "Read-only Claude reviewers cannot run `engram source --root ROOT --json`, so they cannot read the candidate's source_id",
+  "acceptance": [
+    "A read-only Claude review child can run `engram source --root <its review root> --json` through the existing read-only Bash gate and receives the complete source_id.",
+    "The read-only Bash gate still refuses every other `engram` subcommand and every `engram source` form that names a root outside the child's review root, writes a file, or takes an argument other than `--root` and `--json`.",
+    "Focused tests of the read-only Bash gate cover the accepted form and the refused forms, through observable allow/refuse decisions."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "greg-reported",
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

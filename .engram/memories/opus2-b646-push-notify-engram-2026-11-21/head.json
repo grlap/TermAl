@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-b646-push-notify-engram-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "870cea1485354ee9975be60c799f73f3"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1ff7a-256f-72a3-9ee0-b7b29675e86a",
+  "external_ref": null,
+  "title": "Document test-run-only Stop retry and idle capacity recovery",
+  "outcome": "The test-run feature guide gives the same idle Stop contract that the routes implement, including rollback before a successful write, retry of a pending retirement when a background acknowledgement fails, and idle capacity recovery.",
+  "acceptance": [
+    "The guide distinguishes synchronous rollback from a pending background retirement whose pause can be confirmed by repeated Stop.",
+    "It includes the provider-capacity retry exception to an ineligible idle Stop returning 409."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fcc6-d6bf-78c2-a9f5-2b7200724105",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

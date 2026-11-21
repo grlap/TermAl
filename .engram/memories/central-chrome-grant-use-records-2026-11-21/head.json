@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-chrome-grant-use-records-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "42e569989ff44a42a5a33e9d3d23535d",
+      "2b49f88c347c4f9dad82f168daad9bab"
+    ]
+  }
+}

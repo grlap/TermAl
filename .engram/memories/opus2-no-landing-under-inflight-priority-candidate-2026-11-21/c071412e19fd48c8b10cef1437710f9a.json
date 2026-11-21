@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-landing-under-inflight-priority-candidate-2026-11-21",
+    "revision_id": "c071412e19fd48c8b10cef1437710f9a",
+    "previous": null,
+    "body_sha256": "9a452c801ab58a9ae69b586bbd2dae169f89c224dab0ba583be5ef66df7078eb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T16:57:32.486619400Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-21): before landing anything on TermAl master, check whether a higher-priority candidate is in flight on the current master (focused run, pair or FULL under way). Landing moves master under it, so its FULL must then run on a fresh re-cut whose parent is the new master, and any test ref already cut on the old master can no longer gate a landing. On 2026-11-21 I landed w-3c02 (Markdown) at 16:56Z while w-b646 (Greg's source_id priority, e9956f3e on 1fd1e156) was in its focused run, and while combo91's test ref 4234f2de (on 1fd1e156) was queued for a FULL. Both needed re-cuts, and combo91's queued FULL was wasted. Rule: while a priority candidate is in flight, hold other TermAl landings, or ask the coordinator first."
+}

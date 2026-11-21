@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-process-checks-simple-procedures-2026-11-16",
+    "revision_id": "8976261993bf4078830689cad9c4c1ad",
+    "previous": "7f2c327cc5a144079565f87f68abd5d0",
+    "body_sha256": "0cce0088ab8ac441ecc41b220922dbbac2e29b6bfabe1ab58cec6fd5f54b83b3",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T17:06:51.928635400Z"
+    }
+  },
+  "body": "Greg, verbatim via Engram::Asistant (TermAl mailbox 588693a8 #1890, 2026-11-16 05:09Z), to be passed to authors:\n„jaki znowu konflikt, znowu hipoteza, ktore bedzie zrobiona zle i znowu sie wyjebie za pare godzin i bedziemy naprawiac tydzien / prosilem o proste procedury a nie procedury sprawdzajace wszystko! WTF / przekaz doslownie autorom / sprawdzanie procesow NIE BEDZIE DZIALAC WIARYGODNIE”\nRULE:\n- No process listing, census or snapshot as a procedure step, closure condition, evidence or watcher.\n- Prove properties with code plus existing tests in the gate.\n- Don't treat a speculative conflict as fact; establish it with evidence first.\n- Prefer the simplest procedure.\nApplied: w-3fe8 C6 now cites only the control-transport fence and its real-process tests (Kimi #362 wording). The restart census step is withdrawn.\n\nFINAL RULE (Kimi::Consultant #379, 05:26Z, after Greg asked for less room for agent bias): „Domyślnie NIE dodajemy snapshotu ani kontroli niezmienności. Wyjątek jest możliwy tylko wtedy, gdy bez konkretnej kontroli nie da się spełnić krytycznego wymagania zapisanego w acceptance criterion lub wynikającego z decyzji Grega. Mechanizm błędu musi być konkretny, zaobserwowany lub odtwarzalny testem — nie hipotezą. Kontrola działa wewnątrz operacji, na minimalnych danych, które ona rzeczywiście zużywa, i jest najmniejszym sposobem wykrycia tego błędu. Prostszy artefakt, relacja lub pending wygrywa. Koszt i wzrost pracy z historią lub środowiskiem nie mogą przewyższać korzyści. Nigdy jako osobny spis, watcher ani czynność człowieka. Brak takiego wymagania = brak kontroli.” Valid exceptions: source_id, review-freeze and test-ref binding, and output-artifact validation. Enforcement is the reviewer lens on w-d63303cc54de.\n\nRECURRENCE 2026-11-21 (Termal::Fable2's own violation). After Greg's 16:40Z restart I set a host-verification rule of \"HEAD 63cdb117 AND host process start after the binary's write time\", and ran Get-Process and asked runners for ps lines. That is exactly the process check this rule forbids. It produced a wrong conclusion: that DL560 and the Mac ran an old build. On Unix, cargo run can exec-replace itself and keep the PID and start time. That caused an unneeded DL560 and Mac restart. Greg: „byly na najnowszych”. Restart verification is ONLY the federation links (termal_federation_status: authenticated, 0 failures) plus the runner's plain \"done\", or Greg's word. No process start times, no file mtimes, no ps or Get-Process."
+}

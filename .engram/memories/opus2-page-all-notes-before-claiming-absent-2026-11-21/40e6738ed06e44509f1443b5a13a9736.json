@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-page-all-notes-before-claiming-absent-2026-11-21",
+    "revision_id": "40e6738ed06e44509f1443b5a13a9736",
+    "previous": null,
+    "body_sha256": "e4a3ebdd6d87e1b4effc0baf2bcd9b0d8664f8726ad0ea7e9b260588edbd9f5e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T20:45:29.959639700Z"
+    }
+  },
+  "body": "Opus2 error, 2026-11-21 20:42Z: I told Greg (via Engram::Asistant) that B646's authority-text conditions (a) and (b) were missing and that a stand-in for Fable2 was needed. Both were in fact recorded on w-b646ed9ef817 (R4: 0056a962, 3a2d6de6; Greg's copy in Asistant #2327/#2337). The item has 80 notes; engram show --notes displays only the newest window, and literal search did not match. Rule: before stating that a record is ABSENT on an item, page the notes window to completion (follow `after`), or ask the item's holder or coordinator. Never report absence from one window."
+}

@@ -19,12 +19,19 @@
   ],
   "assigned_to": "Termal::Opus3",
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed 5ffb6a64 on master (fast-forward from 1fd1e156, pushed 16:56:01Z). The agreed simple-design text is now verbatim in .claude/reviewers/architecture.md, and its first sentence is the \"before code\" sentence in .agents/skills/coder-test-execution/SKILL.md. Markdown only, +5/-0. The link-check gate test-ec3f762b passed. The review pair 3C02-PAIR-5FFB6A64 is clean (originals read). The evaluation 1480e6e7 passed 3/3. The authority-text conditions (a), (b) and (c) are all recorded. No author refs remain, and nothing was installed.",
+    "completed_at": "2026-11-21T16:56:29.415490600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

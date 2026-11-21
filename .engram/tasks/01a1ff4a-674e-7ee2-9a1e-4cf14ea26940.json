@@ -1,0 +1,30 @@
+{
+  "id": "01a1ff4a-674e-7ee2-9a1e-4cf14ea26940",
+  "external_ref": null,
+  "title": "Provider worktree placement: support a main checkout created with git init --separate-git-dir",
+  "outcome": "A test command whose explicit cwd is a main checkout created with `git init --separate-git-dir` (its `.git` is a pointer file to the common directory, not to `worktrees/<name>`) is recognised as a worktree of the session's repository for provider placement and artifact association, the same way a main checkout with a `.git` directory is.",
+  "acceptance": [
+    "From a session in a linked worktree, a test command whose explicit cwd is a main checkout with a `.git` pointer to the session repository's common directory keeps its provider, registration, artifact and native-completion association. Shown by a behavioural test.",
+    "A `.git` pointer to a directory that is not the session repository's common directory is still refused. Shown by a behavioural test.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "parked-no-observed-failure",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1ff44-be0b-7cc1-8a94-689061450b60",
+  "external_ref": null,
+  "title": "Settle rejected delegation promotion before opening declared-run source capture",
+  "outcome": "A rejected and still-current delegation queue promotion parks the unsent result before declared-run source capture, preserving Stop callback deferral and the existing runtime and promotion ownership fences.",
+  "acceptance": [
+    "A rejected promotion with applicable declared-run configuration parks the same unsent result without starting source capture.",
+    "The successful handoff path, stale or superseded ownership, and Stop deferral retain their current behavior, with focused behavioral evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fcc6-d6bf-78c2-a9f5-2b7200724105",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

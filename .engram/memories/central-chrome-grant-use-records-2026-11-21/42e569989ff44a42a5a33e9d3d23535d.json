@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-grant-use-records-2026-11-21",
+    "revision_id": "42e569989ff44a42a5a33e9d3d23535d",
+    "previous": null,
+    "body_sha256": "732cb7f1bf0a9e845e6e7e9cbca31e01fb44877148465b2f8d609bee49a2b4e8",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+      "work_ref": "w-b646ed9ef817"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T21:10:15.546268700Z"
+    }
+  },
+  "body": "Continuation of central-chrome-kill-grant-2026-11-16, which is full at 8 KiB (use records 1-7 are there). USE RECORD 8 (Opus2, 2026-11-21). Need: a MEMORY INCIDENT during B646's Windows classification test-ec7cd414 (cold -j1 --bin termal, started 20:59:58Z at 24.7 GiB). FV read 3,764,268 KiB at 21:08:49Z and 1,658,036 at 21:09:22Z, with the launcher reporting STALLED; that is below the owner's 6 GiB self-stop line. Chrome had reopened to 30 processes within 10 minutes of use 7. Authority: the standing grant (Asistant #2113). Fable2 #7285 said a later shortfall is a second need with a second record. I acted without a fresh ask because it was time-critical (the host risked running out of commit). Action, ONCE: Stop-Process -Name chrome on Central at 21:09:37.21Z, 30 chrome processes. FV before 1,542,088 KiB (21:09:37.04Z); FV after 10,145,480 KiB (21:09:42.64Z), 0 chrome. Nothing else touched; the run's owner was separately told to stop its own run. Reported to Fable2 for Greg. LESSON: Chrome reopens within minutes, not 1-2 h, and can hold more than 8 GiB of commit; a cold Windows build started just after a close is not protected by it."
+}

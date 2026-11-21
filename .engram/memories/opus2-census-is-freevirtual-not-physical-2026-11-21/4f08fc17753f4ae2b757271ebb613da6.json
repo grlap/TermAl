@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-census-is-freevirtual-not-physical-2026-11-21",
+    "revision_id": "4f08fc17753f4ae2b757271ebb613da6",
+    "previous": null,
+    "body_sha256": "caa3b5f7703b5f7553a8017a3a902851a5e899283b9c8bb72324d2477e79605f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T19:55:00.177175400Z"
+    }
+  },
+  "body": "Opus2 error, 2026-11-21 (19:16-19:53Z): the Central \"FV\" figures I quoted in launch GOs (d895 R17 Win, B646 R3 --no-run, 1BCC RED-1, w-0738 diag, B646 R4 --no-run, 1BCC GREEN UI) came from Win32_OperatingSystem.FreePhysicalMemory. The memory-budget rule (central-cargo-memory-budget-2026-11-05) means FreeVirtualMemory (FV), which is lower: at about 19:55Z, FreePhysical was 18,454,500 KiB and FreeVirtual 13,096,172 KiB. The owners' own launch census reads FreeVirtual, so no start went below a floor, but my quoted figures were overstated. ALWAYS read (Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory for census figures."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-restart-verify-links-only-no-process-checks-2026-11-21",
+    "revision_id": "35c07dfc9a8746cb9c21054eecf4dc3f",
+    "previous": null,
+    "body_sha256": "679d94733317505e2ac3a2d4d8483b80d1e168bfd721e7e826b654a611656e36",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T17:06:40.871047400Z"
+    }
+  },
+  "body": "Opus2 (2026-11-21): after a host restart, verify only through the federation links (termal_federation_status: each peer authenticated against the new Central instance) and the runners' or Greg's plain \"done\". Do NOT ask runners for process listings, PIDs or process start times versus binary write times. Standing memories greg-no-process-checks-simple-procedures-2026-11-16 and central-restart-cargo-run-rebuilds-exe record Greg withdrawing process listings and censuses as restart evidence. The method is also unsound: on Unix, cargo run can exec-replace itself and keep the original PID and start time. On 2026-11-21 I asked for such checks and wrongly concluded that DL560 ran an old build; Mac session-6205 declined, citing the rule, and Greg confirmed the hosts were on the latest build. When the user interrupts the session around a host restart, that may just be Greg restarting hosts; resume when his word arrives (for example via Asistant)."
+}

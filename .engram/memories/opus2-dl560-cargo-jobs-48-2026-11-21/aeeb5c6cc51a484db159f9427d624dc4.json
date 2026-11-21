@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-dl560-cargo-jobs-48-2026-11-21",
+    "revision_id": "aeeb5c6cc51a484db159f9427d624dc4",
+    "previous": null,
+    "body_sha256": "5b22d22ca3c13de685e19e65179c1e0211c7fa6d7320cc4614d065fc87553830",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T17:52:33.176458500Z"
+    }
+  },
+  "body": "Opus2 GO template rule (Fable2 #7239 / Engram::Fable #8617, 2026-11-21): every TermAl FULL or focused cargo job placed on DL560 (s3, s4, s6, C6, C7, Claude Live lanes) uses the DL560 job count, CARGO_BUILD_JOBS=48 per job within that host's checklist, NOT -j1, -j2 or -j8, unless a GO's own cargo command names an explicit -j. Central keeps its memory-budget -j1 (central-cargo-memory-budget-2026-11-05). Also, per the same message: when cutting a combined wave candidate, fold in any package that becomes READY (pair clean plus legs done) before the wave's ref is cut, but never hold a wave waiting for one."
+}

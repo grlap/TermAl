@@ -1,0 +1,30 @@
+{
+  "id": "01a1ff81-4821-7f11-8a5f-ece5c3ba958e",
+  "external_ref": null,
+  "title": "A test-run wait with a host qualifier naming the wrong host reports \"association_stale\" instead of saying no such run exists on that host",
+  "outcome": "When termal_resume_after_test_runs gets a host-qualified run id (host:<uuid>::test-…) whose host does not hold that run, the answer says plainly that the named host has no such run, instead of a pending wait marked association_stale (\"awaiting authenticated native origin facts\").",
+  "acceptance": [
+    "A host-qualified run id that names a host which does not hold the run returns a clear refusal or detail naming the host and the missing run, not association_stale, and creates no pending wait for it.",
+    "A deterministic test covers a wrong-host qualifier for a run that exists locally; existing correct remote and local waits are unchanged.",
+    "The independent review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "test-runs",
+    "usability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

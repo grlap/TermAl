@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-run-end-is-owner-terminal-end-2026-11-21",
+    "revision_id": "e363938bf2ce4d4b9e95a2858f64b71c",
+    "previous": null,
+    "body_sha256": "a86f9447d309b5e90c03e25ffbf3797bf3832922e003d19c4eed93d71dfafd15",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T18:57:12.912322300Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-21): a run's END is only its launcher's terminal END reported by its owner (or read from its results via the owner). Never infer it from a cargo/rustc process disappearing. A FULL's rust stage can end, removing its cargo process, while the same launcher keeps running node stages (freeze, mcp, control, parity, docs). On 2026-11-21 at 18:54Z I saw w-0738's FULL cargo PID gone, assumed the run had ended, and launched B646 R2's LOCAL FULL beside it, breaking the one-Central-cargo-job rule. Merger reported the launcher still running (PID 39916, node freeze stage). Before giving a Central slot, wait for the occupying run's owner to report its terminal END."
+}

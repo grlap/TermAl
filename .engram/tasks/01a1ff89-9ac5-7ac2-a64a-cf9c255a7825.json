@@ -1,0 +1,29 @@
+{
+  "id": "01a1ff89-9ac5-7ac2-a64a-cf9c255a7825",
+  "external_ref": null,
+  "title": "Windows: master's review_freeze_cli integration test does not compile (normalize_user_facing_path not in scope in test_temp_paths.rs)",
+  "outcome": "On Windows, `cargo test` compiles every integration test on master again. tests/review_freeze_cli.rs includes src/test_temp_paths.rs, and that file's #[cfg(windows)] windows_fixture_directory_check resolves normalize_user_facing_path in that context too.",
+  "acceptance": [
+    "On Windows, a full gate's rust-tests stage compiles tests/review_freeze_cli.rs without E0425 on a master that includes the fix",
+    "The fix keeps windows_fixture_directory_check's canonical-spelling behaviour for the bin test harness unchanged"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "gate-blocker",
+    "regression",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Duplicate of w-87d4982c7fc5, which already owns this Windows E0425 (review_freeze_cli / normalize_user_facing_path). Its one-path fix 2395b571 (src/test_temp_paths.rs 42fbaf24 -> 75f17072) already has a clean pair; the same pre-image blob is on master 5ffb6a64. The B646 R2 Central FULL evidence (test-f49869e9) is noted there.",
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1ff18-700f-7d42-924d-0fa88289c7a4",
+  "external_ref": null,
+  "title": "Verify the Git-delta source label in acceptance history",
+  "outcome": "Use clean and dirty acceptance-history summaries emitted by the deployed Engram producer to check TermAl's acceptance history source labels. Preserve the current legacy interpretation and adjust only the summary projection if producer evidence shows a mismatch.",
+  "acceptance": [
+    "An existing acceptance history test exercises producer-emitted clean and dirty Git-delta source summaries through the actual history reader and verifies the displayed source labels.",
+    "Legacy summaries retain their existing interpretation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

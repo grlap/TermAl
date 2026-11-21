@@ -11,10 +11,11 @@
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 1,
+  "priority": 3,
   "labels": [
     "cross-machine",
-    "federation"
+    "federation",
+    "parked-no-observed-failure"
   ],
   "assigned_to": null,
   "deferred_until": null,

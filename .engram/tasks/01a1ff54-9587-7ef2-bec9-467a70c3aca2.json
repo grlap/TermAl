@@ -1,0 +1,30 @@
+{
+  "id": "01a1ff54-9587-7ef2-bec9-467a70c3aca2",
+  "external_ref": null,
+  "title": "Provider placement: a statusless ACP tool_call_update carrying only a cwd loses that cwd on the description path",
+  "outcome": "When an ACP provider sends a title-only pending frame, then a tool_call_update without a status that carries only the linked-worktree cwd, and the completing frame carries the command and RUN locator, the command is placed in that linked worktree and its native completion is associated.",
+  "acceptance": [
+    "A title-only pending ACP frame, then a statusless tool_call_update with only a linked-worktree cwd, then a completing frame with the command text and RUN locator, keeps its provider, registration, artifact and native-completion association. Shown by a behavioural test that fails before the fix.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "cross-machine",
+    "parked-no-observed-failure",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

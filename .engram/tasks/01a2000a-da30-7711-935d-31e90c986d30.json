@@ -1,0 +1,29 @@
+{
+  "id": "01a2000a-da30-7711-935d-31e90c986d30",
+  "external_ref": null,
+  "title": "Pending test-request status read walks an over-limit pending JSON value's overflow pages under the shared mailbox connection mutex",
+  "outcome": "Pending test-request status read walks an over-limit pending JSON value's overflow pages under the shared mailbox connection mutex",
+  "acceptance": [
+    "A live or fixture measurement shows whether the status read's overflow-page traversal for an over-limit pending value causes a user-visible delay on the shared mailbox connection; the measurement is recorded on this item.",
+    "If it does, the status read for such a row no longer traverses the over-limit value's overflow pages, and existing rows and the wire format are unchanged; if it does not, the item is closed with that measurement as its evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "performance",
+    "sqlite"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
