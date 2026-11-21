@@ -330,6 +330,11 @@ async fn home_rpc_failures_distinguish_admission_deadline_and_post_handler_autho
         let rows = observed["homeRpcFailures"].as_array().unwrap();
         assert_eq!(rows.len(), 1, "{mode}: {observed}");
         assert_eq!(rows[0]["stage"], expected);
+        if mode == "deadline" {
+            // The record names the phase the deadline hit; nothing after the
+            // expiry (no post-handler check) moves it on.
+            assert_eq!(rows[0]["phase"], "handler", "{observed}");
+        }
         assert_eq!(rows[0]["operation"], "read");
         assert_eq!(rows[0]["status"], 503);
         assert!(mailbox_relay_uuid(rows[0]["requestId"].as_str().unwrap()));
@@ -358,6 +363,29 @@ fn home_rpc_failures_do_not_copy_invalid_or_unknown_metadata() {
         assert_eq!(row.operation, "unavailable");
         assert!(!serde_json::to_string(&row).unwrap().contains("SECRET"));
     }
+}
+
+/// A request's phases freeze at its deadline: an abandoned job that keeps
+/// entering phases afterwards moves neither the current phase nor the list of
+/// finished ones, so the expiry line and the failure record agree.
+#[test]
+fn home_rpc_phase_trace_freezes_at_expiry() {
+    let trace = MailboxRelayPhaseTrace::default();
+    trace.enter("admission");
+    trace.enter("handler");
+    let (at_expiry, finished) = trace.freeze();
+    trace.enter("operation");
+    trace.enter("state");
+    let (current, after) = trace.snapshot();
+    assert_eq!(at_expiry.map(|phase| phase.phase), Some("handler"));
+    assert_eq!(current.map(|phase| phase.phase), Some("handler"));
+    let names = |phases: &[MailboxRelayPhaseElapsed]| {
+        phases.iter().map(|phase| phase.phase).collect::<Vec<_>>()
+    };
+    assert_eq!(names(&finished), ["admission"]);
+    assert_eq!(names(&after), ["admission"]);
+    // A second freeze keeps the first one.
+    assert_eq!(trace.freeze().0.map(|phase| phase.phase), Some("handler"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
