@@ -344,12 +344,13 @@ struct TestRunIndex {
     observations_durable: HashSet<String>,
     observations_failed: HashSet<String>,
     observation_persistence: TestRunObservationPersistence,
+    observation_cursors: TestRunObservationCursors,
     lifecycle_revalidated: HashSet<(String, String)>,
-    unclassified_commands: HashMap<String, TestRunUnclassifiedCommand>,
+    unclassified_commands: BTreeMap<String, TestRunUnclassifiedCommand>,
     // Original native executions that may outlive their prompt. Retain the
     // same job (including identity refusal and pending registration), never
     // reconstruct an execution from a later task notification.
-    declared_executions: HashMap<String, Arc<Mutex<DeclaredRunExecution>>>,
+    declared_executions: BTreeMap<String, Arc<Mutex<DeclaredRunExecution>>>,
     entries: TestRunEntries,
     /// Every run directory the last rescan parsed, listed or aged out, so a
     /// run whose files did not change is never parsed again. Aged-out runs

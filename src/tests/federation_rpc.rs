@@ -66,6 +66,7 @@ async fn host_utilization_authenticated_read_failures_do_not_retire_peer_health(
         .await
         .unwrap();
     assert_eq!(value["counterBytes"], 1234);
+    let mut retired_so_far = 0;
     for failure_mode in 1..=4 {
         mode.store(failure_mode, Ordering::SeqCst);
         assert!(
@@ -89,12 +90,90 @@ async fn host_utilization_authenticated_read_failures_do_not_retire_peer_health(
             context.sender.lock().unwrap().outstanding.is_empty(),
             "read deadline must settle its counter"
         );
+        // An unresolved read (deadline or undecodable body) is retired with
+        // one bounded record; a signed refusal is settled by its reply.
+        let retired = context
+            .sender_events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.kind == "retiredUnknown" && event.operation == "hostUtilization")
+            .count();
+        assert_eq!(
+            retired,
+            retired_so_far + usize::from(matches!(failure_mode, 2 | 3)),
+            "telemetry failure mode {failure_mode}"
+        );
+        retired_so_far = retired;
         if failure_mode == 2 {
             release.notify_one();
         }
     }
     stop.send_replace(true);
     server.await.unwrap();
+}
+
+/// A response body that fails or overflows while the receiver collects it is
+/// not a security event: the receiver answers a signed UNKNOWN 503, and the
+/// same lease serves the next request.
+#[tokio::test]
+async fn federation_response_body_failure_is_a_signed_unknown_that_keeps_the_link() {
+    for overflow in [false, true] {
+        let central = channel(FederationRole::Central, 'a');
+        let (satellite, _proof) = establish(&central).await;
+        let lease = central.current_lease().unwrap();
+        let failing = Arc::new(AtomicBool::new(true));
+        let handler_failing = failing.clone();
+        let router = authenticated_router(
+            satellite,
+            Router::new().route(
+                "/federation/v1/health",
+                get(move |peer: axum::Extension<FederationAuthenticatedPeer>| {
+                    let failing = handler_failing.clone();
+                    async move {
+                        if !failing.swap(false, Ordering::SeqCst) {
+                            return federation_health(peer).await.into_response();
+                        }
+                        if overflow {
+                            return "x".repeat(FEDERATION_FRAME_LIMIT + 1).into_response();
+                        }
+                        let stream = async_stream::stream! {
+                            yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"{"));
+                            yield Err(std::io::Error::other("handler body failed"));
+                        };
+                        axum::body::Body::from_stream(stream).into_response()
+                    }
+                }),
+            ),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (stop, mut stopped) = tokio::sync::watch::channel(false);
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    federation_wait_stop(&mut stopped).await;
+                })
+                .await
+                .unwrap();
+        });
+        let rpc = FederationRpcClient::new(port, central.clone(), allowed()).unwrap();
+        let failed = rpc.health(&lease).await;
+        let kept = lease.with_incarnation(|| Ok(())).is_ok();
+        let next = rpc.health(&lease).await;
+        stop.send_replace(true);
+        server.await.unwrap();
+        assert_eq!(
+            failed.err().map(|error| error.status),
+            Some(StatusCode::SERVICE_UNAVAILABLE),
+            "overflow {overflow}"
+        );
+        assert!(kept, "overflow {overflow}: the link survives");
+        assert!(
+            next.is_ok(),
+            "overflow {overflow}: the next request is served: {next:?}"
+        );
+    }
 }
 
 #[tokio::test]

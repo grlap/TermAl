@@ -55,7 +55,12 @@ impl FederationChannel {
         self.observe_terminal_event(context, stage, reason, io_kind, None);
     }
 
-    fn observe_rpc_terminal(
+    /// Fences the exact incarnation after an RPC security failure. Before the
+    /// fence it only claims this context's one terminal record, with an
+    /// atomic: no lock and no I/O, so nothing can delay or skip the fence, and
+    /// a later teardown observer of this context cannot record a different
+    /// first cause. The record in shared state and the console line follow.
+    fn fence_rpc_security_failure(
         &self,
         context: &FederationSecurityContext,
         reason: &'static str,
@@ -63,7 +68,18 @@ impl FederationChannel {
         rpc_stage: &'static str,
         status: Option<u16>,
     ) {
-        self.observe_terminal_event(context, "rpc", reason, None, Some((path, rpc_stage, status)));
+        let claimed = !context.terminal_logged.swap(true, Ordering::SeqCst);
+        self.fence_security(context.owner, &context.incarnation);
+        if claimed {
+            let line = self.publish_terminal_event(
+                context,
+                "rpc",
+                reason,
+                None,
+                Some((path, rpc_stage, status)),
+            );
+            eprintln!("{line}");
+        }
     }
 
     fn observe_terminal_event(
@@ -79,10 +95,25 @@ impl FederationChannel {
         if context.terminal_logged.swap(true, Ordering::SeqCst) {
             return;
         }
+        let line = self.publish_terminal_event(context, stage, reason, io_kind, rpc);
+        eprintln!("{line}");
+    }
+
+    /// Records a context's claimed terminal diagnostic and returns its
+    /// console line.
+    fn publish_terminal_event(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+        rpc: Option<(&str, &'static str, Option<u16>)>,
+    ) -> String {
         self.retain_terminal_diagnostic(context, stage, reason, io_kind, rpc);
         self.update_attestation(|observation, _| {
-            // Record before the owning teardown. A delayed old control task
-            // cannot replace its successor, nor can cleanup hide the first cause.
+            // The context's claim already made this its first cause. A delayed
+            // old task cannot replace a successor attempt's observation, and a
+            // later cause cannot replace the first one.
             if observation.attempt_owner != context.owner
                 || observation.attempt_channel.as_deref()
                     != Some(self.server_instance_id.as_str())
@@ -110,10 +141,10 @@ impl FederationChannel {
         // Zero means no HTTP response was received; never log peer body text.
         let (rpc_path, rpc_stage, status) = rpc.unwrap_or(("none", "none", None));
         let status = status.unwrap_or(0);
-        eprintln!(
+        format!(
             "federation link ended peer={} role={role} stage={stage} reason={reason} ioKind={} incarnation={} elapsedMs={elapsed_ms} lastSequence={sequence} rpcPath={rpc_path} rpcStage={rpc_stage} httpStatus={status}",
             self.snapshot.peer.host_id, io_kind.unwrap_or("none"), context.incarnation
-        );
+        )
     }
 
     fn observe_attestation(&self, success: Option<u64>) {

@@ -262,6 +262,107 @@ fn assert_no_observation_snapshots(events: &[SseStreamEvent]) {
 }
 
 #[test]
+fn observation_persistence_tick_work_is_independent_of_terminal_history() {
+    fn run_with_history(history_size: usize) -> (usize, usize) {
+        let mut fixture = ObservationPublicationFixture::new();
+        let keys = ["first-finisher", "second-finisher"];
+        let finished = keys.map(|key| {
+            let id = fixture.start(key);
+            fixture.write_pending();
+            id
+        });
+        let stale = fixture.start("stale-runtime");
+        fixture.write_pending();
+        for key in keys {
+            fixture.end(key);
+        }
+
+        let history: Vec<_> = {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let template = inner.test_run_observations[&finished[0]].clone();
+            (0..history_size)
+                .map(|ordinal| {
+                    let id = format!("observed-unrelated-history-{ordinal:04}");
+                    let mut row = template.clone();
+                    row.execution_id = id.clone();
+                    row.summary.run_id = id.clone();
+                    row.summary.owner_session_id = None;
+                    row.runtime_identity = None;
+                    row.validated_unbound = false;
+                    row.final_unbound_proof = None;
+                    inner.test_run_observations.insert(id.clone(), row.clone());
+                    (id, row)
+                })
+                .collect()
+        };
+        fixture.flush();
+        assert_eq!(
+            fixture.writer.receive(false),
+            PersistWorkerWaitOutcome::Process
+        );
+        assert!(!fixture.writer.batch.drain(&fixture.writer.rx, false));
+        assert_eq!(fixture.writer.batch.pending.len(), finished.len());
+        let delta =
+            collect_persist_delta_from_shared_state(&fixture.state.inner, fixture.watermark);
+        fixture.writer.write(&delta).unwrap();
+        fixture.watermark = delta.watermark;
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&fixture.session).unwrap();
+            inner.session_mut_by_index(index).unwrap().runtime = SessionRuntime::None;
+        }
+
+        TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.set(0));
+        TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.set(0));
+        fixture.state.step_test_command_observation_persistence();
+        let work = (
+            TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.get()),
+            TEST_TEST_RUN_IDENTITY_CANDIDATES.with(|count| count.get()),
+        );
+
+        let mut events = fixture.flush();
+        assert!(!events.is_empty());
+        fixture.write_pending();
+        events.extend(fixture.flush());
+        assert_no_observation_snapshots(&events);
+        let persisted = load_state(fixture.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        let inner = fixture.state.inner.lock().unwrap();
+        for id in &finished {
+            let row = &inner.test_run_observations[id];
+            assert_eq!(row.summary.state, TestRunState::Passed);
+            assert_eq!(row.summary.exit_code, Some(0));
+            assert!(inner.test_runs.observations_durable.contains(id));
+            assert_eq!(&persisted.test_run_observations[id], row);
+        }
+        let stale_row = &inner.test_run_observations[&stale];
+        assert_eq!(stale_row.summary.state, TestRunState::Unknown);
+        assert!(stale_row.summary.interrupted);
+        assert!(stale_row.summary.ended_at.is_none());
+        assert!(inner.test_runs.observations_durable.contains(&stale));
+        assert_eq!(&persisted.test_run_observations[&stale], stale_row);
+        for (id, row) in &history {
+            assert_eq!(&inner.test_run_observations[id], row);
+            assert_eq!(&persisted.test_run_observations[id], row);
+        }
+        work
+    }
+
+    let small = run_with_history(0);
+    let large = run_with_history(512);
+    assert_eq!(
+        (small.0, large.0),
+        (0, 0),
+        "observation persistence must not project all terminal history"
+    );
+    assert_eq!(
+        small.1, large.1,
+        "unrelated terminal history must not increase changed-identity work"
+    );
+}
+
+#[test]
 fn observation_publication_repeated_start_end_preserves_pending_durable_and_stored_rows() {
     let mut fixture = ObservationPublicationFixture::new();
     // One initial full snapshot is legitimate. Subscribe before its enqueue
@@ -422,6 +523,143 @@ fn observation_publication_late_start_ack_cannot_ack_the_new_terminal_image() {
     observation_delta(&fixture, &events, &id, TestRunState::Passed, "durable");
     all.extend(events);
     assert_no_observation_snapshots(&all);
+}
+
+#[test]
+fn observation_persistence_keeps_an_identical_replacement_fence_after_poll() {
+    let mut fixture = ObservationPublicationFixture::new();
+    let id = fixture.start("replace-polled-fence");
+    fixture.flush();
+    let delta = fixture.collect_pending();
+    fixture.writer.write(&delta).unwrap();
+    fixture.watermark = delta.watermark;
+
+    fixture
+        .state
+        .step_test_command_observation_persistence_with_probe(|| {
+            assert!(fixture.state.inner.is_not_held_by_current_thread_for_test());
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let row = inner.test_run_observations[&id].clone();
+            inner.test_run_observations.insert(id.clone(), row.clone());
+            fixture
+                .state
+                .persist_test_command_observation_locked(&mut inner, row);
+        });
+    let events = fixture.flush();
+    observation_delta(&fixture, &events, &id, TestRunState::Running, "pending");
+    {
+        let inner = fixture.state.inner.lock().unwrap();
+        assert!(!inner.test_runs.observations_durable.contains(&id));
+        assert!(
+            inner
+                .test_runs
+                .observation_persistence
+                .0
+                .lock()
+                .unwrap()
+                .contains_key(&id)
+        );
+    }
+
+    fixture.write_pending();
+    let events = fixture.flush();
+    observation_delta(&fixture, &events, &id, TestRunState::Running, "durable");
+    let stored = fixture.stored_observation(&id);
+    let inner = fixture.state.inner.lock().unwrap();
+    assert!(inner.test_runs.observations_durable.contains(&id));
+    assert_eq!(stored, inner.test_run_observations[&id]);
+}
+
+#[test]
+fn observation_persistence_keeps_newer_synchronous_save_after_old_fence_fails() {
+    for batch in [false, true] {
+        let mut fixture = ObservationPublicationFixture::new();
+        let id = fixture.start("replace-failed-fence-synchronously");
+        fixture.flush();
+        fixture.collect_pending();
+        fixture.state.shutdown_persist_blocking();
+        let (_, stopped_rx) = mpsc::channel();
+        drop(std::mem::replace(&mut fixture.writer.rx, stopped_rx));
+        // Abandon the writer's outstanding fence, then retry the exact row
+        // after the tick observes WorkerStopped but before it applies it.
+        drop(fixture.writer.batch.pending.pop().unwrap());
+        fixture
+            .state
+            .step_test_command_observation_persistence_with_probe(|| {
+                let mut inner = fixture.state.inner.lock().unwrap();
+                let row = inner.test_run_observations[&id].clone();
+                if batch {
+                    fixture
+                        .state
+                        .persist_test_run_evidence_batch_deferring_compaction_locked(
+                            &mut inner,
+                            vec![row],
+                            Vec::new(),
+                        );
+                } else {
+                    fixture
+                        .state
+                        .persist_test_command_observation_locked(&mut inner, row);
+                }
+            });
+        let events = fixture.flush();
+        observation_delta(&fixture, &events, &id, TestRunState::Running, "durable");
+        let stored = fixture.stored_observation(&id);
+        let inner = fixture.state.inner.lock().unwrap();
+        assert_eq!(stored, inner.test_run_observations[&id]);
+    }
+}
+
+#[test]
+fn observation_persistence_repairs_past_a_full_page_and_wraps_after_the_tail() {
+    let mut fixture = ObservationPublicationFixture::new();
+    let id = fixture.start("paging-template");
+    fixture.write_pending();
+    let template = fixture.state.inner.lock().unwrap().test_run_observations[&id].clone();
+    assert!(template.runtime_identity.is_some());
+    fixture.end("paging-template");
+    fixture.write_pending();
+    fixture.flush();
+
+    let key = |ordinal| format!("paging-observation-{ordinal:03}");
+    let seed = |inner: &mut StateInner, ordinal, stale| {
+        let id = key(ordinal);
+        let mut row = template.clone();
+        row.execution_id = id.clone();
+        row.summary.run_id = id.clone();
+        if stale {
+            row.runtime_identity = None;
+        }
+        inner.test_run_observations.insert(id, row);
+    };
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        for ordinal in 1..=64 {
+            seed(&mut inner, ordinal, ordinal > 32);
+        }
+    }
+    let runs_in_state = |ordinals: std::ops::RangeInclusive<usize>, expected| {
+        let inner = fixture.state.inner.lock().unwrap();
+        for ordinal in ordinals {
+            assert_eq!(
+                inner.test_run_observations[&key(ordinal)].summary.state,
+                expected
+            );
+        }
+    };
+    fixture.state.step_test_command_observation_persistence();
+    runs_in_state(1..=64, TestRunState::Running);
+    // The first page remains eligible. The next tick must still reach the
+    // second, exactly full page instead of repeating the first.
+    fixture.state.step_test_command_observation_persistence();
+    runs_in_state(1..=32, TestRunState::Running);
+    runs_in_state(33..=64, TestRunState::Unknown);
+    seed(&mut fixture.state.inner.lock().unwrap(), 0, true);
+    // The cursor has passed the new row. Give it the empty tail page and
+    // the wrapped page, then verify the repair through the live row.
+    fixture.state.step_test_command_observation_persistence();
+    fixture.state.step_test_command_observation_persistence();
+    runs_in_state(0..=0, TestRunState::Unknown);
 }
 
 #[test]

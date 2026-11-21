@@ -71,6 +71,22 @@ struct TestRunCommandObservation {
     declared_verdict_pending: bool,
 }
 
+impl TestRunCommandObservation {
+    fn awaiting_runtime_report(&self) -> bool {
+        !self.summary.interrupted
+            && (self.declared_verdict_pending
+                || (self.summary.ended_at.is_none()
+                    && (self.summary.state == TestRunState::Running
+                        || (self.launch_only && self.summary.state == TestRunState::Unknown))))
+    }
+
+    fn has_unconfirmed_launch(&self) -> bool {
+        self.launch_only
+            && self.summary.ended_at.is_none()
+            && self.summary.state == TestRunState::Running
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct TestRunFinalUnboundProof {
@@ -221,6 +237,60 @@ impl<'a> TestRunProjection<'a> {
 struct TestRunObservationPersistence(
     Arc<Mutex<BTreeMap<String, (TestRunCommandObservation, PersistFenceWaiter)>>>,
 );
+
+const TEST_RUN_OBSERVATION_PAGE_SIZE: usize = 32;
+
+#[derive(Clone, Debug, Default)]
+struct TestRunObservationCursors {
+    unclassified: Option<String>,
+    native: Option<String>,
+    monitored: Option<String>,
+    fences: Option<String>,
+}
+
+fn test_run_observation_page_end(keys: &[String]) -> Option<String> {
+    if keys.len() == TEST_RUN_OBSERVATION_PAGE_SIZE {
+        keys.last().cloned()
+    } else {
+        None
+    }
+}
+
+fn test_run_observation_map_page<V>(
+    rows: &BTreeMap<String, V>,
+    cursor: &mut Option<String>,
+) -> Vec<String> {
+    use std::ops::Bound::{Excluded, Unbounded};
+
+    let after = cursor.as_deref().map_or(Unbounded, Excluded);
+    let keys: Vec<_> = rows
+        .range::<str, _>((after, Unbounded))
+        .take(TEST_RUN_OBSERVATION_PAGE_SIZE)
+        .map(|(key, _)| key.clone())
+        .collect();
+    *cursor = test_run_observation_page_end(&keys);
+    keys
+}
+
+fn test_run_observation_runtime_matches(
+    inner: &StateInner,
+    runtimes: &mut HashMap<String, Option<String>>,
+    session_id: &str,
+    expected: Option<&str>,
+) -> bool {
+    runtimes
+        .entry(session_id.to_owned())
+        .or_insert_with(|| {
+            inner.find_session_index(session_id).and_then(|index| {
+                test_run_runtime_identity(
+                    &inner.sessions[index],
+                    &EngramObservationProvenance::Ambient,
+                )
+            })
+        })
+        .as_deref()
+        == expected
+}
 
 #[derive(Clone, Debug)]
 struct TestRunCommandOrigin {
@@ -866,6 +936,15 @@ impl AppState {
         observation: TestRunCommandObservation,
     ) {
         let id = observation.execution_id.clone();
+        // The previous attempt no longer owns settlement, even when this
+        // write finishes synchronously or cannot queue a replacement fence.
+        inner
+            .test_runs
+            .observation_persistence
+            .0
+            .lock()
+            .expect("test observation mutex poisoned")
+            .remove(&id);
         inner.test_runs.observations_durable.remove(&id);
         inner.test_runs.observations_failed.remove(&id);
         let before = inner.revision;
@@ -958,9 +1037,18 @@ impl AppState {
         if observations.is_empty() && compacted.is_empty() {
             return;
         }
-        for row in &observations {
-            inner.test_runs.observations_durable.remove(&row.execution_id);
-            inner.test_runs.observations_failed.remove(&row.execution_id);
+        if !observations.is_empty() {
+            let mut pending = inner
+                .test_runs
+                .observation_persistence
+                .0
+                .lock()
+                .expect("test observation mutex poisoned");
+            for row in &observations {
+                pending.remove(&row.execution_id);
+                inner.test_runs.observations_durable.remove(&row.execution_id);
+                inner.test_runs.observations_failed.remove(&row.execution_id);
+            }
         }
         for row in &compacted {
             inner
@@ -1038,15 +1126,7 @@ impl AppState {
             }
         }
         if !ids.is_empty() {
-            // One borrowed index for the whole batch, then publication: the
-            // summaries are all taken at this cut, as one projection was.
-            let runs: Vec<_> = {
-                let mut index = TestRunIdentityIndex::new(inner);
-                ids.iter()
-                    .filter_map(|id| inner.test_run_observations.get(id).map(|row| index.changed_row(id, row)))
-                    .collect()
-            };
-            for run in runs {
+            for run in test_run_changed_observation_summaries(inner, &ids) {
                 // Global deltas need distinct revisions: same-revision rows
                 // are discarded by clients. Only the first emits a persist
                 // dispatch; later revisions use the existing delta allocator,
@@ -1083,139 +1163,234 @@ impl AppState {
     }
 
     fn step_test_command_observation_persistence(&self) {
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let obsolete: Vec<_> = inner
-            .test_runs
-            .unclassified_commands
-            .iter()
-            .filter(|(_, pending)| {
-                inner
-                    .find_session_index(&pending.origin.session_id)
-                    .and_then(|index| {
-                        test_run_runtime_identity(
-                            &inner.sessions[index],
-                            &EngramObservationProvenance::Ambient,
+        self.step_test_command_observation_persistence_with_probe(
+            #[cfg(test)]
+            || {},
+        );
+    }
+
+    fn step_test_command_observation_persistence_with_probe(
+        &self,
+        #[cfg(test)] after_probe: impl FnOnce(),
+    ) {
+        let (monitored, unclassified, native, pending, fences) = {
+            let mut guard = self.inner.lock().expect("state mutex poisoned");
+            let inner = &mut *guard;
+            let index = &mut inner.test_runs;
+            let cursors = &mut index.observation_cursors;
+            let monitored: Vec<_> = inner
+                .test_run_observations
+                .index()
+                .monitored_after(cursors.monitored.as_deref())
+                .take(TEST_RUN_OBSERVATION_PAGE_SIZE)
+                .cloned()
+                .collect();
+            cursors.monitored = test_run_observation_page_end(&monitored);
+            let unclassified = test_run_observation_map_page(
+                &index.unclassified_commands,
+                &mut cursors.unclassified,
+            );
+            let native =
+                test_run_observation_map_page(&index.declared_executions, &mut cursors.native)
+                    .into_iter()
+                    .map(|id| {
+                        let job = index.declared_executions[&id].clone();
+                        (id, job)
+                    })
+                    .collect::<Vec<_>>();
+            let pending = index.observation_persistence.clone();
+            let fences = {
+                let rows = pending.0.lock().expect("test observation mutex poisoned");
+                test_run_observation_map_page(&rows, &mut cursors.fences)
+                    .into_iter()
+                    .map(|id| {
+                        let waiter = rows[&id].1.clone();
+                        (id, waiter)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            (monitored, unclassified, native, pending, fences)
+        };
+
+        let candidates = (
+            monitored.len(),
+            unclassified.len(),
+            native.len(),
+            fences.len(),
+        );
+        if candidates == (0, 0, 0, 0) {
+            return;
+        }
+        let native_jobs = native
+            .into_iter()
+            .filter_map(|(id, execution)| {
+                let (session, observation) = {
+                    let job = match execution.try_lock() {
+                        Ok(job) => job,
+                        // A busy job remains live and can be checked on the next pass.
+                        Err(std::sync::TryLockError::WouldBlock) => return None,
+                        Err(std::sync::TryLockError::Poisoned(error)) => {
+                            panic!("native execution mutex poisoned: {error}")
+                        }
+                    };
+                    (
+                        job.reservation.session_id.clone(),
+                        job.reservation.execution_id.clone(),
+                    )
+                };
+                Some((id, execution, session, observation))
+            })
+            .collect::<Vec<_>>();
+        let completed: Vec<_> = fences
+            .into_iter()
+            .filter_map(|(id, waiter)| {
+                let result = waiter.wait_until(waiter.now())?;
+                Some((id, waiter, result))
+            })
+            .collect();
+        let completed_count = completed.len();
+        #[cfg(test)]
+        after_probe();
+
+        let (repairs, settled, obsolete, runtime_lookups) = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let mut runtimes = HashMap::new();
+            let mut obsolete = 0;
+            for id in unclassified {
+                if inner
+                    .test_runs
+                    .unclassified_commands
+                    .get(&id)
+                    .is_some_and(|pending| {
+                        !test_run_observation_runtime_matches(
+                            &inner,
+                            &mut runtimes,
+                            &pending.origin.session_id,
+                            pending.origin.runtime_identity.as_deref(),
                         )
                     })
-                    != pending.origin.runtime_identity
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in obsolete {
-            inner.test_runs.unclassified_commands.remove(&id);
-        }
-        // Keep original native jobs across prompt changes, only while their
-        // original runtime can still report END. Workers retain their own Arc.
-        let obsolete: Vec<_> = inner.test_runs.declared_executions.iter()
-            .filter(|(_, execution)| {
-                let job = execution.lock().expect("native execution mutex poisoned");
-                inner.test_run_observations.get(&job.reservation.execution_id)
-                    .is_none_or(|row| row.summary.ended_at.is_some()
-                        || inner.find_session_index(&job.reservation.session_id)
-                            .and_then(|index| test_run_runtime_identity(&inner.sessions[index],
-                                &EngramObservationProvenance::Ambient)) != row.runtime_identity)
-            })
-            .map(|(id, _)| id.clone()).collect();
-        for id in obsolete {
-            inner.test_runs.declared_executions.remove(&id);
-        }
-        // A launch acknowledgement may already be Unknown while its provider
-        // is still monitored. Record exact runtime loss once, without claiming
-        // that the workload ended or acquired a terminal result.
-        let stale: Vec<_> = inner
-            .test_run_observations
-            .values()
-            .filter(|row| {
-                (((row.summary.state == TestRunState::Running
-                    || (row.launch_only && row.summary.state == TestRunState::Unknown))
-                    && row.summary.ended_at.is_none()) || row.declared_verdict_pending)
-                    && !row.summary.interrupted
+                {
+                    inner.test_runs.unclassified_commands.remove(&id);
+                    obsolete += 1;
+                }
+            }
+            // Keep a native job only while its original runtime can report
+            // END. A replaced job at the same key belongs to its new owner.
+            for (id, execution, session, observation) in native_jobs {
+                if inner
+                    .test_runs
+                    .declared_executions
+                    .get(&id)
+                    .is_some_and(|current| Arc::ptr_eq(current, &execution))
                     && inner
-                        .find_session_index(row.summary.owner_session_id.as_deref().unwrap_or(""))
-                        .and_then(|index| {
-                            test_run_runtime_identity(
-                                &inner.sessions[index],
-                                &EngramObservationProvenance::Ambient,
-                            )
+                        .test_run_observations
+                        .get(&observation)
+                        .is_none_or(|row| {
+                            row.summary.ended_at.is_some()
+                                || !test_run_observation_runtime_matches(
+                                    &inner,
+                                    &mut runtimes,
+                                    &session,
+                                    row.runtime_identity.as_deref(),
+                                )
                         })
-                        != row.runtime_identity
-            })
-            .map(|row| row.execution_id.clone())
-            .collect();
-        for id in stale {
-            let Some(row) = inner.test_run_observations.update(&id, |row| {
-                row.summary.state = TestRunState::Unknown;
-                row.summary.interrupted = true;
-                row.monitoring_interrupted_at = Some(test_run_timestamp());
-                row.summary.error = Some("Provider runtime ended or changed before reporting this execution's terminal status.".to_owned());
-                row.clone()
-            }) else {
-                continue;
-            };
-            self.persist_test_command_observation_locked(&mut inner, row);
-        }
-        // Repair persisted launch acknowledgements from older hosts without
-        // requiring their still-live provider runtime to be replaced first.
-        let unconfirmed: Vec<_> = inner
-            .test_run_observations
-            .values()
-            .filter(|row| {
-                row.launch_only
-                    && row.summary.ended_at.is_none()
-                    && row.summary.state == TestRunState::Running
-            })
-            .map(|row| row.execution_id.clone())
-            .collect();
-        for id in unconfirmed {
-            let Some(row) = inner.test_run_observations.update(&id, |row| {
-                test_run_observation_launch_unconfirmed(row);
-                row.clone()
-            }) else {
-                continue;
-            };
-            self.persist_test_command_observation_locked(&mut inner, row);
-        }
-        let pending = inner.test_runs.observation_persistence.clone();
-        let completed: Vec<_> = {
-            let pending = pending.0.lock().expect("test observation mutex poisoned");
-            pending
-                .iter()
-                .filter_map(|(id, (expected, waiter))| {
-                    // Poll on the clock the fence's deadline is measured on.
-                    waiter
-                        .wait_until(waiter.now())
-                        .map(|result| (id.clone(), expected.clone(), result))
-                })
-                .collect()
-        };
-        for (id, expected, result) in completed {
-            // Publication captures pending attention as part of its immutable
-            // cut. Release this guard before that path reads the same mutex.
-            pending
-                .0
-                .lock()
-                .expect("test observation mutex poisoned")
-                .remove(&id);
-            // A pending fence holds its run back from compaction, even a
-            // stale one; its removal, and durable detail below, can make the
-            // run eligible. Ask the next selection, as the batch writer does.
-            inner.test_runs.compaction_examined_revision = None;
-            if inner.test_run_observations.get(&id) != Some(&expected) {
-                continue;
+                {
+                    inner.test_runs.declared_executions.remove(&id);
+                    obsolete += 1;
+                }
             }
-            if result.is_ok() {
-                inner.test_runs.observations_durable.insert(id.clone());
-            } else {
-                inner.test_runs.observations_failed.insert(id.clone());
+            let mut repairs = Vec::new();
+            for id in monitored {
+                let Some(row) = inner.test_run_observations.get(&id) else {
+                    continue;
+                };
+                // The live row may have settled or been replaced since the
+                // page was selected. Recheck the original repair predicates.
+                let stale = row.awaiting_runtime_report()
+                    && !test_run_observation_runtime_matches(
+                        &inner,
+                        &mut runtimes,
+                        row.summary.owner_session_id.as_deref().unwrap_or(""),
+                        row.runtime_identity.as_deref(),
+                    );
+                if !stale && !row.has_unconfirmed_launch() {
+                    continue;
+                }
+                if let Some(row) = inner.test_run_observations.update(&id, |row| {
+                    if stale {
+                        row.summary.state = TestRunState::Unknown;
+                        row.summary.interrupted = true;
+                        row.monitoring_interrupted_at = Some(test_run_timestamp());
+                        row.summary.error = Some("Provider runtime ended or changed before reporting this execution's terminal status.".to_owned());
+                    } else {
+                        test_run_observation_launch_unconfirmed(row);
+                    }
+                    row.clone()
+                }) {
+                    repairs.push(row);
+                }
             }
-            if let Some(row) = inner.test_run_observations.get(&id) {
-                let run = test_run_public_observation(&inner, row);
+            let repair_count = repairs.len();
+            self.persist_test_run_evidence_batch_deferring_compaction_locked(
+                &mut inner,
+                repairs,
+                Vec::new(),
+            );
+
+            let mut settled = Vec::new();
+            if !completed.is_empty() {
+                let mut pending = pending.0.lock().expect("test observation mutex poisoned");
+                for (id, waiter, result) in completed {
+                    // A newer write can replace even an identical row's
+                    // fence while the old waiter is being polled off-lock.
+                    if !pending.get(&id).is_some_and(|(_, current)| {
+                        Arc::ptr_eq(&current.completion, &waiter.completion)
+                    }) {
+                        continue;
+                    }
+                    let (expected, _) = pending.remove(&id).expect("same fence checked above");
+                    inner.test_runs.compaction_examined_revision = None;
+                    if inner.test_run_observations.get(&id) != Some(&expected) {
+                        continue;
+                    }
+                    if result.is_ok() {
+                        inner.test_runs.observations_durable.insert(id.clone());
+                    } else {
+                        inner.test_runs.observations_failed.insert(id.clone());
+                    }
+                    settled.push(id);
+                }
+            }
+            for run in test_run_changed_observation_summaries(&inner, &settled) {
                 if let Ok(revision) = self.commit_delta_locked(&mut inner) {
                     self.publish_delta_locked(&inner, DeltaEvent::TestRunChanged { revision, run });
                 }
             }
+            (repair_count, settled.len(), obsolete, runtimes.len())
+        };
+        if repairs + settled + obsolete + completed_count > 0 {
+            let (monitored, unclassified, native, fences) = candidates;
+            eprintln!(
+                "test runs> observation persistence | capture monitored={monitored} unclassified={unclassified} native={native} fences={fences} | probe completed={completed_count} | apply repairs={repairs} settled={settled} obsolete={obsolete} runtimeLookups={runtime_lookups}"
+            );
         }
     }
+}
+
+fn test_run_changed_observation_summaries(
+    inner: &StateInner,
+    ids: &[String],
+) -> Vec<TestRunSummary> {
+    // One targeted view over the current batch, with no unrelated history.
+    let mut index = TestRunIdentityIndex::new(inner);
+    ids.iter()
+        .filter_map(|id| {
+            inner
+                .test_run_observations
+                .get(id)
+                .map(|row| index.changed_row(id, row))
+        })
+        .collect()
 }
 
 fn test_run_public_observation(

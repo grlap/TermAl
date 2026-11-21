@@ -703,6 +703,7 @@ struct PersistFence {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
+#[derive(Clone)]
 struct PersistFenceWaiter {
     completion: Arc<PersistFenceCompletion>,
 }

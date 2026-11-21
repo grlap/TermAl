@@ -202,12 +202,9 @@ async fn federation_authenticate_message(
                         "remote wake outcome query handler deadline").into_response(),
                     Err(_) if telemetry_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
                         "host utilization cache unavailable").into_response(),
-                    Err(_) => {
-                        state
-                            .channel
-                            .fence_security(context.owner, &context.incarnation);
-                        return Ok(federation_request_timeout());
-                    }
+                    // A handler past its deadline is an UNKNOWN outcome for
+                    // this request only; it never tears down the link.
+                    Err(_) => return Ok(federation_request_timeout()),
                 };
                 if policy_handler_expired {
                     // Do not reacquire a contended owner after this deadline;
@@ -266,7 +263,20 @@ async fn federation_authenticate_message(
                 parts.headers.remove(axum::http::header::CONTENT_LENGTH);
                 axum::body::Bytes::from_static(b"{\"error\":\"host utilization cache unavailable\"}")
             }
-            Ok(Err(_)) => return Err(federation_transport_unavailable()),
+            Ok(Err(_)) => {
+                // A response body that failed or overflowed while being
+                // collected is not a security event. Answer a signed UNKNOWN
+                // outcome, never an unsigned reply the sender must fence on.
+                parts.status = StatusCode::SERVICE_UNAVAILABLE;
+                parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+                parts.headers.insert(
+                    axum::http::header::CONTENT_TYPE,
+                    HeaderValue::from_static("application/json"),
+                );
+                axum::body::Bytes::from_static(
+                    b"{\"error\":\"federation response unavailable; the original operation outcome may be unknown\"}",
+                )
+            }
             Err(_) => return Ok(federation_request_timeout()),
         };
     if parts.status.is_server_error()

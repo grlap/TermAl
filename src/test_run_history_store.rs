@@ -160,7 +160,8 @@ mod test_run_history_store {
         /// must not change any indexed field. Those are, for observations:
         /// each evidence association's store, binding root execution, work,
         /// run and claim ids and producer observation id (and the evidence
-        /// list's membership); summary owner session and run id; grant and
+        /// list's membership); summary owner session and run id; monitoring
+        /// eligibility (report awaited or launch unconfirmed); grant and
         /// tool identities; artifact presence and artifact run id. For
         /// compacted proofs: summary run id, and each nested observation's
         /// execution id and association store and binding ids. For
@@ -416,6 +417,7 @@ mod test_run_history_store {
         check: BTreeMap<TestRunCheckBucket, BTreeSet<String>>,
         summary_run: BTreeMap<String, BTreeSet<String>>,
         artifact_run: BTreeMap<String, BTreeSet<String>>,
+        monitored: BTreeSet<String>,
     }
 
     impl RowIndex<TestRunCommandObservation> for TestRunObservationIndex {
@@ -437,6 +439,9 @@ mod test_run_history_store {
             if let Some(artifact) = &row.artifact {
                 add_member(&mut self.artifact_run, artifact.run_id.clone(), key);
             }
+            if row.awaiting_runtime_report() || row.has_unconfirmed_launch() {
+                self.monitored.insert(key.to_owned());
+            }
         }
 
         fn remove(&mut self, key: &str, row: &TestRunCommandObservation) {
@@ -457,6 +462,7 @@ mod test_run_history_store {
             if let Some(artifact) = &row.artifact {
                 remove_member(&mut self.artifact_run, &artifact.run_id, key);
             }
+            self.monitored.remove(key);
         }
     }
 
@@ -475,6 +481,12 @@ mod test_run_history_store {
         }
         pub(super) fn artifact_run(&self, run_id: &str) -> impl Iterator<Item = &String> {
             members(&self.artifact_run, run_id)
+        }
+
+        pub(super) fn monitored_after(&self, after: Option<&str>) -> impl Iterator<Item = &String> {
+            use std::ops::Bound::{Excluded, Unbounded};
+            self.monitored
+                .range::<str, _>((after.map_or(Unbounded, Excluded), Unbounded))
         }
     }
 
