@@ -1,0 +1,29 @@
+{
+  "id": "01a20017-327c-70e1-bb97-e05775df7960",
+  "external_ref": null,
+  "title": "Read-only `engram source` gate admission: test discrimination and exact-argv Lows from the c4c0 review",
+  "outcome": "Read-only `engram source` gate admission: test discrimination and exact-argv Lows from the c4c0 review",
+  "acceptance": [
+    "An `engram source --root R --json` command followed by an empty word ('' or \"\") is refused by the read-only Bash gate.",
+    "The gate's focused tests distinguish a clean root from a dirty root and fail under the mutations the c4c0 Claude review listed.",
+    "The refusal diagnostics for a rejected `engram source` form name the rejected argument."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "read-only-gate",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

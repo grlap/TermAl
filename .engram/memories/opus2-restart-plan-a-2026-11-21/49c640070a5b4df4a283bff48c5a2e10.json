@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-restart-plan-a-2026-11-21",
+    "revision_id": "49c640070a5b4df4a283bff48c5a2e10",
+    "previous": null,
+    "body_sha256": "235e4b1806473a206b795a2794ab782595309b5e62dcbca8b7c156538f635837",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+      "work_ref": "w-b646ed9ef817"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T21:56:32.985245500Z"
+    }
+  },
+  "body": "Greg chose restart option (A) on 2026-11-21 21:55Z (Asistant #2384, „A chce to zrobic!!”, relayed by Fable2 #7337). There is ONE joint restart, after B646 R6 lands, together with c4c0 (f28c6b9f) and the d895 engram install. There is no earlier switch. Order: R5 warm leak tests on Central -> c4c0's Windows leg and landing -> R6 (= R5 + Codex M1 + M2 + the neutral fixture path, authority bytes unchanged) committed on 5ffb6a64, reviewed, then carried byte-identically onto c4c0's master, adopting the pair -> Central LOCAL FULL -> Fable2's (c) audit -> landing -> installs (TermAl build; d895 engram under the write freeze) -> Fable2 sends \"restart now\". Windows B is out for B646 (3 compiler faults tonight). Legal JOB1/JOB2, Wave A and federation go after the restart."
+}

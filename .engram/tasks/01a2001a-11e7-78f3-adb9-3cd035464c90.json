@@ -1,0 +1,31 @@
+{
+  "id": "01a2001a-11e7-78f3-adb9-3cd035464c90",
+  "external_ref": null,
+  "title": "B646 R5 review Lows: launcher prints `input: unknown` for an incomparable admission; missing decide-level tests; notice leftovers; Test refs bullet omits request.sourceId",
+  "outcome": "B646 R5 review Lows: launcher prints `input: unknown` for an incomparable admission; missing decide-level tests; notice leftovers; Test refs bullet omits request.sourceId",
+  "acceptance": [
+    "The launcher summary names a known incomparable admission as such instead of `input: unknown`.",
+    "Decide-level tests cover mixed-format admission and the git_delta_dirty branches through observable outcomes.",
+    "Unused leftovers in src/engram_received_check_notice.rs are removed.",
+    "The question whether the Test refs bullet should name the admitted request.sourceId is put to both coordinators as an authority-text change under the commit-and-push section's (a), (b) and (c), or dropped with a recorded reason."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "source-id",
+    "test-launcher",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

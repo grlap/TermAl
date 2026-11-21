@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-restart-plan-a-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "49c640070a5b4df4a283bff48c5a2e10"
+    ]
+  }
+}

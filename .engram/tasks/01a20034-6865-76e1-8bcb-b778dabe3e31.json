@@ -1,0 +1,31 @@
+{
+  "id": "01a20034-6865-76e1-8bcb-b778dabe3e31",
+  "external_ref": null,
+  "title": "Pass the exact clean candidate range from /fix-bug to /review-changes",
+  "outcome": "After clean-candidate review instructions land, align /fix-bug Step 5 with the authorized detached candidate workflow. Supply the recorded BASE and COMMIT and preserve existing independent review and gate authority.",
+  "acceptance": [
+    "Pass the exact clean candidate range from /fix-bug to /review-changes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "cross-project",
+    "docs",
+    "greg-directed",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
