@@ -23,6 +23,49 @@ function view(version: number, initialRun?: { runId: string; runDir: string }, i
   </TestRunsProvider>;
 }
 
+it("opens on Active and can switch to History and Needs attention", async () => {
+  const active = makeTestRun({ runId: "active-run" });
+  const passed = makeTestRun({ runId: "passed-run", state: "passed", exitCode: 0 });
+  const failed = makeTestRun({ runId: "failed-run", state: "failed", exitCode: 1 });
+  vi.mocked(api.readTestRuns).mockImplementation(async (_project, _signal, _after, filters) => {
+    switch (filters?.view) {
+      case "active": return page(1, [active]);
+      case "attention": return page(1, [failed]);
+      default: return page(1, [active, passed, failed]);
+    }
+  });
+  render(view(1));
+  const selector = screen.getByRole("combobox", { name: "View" });
+  const list = within(screen.getByLabelText("Discovered runs"));
+  expect(await list.findByRole("button", { name: /active-run/ })).toBeInTheDocument();
+  expect(selector).toHaveValue("active");
+  expect(list.getAllByRole("button")).toHaveLength(1);
+
+  fireEvent.change(selector, { target: { value: "history" } });
+  expect(await list.findByRole("button", { name: /passed-run/ })).toBeInTheDocument();
+  expect(list.getAllByRole("button")).toHaveLength(3);
+
+  fireEvent.change(selector, { target: { value: "attention" } });
+  expect(await list.findByRole("button", { name: /failed-run/ })).toBeInTheDocument();
+  expect(list.getAllByRole("button")).toHaveLength(1);
+});
+
+it("opens the finished run from a transcript card outside the Active list", async () => {
+  const finished = makeTestRun({ runId: "finished-run", state: "passed", exitCode: 0 });
+  vi.mocked(api.readTestRuns).mockImplementation(async (_project, _signal, _after, filters) =>
+    filters?.view === "active" ? page(1) : page(1, [makeTestRun(), finished]));
+  const read = vi.mocked(api.readTestRun).mockResolvedValue({ run: finished,
+    detail: makeTestRunDetail({ limitations: "Retained transcript run details" }) });
+  render(view(1, { runId: finished.runId, runDir: finished.runDir }));
+  const list = within(screen.getByLabelText("Discovered runs"));
+  expect(await list.findByRole("button", { name: /test-one/ })).toBeInTheDocument();
+  expect(list.queryByRole("button", { name: /finished-run/ })).not.toBeInTheDocument();
+  const details = within(screen.getByLabelText("Run details finished-run"));
+  expect(await details.findByText("Retained transcript run details")).toBeInTheDocument();
+  expect(details.getByText(/State: passed/)).toBeInTheDocument();
+  expect(read).toHaveBeenCalledWith(finished.runId, expect.any(AbortSignal));
+});
+
 it("waits for its first page even when the aggregate snapshot is ready", async () => {
   let resolve!: (value: api.TestRunPage) => void;
   vi.mocked(api.readTestRuns).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
@@ -133,20 +176,24 @@ it("keeps View, Project and State filters without a Session control or history s
 it("names the session-link scope, sends it to the paged query and clears it without clearing State", async () => {
   const read = vi.mocked(api.readTestRuns)
     .mockResolvedValueOnce(page(1))
+    .mockResolvedValueOnce(page(1))
     .mockResolvedValueOnce(page(1, []))
     .mockResolvedValueOnce(page(1, [makeTestRun({ runId: "other-failed", ownerSessionId: "other", notifySessionId: null, state: "failed" })]));
   render(view(1, undefined, "session-owner"));
   await screen.findByText("test-one");
   expect(screen.getByText(/Showing runs for/)).toHaveTextContent("Owner");
-  expect(read.mock.calls[0][3]).toEqual({ sessionId: "session-owner", state: "", view: "history" });
+  expect(read.mock.calls[0][3]).toEqual({ sessionId: "session-owner", state: "", view: "active" });
   expect(screen.queryByRole("combobox", { name: "Session" })).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("View"), { target: { value: "history" } });
+  await screen.findByText("test-one");
+  expect(read.mock.calls[1][3]).toEqual({ sessionId: "session-owner", state: "", view: "history" });
   fireEvent.change(screen.getByLabelText("State"), { target: { value: "failed" } });
   await screen.findByText("No test runs match these filters.");
-  expect(read.mock.calls[1][3]).toEqual({ sessionId: "session-owner", state: "failed", view: "history" });
+  expect(read.mock.calls[2][3]).toEqual({ sessionId: "session-owner", state: "failed", view: "history" });
   fireEvent.click(screen.getByRole("button", { name: "Show all runs" }));
   await screen.findByText("other-failed");
-  expect(read).toHaveBeenCalledTimes(3);
-  expect(read.mock.calls[2][3]).toEqual({ sessionId: "", state: "failed", view: "history" });
+  expect(read).toHaveBeenCalledTimes(4);
+  expect(read.mock.calls[3][3]).toEqual({ sessionId: "", state: "failed", view: "history" });
   expect(screen.getByLabelText("State")).toHaveValue("failed");
   expect(screen.queryByText(/Showing runs for/)).not.toBeInTheDocument();
 });

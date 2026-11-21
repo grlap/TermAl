@@ -204,6 +204,90 @@ fn source_owner_registration_refuses_pin_mismatch_and_configuration_race_before_
     );
 }
 
+/// Registration refuses a project with no Engram binaryPath exactly as before:
+/// the same 409 and message, with no "code". The typed code is the
+/// source-owner metadata GET's alone. Both registration paths meet it: the
+/// owner check itself, and the re-check just before publication.
+#[test]
+fn source_owner_registration_refuses_an_unconfigured_project_without_a_code() {
+    let fixture = RunFixture::new("source-pin-unconfigured");
+    let session = owner(&fixture);
+    configured_owner(&fixture);
+    let (pin, _) = observed_owner(
+        &fixture.state,
+        &session,
+        std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET,
+    )
+    .unwrap();
+    let unconfigure = |state: &AppState| {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .projects
+            .iter_mut()
+            .find(|p| p.id == fixture.project_id)
+            .unwrap()
+            .engram = None;
+    };
+    let wire = |error: ApiError| -> (StatusCode, Value) {
+        let response = error.into_response();
+        let status = response.status();
+        let bytes = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(axum::body::to_bytes(response.into_body(), 8192))
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    };
+    let mut refusals = Vec::new();
+    for (case, before_check) in [("owner check", true), ("before publication", false)] {
+        configured_owner(&fixture);
+        let id = format!("test-source-owner-unconfigured-{}", before_check);
+        let directory = pinned_run(&fixture, &session, &id, &pin);
+        let error = fixture
+            .state
+            .register_test_run_inner_with_source_owner(
+                &session,
+                registration_request(&id, &directory),
+                &mut TestRunRegistrationDiagnostics::new(&fixture.state.server_instance_id),
+                |state, session, deadline| {
+                    if before_check {
+                        unconfigure(state);
+                        return observed_owner(state, session, deadline);
+                    }
+                    let observed = observed_owner(state, session, deadline)?;
+                    unconfigure(state);
+                    Ok(observed)
+                },
+            )
+            .err()
+            .unwrap();
+        assert!(
+            !fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_registrations
+                .contains_key(&id),
+            "{case}"
+        );
+        refusals.push((case, wire(error)));
+    }
+    for (case, (status, body)) in refusals {
+        assert_eq!(status, StatusCode::CONFLICT, "{case}: {body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("binaryPath is not configured"),
+            "{case}: {body}"
+        );
+        assert!(body.get("code").is_none(), "{case}: {body}");
+    }
+}
+
 #[test]
 fn source_owner_request_is_closed_and_only_present_pins_change_legacy_identity() {
     let root = TestTempRoot::create("source-pin-identity");

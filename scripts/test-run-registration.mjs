@@ -98,7 +98,15 @@ export async function sourceOwnerMetadata(env = process.env) {
   try {
     const url = new URL(`/api/sessions/${encodeURIComponent(session)}/source-owner`, base);
     const response = await fetch(url, { signal: controller.signal, redirect: "error" });
-    if (!response.ok) throw new Error(`source owner metadata refused (${response.status}); no tests started`);
+    if (!response.ok) {
+      const refusal = await hostRefusal(response);
+      const shown = refusal ? `: ${refusal.reason}${refusal.code ? `; code ${refusal.code}` : ""}` : "";
+      const error = new Error(`source owner metadata refused (${response.status}${shown}); no tests started`);
+      // Only the host's typed refusal for an unconfigured project has its own
+      // remedy; every other refusal keeps the launcher's existing correction.
+      error.sourceOwnerUnconfigured = refusal?.code === sourceOwnerUnconfiguredCode;
+      throw error;
+    }
     const pin = await readResponse(response);
     if (!sourceOwnerPinValid(pin)) throw new Error("source owner metadata is malformed or unsupported; no tests started");
     return pin;
@@ -111,7 +119,49 @@ export async function sourceOwnerMetadata(env = process.env) {
   } finally { clearTimeout(timeout); clearTimeout(warning); }
 }
 
-async function readResponse(response) {
+// The most characters of a host's refusal reason a launcher refusal repeats,
+// counted after escaping.
+const hostReasonChars = 512;
+// The host's typed code for a project with no Engram binaryPath configured
+// (src/wire.rs).
+const sourceOwnerUnconfiguredCode = "engram_source_owner_unconfigured";
+
+// The host's own reason for refusing source-owner metadata, from a bounded
+// JSON reply carrying a non-empty `error` string, with its `code` when that is
+// a lowercase snake_case identifier. The body must be valid UTF-8. Control,
+// format and lone surrogate characters are escaped, as is a backslash so that
+// an escape cannot be imitated, and the shown text is cut on a whole escape,
+// stating the received length. Any other reply has no reason, and nothing else
+// from it is repeated.
+async function hostRefusal(response) {
+  let body;
+  try { body = await readResponse(response, { strictUtf8: true }); } catch { return undefined; }
+  if (!body || typeof body !== "object" || typeof body.error !== "string" || !body.error) return undefined;
+  const received = [...body.error];
+  let shown = "";
+  let shownChars = 0;
+  for (const character of received) {
+    const escaped = character === "\\" ? "\\\\"
+      : /[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(character)
+        ? `\\u{${character.codePointAt(0).toString(16)}}` : character;
+    const width = [...escaped].length;
+    if (shownChars + width > hostReasonChars) {
+      shown += `… (${received.length} characters)`;
+      break;
+    }
+    shownChars += width;
+    shown += escaped;
+  }
+  const code = typeof body.code === "string" && body.code.length <= 64
+    && /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u.test(body.code) ? body.code : undefined;
+  return { reason: shown, code };
+}
+
+// A refusal's reason is shown to the user, so its body must decode as UTF-8
+// without replacement; other host replies keep the lenient decoding.
+const strictUtf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+async function readResponse(response, { strictUtf8: strict = false } = {}) {
   if (!response.body) throw responseFailure("missing_response", "host response has no body");
   let length = 0;
   const chunks = [];
@@ -120,8 +170,10 @@ async function readResponse(response) {
     if (length > responseByteLimit) throw responseFailure("oversized_response", "oversized host response");
     chunks.push(chunk);
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw responseFailure("malformed_response", "malformed host response"); }
+  try {
+    const bytes = Buffer.concat(chunks);
+    return JSON.parse(strict ? strictUtf8.decode(bytes) : bytes.toString("utf8"));
+  } catch { throw responseFailure("malformed_response", "malformed host response"); }
 }
 
 function responseFailure(category, message) {

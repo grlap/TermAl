@@ -147,6 +147,10 @@ enum ApiErrorKind {
     /// (`engram_store_transient`). Its stable code goes beside `error`, so a
     /// caller can resend the unchanged request once the store is ready.
     EngramStoreTransient,
+    /// Source-owner metadata was refused because the project has no Engram
+    /// binaryPath configured. Its stable code goes beside `error`, so the
+    /// launcher can name that remedy for this refusal alone.
+    EngramSourceOwnerUnconfigured,
 }
 
 impl ApiErrorKind {
@@ -323,6 +327,16 @@ impl IntoResponse for ApiError {
                 Json(json!({
                     "error": self.message,
                     "code": ENGRAM_STORE_TRANSIENT_API_CODE,
+                })),
+            )
+                .into_response();
+        }
+        if self.kind == Some(ApiErrorKind::EngramSourceOwnerUnconfigured) {
+            return (
+                self.status,
+                Json(json!({
+                    "error": self.message,
+                    "code": "engram_source_owner_unconfigured",
                 })),
             )
                 .into_response();

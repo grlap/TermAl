@@ -706,7 +706,13 @@ export async function createRun({
   try {
     sourceOwner = await sourceOwnerMetadata(env);
     sourceBinary = sourceOwner?.binaryPath ?? sourceBinaryPath(env);
-  } catch (error) { throw refusedBeforeRegistration(error); }
+  } catch (error) {
+    // Registering for credit needs the same metadata, which an unconfigured
+    // project cannot supply, so that typed refusal names its own remedy in
+    // every input mode. Every other refusal keeps the existing correction.
+    if (error.sourceOwnerUnconfigured) throw new Error(`${error.message}; ${sourceOwnerRemedy}`, { cause: error });
+    throw refusedBeforeRegistration(error);
+  }
   const sourceEnv = { ...env, ENGRAM_SOURCE_BINARY: sourceBinary };
   const captureInput = () => commitInputStatus(normalizedRoot, sourceEnv, { pin: sourceOwner });
   let commitInput;
@@ -1348,6 +1354,10 @@ function validateInitialResult(request, result) {
 // How a committed-input run earns credit: it is told to every run that will
 // not, in its summary or, when refused before it has one, in the refusal.
 const registrationCorrection = "register at start with --input commit in the claim's named root";
+const sourceOwnerRemedy = "configure the project's Engram binaryPath, or, for evidence only "
+  + "without verification credit, start a separate foreground hostless run (TERMAL_BASE_URL, "
+  + "TERMAL_SESSION_ID and TERMAL_CLI unset, an absolute ENGRAM_SOURCE_BINARY, no --notify "
+  + "or request id)";
 
 // Names a run whose worker stopped before readiness: no stage ran. A
 // committed-input run's error carries the correction right after it.

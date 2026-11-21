@@ -327,14 +327,29 @@ fn engram_source_owner_authority_locked(inner: &StateInner, session: &str)
     let project = engram_project_for_session_locked(inner, session)
         .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
         .ok_or_else(|| ApiError::conflict("source owner session has no local project"))?;
-    let settings = project.engram.clone()
-        .ok_or_else(|| ApiError::conflict("Engram source owner binaryPath is not configured for this project"))?;
+    let settings = project.engram.clone().ok_or_else(engram_source_owner_unconfigured)?;
     Ok(EngramSourceOwnerAuthority {
         project_id: project.id.clone(), project_root: project.root_path.clone(), settings,
         host_settings: inner.preferences.engram.clone(),
         session_generation: record.active_turn_generation,
         native_creation_id: record.federation_native_creation_id.clone(),
     })
+}
+
+/// The refusal for a project with no Engram binaryPath, typed so the launcher
+/// can name its own remedy instead of a retry.
+fn engram_source_owner_unconfigured() -> ApiError {
+    ApiError::conflict("Engram source owner binaryPath is not configured for this project")
+        .with_kind(ApiErrorKind::EngramSourceOwnerUnconfigured)
+}
+
+/// Test-run registration refuses an unconfigured project with its earlier,
+/// untyped reply: the code belongs to the source-owner metadata GET alone.
+fn engram_source_owner_registration_refusal(mut error: ApiError) -> ApiError {
+    if error.kind == Some(ApiErrorKind::EngramSourceOwnerUnconfigured) {
+        error.kind = None;
+    }
+    error
 }
 
 fn engram_source_owner_error(error: anyhow::Error) -> ApiError {
@@ -367,7 +382,7 @@ impl AppState {
             &self.inner.lock().expect("state mutex poisoned"), session)?;
         let configured = authority.settings.binary_path.as_deref()
             .filter(|path| !path.is_empty())
-            .ok_or_else(|| ApiError::conflict("Engram source owner binaryPath is not configured for this project"))?;
+            .ok_or_else(engram_source_owner_unconfigured)?;
         let cwd = engram_host_workdir(self.persistence_path.as_ref())
             .map_err(|error| engram_source_owner_error(error.into()))?;
         let pin = engram_source_owner_metadata_with(FsPath::new(configured),

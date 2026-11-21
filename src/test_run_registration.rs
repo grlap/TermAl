@@ -945,7 +945,8 @@ impl AppState {
                 self,
                 session_id,
                 EngramSourcePhasePlan::at(requested + ENGRAM_SOURCE_COMMAND_BUDGET, requested),
-            )?;
+            )
+            .map_err(engram_source_owner_registration_refusal)?;
             if &actual != expected {
                 return Err(ApiError::conflict(
                     "test run source owner pin does not match the configured executable",
@@ -1022,7 +1023,8 @@ impl AppState {
                 capture.validate_locked(&inner, session_id, &request.run_id)?;
             }
             if let Some(expected) = &source_owner_authority {
-                let current = engram_source_owner_authority_locked(&inner, session_id)?;
+                let current = engram_source_owner_authority_locked(&inner, session_id)
+                    .map_err(engram_source_owner_registration_refusal)?;
                 if &current != expected {
                     return Err(ApiError::conflict(
                         "test run source owner configuration changed before publication",

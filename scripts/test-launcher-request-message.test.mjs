@@ -2,7 +2,7 @@
 // fixtures. No live host, native verification credit or product gate is minted.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -586,6 +586,96 @@ test("every launch refused before its first stage names its cause and the correc
       assert.doesNotMatch(summary, /not registered at start/u, row.label);
     } else if (!row.startup && !row.afterCreated) {
       assert.equal(runDir, undefined, `${row.label}: no run directory`);
+    }
+  }
+});
+
+// A host that refuses the session's source-owner metadata stops the launch
+// before it has a run directory, in every input mode. A refusal the host
+// explains carries its own reason, escaped and cut on a whole escape at 512
+// shown characters with the received length in characters. Only the typed
+// refusal for an unconfigured project names its own remedy, since registering
+// for credit needs the same metadata; every other refusal, including a busy
+// host, keeps the existing correction. A reply without a readable reason
+// keeps its status alone.
+test("a source-owner refusal names the host's reason and the remedy that fits it", async (t) => {
+  const stages = [{ name: "focused", command: process.execPath, args: ["-e", "process.exit(0)"] }];
+  const unconfigured = "Engram source owner binaryPath is not configured for this project";
+  const long = `bad\u0007reason ${"x".repeat(600)}`;
+  const straddle = `${"x".repeat(509)}\u0007z`;
+  const astral = "\u{1F600}".repeat(600);
+  const replies = [
+    { label: "an unconfigured owner with its code", body: { error: unconfigured, code: "engram_source_owner_unconfigured" },
+      shown: [unconfigured, "engram_source_owner_unconfigured"], remedy: true },
+    { label: "a busy host", status: 429, body: { error: "source owner probe busy" }, shown: ["source owner probe busy"] },
+    { label: "a long reason with a control character", body: { error: long },
+      shown: ["bad\\u{7}reason", `(${[...long].length} characters)`], hidden: ["\u0007", "x".repeat(512)] },
+    { label: "a reason of exactly the bound", body: { error: "y".repeat(512) },
+      shown: ["y".repeat(512)], hidden: ["…"] },
+    { label: "an escape that would straddle the bound", body: { error: straddle },
+      shown: [`${"x".repeat(509)}… (511 characters)`], hidden: ["\\u"] },
+    { label: "a reason of astral characters", body: { error: astral },
+      shown: [`${"\u{1F600}".repeat(512)}… (600 characters)`], hidden: ["\u{1F600}".repeat(513)] },
+    { label: "a reason whose code is not an identifier", body: { error: unconfigured, code: "Not A Code\n" },
+      shown: [unconfigured], hidden: ["Not A Code"] },
+    { label: "a code with an empty segment", body: { error: unconfigured, code: "engram__unconfigured" },
+      shown: [unconfigured], hidden: ["engram__unconfigured"] },
+    { label: "a code with a trailing underscore", body: { error: unconfigured, code: "engram_source_owner_unconfigured_" },
+      shown: [unconfigured], hidden: ["; code"] },
+    { label: "a reason with a backslash", body: { error: "literal \\u{7} text" },
+      shown: ["literal \\\\u{7} text"], hidden: ["literal \\u{7} text"] },
+    { label: "a reason with a lone surrogate", body: { error: "half \ud800 pair" },
+      shown: ["half \\u{d800} pair"], hidden: ["\ud800"] },
+    { label: "a reason that is not valid UTF-8",
+      raw: Buffer.concat([Buffer.from('{"error":"bad '), Buffer.from([0xff]), Buffer.from(' byte"}')]),
+      hidden: ["bad", "�"] },
+    { label: "a malformed body", raw: "not json", hidden: ["not json"] },
+    { label: "a body without an error", body: { message: "elsewhere" }, hidden: ["elsewhere"] },
+    { label: "an oversized body", body: { error: "o".repeat(70_000) }, hidden: ["oooo"] },
+  ];
+  const modes = [
+    { label: "default input", options: { input: undefined, automaticInput: true } },
+    { label: "--input commit", options: { input: "commit" } },
+    { label: "--input plain", options: { input: "plain" } },
+  ];
+  const hostEnv = { ...hostlessEnv(), TERMAL_SESSION_ID: "fixture-owner", TERMAL_BASE_URL: "http://127.0.0.1:9" };
+  for (const reply of replies) {
+    for (const mode of modes) {
+      const where = `${reply.label}, ${mode.label}`;
+      // The refusal comes before the launcher reads the repository, so the
+      // root needs none; nothing may be created in it.
+      const f = fixture(t);
+      const before = readdirSync(f.root, { recursive: true }).sort();
+      const status = reply.status ?? 409;
+      const fetchMock = t.mock.method(globalThis, "fetch",
+        async () => new Response(reply.raw ?? JSON.stringify(reply.body), { status }));
+      let created;
+      let refusal;
+      try {
+        await createRun({ root: f.root, stages, onRunCreated: (directory) => { created = directory; }, ...mode.options }, hostEnv);
+      } catch (error) { refusal = error; } finally { fetchMock.mock.restore(); }
+      assert.ok(refusal, `${where}: refused`);
+      assert.equal(created, undefined, `${where}: no run directory`);
+      assert.deepEqual(readdirSync(f.root, { recursive: true }).sort(), before, `${where}: nothing created`);
+      const message = refusal.message;
+      assert.ok(message.startsWith(`source owner metadata refused (${status}`), `${where}: ${message}`);
+      assert.ok(message.includes("no tests started"), `${where}: ${message}`);
+      for (const text of reply.shown ?? []) assert.ok(message.includes(text), `${where} shows ${text}: ${message}`);
+      for (const text of reply.hidden ?? []) assert.ok(!message.includes(text), `${where} hides ${JSON.stringify(text.slice(0, 20))}: ${message}`);
+      if (!reply.shown) {
+        assert.ok(message.startsWith(`source owner metadata refused (${status}); no tests started`), `${where}: ${message}`);
+      }
+      if (reply.remedy) {
+        for (const part of ["binaryPath", "hostless", "TERMAL_SESSION_ID", "ENGRAM_SOURCE_BINARY", "evidence only", "--notify"]) {
+          assert.ok(message.includes(part), `${where} names ${part}: ${message}`);
+        }
+        assert.ok(!message.includes("register at start"), `${where}: ${message}`);
+        continue;
+      }
+      // Every other refusal keeps the existing correction: registering for
+      // credit in default and commit modes, none for a plain run.
+      assert.ok(!message.includes("hostless"), `${where}: ${message}`);
+      assert.equal(message.endsWith(correction), mode.options.input !== "plain", `${where}: ${message}`);
     }
   }
 });

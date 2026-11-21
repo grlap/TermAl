@@ -981,7 +981,8 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
             | ApiErrorKind::FederationInvalidBinding
             | ApiErrorKind::FederationExecutorAssociationRetired
             | ApiErrorKind::EngramStoreTransient
-            | ApiErrorKind::FederationBoundSessions,
+            | ApiErrorKind::FederationBoundSessions
+            | ApiErrorKind::EngramSourceOwnerUnconfigured,
         ) => None,
         None if error.status.is_server_error() => {
             Some("Rendered Markdown is unavailable due to a read error.".to_owned())

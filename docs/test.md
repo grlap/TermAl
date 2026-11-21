@@ -271,7 +271,15 @@ input: the launcher still measures its own root. The complete pin stays in the
 request's existing immutable registration identity, and executable bytes are
 checked around each observation. A refused GET, malformed pin or byte mismatch
 stops admission; there is no hostless fallback. A partial `TERMAL_*` context
-also cannot become standalone.
+also cannot become standalone. When the host explains a refused GET with a
+valid UTF-8 JSON `error`, the refusal repeats that reason, escaped and cut at
+512 characters, with the host's `code` if it is a lowercase snake_case
+identifier; any other reply shows its status alone. Only the typed
+`engram_source_owner_unconfigured` refusal, for a project with no Engram
+`binaryPath`, names its own remedy in every input mode: configure that
+`binaryPath`, or start a separate foreground hostless run for evidence only,
+since registering for credit needs the same pin. Every other refusal keeps the
+launcher's existing correction.
 
 For an explicitly hostless run, select an absolute `ENGRAM_SOURCE_BINARY`, or
 use the executable under an absolute `CARGO_HOME/bin` (the default is

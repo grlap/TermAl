@@ -566,3 +566,70 @@ async fn source_owner_endpoint_rejects_caller_parameters_and_unknown_sessions() 
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// A project with no Engram binaryPath is refused with its own stable code,
+/// whether it has no Engram settings or settings without a binaryPath. Other
+/// refusals on the route carry no such code.
+#[tokio::test]
+async fn source_owner_endpoint_types_the_unconfigured_binary_path_refusal() {
+    let (state, _, project, session) = metadata_state();
+    let app = Router::new()
+        .route(
+            "/api/sessions/{id}/source-owner",
+            get(get_session_source_owner),
+        )
+        .with_state(state.clone());
+    let owner = |session: &str| {
+        Request::builder()
+            .uri(format!("/api/sessions/{session}/source-owner"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    let set_engram = |engram: Option<EngramProjectSettings>| {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .projects
+            .iter_mut()
+            .find(|p| p.id == project)
+            .unwrap()
+            .engram = engram;
+    };
+    for (case, engram) in [
+        ("no Engram settings", None),
+        (
+            "no binaryPath",
+            Some(EngramProjectSettings {
+                binary_path: None,
+                ..EngramProjectSettings::default()
+            }),
+        ),
+        (
+            "an empty binaryPath",
+            Some(EngramProjectSettings {
+                binary_path: Some(String::new()),
+                ..EngramProjectSettings::default()
+            }),
+        ),
+    ] {
+        set_engram(engram);
+        let (status, body): (StatusCode, Value) = request_json(&app, owner(&session)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{case}: {body}");
+        assert_eq!(
+            body["code"], "engram_source_owner_unconfigured",
+            "{case}: {body}"
+        );
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("binaryPath is not configured"),
+            "{case}: {body}"
+        );
+    }
+    let (status, body): (StatusCode, Value) =
+        request_json(&app, owner("session-not-present")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_ne!(body["code"], "engram_source_owner_unconfigured", "{body}");
+}
