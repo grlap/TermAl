@@ -31,6 +31,12 @@ struct FederationLinkState {
     installed_owner: u64,
 }
 
+impl FederationLinkState {
+    fn security_retired(&self) -> bool {
+        self.security.as_ref().is_some_and(|context| context.is_retired())
+    }
+}
+
 #[derive(Clone)]
 struct FederationChannel {
     snapshot: FederationPeerSnapshot,
@@ -40,6 +46,7 @@ struct FederationChannel {
     server_instance_id: String,
     state: Arc<Mutex<FederationLinkState>>,
     bound: FederationRpcBound,
+    active_test_runs_read: Arc<tokio::sync::Semaphore>,
     opening: Arc<tokio::sync::Mutex<()>>,
     control_slots: Arc<tokio::sync::Semaphore>,
     control_tasks: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>,
@@ -65,6 +72,7 @@ impl FederationChannel {
             server_instance_id: Uuid::new_v4().to_string(),
             state: Arc::new(Mutex::new(FederationLinkState::default())),
             bound: FederationRpcBound::default(),
+            active_test_runs_read: Arc::new(tokio::sync::Semaphore::new(1)),
             opening: Arc::new(tokio::sync::Mutex::new(())),
             control_slots: Arc::new(tokio::sync::Semaphore::new(4)),
             control_tasks: Arc::default(),
@@ -121,7 +129,8 @@ impl FederationChannel {
 
     fn lease(&self, incarnation: &str) -> Result<FederationLinkLease, ApiError> {
         let state = self.state.lock().expect("federation link mutex poisoned");
-        if state.incarnation.as_deref() != Some(incarnation)
+        if state.security_retired()
+            || state.incarnation.as_deref() != Some(incarnation)
             || state.recorded_incarnation.as_deref() != Some(incarnation)
         {
             return Err(federation_stale_link());
@@ -138,7 +147,9 @@ impl FederationChannel {
             .incarnation
             .clone()
             .ok_or_else(federation_stale_link)?;
-        if state.recorded_incarnation.as_deref() != Some(incarnation.as_str()) {
+        if state.security_retired()
+            || state.recorded_incarnation.as_deref() != Some(incarnation.as_str())
+        {
             return Err(federation_stale_link());
         }
         Ok(FederationLinkLease {
@@ -184,7 +195,9 @@ impl FederationLinkLease {
             .state
             .lock()
             .expect("federation link mutex poisoned");
-        if state.incarnation.as_deref() != Some(self.incarnation.as_str()) {
+        if state.security_retired()
+            || state.incarnation.as_deref() != Some(self.incarnation.as_str())
+        {
             return Err(federation_stale_link());
         }
         apply()

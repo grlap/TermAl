@@ -33,6 +33,7 @@ async fn federation_authenticate_message(
         && parts.uri.path() == FEDERATION_EXECUTOR_OUTCOME_ROUTE;
     let telemetry_request = parts.method == axum::http::Method::GET
         && parts.uri.path() == "/federation/v1/host-utilization";
+    let active_test_runs_request = parts.uri.path() == FEDERATION_ACTIVE_TEST_RUNS_ROUTE;
     let durable_request = mailbox_request || relay_request || binding_request || executor_request || prompt_policy_request;
     let request_limit = if prompt_policy_request {
         FEDERATION_PROMPT_POLICY_REQUEST_BYTES
@@ -47,6 +48,8 @@ async fn federation_authenticate_message(
         REMOTE_PROMPT_STATUS_BYTES
     } else if telemetry_request {
         host_utilization::RESPONSE_BYTES
+    } else if active_test_runs_request {
+        FEDERATION_ACTIVE_TEST_RUNS_RESPONSE_BYTES
     } else if executor_request {
         32 * 1024
     } else if mailbox_request || relay_request {
@@ -55,7 +58,7 @@ async fn federation_authenticate_message(
         FEDERATION_FRAME_LIMIT
     };
     federation_check_request_headers(&parts.headers)?;
-    let context = state.channel.security_context()?;
+    let context = state.channel.security_context_for_rpc(active_test_runs_request)?;
     let direction = if state.channel.snapshot.local_role == FederationRole::Satellite {
         "c2s"
     } else {
@@ -89,25 +92,28 @@ async fn federation_authenticate_message(
     let mailbox_intent = if mailbox_request {
         serde_json::from_slice::<FederationMailboxRequest>(&body).ok()
     } else { None };
-    let reserved = {
-        let link = state
-            .channel
-            .state
-            .lock()
-            .expect("federation link mutex poisoned");
-        if link
-            .security
-            .as_ref()
-            .is_none_or(|active| !Arc::ptr_eq(active, &context))
-            || link.recorded_incarnation.as_deref() != Some(context.incarnation.as_str())
-        {
-            return Err(federation_auth_refused());
+    let reserved = match state.channel.authenticated_link_state(active_test_runs_request) {
+        Ok(link) => {
+            if context.is_retired() || link
+                .security
+                .as_ref()
+                .is_none_or(|active| !Arc::ptr_eq(active, &context))
+                || link.recorded_incarnation.as_deref() != Some(context.incarnation.as_str())
+            {
+                return Err(federation_auth_refused());
+            }
+            context
+                .received
+                .lock()
+                .expect("replay window poisoned")
+                .reserve(counter)
         }
-        context
-            .received
-            .lock()
-            .expect("replay window poisoned")
-            .reserve(counter)
+        Err(error) => {
+            // The MAC is already verified for this exact context. Consume
+            // this counter even when the live link lock precludes admission.
+            context.received.lock().expect("replay window poisoned")
+                .reserve(counter).and(Err(error))
+        }
     };
     let mut relay_failure_stage = if reserved.is_err() {
         MailboxRelayHomeRpcStage::ReplayCounter
@@ -146,6 +152,14 @@ async fn federation_authenticate_message(
         let authority: FederationRequestAuthority =
             serde_json::from_slice(header.as_bytes()).map_err(|_| federation_auth_refused())?;
         authority.ensure_expected(&authority_state.channel.snapshot)?;
+        if active_test_runs_request {
+            let lease = FederationLinkLease {
+                channel: authority_state.channel,
+                incarnation: authority_context.incarnation.clone(),
+            };
+            lease.try_with_active_test_runs_authority(|_| Ok(()))?;
+            return Ok(lease);
+        }
         (authority_state.ensure_current)()?;
         authority_state.channel.lease(&authority_context.incarnation)
     };
@@ -202,6 +216,7 @@ async fn federation_authenticate_message(
                         "remote wake outcome query handler deadline").into_response(),
                     Err(_) if telemetry_request => ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
                         "host utilization cache unavailable").into_response(),
+                    Err(_) if active_test_runs_request => active_test_runs_unavailable().into_response(),
                     Err(_) => {
                         state
                             .channel
@@ -209,9 +224,9 @@ async fn federation_authenticate_message(
                         return Ok(federation_request_timeout());
                     }
                 };
-                if policy_handler_expired {
-                    // Do not reacquire a contended owner after this deadline;
-                    // the admitted context authenticates only an unknown result.
+                if policy_handler_expired || active_test_runs_request {
+                    // Policy expiry authenticates only an unknown result.
+                    // The active snapshot checks authority after body collection.
                     response
                 } else if prompt_policy_request {
                     let check = state.ensure_current.clone();
@@ -256,7 +271,7 @@ async fn federation_authenticate_message(
     }};
     let response = restore_output_failure(response);
     let (mut parts, body) = response.into_parts();
-    let body =
+    let mut body =
         match state.channel.control.clock.timeout_at(deadline, axum::body::to_bytes(body, response_limit)).await {
             Ok(Ok(body)) => body,
             _ if telemetry_request => {
@@ -266,9 +281,31 @@ async fn federation_authenticate_message(
                 parts.headers.remove(axum::http::header::CONTENT_LENGTH);
                 axum::body::Bytes::from_static(b"{\"error\":\"host utilization cache unavailable\"}")
             }
+            _ if active_test_runs_request => {
+                parts.status = StatusCode::SERVICE_UNAVAILABLE;
+                parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+                axum::body::Bytes::from_static(b"{\"error\":\"remote Test Runs snapshot unavailable\"}")
+            }
             Ok(Err(_)) => return Err(federation_transport_unavailable()),
             Err(_) => return Ok(federation_request_timeout()),
         };
+    if active_test_runs_request && parts.status.is_success() {
+        // Check live authority after collecting the reply, just before
+        // signing. A busy or changed cut may authenticate only a refusal.
+        let lease = FederationLinkLease {
+            channel: state.channel.clone(),
+            incarnation: context.incarnation.clone(),
+        };
+        if let Err(error) = lease.try_with_active_test_runs_authority(|_| Ok(())) {
+            parts.status = error.status;
+            parts.headers.remove(axum::http::header::CONTENT_LENGTH);
+            parts.headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            );
+            body = axum::body::Bytes::from_static(b"{\"error\":\"remote Test Runs snapshot unavailable\"}");
+        }
+    }
     if parts.status.is_server_error()
         && let Some(request) = relay_body.as_ref()
         && let Some(app) = state.channel.app.as_ref()

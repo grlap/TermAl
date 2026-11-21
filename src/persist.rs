@@ -360,10 +360,17 @@ fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connecti
     open_sqlite_state_read_connection_with_busy_timeout(path, SQLITE_BUSY_TIMEOUT)
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_STATE_SQLITE_READ_OPENS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn open_sqlite_state_read_connection_with_busy_timeout(
     path: &FsPath,
     busy_timeout: Duration,
 ) -> Result<rusqlite::Connection> {
+    #[cfg(test)]
+    TEST_STATE_SQLITE_READ_OPENS.with(|reads| reads.set(reads.get() + 1));
     reject_existing_sqlite_state_path_redirection(path)?;
     let connection = rusqlite::Connection::open_with_flags(
         path,
