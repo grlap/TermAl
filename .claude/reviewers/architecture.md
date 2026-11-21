@@ -1,6 +1,9 @@
 # Architecture Review
 
 Focus: State management, layer boundaries, agent-agnostic patterns, design consistency, maintainability boundaries.
+
+For a new mechanism or a significant behavior change, the item states the goal, the observed problem, the proposed behavior and its cost before code. The existing design reviewer checks necessity, simpler existing alternatives, real host behavior and possible damage to functionality. Do not require protection for hypothetical scenarios; a severity label is not evidence. Do not dismiss a concrete correctness defect merely because no incident has occurred. Small fixes use ordinary review only.
+
 ## Development-Phase Compatibility Policy
 - Legacy compatibility means supporting older persisted schema or older local/internal API shapes from previous development builds, such as obsolete orchestrator fields.
 - Do NOT flag missing schema upgrades, migrations, or backward compatibility for ~/.termal/*.json, browser localStorage state, or local/internal API contracts from previous local-only development builds.
