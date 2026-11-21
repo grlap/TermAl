@@ -1,0 +1,29 @@
+{
+  "id": "01a2007a-338e-7512-9596-159aef4a8381",
+  "external_ref": null,
+  "title": "Design review: the project coordinator chooses the design reviewers (role wording, no session names) in .claude/reviewers/architecture.md",
+  "outcome": "Design review: the project coordinator chooses the design reviewers (role wording, no session names) in .claude/reviewers/architecture.md",
+  "acceptance": [
+    "In .claude/reviewers/architecture.md the sentence \"The existing design reviewer checks necessity, simpler existing alternatives, real host behavior and possible damage to functionality.\" reads \"The project coordinator chooses the design reviewers before code; they check necessity, simpler existing alternatives, real host behavior and possible damage to functionality.\", and the rest of the paragraph is unchanged.",
+    "The change lands as a Markdown-only candidate with the link check and both reviewers, after the 2026-11-21 restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "review-process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

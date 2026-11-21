@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-no-archive-sha-in-gos-2026-11-21",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4a51215c92d14eee9ec315db7a0c7bad"
+    ]
+  }
+}

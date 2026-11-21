@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-grant-use-records-2026-11-21",
+    "revision_id": "9478251f1e434344bd69c2bff1f20755",
+    "previous": "2b49f88c347c4f9dad82f168daad9bab",
+    "body_sha256": "d0d0a908588c64f5c97176260d46c96c482e04adbd6181f8d82fa0181f1744d7",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+      "work_ref": "w-b646ed9ef817"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T23:37:48.463021Z"
+    }
+  },
+  "body": "Continuation of central-chrome-kill-grant-2026-11-16, which is full at 8 KiB (use records 1-7 are there). USE RECORD 8 (Opus2, 2026-11-21). Need: a MEMORY INCIDENT during B646's Windows classification test-ec7cd414 (cold -j1 --bin termal, started 20:59:58Z at 24.7 GiB). FV read 3,764,268 KiB at 21:08:49Z and 1,658,036 at 21:09:22Z, with the launcher reporting STALLED; that is below the owner's 6 GiB self-stop line. Chrome had reopened to 30 processes within 10 minutes of use 7. Authority: the standing grant (Asistant #2113). Fable2 #7285 said a later shortfall is a second need with a second record. I acted without a fresh ask because it was time-critical (the host risked running out of commit). Action, ONCE: Stop-Process -Name chrome on Central at 21:09:37.21Z, 30 chrome processes. FV before 1,542,088 KiB (21:09:37.04Z); FV after 10,145,480 KiB (21:09:42.64Z), 0 chrome. Nothing else touched; the run's owner was separately told to stop its own run. Reported to Fable2 for Greg. LESSON: Chrome reopens within minutes, not 1-2 h, and can hold more than 8 GiB of commit; a cold Windows build started just after a close is not protected by it.\n\nUSE RECORD 9 (Opus2, 2026-11-21), INEFFECTIVE. Need: the d895 engram bin build (12325, warm -j1, 20 GiB warm floor = 20,971,520 KiB). Fable2 #7311 resumed the Central queue under #7308's rule (close only if it closes the gap, right before the LAUNCH). Reads: FV 17,333,640 KiB at 21:29:52Z with 24 chrome processes holding about 6.7 GB private, so FV plus Chrome looked like about 24 GiB. Action, ONCE: Stop-Process -Name chrome at 21:30:00.95Z (24 procs). FV before 17,997,816 (21:30:00.88Z). After: 17,770,944 (21:30:06.39Z) and 16,350,708 (21:30:22Z), with 0 chrome. FV did NOT rise; it kept falling. Something else on Central is consuming commit (probably the idle WSL2 VM or host sessions; not process-hunted, per Greg's rule). No LAUNCH was given. LESSON: Chrome's private bytes are not a reliable predictor of freed commit while another consumer is growing. Read FV twice, a few seconds apart, and close Chrome only when FV is stable.\n\nSTANDING PERMISSION (Fable2 #7368, 2026-11-21 23:37Z), for the rest of tonight's restart path only: the B646 R6 carry --no-run, its LOCAL FULL, and both release builds (TermAl and Engram 5bcd10b8). If FV falls below 8 GiB (8,388,608 KiB) while one of them runs and Chrome holds enough to restore it, ONE Chrome close per run is within the grant. Record each close here and on the item, and Fable2 reports it to Greg. Outside this path, the \"no more closes tonight\" ruling (Fable2 #7313) still applies."
+}

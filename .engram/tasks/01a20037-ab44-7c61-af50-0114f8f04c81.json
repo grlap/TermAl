@@ -1,0 +1,28 @@
+{
+  "id": "01a20037-ab44-7c61-af50-0114f8f04c81",
+  "external_ref": null,
+  "title": "Restore the source citation of Greg's word in the Test refs for remote runs bullet (AGENTS.md, CLAUDE.md)",
+  "outcome": "Restore the source citation of Greg's word in the Test refs for remote runs bullet (AGENTS.md, CLAUDE.md)",
+  "acceptance": [
+    "The Test refs for remote runs bullet in AGENTS.md and CLAUDE.md again cites Greg's word that grants it („tak, Opus moze wypychac”, 2026-10-19, with its source), verbatim, without changing the bullet's scope.",
+    "The change lands under the commit-and-push section's conditions (a), (b) and (c), as a recording of Greg's words."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "authority-text",
+    "provenance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Filed in error by Termal::Fable2. Greg himself asked for the quotes to come out of the Test refs bullet: he objected to the long, quote-heavy draft as „za dlugi i zawiera moje wstawki” (Asistant 588693a8 #2299; B646 note 68f2042aed224b09a639bd9820df710e). Removing the provenance sentence is his direction, so restoring it would go against his word.",
+  "completion": null
+}

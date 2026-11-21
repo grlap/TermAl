@@ -4,8 +4,8 @@
   "title": "Read-only Claude reviewers cannot run `engram source --root ROOT --json`, so they cannot read the candidate's source_id",
   "outcome": "Read-only Claude reviewers cannot run `engram source --root ROOT --json`, so they cannot read the candidate's source_id",
   "acceptance": [
-    "A read-only Claude review child can run `engram source --root <its review root> --json` through the existing read-only Bash gate and receives the complete source_id.",
-    "The read-only Bash gate still refuses every other `engram` subcommand and every `engram source` form that names a root outside the child's review root, writes a file, or takes an argument other than `--root` and `--json`.",
+    "The read-only Claude Bash gate admits `engram source --root <its review root> --json` for a read-only Claude review child on a clean and on a dirty review root, shown by a behavioural test of the gate's allow decision; the live run in the restarted build is tracked as w-e5430c654802.",
+    "The read-only Bash gate still refuses every other `engram` subcommand and every `engram source` form that names a root outside the child's review root, writes a file, or passes an option other than `--root` and `--json`; an appended empty word is tracked separately as w-e05775df7960.",
     "Focused tests of the read-only Bash gate cover the accepted form and the refused forms, through observable allow/refuse decisions."
   ],
   "acceptance_bindings": [],

@@ -1,0 +1,28 @@
+{
+  "id": "01a2007c-4122-7883-bf9f-e5430c654802",
+  "external_ref": null,
+  "title": "After the restart: verify live that a read-only Claude reviewer runs `engram source --root R --json` (c4c0 in the running build)",
+  "outcome": "After the restart: verify live that a read-only Claude reviewer runs `engram source --root R --json` (c4c0 in the running build)",
+  "acceptance": [
+    "In the restarted TermAl build that contains c4c0, a read-only Claude review child runs `engram source --root <its review root> --json` through the read-only Bash gate, on a dirty review root, and receives the complete source_id. The run is observed in a real review, for example Comovo's Claude review half, and recorded with the build hash, the session and the command result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "post-restart",
+    "read-only-gate"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

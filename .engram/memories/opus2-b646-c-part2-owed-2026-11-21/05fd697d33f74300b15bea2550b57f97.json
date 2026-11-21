@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-b646-c-part2-owed-2026-11-21",
+    "revision_id": "05fd697d33f74300b15bea2550b57f97",
+    "previous": null,
+    "body_sha256": "03deb96fb820e1e18dfee7160ea024e9ab9646b6740f52afa3fa373478fb4051",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+      "work_ref": "w-b646ed9ef817"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T22:27:10.090810100Z"
+    }
+  },
+  "body": "B646 (c) final-diff audit, 2026-11-21. PART 1 (content) PASSED and was recorded by Fable2 (#7350) on w-b646. R6 51e94513's four authority blobs equal the concurred R2 78784d1c; (a) is notes 96dcf3ec/0056a962 (Fable2) and 3a2d6de6 (Engram::Fable); (b) is Asistant #2327/#2337. PART 2 is OWED before the landing: when the CARRIED R6 candidate's (R6 re-cut byte-identically onto c4c0's master) gate ends, Opus2 sends Fable2 its commit, its four authority blob ids (AGENTS.md, CLAUDE.md, .claude/commands/review-changes.md, .claude/commands/review-code.md), the run id and both source_ids, and Fable2 records the identity check. Also owed: on the B646 push, mail Engram::Merger (11859) and Engram::Fable the master commit id and push time (memory opus2-b646-push-notify-engram-2026-11-21). Lesson from tonight: the Test refs bullet requires the RUNNER's own review-freeze fingerprint before AND after its run. Put it in every test-ref GO."
+}

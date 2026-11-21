@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-archive-sha-in-gos-2026-11-21",
+    "revision_id": "4a51215c92d14eee9ec315db7a0c7bad",
+    "previous": null,
+    "body_sha256": "77997c4626277e2d8fbda0196e35fbdccb66fdde6131edda060347c8c565cd2c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T22:29:40.039478200Z"
+    }
+  },
+  "body": "Opus2 GO template correction (Fable2 #7354, 2026-11-21 22:29Z, under Greg's „NIE MA RECZNEGO HASHOWANIA”, memory greg-no-manual-hashing-2026-11-21). NEVER ask runners for \"one archive with one whole-archive SHA-256\" or any other manual hash. The only fingerprint allowed is the review-freeze tool's (scripts/review-freeze-fingerprint.mjs), and only where the master Test refs bullet names it: the integration owner's freeze, and the runner's before/after fingerprint on a test-ref FULL. Run evidence is the launcher's own run directory, results and source_ids, reported verbatim, plus the original files transferred as they are. My GO templates from earlier tonight (go-C7-*, go-C6-*, go-s4-*) carry the old hash line; drop it in every new GO."
+}

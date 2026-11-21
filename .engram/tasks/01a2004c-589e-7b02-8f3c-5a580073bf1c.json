@@ -1,0 +1,39 @@
+{
+  "id": "01a2004c-589e-7b02-8f3c-5a580073bf1c",
+  "external_ref": null,
+  "title": "Causal test-run diagnostics can retain awaiting_receipt after the original receipt has been read",
+  "outcome": "After the ordinary causal completion scan validates the retained original send receipt and produces a Ready plan, the pending diagnostic stops asking for that receipt and reports the next deciding condition.",
+  "acceptance": [
+    "A normal retained original relay receipt followed by a Ready plan makes a diagnostic read before the origin pull show awaiting_completion with origin_completion_available, with a behavioral regression.",
+    "The Ready scan still preserves recorded origin and admission failures and does not change receipt custody, retry order or pending row retirement."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "capacity",
+    "cross-project",
+    "diagnostics",
+    "greg-directed",
+    "greg-direction",
+    "host-recording",
+    "multi-machine",
+    "pilot",
+    "refusal-reasons",
+    "remote",
+    "remote-credit",
+    "review-follow-up",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1e0a8-4380-7731-bdc1-7e4fde53a0e3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
