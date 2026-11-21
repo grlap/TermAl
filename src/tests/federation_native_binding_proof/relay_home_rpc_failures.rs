@@ -330,6 +330,11 @@ async fn home_rpc_failures_distinguish_admission_deadline_and_post_handler_autho
         let rows = observed["homeRpcFailures"].as_array().unwrap();
         assert_eq!(rows.len(), 1, "{mode}: {observed}");
         assert_eq!(rows[0]["stage"], expected);
+        if mode == "deadline" {
+            // The record names the phase the deadline hit; nothing after the
+            // expiry (no post-handler check) moves it on.
+            assert_eq!(rows[0]["phase"], "handler", "{observed}");
+        }
         assert_eq!(rows[0]["operation"], "read");
         assert_eq!(rows[0]["status"], 503);
         assert!(mailbox_relay_uuid(rows[0]["requestId"].as_str().unwrap()));
