@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-new-hashing-pair-brief-line-2026-11-21",
+    "revision_id": "0bb6f2b254e34acbac443e426a3ef67a",
+    "previous": null,
+    "body_sha256": "6ce0dc05beb413e8169a51b7ba379c7431094f208b2e80ba859e72d9db31d2bc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T08:04:07.140551200Z"
+    }
+  },
+  "body": "Opus2 rule (2026-11-21 08:00Z, Greg via Fable2 #7109: \"PRZEKAZ WSZYSTKIM, NIE MA RECZNEGO HASHOWANIA\"; full rule in memory greg-no-manual-hashing-2026-11-21).\n- Add NO new hashing, repository or index listing, or identity-computation step to any GO, brief, procedure or plan. The shared source_id from engram source is the one identity; git commit and diff ranges select content.\n- Stop computing new review-freeze fingerprints once w-b646ed9ef817's replacement lands. Until then the test-ref rule still binds the freeze fingerprint.\n- Every review-pair brief I place carries the line: \"Flag any new hashing, repository or index listing, or identity computation as a finding.\"\n- Open question to Fable2: whether comparing a runner's own reported archive SHA-256 on receipt is allowed. Until Fable2 rules, keep only that comparison and add nothing new.\nAlso: before routing a pair anywhere, check that the owner has not already started one under an earlier GO. Opus3 started the 8d1d pair under #2130 while I re-routed it to DL560 (#2132), and the DL560 round had to be withdrawn."
+}

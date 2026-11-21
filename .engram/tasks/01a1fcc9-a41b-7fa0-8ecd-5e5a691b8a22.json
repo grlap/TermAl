@@ -1,0 +1,28 @@
+{
+  "id": "01a1fcc9-a41b-7fa0-8ecd-5e5a691b8a22",
+  "external_ref": null,
+  "title": "ACP providers (Cursor, Gemini) with delayed command description never establish linked-worktree test placement",
+  "outcome": "Found by the Claude reviewer of w-5c8b45a10439 R4 (delegation-839e869d, Low 1). An ACP provider whose command description arrives after the start (Cursor, Gemini) never establishes linked placement, so a genuine test in a distinct linked worktree of the session's repository is refused. w-5c8b45a10439 excludes this case. Fix direction: capture the linked admin identity at the pending start.",
+  "acceptance": [
+    "An ACP delayed-description test command in a distinct linked worktree of the session's repository associates like a Codex or Claude one, shown by a behaviour test that fails before the fix.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acp",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a1fd3f-5139-74b3-b8b2-8b71719d5d7e",
+  "external_ref": null,
+  "title": "A local worker or join failure in the post-reply authority check fences the federation link",
+  "outcome": "After a verified reply, the sender's authority classification separates a confirmed authority or incarnation mismatch, which fences or returns a typed stale refusal, from a local execution failure. A failed blocking job or join, such as run_blocking_api's local 500, is a request-local UNKNOWN and never fences. NativeBinding keeps its typed stale-authority refusal, but cannot swallow a confirmed mismatch that must fence.",
+  "acceptance": [
+    "In the authenticated RPC sender's post-reply authority step, a local failure of the blocking authority job (a worker or join failure, a local 5xx from run_blocking_api) ends that request as UNKNOWN. The link and the incarnation stay. A confirmed authority or incarnation mismatch still fences as today. Shown by behavioural tests: a prompt-policy request whose authority job fails locally keeps the link and the same pair serves the next request; a real authority change still fences.",
+    "For NativeBinding, an ensure_current failure that is a confirmed authority mismatch while the matching incarnation is still installed takes the fence path, or an explicitly ruled equivalent. A local or stale-lease refusal keeps the typed stale-authority refusal. Shown by a behavioural test.",
+    "No timeout or limit value changes. The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

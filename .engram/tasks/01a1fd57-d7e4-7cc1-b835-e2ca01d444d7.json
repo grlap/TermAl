@@ -1,0 +1,28 @@
+{
+  "id": "01a1fd57-d7e4-7cc1-b835-e2ca01d444d7",
+  "external_ref": null,
+  "title": "Source-owner registration tests use real source-owner deadlines; make them deterministic",
+  "outcome": "The tests in src/tests/test_run_registration_source_owner.rs exercise source-owner registration without real wall-clock deadlines. Pins and authorities are either injected at the existing verifier seam, or the deadlines run on a scripted clock, so scheduling delay can never turn an expected result into a deadline error.",
+  "acceptance": [
+    "Every test in src/tests/test_run_registration_source_owner.rs, including source_owner_registration_refuses_an_unconfigured_project_without_a_code, obtains its expected pin, refusal or authority without depending on a real-time deadline (Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET): through the verifier seam or a scripted clock. The tests still assert the same observable results.",
+    "No product behaviour changes. The tests pass in a registered run, and the review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

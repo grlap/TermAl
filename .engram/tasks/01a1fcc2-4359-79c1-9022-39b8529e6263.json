@@ -1,0 +1,37 @@
+{
+  "id": "01a1fcc2-4359-79c1-9022-39b8529e6263",
+  "external_ref": null,
+  "title": "Declared test command's late completion settles Unknown: \"no retained original artifact binding\" (Questly flutter, exit 0)",
+  "outcome": "A declared test command (termal-tests.toml) that completes late, after the provider first returned a handle to the still-running process, settles from its retained original artifact binding. A real exit 0 with a fresh passing artifact must not end Unknown.\nReport (Kimi::Consultant, TermAl mailbox 852a55c9 #532): Questly session-18901 ran its exact committed declared command from the repository root: `flutter test --no-pub --exclude-tags supabase-local --file-reporter json:.tools/termal-results/flutter.json`. It exited 0 locally, with fresh complete Dart JSON reporting done.success=true and 1820 passed. Run observed-ef998b3f74b0af8b23f77b3107bac3caef8751cc4257707913eff818e269052a (06:09:05–06:09:58Z) ended hostObserved, trackingDurability=durable, exitCode=0, state=unknown, verificationRecordIds=[], with error \"declared late completion has no retained original artifact binding\". Codex first returned a handle to the running process; exit 0 arrived in a later read. An earlier observation, observed-5e98af38c436adb8557409259573118f2c18ffa039883d6bc509df01d9ed9ce1, was running without a PID because tracking failed, then ended unknown with exit 1.\nSource pointer (read-only, master b811df61): src/test_run_declared_settlement.rs:~86–137. The binding is built only when exactly ONE open observation matches owner session, runtime identity and tool identity (`[row] if declared`); otherwise it is None and the result is this error. Unverified hypothesis, not claimed: the earlier stale observation (5e98af38) of the same command was still open, so two rows matched. Another possibility is that test_run_late_declared_binding returned None. The agent should not rerun to force a pass.",
+  "acceptance": [
+    "The cause of this Unknown settlement is identified from source and the two observations' retained records: which condition left the binding absent.",
+    "A behaviour test that fails before the fix reproduces the case (a declared command whose provider returns a handle first and whose exit arrives later, alongside the triggering condition), and after the fix it settles from the original artifact binding as passed. Genuinely unbound or mismatched completions still settle Unknown, with their existing errors.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "declared-tests",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

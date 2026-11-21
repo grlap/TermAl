@@ -1,0 +1,28 @@
+{
+  "id": "01a1fd6b-79c9-7961-8d19-fa4560ab1774",
+  "external_ref": null,
+  "title": "Exercise delegation fan-in persistence across shutdown and restart",
+  "outcome": "Behavior coverage proves shutdown holds an exact unsent fan-in that can later dispatch once and a persisted promoted fan-in with no proven enqueue result remains held across restart.",
+  "acceptance": [
+    "Use the actual shutdown, persistence and boot paths to distinguish known unsent from unknown dispatch state after reload.",
+    "Verify that the known-unsent result reaches one provider handoff without creating a new transcript marker and the unknown result is not replayed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "delegation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

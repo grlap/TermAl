@@ -27,12 +27,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1fcd9-e84b-7bc0-9daa-8d1d245a62f1",
+  "disposal_reason": "Folded into w-8d1d245a62f1 on Fable2's ruling (TermAl mailbox 03723eab #5755: \"Fold the operation naming into the 10 s warning and the retirement record\"; #5760: \"carry on with w-bd85090dc418's disposition (folded in here)\"). Under Greg's „do usuniecia, po prostu do usuniecia” a sender-window expiry no longer fences the link, so the senderDeadlineExpired terminal record this item would have extended no longer exists. Its goal moves to w-8d1d: the 10 s warning line and the single retirement line name the fixed operation (FederationRpcRoute::operation()), the counter, the reason and elapsedMs, with no payload. w-8d1d's GREEN candidate 1664f5ad covers this with a test. Its candidates are superseded unlanded: GREEN 31afc89365339ee1e2502fd9e06e4526581c4a8d and RED de98be35db666cb0db1888e4fdaf73661e94d25a. Their author refs author-test/w-bd85090dc418-31afc893 and -de98be35 were pushed at 06:14:01Z and deleted at 07:03:56Z, with no run evidence. Root .tmp/wt-bd85-9474 (clean at 31afc893) goes to Sol-a7bb for removal.",
   "completion": null
 }

@@ -1,0 +1,29 @@
+{
+  "id": "01a1fcc9-a346-7bc1-81b1-3dc438807973",
+  "external_ref": null,
+  "title": "Test-run artifact reads follow a redirected run-id child: keep directory handles through the read (TOCTOU)",
+  "outcome": "Found by the Codex reviewer of w-5c8b45a10439 R4 (delegation-869896d6, Medium 1, test_run_artifacts.rs:378), and ruled out of that item's frozen scope as a pre-existing path. artifact_parent drops its no-follow review-runs handle, the run-id child is canonicalized once, and TestRunDisk::read opens the request and results files by path. A concurrent redirect of the run-id child can therefore move the read, while revalidation checks only the parent path.\nFix direction: keep directory handles through the read (openat-style reads of the run child and its files, no-follow), so that first read and revalidation bind the same objects. Codex notes that the identity comparison in w-348bbf7f969b would not close this; the two are related.",
+  "acceptance": [
+    "A behaviour test that fails before the fix redirects the run-id child between first read and revalidation and shows the read follows it. After the fix the read refuses, or stays bound to the original objects, with no wall-clock assertion.",
+    "Ordinary artifact reads, refusal codes and existing tests are unchanged.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "hardening",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-carry-registered-runs-stand-2026-11-21",
+    "revision_id": "6f6e28e9d63741deb39b919d10109df1",
+    "previous": null,
+    "body_sha256": "21dd40d8ccd0a9af51369ab631b1a898b8adcbe8abae3023ca8fb7436a85335b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T08:55:52.997145Z"
+    }
+  },
+  "body": "Fable2 ruling #7128 (2026-11-21 08:55Z) on byte-identical carries and batch landings: the registered verification runs on the reviewed pre-carry candidates STAND. Do NOT repeat them pre-emptively on the batch or carry commit. Basis: the candidate-commits bullet lets a byte-identical contribution adopt its reviewed candidate's evidence, and a test-bound criterion is judged at the item's own reviewed candidate revision, where its registered run is.\nConditions, each recorded on each item:\n1. The carry's contribution is byte-identical to the reviewed candidate's: same paths, equal pre-image and post-image blob ids, status and mode, with no rename detection (git diff --raw --no-renames --abbrev=40). Record it per item.\n2. The batch passes its focused pass and its Linux FULL on the EXACT batch commit, with equal source ids before and after.\n3. Each evaluation is requested on the reviewed candidate revision, with its registered run.\nFallback: only if an evaluator or Engram refuses because the judged revision differs from the landed one, repeat THAT item's focused registered run on the batch commit, in a named root at that commit.\nAlso from #7129: don't hold ready items for a not-yet-clean sibling. Batch the ready ones; the rest follow in the next batch."
+}

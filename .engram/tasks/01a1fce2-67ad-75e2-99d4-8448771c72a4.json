@@ -1,0 +1,31 @@
+{
+  "id": "01a1fce2-67ad-75e2-99d4-8448771c72a4",
+  "external_ref": null,
+  "title": "Remote run's authenticated native origin facts never reach Central (08431-FULL-1: facts=null, association_stale for 2h40m)",
+  "outcome": "Report from Engram::Fable (TermAl mailbox ebe242f7 #8492, 06:53Z). Engram::Merger (session-11859, claim holder of Engram w-08431f15a711) registered a test-run wait and a native-run lookup for DL560 s4's run test-b79d1765-f547-4761-84ca-64d8aad25d49: started about 04:15Z, typed request #391, committed_input 603a4d60, landing_gate, work revision 2. From 04:19Z to 06:53Z the lookup returns facts=null with association_stale \"awaiting authenticated native origin facts\", and no END reached the runner mailbox after #392. This blocks the P0 landing and the EO C1 witness.\nContext: the Central–DL560 federation link churned all morning, with drops at 04:20, 04:22, 04:33–04:39, 05:33–05:54 and 06:02 (w-70d8b360cdc3), and has been down since 06:02:37Z.\nOpen question: was the run's terminal fact emitted on DL560 during a link drop and never re-sent after reconnect (a K3 fact delivery and retry defect), or is it simply held until the link returns? Expected behaviour: authenticated native origin facts are durably retained on the producing host and delivered once any authenticated link is available, with no manual resend.",
+  "acceptance": [
+    "It is established from DL560's retained run records and Central's lookup state whether test-b79d1765's terminal facts were emitted, when, and why they did not reach Central: held by the link outage, or dropped or not retried after reconnects.",
+    "If it is a defect, a behaviour test reproduces a terminal fact emitted during a link drop, and after the fix it is delivered after re-establishment, with no manual resend and no rerun. The test uses no wall-clock thresholds.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "cross-project",
+    "federation",
+    "k3"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

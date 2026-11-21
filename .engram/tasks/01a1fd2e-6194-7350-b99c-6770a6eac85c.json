@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd2e-6194-7350-b99c-6770a6eac85c",
+  "external_ref": null,
+  "title": "Remove the compiled Engram schema-1 review-freeze check (termal_review_freeze_check) and its inherited Git filter gate",
+  "outcome": "TermAl no longer computes the compiled review-freeze fingerprint. That fingerprint lists the whole index and HEAD tree, and hashes HEAD, the staged and unstaged binary diffs, and untracked bytes. Reviewer prompts no longer instruct it, and the filter gate it brought (refusing configured clean, smudge or process filters) no longer blocks scoped queries: named-root admission, declared-run membership, artifact ignore checks. Shared transport and file-safety helpers stay.",
+  "acceptance": [
+    "src/review_freeze.rs fingerprint verification, src/review_freeze_api.rs, src/review_freeze_process.rs, src/delegation_mcp_review_freeze.rs, the termal_review_freeze_check MCP tool and route, the reviewer-prompt instruction at src/delegations.rs:2839, and their dedicated tests and docs are removed; shared transport/file-safety helpers used elsewhere are kept and moved to a neutral module if needed. A source search recorded on the item shows no remaining caller.",
+    "The inherited filter gate (src/review_freeze.rs:116,125) no longer blocks src/engram_source_roots.rs:1552, src/declared_run_source.rs:137 or src/engram_trx_artifact.rs:770; behaviour tests of those paths pass with a configured filter present.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "greg-directed",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

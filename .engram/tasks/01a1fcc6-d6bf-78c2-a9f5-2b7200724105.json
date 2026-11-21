@@ -1,0 +1,30 @@
+{
+  "id": "01a1fcc6-d6bf-78c2-a9f5-2b7200724105",
+  "external_ref": null,
+  "title": "Completed delegations did not wake their waiting parent (Questly session-18901); it moved only on an unrelated mailbox message",
+  "outcome": "A parent that waits on delegations (termal_resume_after_delegations) resumes from the delegation-completion fan-in when its awaited delegations complete, not only when some unrelated mailbox wake arrives.\nReport (Greg, relayed by Kimi::Consultant, TermAl mailbox 852a55c9 #534, 06:23Z): Questly::Codex2 (session-18901) was waiting on TWO delegations whose results were available, but did not resume on their completion. It moved only after Termal::Fable2 sent it an unrelated direct mailbox message. A mailbox wake is not proof that the result was delivered.\nLikely pair, read-only from GET /api/sessions/session-18901/delegations; times are local -8h, so UTC = +8h:\n- delegation-0f52601b-db71-40dc-a9c2-85b7020b4382 (Codex /review-code, child session-19259), created 06:13:34Z, completed 06:21:00Z;\n- delegation-632873db-0985-42d0-8544-f396199a8a2b (Claude /review-code, child session-19260), created 06:13:34Z, completed 06:17:18Z.\nBoth are reviewers with readOnly policy and reviewResultRequired=true. Fable2's direct message to session-18901 was #5, at 06:22:32Z. The wait id is not yet established. No rerun of the delegations, no new watcher, and this is not to be called expected behaviour.",
+  "acceptance": [
+    "The exact wait (wait id, its registered delegation ids and mode) and what happened at each delegation's completion (terminal publication, fan-in, queued parent prompt or none) are established from the host's retained records, and the failing step is named.",
+    "Stop interrupts the current parent turn and holds its delegation wait without restarting the children or starting another parent turn. If both children finish during the pause, fan-in queues exactly one prompt containing both result sections and holds it until an explicit user prompt or queue resume. That explicit resume delivers the result through delegation fan-in without an unrelated mailbox message. A behavior test fails before the fix and passes after it without a wall-clock timing assertion.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "delegation",
+    "greg-reported",
+    "wake"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

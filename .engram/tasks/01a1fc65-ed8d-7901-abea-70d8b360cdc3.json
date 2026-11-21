@@ -11,7 +11,7 @@
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 1,
+  "priority": 0,
   "labels": [
     "cross-machine",
     "federation",

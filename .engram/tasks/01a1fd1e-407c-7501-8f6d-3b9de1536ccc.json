@@ -1,0 +1,31 @@
+{
+  "id": "01a1fd1e-407c-7501-8f6d-3b9de1536ccc",
+  "external_ref": null,
+  "title": "Remove the raw full-inventory review identity (review_identity*.rs, termal_review_identity tool and API); review uses only the shared source_id",
+  "outcome": "TermAl has one review-input identity: the shared source_id produced by `engram source`, with Git commit and diff ranges selecting the reviewed content. The raw review identity, which lists the whole index (`git ls-files --stage --sparse --debug -z` in review_identity_inventory.rs) and walks directories, is removed from the product. That covers its modules, the termal_review_identity MCP tool, its HTTP API and its documentation, so nothing can call it, not even as an opt-in.",
+  "acceptance": [
+    "The raw review identity capture is deleted: src/review_identity.rs, review_identity_api.rs, review_identity_discovery.rs, review_identity_fs.rs, review_identity_git.rs, review_identity_inventory.rs and their routes, the termal_review_identity MCP tool, and the tests and docs that only exercise them. No caller remains, verified by a source search recorded on the item.",
+    "Every TermAl review, resume and delegation path that used the raw identity uses the shared source_id instead, with Git commit and diff ranges for content selection. No other identity, scan, inventory or environment check is introduced.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd5e-d3aa-7240-9e2d-53aa7bfb35d4",
+  "external_ref": null,
+  "title": "Integrate combo88 on b811df61: 0CD1 3c7a6417, 6236 f149b337, 8d1d 37e8ffd2, 0030 bcfa882d (byte-identical carries; combo87 without FF2C)",
+  "outcome": "One combined candidate on master b811df61 carries the four reviewed, disjoint contributions unchanged. It passes a focused run on its exact input, then one full gate, and lands by fast-forward once each contributing item has its pre-landing evaluation.",
+  "acceptance": [
+    "Integrate combo88 on b811df61: 0CD1 3c7a6417, 6236 f149b337, 8d1d 37e8ffd2, 0030 bcfa882d (byte-identical carries; combo87 without FF2C) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "batch-landing",
+    "integration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -2,10 +2,10 @@
   "id": "01a1fc5d-82d7-7583-ae70-a433186e11cd",
   "external_ref": null,
   "title": "review_identity capture hits its 40 s deadline on a Flutter repo with submodules, blocking a review from starting",
-  "outcome": "No TermAl code change. Ordinary TermAl review already uses committed Git identity. The opt-in raw capture stays unchanged. Comovo owns its separate procedure change to committed BASE + COMMIT review under Greg's authority.",
+  "outcome": "No scanner change. Ordinary TermAl review adopts the shared source_id under the separate procedure item. Comovo owns its own review transition to the same source_id under Greg's direct instruction; Git ranges select the reviewed content.",
   "acceptance": [
-    "A note, with source evidence, states that TermAl's ordinary review and resume paths use the candidate's Git commit/tree and changed status, and never call the raw full-environment review identity.",
-    "The Comovo unblock is recorded as Comovo's own procedure change (committed BASE + COMMIT review) under Greg's word, with its owner.",
+    "TermAl's ordinary review and resume paths identify the review input only by the shared source_id (moved there by w-53eb82ce27a1) and never call the raw full-environment review identity, including as a fallback.",
+    "The Comovo unblock is recorded as Comovo's own procedure change to the shared source_id (owner Comov::Codex), under Greg's word.",
     "No new scanner, gate or capture variant is added; the raw tool stays an unchanged explicit opt-in."
   ],
   "acceptance_bindings": [],

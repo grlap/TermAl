@@ -1,0 +1,31 @@
+{
+  "id": "01a1fcef-d2b6-72f2-a234-2c9b94e31c9b",
+  "external_ref": null,
+  "title": "Federation control-heartbeat liveness teardown at 45 s silence: raise to ≥60 s per Greg's rule (keep liveness detection)",
+  "outcome": "Found by Opus3 while designing w-3bddbf73af2a (TermAl mailbox 03723eab #5763). The control-heartbeat timeout at federation_runtime_io.rs:96 is 45 s, and it tears the link down after that long with no frame received. This is liveness detection, not a slow-request abort, and it stays: a dead connection must be detected, otherwise a stale live-link entry blocks reconnect (the 409 guard in federation_snapshots.rs:112–115). Greg's rule, as relayed, is no timeout-triggered abort or reset below 60 s. So the silence limit rises to at least 60 s, the heartbeat interval stays unchanged, and one bounded warning is logged at the first missed interval. Coordinator ruling by Termal::Fable2.",
+  "acceptance": [
+    "The control link is torn down for liveness only after at least 60 s with no frame received, and one bounded warning is logged before that. A behaviour test on the scripted clock shows a 50 s silence keeps the link and a silence past the limit tears it down. It fails before the change, and it uses no wall-clock thresholds.",
+    "The heartbeat interval and all security fencing are unchanged, and the existing control-heartbeat tests pass with their expectations updated only for the new limit.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-directed",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

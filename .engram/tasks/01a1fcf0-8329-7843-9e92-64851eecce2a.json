@@ -1,0 +1,29 @@
+{
+  "id": "01a1fcf0-8329-7843-9e92-64851eecce2a",
+  "external_ref": null,
+  "title": "Federation middleware runs current_authority() synchronously on async workers for binding and executor routes (blocks runtime threads during StateInner holds)",
+  "outcome": "Found by Opus3 (TermAl mailbox 03723eab #5765). ensure_current, which is current_authority() taking the link mutex and then StateInner (federation_channel_authority.rs:28-36), runs synchronously on the ASYNC worker in the authenticated middleware, both before the handler (federation_http_authenticate.rs:170) and after it (:227), outside any timeout. Only the prompt-policy route runs these checks on the blocking pool (:159, :217). During a multi-second StateInner hold, every authenticated request blocks an async runtime worker twice and its deadline cannot fire. w-3bddbf73af2a moves the relay and mailbox routes onto the blocking pool under the deadline. This item covers the remaining durable routes, binding and executor, with the same pattern: same checks, same order.",
+  "acceptance": [
+    "The binding and executor routes run their pre- and post-handler authority checks on the blocking pool under the request deadline, with the same checks and order. A behaviour test shows that a StateInner hold during such a request does not block an async worker and that the deadline outcome is still produced, with no wall-clock thresholds.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

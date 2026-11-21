@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-test-ref-needs-focused-pass-2026-11-21",
+    "revision_id": "8d5599ec7dc74366a83460f3f3a24634",
+    "previous": null,
+    "body_sha256": "b443ad3194ffb8969c673efca8225b419ff825e467947f19565d39061886b2b7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T05:30:02.453583100Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-21 ~05:25Z, my own slip, caught by Sol-a7bb #2543). The remote-run test ref bullet allows pushing ONLY a merge-ready input: every required review complete with no outstanding Medium or higher, AND a fresh focused compile and tests covering its changes and new tests passed on that EXACT input. I pushed process_limits' test ref (a465a7a5) and started PL-FULL-1 with the pair clean but no focused pass on aa1a9c04 (its 26-case focused leg was still queued). I had done the same on the combo86 batch (2445755d). Before every test-ref push (single or batch), check and cite: (1) a clean pair; (2) a focused run that PASSED on the exact commit or tree being frozen, covering the changed modules and new tests. For a batch, the contributions' own focused runs are on other inputs, so place a focused run on the combined commit first. If none exists, place the focused run (DL560 when Central is constrained) and push the ref only after it passes."
+}

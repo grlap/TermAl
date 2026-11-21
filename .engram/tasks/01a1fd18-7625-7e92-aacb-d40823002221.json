@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd18-7625-7e92-aacb-d40823002221",
+  "external_ref": null,
+  "title": "Federation request UNKNOWN retirements: decode-failure test, diagnostics projection, and a distinct reqwest-timeout reason",
+  "outcome": "Follow-up of w-8d1d245a62f1's review pairs. With no timeout fencing the link, a request whose outcome is UNKNOWN now leaves only a bounded stderr line and a test-only event. Operators need it visible in diagnostics, and the remaining request-path arms need direct tests.",
+  "acceptance": [
+    "A behaviour test drives a verified 2xx reply whose body is not valid JSON through the sender. The request ends UNKNOWN, its counter is retired with exactly one record (reason transport), the link stays up and the next request on the same lease succeeds. It uses no wall-clock wait.",
+    "The federation diagnostics projection, not only stderr, exposes UNKNOWN request retirements with a bounded counter and a last reason and operation per peer, with no payload, path or peer text, so a peer whose requests keep timing out while its link stays up is visible to operators.",
+    "A reqwest client timeout is recorded with its own retirement reason, distinct from other transport failures, decided from the reqwest error kind rather than inferred from timing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-machine",
+    "diagnostics",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

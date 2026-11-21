@@ -1,0 +1,30 @@
+{
+  "id": "01a1fc9d-c979-7c90-90aa-b646ed9ef817",
+  "external_ref": null,
+  "title": "Switch TermAl's source_id consumers to commit ids + one diff hash, in step with Engram w-d895ea3ac77c",
+  "outcome": "Engram w-d895ea3ac77c (P0, owner Engram 11334) changes the shared source_id to root and submodule commit ids plus ONE hash of the Git diff, replacing the per-changed-file changes[] list. This follows Greg's final correction, relayed by Kimi: no per-file inventory or hash-object census, no second identity.\nTermAl reads that shape in several places: the launcher (request.sourceId and results.sourceIdBefore/After validation), the host adapter and source-owner admission, and K3 remote comparisons. TermAl's strict readers switch at ONE agreed switch point with the producer, per the rollout rule in docs/features/source-identity.md. Stored records stay readable as stored and are never recomputed. No parallel identity.\nSteps: TermAl reviews Engram's design note for the delta definition; this item's owner lists every TermAl reader of source_id; then the readers switch in the same window as the producer.",
+  "acceptance": [
+    "Every TermAl reader and comparison of the shared source_id (launcher, host adapter, source-owner admission, K3/remote) accepts the new commit-ids-plus-diff-hash shape at the agreed switch point, with stored older records still read as stored and never recomputed.",
+    "Behaviour tests on those readers cover the new shape and an older stored record. No test pins source text, and no second identity or parallel format is introduced.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input, landed in the same window as Engram's producer change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "cross-project",
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a1fcd6-ff35-77a2-8e5f-13c05876bc56",
+  "external_ref": null,
+  "title": "Keep the coder-test-execution checklist contiguous",
+  "outcome": "Place the verbatim capture-once paragraph outside the numbered checklist, or format it as a continuation that preserves one ordered list. Preserve the wording and verify the rendered steps 1–7.",
+  "acceptance": [
+    "Keep the coder-test-execution checklist contiguous is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

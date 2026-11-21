@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd6b-ac38-7d02-b146-5edf21607661",
+  "external_ref": null,
+  "title": "Cover the relay and mailbox post-handler owner-check deadline with a scripted-clock test",
+  "outcome": "A scripted-clock test holds the post-handler owner check (ensure_current plus with_incarnation) on the relay route and on the mailbox route past FEDERATION_HANDLER_DEADLINE. It asserts the signed 503 UNKNOWN, one expiry line, one record with stage handlerDeadline and phase postAuthority, that the RPC slot is held until the check settles, and that the link is not fenced. The test fails if that arm loses its label.expired() call or its stage.",
+  "acceptance": [
+    "Cover the relay and mailbox post-handler owner-check deadline with a scripted-clock test is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

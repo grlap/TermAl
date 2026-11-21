@@ -1,0 +1,34 @@
+{
+  "id": "01a1fcdd-cbe9-7621-9120-03839d1afe7a",
+  "external_ref": null,
+  "title": "Observation persistence holds the state lock for seconds (test_run_observations.rs:1086): full-history projection and inline compaction under StateInner",
+  "outcome": "From Architect2's read-only diagnosis (note 3f75d1b0 on w-70d8b360cdc3, source b811df61). src/test_run_observations.rs:1086 holds StateInner for the whole observation-persistence step:\n- a repeated full-history projection per completed fence;\n- per stale or unconfirmed row commit housekeeping;\n- full inline compaction.\nGreg's Central log shows that hold at 7469 ms (05:50:42Z), with other waiters up to 12 s. Federation authority and relay admission need the same mutex, so those synchronous checks can overrun peers' budgets. This is a correlation with that day's link drops, not proof. Phase and row counts are absent, so which branch consumed the 7.5 s is unknown.\nFirst fix: a targeted per-batch projection instead of full history, compaction deferred off the lock, and bounded, revalidated work, without timeout increases. Collection scaling in general belongs to w-ee1cc0cf84bf (deferred, unclaimed, R2 held), which is not revived here. Link teardown on timeouts is removed separately in w-8d1d245a62f1.",
+  "acceptance": [
+    "Observation persistence no longer projects full history or compacts inline while holding StateInner. The work under the lock is bounded per batch, and bounded metadata shows the phase and row counts of each persistence step.",
+    "A behaviour test with a large observation history shows the lock-held work is bounded by the batch, not by the history size: it fails before the fix, and it uses counts, not wall-clock thresholds. Recorded results are unchanged.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "host-recording",
+    "performance",
+    "relay",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

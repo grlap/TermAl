@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd86-9da6-7c30-a382-cd99359ae3bd",
+  "external_ref": null,
+  "title": "Route both sends in the own-send acknowledgement regression through the public send handler",
+  "outcome": "a_domain_page_holding_only_the_readers_own_send_is_acknowledged (src/tests/federation_mailbox_participation_regressions.rs) sends both messages through the public send route, using the existing public_send helper, instead of calling federation_mailbox_operation directly. The reported sequence is then covered end to end through public routes.",
+  "acceptance": [
+    "Route both sends in the own-send acknowledgement regression through the public send handler is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "mailbox",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd6b-c1c3-7792-bbbe-08eb816e3a03",
+  "external_ref": null,
+  "title": "Mark a fixed phase before the relay handler's final local-host authority read",
+  "outcome": "The final lease.with_current in serve_mailbox_relay (src/mailbox_relay_rpc.rs, around :130) enters its own fixed phase first. A deadline during that link or StateInner wait is then attributed to that phase, not to the last one the operation entered (\"authority\" for Describe, \"operation\" for Read).",
+  "acceptance": [
+    "Mark a fixed phase before the relay handler's final local-host authority read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "diagnostics",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

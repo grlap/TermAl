@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd03-8e5b-7b60-b03a-0c293369cdbe",
+  "external_ref": null,
+  "title": "Central repeatedly fails to apply remote deltas after a satellite restart: \"remote session `session-4` not found\" for desktop-9bfcgfi",
+  "outcome": "After a satellite restarts, Central applies that satellite's session deltas without errors. A delta for a session Central has not yet mirrored is reconciled, for example by fetching that session or by one bounded resync, instead of failing repeatedly. Every failure that remains names its reason once.",
+  "acceptance": [
+    "The cause of the repeated \"remote delta apply failed … remote session `session-4` not found\" on Central for desktop-9bfcgfi (Windows B), 07:18:01Z–07:19:36Z on 2026-11-21, after Windows B restarted at 07:11:58Z, is identified from source and the console evidence.",
+    "A behaviour test that fails before the fix shows that a delta for a session absent from Central's remote mirror is reconciled, not repeatedly rejected, and passes after the fix, with no wall-clock thresholds.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

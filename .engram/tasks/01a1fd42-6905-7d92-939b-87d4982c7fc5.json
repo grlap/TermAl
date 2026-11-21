@@ -1,0 +1,26 @@
+{
+  "id": "01a1fd42-6905-7d92-939b-87d4982c7fc5",
+  "external_ref": null,
+  "title": "Windows: cargo check --tests fails on master: review_freeze_cli integration test lacks normalize_user_facing_path",
+  "outcome": "On Windows, `cargo check --bin termal --tests` compiles every test target on master without error, including the review_freeze_cli integration test.",
+  "acceptance": [
+    "On Windows, the launcher's rust-tests compile of all test targets succeeds on the exact landed input, including review_freeze_cli and review_identity_cli if still present, shown by a registered or recorded Windows run whose source_id is equal before and after.",
+    "The fix is minimal and changes no product behaviour: the include!-ed src/test_temp_paths.rs no longer calls a binary-crate-only function in integration-test targets, or those targets provide it. No new hashing or identity.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on Windows on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

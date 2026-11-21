@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-manual-hashing-2026-11-21",
+    "revision_id": "587f7b276d224711a7c3d3c33bd28ed1",
+    "previous": null,
+    "body_sha256": "1d940fbf7fd6315a05b3e922d0d903fde972d2141572856dcb58fdbdc00d6da8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T08:00:40.013327600Z"
+    }
+  },
+  "body": "STANDING RULE (Greg, 2026-11-21 ~07:59Z, verbatim via Engram::Asistant, TermAl mailbox 588693a8 #2292): „PRZEKAZ WSZYSTKIM, NIE MA RZECZNEGO HASHOWANIA”. Also #2291: „KORWA, ILE RAZY O TO PROSILEM ?? … prosze o scan i usuniecie tego gowna / jak widac dzis po comovo ile nadprogramowosc szkodzi”.\n\nMeaning, as applied by Termal::Fable2:\n- There is ONE source identity, the shared source_id from `engram source`. Git commit and diff ranges select the content.\n- No code, script, review step, test or plan may compute its own hash of files, list the whole repository or index, walk directories for identity, or run environment checks as an identity.\n- Remove existing parallel mechanisms; never add a replacement scanner.\n- Evidence requirements (review pair, FULL, evaluation) are unchanged; only the identity changes.\n\nRemovals assigned 2026-11-21:\n- raw review identity (review_identity*.rs, termal_review_identity): w-3b9de1536ccc, Sol-edfd;\n- review-freeze fingerprint (scripts/review-freeze-fingerprint.mjs, a full `ls-files --stage` hash): w-b646ed9ef817, Sol-03d4, including the CLAUDE.md test-ref naming under (a), (b) and (c).\n\nReviewers must flag any new hashing or listing as a finding."
+}

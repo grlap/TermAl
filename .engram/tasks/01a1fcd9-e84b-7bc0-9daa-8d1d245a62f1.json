@@ -1,0 +1,38 @@
+{
+  "id": "01a1fcd9-e84b-7bc0-9daa-8d1d245a62f1",
+  "external_ref": null,
+  "title": "Federation sender window tears down the whole link after 10 s; no timeout may disconnect federation, and no limit is raised",
+  "outcome": "Greg reports, via Kimi::Consultant (TermAl mailbox 852a55c9 #534, 06:44Z): „znowu problem, jakis krotki timeout po 10 sekundach rozlaczamy federacje”. termal_list_sessions now reports DL560 unavailable: 503 \"peer authenticated mailbox link is unavailable\". Greg's current rule, as relayed: no abort or reset limit below 60 s, only a bounded warning at 10 s. It is consistent with his earlier source-capture words „Takie sztywne limity bardzo duzo nas kosztuja” and „Min 1 minuta” (docs/features/source-identity.md).\nToday every federation drop traced so far is the 10 s sender window expiring (senderDeadlineExpired, rpcDeadlineBudgetMs=10000 per Sol-c593's design). The sender watchdog then fences, that is tears down, the whole link, and the peer sees controlEof. Central's multi-second state-lock holds (up to 7.5 s, waits up to 12 s) and 6–9 s persist collects push handlers past 10 s, so all three links dropped together at 05:50:49Z.\nChange: the sender-window ABORT and fence happen no earlier than 60 s. At 10 s, log one bounded warning naming the operation, and continue. The replay-window bound (64 counters) and exact-incarnation fencing logic are unchanged except for the deadline. The root cause, Central state-lock contention, is tracked separately (w-e2972bb21221 and the analysis on w-70d8b360cdc3); this item removes the over-tight abort.",
+  "acceptance": [
+    "No timeout path calls fence_security or retires a healthy authenticated incarnation: the request await, the sender-window watchdog and the receiver's handler deadline. A timed-out, unanswered, unreadable or cancelled ordinary RPC settles as UNKNOWN for that request only, its counter retired with one bounded record naming the fixed operation, and every existing timeout and limit value is unchanged from base (10 s request, sender window and attestation; 2 s telemetry; 5 s handler). A behaviour test on the scripted clock shows a timed-out RPC FOLLOWED BY successful use of the SAME enrolled pair, with no re-pairing, no rerun of work and no wall-clock thresholds. It fails on today's code.",
+    "Genuine authentication and security failures (MAC, replay, authority, incarnation mismatch) still fence, and the replay guarantee holds without teardown: the unresolved-counter handling is explicit and no counter is deleted silently. The existing security tests pass, and the onboarding expiry test and the health-deadline test that pinned teardown are updated as part of this product change.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

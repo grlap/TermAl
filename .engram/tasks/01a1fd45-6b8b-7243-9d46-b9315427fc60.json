@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd45-6b8b-7243-9d46-b9315427fc60",
+  "external_ref": null,
+  "title": "SSE test-run publication captures and validates the complete history projection cut under StateInner (publish_delta_locked / test_run_history_projection_locked)",
+  "outcome": "Publishing test-run changes over SSE no longer captures or validates the complete test-run history projection cut while holding StateInner. The lock work for a publication is bounded by the changed rows, not by total history. Ordered revisions and the DTO contract are unchanged.",
+  "acceptance": [
+    "publish_delta_locked's TestRunChanged handling and test_run_history_projection_locked no longer capture or validate the complete TestRunProjectionCut under StateInner. The under-lock work for one publication batch is bounded by its changed rows, and one immutable transport cut is shared per batch. Ordered revisions and the DTO contract are unchanged.",
+    "A behaviour test that fails before the fix shows that the under-lock capture work for a publication is the same with or without a large unrelated terminal history (counter-based, no elapsed-time assertion), and passes after.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

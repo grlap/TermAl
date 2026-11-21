@@ -1,0 +1,24 @@
+{
+  "id": "01a1fd5a-8db5-7441-9d25-a6185ff56811",
+  "external_ref": null,
+  "title": "Host-generated evaluator and reviewer briefs still teach \"git diff HEAD -- . | sha256sum\" against Greg's no-manual-hashing rule",
+  "outcome": "No TermAl-generated brief, refusal text or read-only allowlist example teaches or suggests hashing a diff or files (for example sha256sum) as a way to identify source. Evaluator and reviewer guidance points only at the shared source_id from engram source and plain read-only Git display commands.",
+  "acceptance": [
+    "Host-generated evaluator and reviewer briefs still teach \"git diff HEAD -- . | sha256sum\" against Greg's no-manual-hashing rule is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

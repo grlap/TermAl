@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd6b-cd06-7b71-95b7-f313359c646b",
+  "external_ref": null,
+  "title": "Relay phase trace: make enter()'s frozen guard observable, or drop it",
+  "outcome": "Either a test fails when MailboxRelayPhaseTrace::enter() stops ignoring phases after freeze(), or the guard is removed as unobservable, with a comment saying why. Today snapshot() and a repeat freeze() both return the frozen copy, so removing the guard only changes live state that nothing reads.",
+  "acceptance": [
+    "Relay phase trace: make enter()'s frozen guard observable, or drop it is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "federation",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

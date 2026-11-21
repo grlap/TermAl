@@ -1,0 +1,29 @@
+{
+  "id": "01a1fcd3-a1e2-7a12-852f-e31d84c56e78",
+  "external_ref": null,
+  "title": "Codex app-server notification thread/readState/changed is unhandled (diagnostic logged)",
+  "outcome": "TermAl logs `codex diagnostic> unhandled shared Codex app-server notification thread/readState/changed`. Greg's host log, relayed by Asistant in TermAl mailbox 588693a8 #2216, shows it at 06:17:23.815Z on 2026-11-21, with threadId 01a1a468-972e-7ab0-aa7e-d9727a983ef2, firstUnread turnId 01a1a468-9778-7920-9d71-2833afa40203, revision b5f7c955-…, emittedAtMs 1795241843815. src has no handler for \"thread/readState\". Establish what the notification means for TermAl (likely read-state bookkeeping in the Codex app-server), then either handle it or ignore it explicitly without a diagnostic, with no behaviour change to turns or delivery. This is a separate symptom from the native relay 409s in the same log.",
+  "acceptance": [
+    "The notification's meaning is stated from the Codex app-server protocol, and whether TermAl needs it.",
+    "It is handled or explicitly ignored, so it no longer logs as unhandled, with a behaviour test over the notification path. Turn and delivery behaviour are unchanged.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

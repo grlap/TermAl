@@ -1,0 +1,28 @@
+{
+  "id": "01a1fd57-f148-72d0-834d-9463d1903102",
+  "external_ref": null,
+  "title": "Host diagnostic lines are written synchronously to stderr on async runtime workers",
+  "outcome": "Bounded host diagnostic lines written from async request paths, such as the federation request deadline-expiry line and the federation link terminal line, go through a nonblocking sink. A stalled stderr can then never delay a request's reply or block a Tokio worker.",
+  "acceptance": [
+    "Diagnostic lines emitted on async request paths in the federation listener and RPC code (FederationRequestLabel::expired, the link terminal line in fence_rpc_security_failure and observe_terminal_event, and others found by a sweep) are handed to a bounded nonblocking sink instead of a synchronous eprintln!. A behavioural test with a stalled sink shows the request's signed reply still returns by its deadline.",
+    "Line content, bounds and order are unchanged. No timeout or limit value changes. The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "host-logging"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

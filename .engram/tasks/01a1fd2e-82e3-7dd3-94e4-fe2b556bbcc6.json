@@ -1,0 +1,29 @@
+{
+  "id": "01a1fd2e-82e3-7dd3-94e4-fe2b556bbcc6",
+  "external_ref": null,
+  "title": "Remove remaining independent source checks: termal-tests.toml hash, UI lockfile hash, watcher veto on carried-check evidence, sha256sum diff guidance; then retired capture helpers and docs",
+  "outcome": "No TermAl path checks source by its own hashing or by watcher events. Source evidence comes only from the shared source_id. Historical records stay readable, and retired capture code and docs that present old behaviour as current are removed.",
+  "acceptance": [
+    "ACTIVE slice: (1) src/engram_declared_tests.rs:69,88,584 no longer re-reads and SHA-256-hashes termal-tests.toml as source drift (callers src/declared_run_source.rs:145, src/engram_trx_artifact.rs:630,662); declaration parsing and membership stay. (2) scripts/test-ui-bootstrap.mjs:111,137 no longer hashes ui/package-lock.json for drift; dependency setup and validation stay. (3) The watcher veto from src/workspace_watch_observation.rs into src/engram_carried_checks.rs:2021,2052 and src/engram_registered_closing_baseline.rs:120 is removed from source evidence. (4) The `git diff HEAD | sha256sum` guidance in src/acceptance_evaluation.rs:1703,1709, src/claude_read_only_refusal.rs:83,86 and the diff-fingerprint rationale in src/claude.rs:1433,1850,1873 are removed. Behaviour tests cover the changed paths.",
+    "HISTORICAL slice: the obsolete capture helpers (git-commit:<HEAD> fixtures in src/ordinary_commit_input.rs, src/engram_source_roots.rs, src/engram_turn_observations.rs; scripts/test-launcher-source.mjs:83 captureSourceMetadata), the test-only toolchain probe (src/engram_check_toolchain.rs, src/engram_build_checks.rs:53, src/engram_turn_checks.rs:1894) and docs/UI text presenting content-v1 or old fingerprints as current are removed; readers of stored historical evidence are kept.",
+    "Each slice: the review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

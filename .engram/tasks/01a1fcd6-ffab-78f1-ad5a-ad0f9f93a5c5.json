@@ -1,0 +1,28 @@
+{
+  "id": "01a1fcd6-ffab-78f1-ad5a-ad0f9f93a5c5",
+  "external_ref": null,
+  "title": "Name the existing source evidence in reviewer briefs when needed",
+  "outcome": "Amend the review brief checklist so that, when reviewer source_id evidence is needed, the brief includes the parent’s existing recorded run ID or original result locator. Carry that reference through review without a further capture.",
+  "acceptance": [
+    "Name the existing source evidence in reviewer briefs when needed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "documentation",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

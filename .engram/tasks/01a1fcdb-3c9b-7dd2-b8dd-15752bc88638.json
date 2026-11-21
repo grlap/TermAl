@@ -1,0 +1,31 @@
+{
+  "id": "01a1fcdb-3c9b-7dd2-b8dd-15752bc88638",
+  "external_ref": null,
+  "title": "Federation link does not recover after teardown: DL560 stayed disconnected 40+ min (57 attempts) with no satellite-side reconnect",
+  "outcome": "Greg, verbatim (Asistant #2232): „system jest nonrecoverable WTF”.\nEvidence:\n- The DL560 satellite closed its link at 06:02:37Z (senderDeadlineExpired, inc c90b233e). After that, its console log (Asistant #2228) shows NO further federation link or reconnect lines through 06:41Z.\n- Meanwhile Central's worker for DL560 reached attempt 57 in retryBackoff, with retryAfterMs ≈203 s, attestation lastReason controlEof and last success 05:55:06Z (termal_federation_status, 06:35:55Z).\n- termal_list_sessions reports DL560 unavailable: 503 \"peer authenticated mailbox link is unavailable\".\n- Earlier the same day, every teardown reconnected within seconds.\nRequired: after ANY link loss, whichever side tears it down and whatever the load, the pair re-establishes automatically and promptly once both hosts are up. If a stage cannot complete, it is visible with a named reason, never a silent stall. No manual restart required.",
+  "acceptance": [
+    "The cause of the DL560 non-recovery after 06:02:37Z is identified from source and the retained logs of both sides: which stage of re-establishment fails or stalls, and why.",
+    "A behaviour test that fails before the fix reproduces that stall after a satellite-initiated teardown, and after the fix the pair re-establishes without a restart. Any stage that cannot complete reports a named reason. No wall-clock thresholds.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "greg-reported",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1fc65-ed8d-7901-abea-70d8b360cdc3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

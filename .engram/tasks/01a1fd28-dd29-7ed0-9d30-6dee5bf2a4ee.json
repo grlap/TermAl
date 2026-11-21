@@ -1,0 +1,31 @@
+{
+  "id": "01a1fd28-dd29-7ed0-9d30-6dee5bf2a4ee",
+  "external_ref": null,
+  "title": "Record the one-source_id contract in TermAl's portable skills and review commands",
+  "outcome": "TermAl's portable agent skills (.agents/skills/) and review commands state the same contract as Engram's: the shared Engram-owned source_id is the only source identity for review, gates, handoffs and evidence. There is no task-, review- or run-specific fingerprint, no manual or unchanged-file hashing, no environment inventory, no fallback scanner and no replacement identity. Git commit, tree and diff select and display scope. A missing, partial or refused source_id is an evidence gap for the shared producer, never permission for a local hash. Existing validation requirements are unchanged.",
+  "acceptance": [
+    "The TermAl skills and review commands that describe source identity, testing, review or handoff evidence carry the contract text, worded identically in substance to Engram's agreed text (coordinated with Engram::Fable), and no TermAl instruction file still tells an agent to compute a fingerprint or hash files for identity.",
+    "No test reads or pins the content of these Markdown files; the doc-link check passes on the exact landed input.",
+    "The review pair has no outstanding Medium-or-higher finding on the exact landed input, and any authority-text wording goes through (a), (b) and (c)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "docs",
+    "greg-directed",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

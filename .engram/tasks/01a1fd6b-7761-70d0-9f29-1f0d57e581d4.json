@@ -1,0 +1,28 @@
+{
+  "id": "01a1fd6b-7761-70d0-9f29-1f0d57e581d4",
+  "external_ref": null,
+  "title": "Show Resume for a paused delegation wait before any result is queued",
+  "outcome": "An idle parent with an unfinished delegation wait and an empty queue has a visible Resume control after explicit Stop. Resume calls the existing queue route and releases the automatic-resume latch without waiting for a result or starting the children again.",
+  "acceptance": [
+    "A UI behavior test exercises an idle paused delegation wait with an empty queue and verifies that Resume calls the existing session queue action.",
+    "The control preserves the existing recovery behavior for an actionable queued prompt, capacity wait and test-run wait."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "delegation",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

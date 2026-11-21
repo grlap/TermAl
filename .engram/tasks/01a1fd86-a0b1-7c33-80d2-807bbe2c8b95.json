@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd86-a0b1-7c33-80d2-807bbe2c8b95",
+  "external_ref": null,
+  "title": "Split src/mailboxes.rs below the Rust module size threshold",
+  "outcome": "src/mailboxes.rs (4299 lines after the mailbox-id guard) is split by pure code moves into focused modules below the ~3,000-line threshold in .claude/reviewers/architecture.md. Each new file carries the provenance header. The mailbox-id echo and canonical-id helpers (mailbox_id_echo, decode_mailbox_relay_locator, require_canonical_mailbox_id) are a natural first slice. Behaviour is unchanged.",
+  "acceptance": [
+    "Split src/mailboxes.rs below the Rust module size threshold is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "mailbox",
+    "refactor"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

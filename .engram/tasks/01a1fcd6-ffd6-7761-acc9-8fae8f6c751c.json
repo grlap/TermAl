@@ -1,0 +1,28 @@
+{
+  "id": "01a1fcd6-ffd6-7761-acc9-8fae8f6c751c",
+  "external_ref": null,
+  "title": "Clarify the raw-byte exceptions reference in the review commands",
+  "outcome": "Clarify or remove the v2 pointer’s reference to recorded raw-byte exceptions in both review commands. Obtain concurrence on exact authority wording and preserve existing review authority semantics.",
+  "acceptance": [
+    "Clarify the raw-byte exceptions reference in the review commands is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "documentation",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

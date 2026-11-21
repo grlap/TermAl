@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd3f-288a-7b32-91ab-5ab21803ba12",
+  "external_ref": null,
+  "title": "Mailbox and relay federation routes sign HTTP 500, not a signed UNKNOWN 503, when the receiver fails to collect a response body",
+  "outcome": "When the receiver fails to collect a response body on a mailbox or mailbox-relay route, the sender gets a signed UNKNOWN reply. That reply is classified as \"outcome may be unknown\" (503 class) for the mailbox operation, never as a definite failure, and it never fences. This matches the smaller-limit routes.",
+  "acceptance": [
+    "On mailbox and mailbox-relay routes, a handler response whose body stream fails or overflows is signed as an UNKNOWN outcome. It uses the same signed 503 envelope as the smaller-limit routes and keeps each route's existing typed mailbox envelope where one applies. Both route limits are preserved: the 64 MiB finite-output bound and the route's own response limit. Shown by a behavioural test that drives the mailbox branch, as well as the health branch, with a failing and an overflowing body.",
+    "The sender's mailbox classification of that reply is UNKNOWN, with the idempotency key retained, and the link is kept. No timeout or limit value changes.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

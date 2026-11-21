@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd10-3ba4-7a41-adbf-d19b3bad344c",
+  "external_ref": null,
+  "title": "Verification record can classify a clean but off-pin submodule as clean: engram_verification_record.rs checks only for empty change arrays",
+  "outcome": "A source in which any gitlink's checked-out commit differs from its recorded pin is never classified as clean by TermAl's verification record, under both the legacy and the new source_id shape (Engram w-d895ea3ac77c).",
+  "acceptance": [
+    "engram_verification_record.rs (cleanliness classification, currently around line 136) treats a source as clean only when no staged, unstaged or untracked change exists AND no gitlink is off its recorded pin; an off-pin child commit makes the source not clean under both source_id shapes.",
+    "A behaviour test that fails before the fix builds a repository with a clean submodule checked out at a commit other than its recorded pin, and shows that the verification record does not classify it as clean; it passes after the fix, with no wall-clock thresholds.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "source-identity",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

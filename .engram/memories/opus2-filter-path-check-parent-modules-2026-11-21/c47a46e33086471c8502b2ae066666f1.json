@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-filter-path-check-parent-modules-2026-11-21",
+    "revision_id": "c47a46e33086471c8502b2ae066666f1",
+    "previous": null,
+    "body_sha256": "03cbd87e0373f9cd7acf8a53471099b2ce547c5b0e3b6574e8704979302401ce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T07:47:00.732071500Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-21 ~07:45Z, my own miss). I verified that \"mod admission_deadline\" and \"mod relay_production_shape\" existed, then passed the author's filter tests::federation_native_binding_proof::relay_production_shape::admission_deadline:: to a runner. It selected ZERO tests (3BDD-RED-1, test-1e440859), because relay_production_shape is declared inside relay.rs, so the real path has one more level: ...::federation_native_binding_proof::relay::relay_production_shape::admission_deadline::. Rule: before sending any cargo test filter, resolve the WHOLE module chain from src/tests/mod.rs downwards (each \"mod X;\" or #[path] declaration and the file that declares it), or use git grep to find the parent of every module in the filter. Finding the leaf \"mod\" declaration alone is not enough. A zero selection is a STOP, never a pass."
+}

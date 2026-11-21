@@ -1,0 +1,29 @@
+{
+  "id": "01a1fd58-07be-7252-92be-2419fc912e82",
+  "external_ref": null,
+  "title": "Relay and mailbox capacity refusals (429 RpcCapacity) leave no home failure record",
+  "outcome": "When the relay home refuses a relay request for per-peer capacity (stage RpcCapacity, HTTP 429), the refusal is observable in the bounded home failure records. The wire status and the bounded retention are unchanged.",
+  "acceptance": [
+    "A relay request refused for capacity produces one bounded homeRpcFailures record with stage rpcCapacity, while its wire reply stays the signed 429. The 5xx-only gates in federation_http_authenticate.rs and MailboxRelayHomeRpcFailures::note_with_phases admit exactly that stage. Shown by a behavioural test that saturates the per-peer bound.",
+    "No other 4xx refusal is recorded, and retention and redaction are unchanged. The review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

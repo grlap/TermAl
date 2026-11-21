@@ -1,0 +1,29 @@
+{
+  "id": "01a1fd58-23f2-7b33-b480-0afd932aeef5",
+  "external_ref": null,
+  "title": "relay_admission_deadline's one-shot owner-check hold is not filtered to the relay read",
+  "outcome": "The admission-deadline test holds the owner check only for the relay read it drives, so no background request reaching the home router can take the hold. The test's result therefore depends only on the product.",
+  "acceptance": [
+    "In src/tests/federation_native_binding_proof/relay_admission_deadline.rs, the armed owner-check hook (the one-shot holding.swap in ensure_current) is consumed only by the relay read request under test, identified for example by its relay request id or operation before the arm is taken, not by whichever authenticated request reaches the home first. The test keeps its assertions: the check runs off the async workers, the deadline answers an UNKNOWN 503 while held, the held check keeps its RPC slot, and the record names phase admission.",
+    "The test passes deterministically, with no retries or added waits, and still fails on the pre-w-3bdd product for the async-worker reason. The review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "nondeterminism",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

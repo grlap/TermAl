@@ -1,0 +1,27 @@
+{
+  "id": "01a1fd86-8648-7210-bc1e-181b61e86ac8",
+  "external_ref": null,
+  "title": "Assert the domain numeric-acknowledge refusal message, not only its 400",
+  "outcome": "numeric_ack_is_rejected_for_domain_members_but_standalone_behavior_remains (src/tests/federation_mailboxes.rs) asserts the domain refusal's message, \"central domain acknowledgement requires only the unchanged issued receipt\", as well as the 400. It then fails if the malformed-id guard, or any other 400, answers the request first.",
+  "acceptance": [
+    "Assert the domain numeric-acknowledge refusal message, not only its 400 is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

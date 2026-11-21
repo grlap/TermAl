@@ -1,0 +1,31 @@
+{
+  "id": "01a1fcd7-1656-7271-94a2-09664d9b6881",
+  "external_ref": null,
+  "title": "Local native relay notification retried with 409 for 20+ minutes; diagnostics can't identify its target or refusal stage",
+  "outcome": "Greg's Central host log (Asistant #2216) shows \"native relay notification 704 deferred (409 Conflict)\" every minute from 06:17:41Z to 06:36:41Z on 2026-11-21.\nArchitect2's read-only diagnosis (note 7765f276 on w-70d8b360cdc3): 704 is a recipient-side LOCAL notification row on Central. Its intended recipient is a Central session, and the home-local wake path uses no remote link lease, so the DL560 link outage does NOT explain the 409. That corrects the coordinator's first hypothesis.\nExisting diagnostics cannot identify the target session or message, or the exact refusal stage; the same log line also covers removal-reconciliation errors. The row is durably retried, but whether it eventually hands off, and who waits on it, are unknown.\nNeeded: bounded metadata-only diagnostics that name the target session, the stage and the reason for a deferred local notification, then the cause of this 409 and a fix if it is a defect. No body logging.",
+  "acceptance": [
+    "A deferred local relay notification's target session, refusal stage and reason are visible through existing read-only diagnostics, metadata only, shown by a behaviour test.",
+    "The cause of the repeated 409 on a local home wake is identified. If it is a defect, it is fixed with a test that fails before the fix, and delivery is never lost or double-delivered.",
+    "The review pair is clean, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "diagnostics",
+    "greg-reported",
+    "mailbox",
+    "relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

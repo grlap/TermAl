@@ -1,0 +1,30 @@
+{
+  "id": "01a1fd46-7e7c-7ee1-88ae-7877079a9922",
+  "external_ref": null,
+  "title": "Relay origin with_current holds the link mutex while it waits for StateInner, so a concurrent listener request can still pin an async worker",
+  "outcome": "Under owner (StateInner) contention, no authenticated listener request's synchronous wait on the federation link mutex can pin an async worker past its handler deadline. Either the link mutex is never held across a StateInner wait, or the listener's link-mutex waits run under the deadline, while with_current keeps its authority atomicity.",
+  "acceptance": [
+    "A scripted-clock test over authenticated HTTP holds the owner (StateInner) lock while a relay request's origin check (with_current) is in flight, then sends a second authenticated request. The second request's handler deadline still answers its typed UNKNOWN or unsigned 408 on time; no async worker is blocked on the link mutex. On the pre-change code the test fails.",
+    "with_current's authority-under-link-lock guarantee is preserved, or a replacement with the same safety is ruled in a design note. No timeout or limit value changes, and nothing fences.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

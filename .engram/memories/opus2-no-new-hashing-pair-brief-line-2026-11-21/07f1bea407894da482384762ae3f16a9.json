@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-new-hashing-pair-brief-line-2026-11-21",
+    "revision_id": "07f1bea407894da482384762ae3f16a9",
+    "previous": "0bb6f2b254e34acbac443e426a3ef67a",
+    "body_sha256": "adbb607a86b111a2d8acefcf4758da2c4e7f2341be92b05ac21a5db54829cebf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T08:11:47.072230100Z"
+    }
+  },
+  "body": "Opus2 rule (2026-11-21; Greg via Fable2: \"NIE MA RECZNEGO HASHOWANIA\"). The full rule is in memory greg-no-manual-hashing-2026-11-21. Fable2's recorded rulings are #7111 and #7112; #7112 is the stricter one and binds.\n- AUTHOR runs (author-test refs: RED, GREEN, focused): keep exactly ONE check, HEAD == the named commit. Do NOT add tree, porcelain or review-freeze fingerprint checks. Cleanliness and identity come only from the launcher's sourceIdBefore and sourceIdAfter: equal, with \"changes\": [].\n- Evidence transport: keep ONE whole-archive SHA-256 (transfer integrity, compared on receipt). No per-file SHA256SUMS.\n- TLC: no script or Coord.tla sha checks (repository files are named by commit and source_id); keep the tla2tools.jar pinned-binary check. Other pinned external binaries (Engram) keep their SHA.\n- Exception until the new test-ref wording lands: a LANDING FULL on a test/<item>-<fp8> ref keeps exactly what the CURRENT CLAUDE.md test-ref rule binds (fresh worktree equal to the commit, tree id, fingerprint, equal source ids). New wording: commit8 naming, source_id recorded before the push and compared by the runner's launcher.\n- Add no new hashing, listing or identity step anywhere. Every review-pair brief carries: \"Flag any new hashing, repository or index listing, or identity computation as a finding.\" Put that line, and any owner-required check, in the brief BEFORE the spawn. Follow-ups can only reach completed children.\n- Before routing a pair, check that the owner has not already started one under an earlier GO (the 8d1d crossing on 2026-11-21).\nThe standing correction went to C6, C7, Windows B session-4 and session-5, the Mac Engram runner and s4 at 08:12Z."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-filter-path-check-parent-modules-2026-11-21",
+    "revision_id": "60e54a8a99eb4f5f84ea4b567af018d6",
+    "previous": "c47a46e33086471c8502b2ae066666f1",
+    "body_sha256": "d34fccec99488d045185d36d6e4ab22ea02f770bd2cb213271d703cfdf9840ab",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T07:50:06.314410700Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-21, revision 2; corrects revision 1). A cargo test filter must use each segment's module NAME along the full chain from src/tests/mod.rs, parents included. The module name is the identifier in `mod NAME;`, NOT the file name. A `#[path = \"file.rs\"] mod name;` attribute makes them differ. Example: relay.rs mounts `#[path = \"relay_production_shape.rs\"] mod production_shape;`, so the right path is tests::federation_native_binding_proof::relay::production_shape::admission_deadline::. Revision 1 wrongly suggested `relay::relay_production_shape::`; Opus3 caught it (#2126), and that would also have selected zero tests. Before sending a filter: grep every `mod` line (and any #[path]) from tests/mod.rs down to the leaf, and confirm each segment. Zero selection (\"running 0 tests\") means STOP; it is never evidence. Related lesson, the same day: a focused UI call is `node ui/node_modules/vitest/vitest.mjs run --root ui --project <category> <files>` from the repo root (docs/test.md). It is never `npx vitest run --root ui`, because npx from the root fetched an unrelated vitest 5.1.1 without jsdom (C87-FOCUSED-1 call 2)."
+}

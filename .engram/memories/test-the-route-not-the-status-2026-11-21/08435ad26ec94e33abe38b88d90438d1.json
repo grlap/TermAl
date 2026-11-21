@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "test-the-route-not-the-status-2026-11-21",
+    "revision_id": "08435ad26ec94e33abe38b88d90438d1",
+    "previous": null,
+    "body_sha256": "d46ecd88309eee70d8ccd6432ce72ee9158bc4ff48cbf129bef3d756bc66d7d1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-21T06:39:12.650163700Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-21 06:39Z). With the DL560 federation link down, I told Greg there was \"no authorized route\" to DL560. Greg corrected me (\"nie bzdura… dziala\"): his TermAl UI prompt to a DL560 remote session worked, because the UI's remote-session proxy does not depend on the federation peer link. Agent mailboxes do depend on it (409 \"requires the enrolled authenticated peer to be connected\"). Rule: never conclude \"no route\" from federation status alone. Test the specific route (one send or one read) and name which path works and which doesn't. Programmatic prompting of remote roots through the working path is the P0 item w-a8af3a34d80a."
+}
