@@ -14,6 +14,8 @@ against its recorded base, using multiple specialized reviewer lenses.
 
 **IMPORTANT: `/review-code` is inspection-only in both direct and delegated sessions. Do NOT attempt to fix bugs, edit files, run mutating Git commands, mutate the tracker, or inspect tracker tasks to reconcile review findings. Read-only startup recovery required by project instructions is allowed. Report findings and proposed tracker follow-ups for the parent `/review-changes` coordinator without changing the workspace or tracker. These proposals are not tracker updates and may duplicate existing issues; only `/review-changes` reconciles them with the Engram tracker after consolidating all reviewer results.**
 
+For source_id capture and reuse, follow the capture-once rule in the coder-test-execution skill: reviewers capture no source_id of their own and, when they need one, cite the parent's recorded run named in their brief; this command's Git identity checks and recorded raw-byte exceptions are unchanged.
+
 **IMPORTANT: Do NOT run compilation, build, test, type-check, lint, benchmark, coverage, or formatting gates from `/review-code`, even when a command appears read-only. This includes `cargo check`, `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`, TypeScript compilers, Vitest, ESLint, Prettier, and package-manager test/build scripts. The parent `/review-changes` session exclusively owns quality gates. Reviewers may inspect existing source, tests, configuration, diffs, and previously produced output.**
 
 ## Step 1: Get the changes

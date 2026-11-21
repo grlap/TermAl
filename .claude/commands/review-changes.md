@@ -114,6 +114,8 @@ for that target. Keep that commit, source and index unchanged through the
 gate and review; a changed input still needs its own validation. The
 existing working-tree path and failed-gate investigation below are unchanged.
 
+For source_id capture and reuse, follow the capture-once rule in the coder-test-execution skill: reviewers capture no source_id of their own and, when they need one, cite the parent's recorded run named in their brief; this command's Git identity checks and recorded raw-byte exceptions are unchanged.
+
 The script owns the stage order, working directories, native tool resolution,
 fingerprint, fail-fast execution, logs and diagnostic summary. Do not run the
 individual gates manually. Do not import launcher functions from inline Node,
