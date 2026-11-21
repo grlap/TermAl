@@ -139,10 +139,10 @@ than the common Git directory. Empty, relative, multiline, option-echo or
 control-character output is refused with `cannot locate Git run directory`
 before any run directory is created or registered.
 
-On a remote runner, check Git from the actual agent process's environment
-and repository working directory. An interactive or SSH shell can select a
-different executable through `PATH`. These Node commands use the same Git
-lookup as the launcher; check both exits and the absolute directory reply:
+On a remote runner, check Git from the TermAl session's own shell environment
+and repository working directory. The session's `PATH` determines which Git
+executable the launcher uses. These Node commands use the same Git lookup as
+the launcher. Check both exits and the absolute directory reply.
 
 ```bash
 node -e "const r=require('node:child_process').spawnSync('git',['--version'],{stdio:'inherit'}); if(r.error) console.error(r.error.message); process.exit(r.status ?? 1)"

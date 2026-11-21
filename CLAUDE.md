@@ -271,12 +271,6 @@ in Engram::Advisor's session, recorded verbatim):
   evidence is recorded, and at the latest when the input's items close, and
   records the push and the deletion (commit id, tree id, fingerprint, times)
   on the item. This grants no other commit, push, install or restart.
-- S3 pilot lane (Greg, 2026-10-20, option (c)): a TermAl session
-  assigned as a pilot host's lane may, as an exception to the
-  work-only-in-the-repository rule, write only under the Engram
-  checkout's `target/s3-pilot/` on that host and run Git there exactly
-  as Engram's S3 pilot bullet allows; nothing else outside this
-  repository. This grants no other commit, push, install or restart.
 - Use explicit paths only: never `git add -A` or `git add -u`.
 - Do not amend, rebase or force-push. Commit message bodies (below the
   subject line) must not contain tracker ids (Engram ids, or Beads ids
@@ -342,6 +336,11 @@ operations, so the rule holds only as long as every agent follows it:
   value you have not checked. In PowerShell never assign `$home` or any other
   automatic variable: variable names ignore case, `$HOME` is read-only, and a
   failed assignment keeps the old value while the script runs on.
+- Never run ssh, scp or another side-channel remote shell or file copy to
+  another host, not even as a fallback. Work on another host goes through its
+  TermAl remote session (federation and relay mail) or through Git branches on
+  origin; a broken remote step goes to the TermAl coordinator or Greg.
+  TermAl's own federation transport is not an agent action.
 
 For directory and worktree cleanup, the executor and prerequisites in "Cleanup deletions" in AGENTS.md take precedence over TermAl documentation and worker handoff text. When those texts name the Merger, coordinator or spawning parent as the remover, that role is accountable for arranging cleanup under the shared rule and recording the result.
 
