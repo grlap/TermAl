@@ -192,6 +192,8 @@ fn parse_engram_source_observation(
             source_id.validate(deadline)?;
             if Some(source_id.commit.as_str()) != commit
                 || Some(source_id.tree.as_str()) != observation.tree.as_deref()
+                || (source_id.git_delta.is_some()
+                    && source_id.is_clean() != (observation.status == EngramSourceStatus::Clean))
             {
                 bail!("Engram source_id disagrees with its provenance");
             }

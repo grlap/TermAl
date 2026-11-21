@@ -108,10 +108,9 @@ in Engram::Advisor's session, recorded verbatim):
 >
 > to robimy commit
 
-- A changeset may be landed (committed on master, or master fast-forwarded
-  to a candidate commit) without a further permission round trip only when
-  all three hold for the exact commit being landed (for the staged-tree
-  lane, the exact tree being committed):
+- Fast-forward master to the gated clean candidate commit without a
+  further permission round trip only when all three conditions hold for
+  that commit:
   1. The review pair (`/review-changes`: two independent read-only
      `/review-code` children of different vendors, one Codex and one
      Claude, `writePolicy: readOnly`; while Codex or Claude is unavailable —
@@ -129,9 +128,10 @@ in Engram::Advisor's session, recorded verbatim):
      breaks shown as ' / ': 'claude will soon run of tokens / we need to
      use Kimi as replacement / and focus on simple cleanup / we have
      enormous backlog') has no outstanding in-scope finding of Medium or
-     higher on the reviewed input (for a candidate committed afresh with an
-     identical contribution, the input whose review pair it adopts under
-     the candidate-commits bullet below), and every in-scope finding of
+     higher on the reviewed clean candidate commit (for a candidate
+     committed afresh with an identical contribution, the input whose review
+     pair it adopts under the candidate-commits bullet below), and every
+     in-scope finding of
      Medium or
      higher from earlier rounds was fixed and reviewed again; a Low or a
      Note need not be fixed before the landing, and a Low left unfixed is
@@ -144,24 +144,25 @@ in Engram::Advisor's session, recorded verbatim):
      two coordinators decided on 2026-09-29 to narrow both projects' rule
      to an unavailable Codex, and Greg's word of 2026-10-15 above widened
      it to an unavailable Codex or Claude.
-  2. The full gate is green on exactly that input, compiled from it, before
-     every landing whether or not a commit prompt is shown. A changeset that
-     touches only `.md` files (docs, AGENTS.md, CLAUDE.md, skills and
-     commands) instead passes the link check on exactly that input, run as
-     `node scripts/test-launcher.mjs focused --input commit -- node scripts/check-doc-links.mjs`;
-     both reviewers still review it, and the landing still installs as
-     described below. Any other changed path needs the full gate. Wherever
-     this section requires the full gate on a candidate or a replacement
-     candidate, a Markdown-only changeset runs this link check instead, on
-     a clean checkout of that candidate, and no full run, local or on a test
-     ref, replaces it; Markdown-only work therefore lands as a candidate
-     commit, not through the staged-tree lane.
+  2. The full gate passes on the exact clean candidate commit being landed,
+     with `node scripts/test-launcher.mjs full --input commit`. The launcher's
+     `request.sourceId`, `results.sourceIdBefore` and `results.sourceIdAfter`
+     must all equal the recorded complete `source_id`. Keep the input
+     unchanged after the gate. A changeset touching only `.md` files
+     instead passes the link check on that clean candidate commit, run as
+     `node scripts/test-launcher.mjs focused --input commit -- node scripts/check-doc-links.mjs`,
+     with the same input checks. Both reviewers still review it, and the
+     landing still installs as described below. Any other changed path
+     needs the full gate. Wherever this section requires the full gate on
+     a candidate or a replacement candidate, a Markdown-only changeset
+     runs this link check instead, on that clean candidate commit. No full
+     run replaces the Markdown link check.
   3. The tasks carry the evidence needed to close them. A criterion that
      only the landing itself can satisfy, namely that the change is
      committed, pushed, on master or installed, counts as carried when
      conditions 1 and 2 hold and an independent acceptance evaluation of the
-     frozen tree found every other criterion, and every other part of that
-     criterion, met; a criterion that needs the build running, a restart, or
+     clean candidate commit found every other criterion, and every other
+     part of that criterion, met; a criterion that needs the build running, a restart, or
      a live or remote observation is not one of these. The landing then
      makes it true, and the item completes only after a post-landing
      evaluation passes it.
@@ -173,9 +174,10 @@ in Engram::Advisor's session, recorded verbatim):
 - Candidate commits (Greg, 2026-10-31: 'zatwierdzam opcje B', 'idzmy na
   prostsa opcja B / zatwierdzam'). So that focused checks, reviews and the
   full gate run on a clean commit, a writable session may commit its change
-  on its own feature branch or detached worktree, never on master, and never
-  pushed except as an author test ref under the next bullet. A candidate
-  commit is not a landing and grants no other push, install or restart.
+  on its own feature branch or detached worktree, never on master. A
+  candidate may be pushed only under the Author test refs or Test refs
+  for remote runs bullets below. A candidate commit is not a landing and
+  grants no other push, install or restart.
   The final full gate runs on a clean checkout of a single
   candidate commit whose parent is the current master. The integration
   owner lands it only by fast-forwarding master to exactly that gated
@@ -187,8 +189,10 @@ in Engram::Advisor's session, recorded verbatim):
   change the same paths, and every changed path has equal pre-image and
   post-image blob ids, status and mode, compared without rename
   detection), the new candidate is frozen and gated as its own input and
-  adopts that review pair, which serves as its review evidence; any change
-  to the contribution needs a new review. The full gate, and for a change
+  adopts that review pair, which serves as its review evidence. Record the
+  original review, the unchanged contribution proof and the new candidate's
+  complete `source_id` with the adoption. Any change to the contribution
+  needs a new review. The full gate, and for a change
   that conditions (a), (b) and (c) below cover the final-diff audit, still
   run on the new candidate, and the integration owner still assesses its
   dependencies and conflicts (Greg, 2026-11-06, relayed by Engram::Asistant
@@ -201,8 +205,8 @@ in Engram::Advisor's session, recorded verbatim):
   A candidate that fails is superseded
   by a new candidate commit, never amended, rebased or force-pushed. Each
   new candidate is committed on a new branch or a detached HEAD at the
-  current master, and the earlier candidate is left as it is. The
-  staged-tree lane remains available.
+  current master, and the earlier candidate is left as it is. Staged inputs
+  remain available for focused correction checks only.
 - Author test refs (Greg, 2026-11-09, relayed by Engram::Asistant in TermAl
   mailbox 588693a8 #1187: 'prosze zapisac to jako skille i instrukcje w
   pamieci / ja nie widze innego sensu', answering his question in #1183, 'nie
@@ -236,19 +240,17 @@ in Engram::Advisor's session, recorded verbatim):
   integration owner; do not run `git push origin master` from that worktree.
 - Apart from author test refs and task-sync data-branch pushes, only the
   integration owner performs pushes under this rule. Every other
-  committing session, including one committing directly on master, sends
-  the commit hash and exact-input gate, review and task evidence to that
-  owner by TermAl mailbox.
-- Before every push of master under this rule, including for a commit made
-  directly on master, the integration owner must verify that master's tip
-  is the reviewed and gated commit, that `origin/master` still matches the
-  reviewed integration base, and that the push is a fast-forward; for a
-  candidate
-  that adopts a review pair, the gated commit is its own and the
-  integration base is the master it was committed on. For a change that
+  committing session sends the candidate commit and its exact-input gate,
+  review and task evidence to that owner by TermAl mailbox.
+- Before every push of master under this rule, the integration owner must
+  verify that master's tip is the exact gated candidate commit, that
+  `origin/master` still matches the candidate's recorded base, and that
+  the push is a fast-forward. For a candidate that adopts a review pair,
+  verify the adoption on its own gated input under the candidate-commits
+  bullet. For a change that
   conditions (a), (b) and (c) below cover, the integration owner also
   verifies that the final-diff audit recorded on the item passed and that
-  it names the input fingerprint of the reviewed and gated input (for a
+  it names the complete Engram source_id of the reviewed and gated input (for a
   candidate that adopts a review pair, of its own gated input). If any
   check fails, do not push: coordinate integration and validate and review
   the resulting input before publishing. Push from the master checkout,
@@ -306,56 +308,40 @@ in Engram::Advisor's session, recorded verbatim):
   coordinators choose (as above); the landing report says whether running
   sessions need the new build, with its build hash and reason. Nothing is
   installed outside the repository.
-- Test refs for remote runs (Greg, 2026-10-19: "tak, Opus moze wypychac"; a
-  test ref is a merge-ready patch, not scratch; Mac and Windows gates carry
-  equal weight). As an exception to the previous bullet, to give a remote
-  runner an exact input, the integration owner (as of 2026-10-19:
-  Termal::Opus2) may commit a merge-ready input tree and push it as
-  `refs/heads/test/<item>-<fingerprint8>`, where `<item>` is the item's
-  short work ref and `<fingerprint8>` is the first eight hex digits of the
-  frozen input's review-freeze fingerprint. Only a merge-ready input is
-  pushed: every required review is complete with no outstanding
-  Medium-or-higher finding, and a fresh focused compile and tests covering
-  its changes and new tests have passed on that exact input. Before
-  committing, the integration owner (as of 2026-10-19: Termal::Opus2)
-  records on the item, beside the freeze fingerprint and while that
-  fingerprint still verifies, the tree id of the complete frozen input,
-  including any untracked files it contains. The commit's parent is the
-  master commit the input was frozen on, its tree is that recorded tree id,
-  and its message names the fingerprint and nothing else. The commit is
-  created detached, and no local branch adopts it. The integration owner (as
-  of 2026-10-19: Termal::Opus2) pushes only that commit, to origin, with the
-  explicit refspec `<commit>:refs/heads/test/<item>-<fingerprint8>`: never
-  master or another branch, another remote, a force-push, rebase or merge,
-  and never a ref whose tree differs from the recorded tree id. The runner
-  fetches the ref into its own clone, checks the commit out in a fresh
-  worktree whose index and tracked files equal that commit and which holds
-  no untracked files, records that state, runs the standard launcher, and
-  requires that the commit's tree id equals the tree id recorded before the
-  push and that its own review-freeze fingerprint is the same before and
-  after its run. The runner pushes nothing back; it returns its evidence
-  through the existing channels, never through Git. A focused run on a test
-  ref is evidence only. A full gate run by the standard launcher on the
-  exact test ref counts as the landing gate for that tree on any host, with
-  the same weight as one run on Windows, when its results record an equal
-  source_id before and after (results.sourceIdBefore and
-  results.sourceIdAfter, the launcher's boundary identity since commit
-  30ddf016, docs/test.md), the input's review-freeze fingerprint is the one
-  the test ref's name and commit message bind, and the integration owner has
-  recorded on the item the run id, host, commit, tree id and both source_id
-  values from that run's results;
-  it gates only a landing whose master commit has that
-  tree id, and until then it is evidence only. A change that touches
-  Windows-only code or tests also needs the relevant gate on Windows. In
-  this remote flow, reviews finish before the push and the gate runs on the
-  pushed ref, so review and gate never run in parallel on an unpublished
-  candidate; a failed remote gate sends the input back to its owner, like
-  any failed gate. Landing still follows the standing approval on master,
-  including installing a binary built from that exact tree. The integration
-  owner (as of 2026-10-19: Termal::Opus2) deletes the ref once the run's
-  evidence is recorded, and at the latest when the input's items close, and
-  records the push and the deletion (commit id, tree id, fingerprint, times)
-  on the item. This grants no other commit, push, install or restart.
+- Test refs for remote runs. The integration owner (Termal::Opus2) may
+  push a merge-ready candidate commit
+  to origin as `refs/heads/test/<item>-<commit8>` (the item's short work ref
+  and the first eight hex digits of the commit id), so that a remote runner
+  tests exactly that commit:
+  - Merge-ready means every required review is complete with no outstanding
+    Medium-or-higher finding, and a focused compile and tests covering the
+    change have passed on that commit.
+  - The commit is detached, on no local branch, with the master commit it
+    was prepared on as its parent and an ordinary commit message.
+  - Before pushing, the integration owner records the commit's complete
+    `source_id` on the item. It is the only identity of the input. It must
+    equal the reviewed candidate's recorded `source_id`, or, for a candidate
+    committed afresh on a newer master that adopts that review under the
+    candidate-commits bullet, that candidate's `source_id` recorded with the
+    adoption.
+  - Push only that commit, only with the refspec
+    `<commit>:refs/heads/test/<item>-<commit8>`; never master, another branch
+    or remote, a force-push, rebase or merge.
+  - The runner checks the commit out in a fresh, clean worktree, runs the
+    standard launcher and pushes nothing back.
+  - A focused run is evidence only. A full gate counts as the landing gate
+    for that commit on any host, with equal weight, when the launcher's
+    `sourceIdBefore` and `sourceIdAfter` both equal the recorded `source_id`
+    and the run id, host and both values are recorded on the item. A missing
+    or incomparable value does not count. A change to Windows-only code or
+    tests also needs a Windows gate.
+  - A failed gate returns the input to its owner. Landing follows the
+    standing approval, including installing the binary built from that
+    commit.
+  - Delete the ref once its evidence is recorded, and at the latest when the
+    item closes. Record the push and the deletion (commit id, `source_id`,
+    times) on the item. This grants no other commit, push, install or
+    restart.
 - Use explicit paths only: never `git add -A` or `git add -u`.
 - Do not amend, rebase or force-push. Commit message bodies (below the
   subject line) must not contain tracker ids (Engram ids, or Beads ids
@@ -487,9 +473,10 @@ sprawdzania czy mają okreslone frazy. Usunąć natychmiast.'
 
 ## Shared test launcher
 
-Use `node scripts/test-launcher.mjs full` for the maintained full gate (its stages are listed in docs/test.md) and
-`node scripts/test-launcher.mjs focused -- COMMAND ARG...` for an authorized
-focused check. The launcher stores complete stdout/stderr and atomic terminal
+Use `node scripts/test-launcher.mjs full --input commit` for the maintained
+full gate on a clean candidate commit (its stages are listed in docs/test.md).
+Use `node scripts/test-launcher.mjs focused -- COMMAND ARG...` for an authorized
+focused correction check. The launcher stores complete stdout/stderr and atomic terminal
 results under Git metadata, while context receives only a bounded summary.
 Detached runs require a different coordinator via `--notify`; after `STARTED`,
 end the turn and wait for the mailbox wake—do not poll status or tail logs.

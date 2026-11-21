@@ -25,9 +25,19 @@ fn test_run_source_endpoints(results: &Value) -> Option<(EngramSourceId, EngramS
         test_run_source_id(results.get("sourceIdAfter"))?))
 }
 
+fn test_run_source_comparison(before: &EngramSourceId, after: &EngramSourceId) -> &'static str {
+    match before.compare(after) {
+        Some(true) => "matched",
+        Some(false) => "mismatched",
+        None => "incomparable",
+    }
+}
+
 fn test_run_source_input_matches(request: &Value, results: &Value) -> bool {
     let Some(admitted) = test_run_source_id(request.get("sourceId")) else { return false; };
-    test_run_source_endpoints(results).is_some_and(|(before, after)| admitted == before && before == after)
+    test_run_source_endpoints(results).is_some_and(|(before, after)| {
+        admitted.compare(&before) == Some(true) && before.compare(&after) == Some(true)
+    })
 }
 /// A focused command in a summary keeps at most this many arguments...
 const TEST_RUN_COMMAND_MAX_ITEMS: usize = 32;
@@ -358,8 +368,7 @@ impl TestRunWaitEvidence {
             })
         };
         let source_comparison = match test_run_source_endpoints(results) {
-            Some((before, after)) if before == after => "matched",
-            Some(_) => "mismatched",
+            Some((before, after)) => test_run_source_comparison(&before, &after),
             _ => "unknown",
         };
         Self {
@@ -375,7 +384,7 @@ impl TestRunWaitEvidence {
         Self {
             stages: Some([usize::MAX; 6]),
             preflight: Some([usize::MAX; 6]),
-            source_comparison: "mismatched",
+            source_comparison: "incomparable",
         }
     }
 }
@@ -950,8 +959,13 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
     let source_comparison = (request.get("sourceId").is_some()
         || results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some()).then(|| {
         match (&source_id, &source_id_before, &source_id_after) {
-            (Some(admitted), Some(before), Some(after)) if admitted == before && before == after => "matched",
-            (Some(_), Some(_), Some(_)) => "mismatched",
+            (Some(admitted), Some(before), Some(after)) => match (
+                admitted.compare(before), before.compare(after),
+            ) {
+                (Some(true), Some(true)) => "matched",
+                (None, _) | (_, None) => "incomparable",
+                _ => "mismatched",
+            },
             _ => "unknown",
         }.to_owned()
     });

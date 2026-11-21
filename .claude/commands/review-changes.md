@@ -1,13 +1,15 @@
 ---
 name: review-changes
-description: Review working-tree changes or a recorded commit against its base with two independent TermAl reviewers.
+description: Review a clean candidate commit against its base with two independent TermAl reviewers.
 metadata:
   termal:
     title:
       strategy: default
 ---
 
-Review staged, unstaged and untracked changes, or an explicitly supplied committed input against its recorded base, by delegating `/review-code` to two reviewers of different vendors — Codex and Claude, Kimi standing in for an unavailable Codex or Claude, never for both — through TermAl delegation sessions.
+Run this workflow from the writable parent session on a clean candidate commit.
+Obtain two independent TermAl `/review-code` reviews, one Codex and one Claude.
+Kimi may stand in for one unavailable reviewer.
 
 **IMPORTANT: Run `/review-changes` directly in the existing active, writable parent session. Never delegate or spawn `/review-changes` itself. The coordinator must be able to create normal build/test artifacts; only the `/review-code` children are delegated with `writePolicy: readOnly`.**
 
@@ -39,85 +41,67 @@ Required MCP tools:
 
 ## Step 1: Confirm review target
 
-For a supplied candidate commit, the target is that commit's change against
-its recorded base, and the checkout is clean. Require explicit `BASE` and
-`COMMIT`, resolve both to commit object ids, and record those full ids and
-the candidate's tree id (`TREE`) on the item and in the review brief before
-validation. Missing or
-invalid committed-input identity is an unavailable target, not a request to
-fall back to working-tree changes. Do not infer the base from `HEAD^`.
+Confirm that the checkout is clean and inspect the candidate's change against
+its recorded base. Require explicit `BASE` and `COMMIT` that resolve to commit
+objects. Run these read-only checks from the candidate worktree:
 
-Confirm that `git rev-parse HEAD` equals `COMMIT`, obtain `TREE` with
-`git show -s --format=%T COMMIT`, and require
-`git status --porcelain --untracked-files=all` to print nothing. List the
-change with `git diff --name-only BASE COMMIT --`. If the range is empty,
-report that there is nothing to review and stop; a clean checkout alone is
-not an empty change. A dirty checkout or identity mismatch stops this mode
-with an explicit unavailable-target report. All target inspection commands
-must succeed; missing output from a failed command is not a clean checkout
-or an empty change.
+```bash
+git rev-parse HEAD
+git status --porcelain --untracked-files=all
+git diff --name-only BASE COMMIT --
+```
 
-This mode selects an already existing commit; it grants no permission to
-create or push one. The "Commit and push" sections of CLAUDE.md and AGENTS.md
-remain authoritative, including their existing test-ref exception. This
-review target adds no Git, integration, review-reuse or test-ref authority.
+HEAD must equal `COMMIT`, and status must be empty. All commands must succeed.
+If the candidate has no changes, report that and stop.
 
-Without a supplied committed input, run `git status --short`,
-`git diff --name-only`, `git diff --cached --name-only`, and
-`git ls-files --others --exclude-standard`. If there are no staged,
-unstaged or untracked changes, report that there is nothing to review and stop.
+### Freeze the review input
 
-A candidate commit, under the candidate-commits rule in the Commit and push
-section of CLAUDE.md and AGENTS.md, is such a committed input. The parent
-commits its change on its own feature branch or detached worktree, never on
-master and never pushed, and follows the commit-message rule in the Commit and
-push section of CLAUDE.md and AGENTS.md, because a fast-forward keeps that
-commit in master's history. Its freeze identity is the commit plus an empty
-`git status --porcelain --untracked-files=all`, which respects `.gitignore`.
-Record the base commit, the candidate commit and its tree id on the item and
-in the brief before validation starts. Focused checks and reviews may run on
-such a commit. The final full gate runs on a clean checkout of a single
-candidate commit whose parent is the current master, and the landing is
-exactly that commit.
+Independent reviews and landing gates run on clean candidate commits.
+Staged inputs are for focused correction checks only. Reuse the launcher's
+complete admitted `source_id` for the exact candidate when available.
+Otherwise the parent obtains it with `engram source --root ABSOLUTE_WORKTREE --json`.
+Record its locator, the root, the base and the changed paths on the item and
+in the brief. Its commit must equal `COMMIT`. Keep the input unchanged
+through validation and review.
 
-The integration owner lands a candidate only by fast-forwarding master to
-exactly that gated commit, when the standing rule's three conditions hold, and
-pushing it without force. If master has moved, the change is committed afresh
-as a new candidate whose parent is the current master, which is frozen, gated
-and reviewed as its own input, unless its contribution, its diff against its
-parent, is byte-identical to the contribution of a candidate already reviewed
-with no outstanding Medium-or-higher finding (both change the same paths, and
-every changed path has equal pre-image and post-image blob ids, status and
-mode, compared without rename detection): then it is frozen and gated as its
-own input and adopts that review pair. Any change to the contribution needs a
-new review. The full gate, and for authority text the Step 7 audit, still run
-on the new candidate, and the integration owner still assesses its
-dependencies and conflicts (the Commit and push sections of CLAUDE.md and
-AGENTS.md give Greg's word).
-A candidate that fails is superseded by a new candidate commit, never
-amended, rebased or force-pushed. Each new candidate is committed on a new
-branch or a detached HEAD at the current master, and the earlier candidate is
-left as it is. Review of staged, unstaged and untracked changes, as above,
-remains available.
+Reviewers cite that record and read the diff from the base to its commit.
+At the start and end, use read-only Git checks that HEAD equals that commit
+and the checkout is clean. The parent checks the round against the
+launcher's available observations for the same input as in Step 5.
+
+Candidate commits and review adoption follow the candidate-commits bullet
+in AGENTS.md and CLAUDE.md. A remote final gate follows their Test refs
+bullet. Record the new candidate's complete `source_id` with the adoption.
+A known intervening edit invalidates the affected result. Where correctness
+depends on a property Git normalizes, check that property directly and
+record what the check covers.
 
 ## Step 2: Parent quality gates
 
-The parent owns gate execution. Use the maintained CLI once from the repository root:
+For a local landing gate, run the applicable gate before Step 3. When the
+integration owner uses the Test refs route in AGENTS.md and CLAUDE.md, run
+the focused compile and tests required by that bullet on the candidate
+before Step 3. The remote landing gate runs on the pushed candidate after
+the review pair has been verified and the test ref has been published.
+
+Run the maintained launcher from the clean candidate checkout:
 
 ```bash
-node scripts/test-launcher.mjs full
+node scripts/test-launcher.mjs full --input commit
 ```
 
-For a committed input, run this gate once on the clean checkout of the
-recorded `COMMIT` from Step 1. No separate working-tree pre-gate is required
-for that target. Keep that commit, source and index unchanged through the
-gate and review; a changed input still needs its own validation. The
-existing working-tree path and failed-gate investigation below are unchanged.
+For a changeset touching only `.md` files, run the Markdown link check on
+that same clean candidate commit. Both reviewers still review it.
 
-For source_id capture and reuse, follow the capture-once rule in the coder-test-execution skill: reviewers capture no source_id of their own and, when they need one, cite the parent's recorded run named in their brief; this command's Git identity checks and recorded raw-byte exceptions are unchanged.
+```bash
+node scripts/test-launcher.mjs focused --input commit -- node scripts/check-doc-links.mjs
+```
+
+Keep the candidate unchanged through the gate and review. A changed input
+needs its own validation.
 
 The script owns the stage order, working directories, native tool resolution,
-fingerprint, fail-fast execution, logs and diagnostic summary. Do not run the
+input checks, fail-fast execution, logs and diagnostic summary. Do not run the
 individual gates manually. Do not import launcher functions from inline Node,
 override its stage array, reconstruct the sequence, or write another runner.
 
@@ -130,7 +114,7 @@ For an existing authorized root worker notifying a different coordinator, the
 supported CLI is:
 
 ```bash
-node scripts/test-launcher.mjs full --detach --notify COORDINATOR_SESSION_ID
+node scripts/test-launcher.mjs full --input commit --detach --notify COORDINATOR_SESSION_ID
 ```
 
 Preserve the real sender identity; never spoof TERMAL_SESSION_ID or self-send.
@@ -139,8 +123,13 @@ host completion wake: if none is available, report that launcher integration
 gap and stop. Do not silently substitute foreground wait loops or delegate
 the review command itself.
 
-Keep the run directory from the launch receipt. On completion, read only:
-`node scripts/test-launcher.mjs summary RUN_DIRECTORY`.
+Keep the run directory from the launch receipt. On completion, read
+`node scripts/test-launcher.mjs summary RUN_DIRECTORY` and the recorded
+`source_id` values in `request.json` and `results.json`. Require the admitted
+`request.sourceId` and both `results.sourceIdBefore` and
+`results.sourceIdAfter` to equal the complete `source_id` recorded in Step 1.
+A mismatch or unavailable identity is an evidence gap. These boundary
+checks do not prove the absence of transient edits.
 Report failures and warnings with log paths; inspect bounded log excerpts only
 to diagnose them. Missing terminal evidence is UNKNOWN, not PASS. Notification
 recovery uses `node scripts/test-launcher.mjs notify RUN_DIRECTORY`, never a
@@ -148,8 +137,7 @@ new test run. A run whose launcher died without a terminal result is settled
 with `node scripts/test-launcher.mjs recover RUN_DIRECTORY`: it becomes an
 interrupted failure, never a pass, and only the run's owner sends its
 completion. Reuse completed evidence for unchanged input; do not edit tested
-input while running. Only a successful full run for the current input permits
-Step 3. See docs/test.md for the launcher contract, not an alternate gate plan.
+input while running. See docs/test.md for the launcher contract.
 
 If any quality gate in this step produces a failure or error, stop the remaining
 gate sequence and do not spawn reviewers, but do not stop at merely presenting
@@ -192,17 +180,16 @@ Using `termal_spawn_session`, create two child delegation sessions from the curr
 
 Give each reviewer a multiline prompt whose first line tells it to read
 `.claude/commands/review-code.md` and follow it. Include the working directory,
-target mode and changed paths. For a committed input, include the same
-recorded full `BASE`, `COMMIT` and `TREE` ids and the required start/end
-HEAD, tree and clean-status checks. The change to inspect is
-`git diff BASE COMMIT --`, including added and deleted files, even though
-the checkout is clean. Do not pass this context as arguments after a
-one-line `/review-code`: TermAl's one-line command expansion has no
-arguments slot.
+recorded base, candidate commit, changed paths and the parent's complete
+`source_id` record locator to cite at both boundaries. The change to inspect
+is `git diff BASE COMMIT --`, including added and deleted files. Do not pass
+this context as arguments after a one-line `/review-code`: TermAl's one-line
+command expansion has no arguments slot.
 
-When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt: the same multiline `/review-code` brief as the reviewer it replaces, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`. The stand-in replaces the unavailable reviewer, whether its spawn was refused or its result was lost to that reviewer's usage limit or outage, so a round never has more than two reviews that count. Never two reviewers of one vendor. Kimi never stands in for both reviewers of the same round: when Codex and Claude are both unavailable, only one stand-in is spawned, the other reviewer is reported as unavailable, and the round does not satisfy the commit rule's review pair. A round is one pass of Steps 3–5 over one gated input; the same freeze means the reviewed files unchanged since that gate, as Step 4 requires. A Kimi reviewer's read-only gate is weaker than Claude's or Codex's (docs/features/kimi-cli-integration.md, Read-only delegation children); the stand-in is accepted only for an unavailable Codex or Claude.
+When Codex or Claude is unavailable (a usage limit or outage met in this round, with its refusal text recorded on the item), spawn Kimi in its place: Agent `Kimi`, Prompt: the same multiline `/review-code` brief as the reviewer it replaces, Mode `reviewer`, Write policy `readOnly`, Title `Kimi /review-code`. The stand-in replaces the unavailable reviewer, whether its spawn was refused or its result was lost to that reviewer's usage limit or outage, so a round never has more than two reviews that count. Never two reviewers of one vendor. Kimi never stands in for both reviewers of the same round: when Codex and Claude are both unavailable, only one stand-in is spawned, the other reviewer is reported as unavailable, and the round does not satisfy the commit rule's review pair. A round is one pass of Steps 3–5 over one unchanged candidate commit, as Step 5 requires. A Kimi reviewer's read-only gate is weaker than Claude's or Codex's (docs/features/kimi-cli-integration.md, Read-only delegation children); the stand-in is accepted only for an unavailable Codex or Claude.
 
-Use read-only delegation sessions here so reviewers see the exact current worktree, including untracked files. Do not request `isolatedWorktree` for this command until the known "isolated delegation worktree snapshots omit untracked files" limitation is fixed by mirroring or explicitly rejecting untracked dirty state.
+Use read-only delegation sessions so reviewers see the worktree named in
+the parent's record.
 
 If either spawn fails, report the failure clearly. When the Codex or Claude spawn fails because that reviewer is unavailable (a usage limit or outage met in this round), record the refusal text on the item and, if no stand-in has been spawned this round, spawn Kimi in its place on the same freeze. For any other failure, or when the stand-in fails too, stop unless one reviewer was already created; in that case continue to Step 4 for the created reviewer and mark the missing reviewer as unavailable.
 
@@ -214,19 +201,27 @@ Call `termal_resume_after_delegations` with the outstanding delegation ids (both
 
 While the reviewers run, keep the reviewed files unchanged: reviewers read the live working tree, so an edit during the review makes it cover a moving target. Make independent edits in another worktree. A deliberate edit to the reviewed files needs a new gate and a new review; do not read the earlier result as covering it.
 
-For a committed input, keep `HEAD` at the recorded `COMMIT` and retain the
-clean checkout through both reviews. A known intervening source or index
+Keep `HEAD` at the recorded `COMMIT` and retain the clean checkout through
+both reviews. A known intervening source or index
 edit invalidates the affected result even if later boundary checks match.
 
 Never use `termal_wait_delegations`, PowerShell, shell, raw HTTP polling, or session-log polling for `/review-changes` review fan-in. `termal_wait_delegations` is reserved for short smoke tests and diagnostics outside this command. A backend resume wait queues its result as the next parent prompt; keeping the parent turn active prevents that queued fan-in prompt from running and can make the review appear stuck.
 
 ## Step 5: Consolidate results
 
-For a committed input, first repeat Step 1's HEAD, tree and clean-status
-checks against the recorded identities. Require both reviewers to report
-the same `BASE`, `COMMIT` and `TREE` and their independent start/end checks.
-A mismatch or missing identity evidence is unavailable coverage, not a clean
-review. The Git tree id is separate from the launcher's own fingerprint.
+When the pair returns, verify both reviews. Resolve findings under Step 6.
+A clean, verified review round satisfies the review condition for a remote
+test-ref push under the Test refs bullet in AGENTS.md and CLAUDE.md.
+For that path the applicable gate runs after the push. Landing requires the
+applicable gate to pass on the same candidate commit with matching complete
+admitted, before and after `source_id` values. For a Markdown-only candidate
+the link check is the applicable gate.
+
+Confirm each reviewer cited the parent's complete `source_id` and reported
+matching read-only Git boundary checks for the supplied diff scope. Compare
+the record with the launcher's available observations on the unchanged
+input. Investigate missing or mismatched evidence. If the input changed,
+renew the affected validation and review on the corrected input.
 
 After both reviewers finish, fetch each delegation result packet and present a concise fan-in:
 
@@ -254,8 +249,8 @@ establish a passing check.
 Deduplicate findings. If both reviewers report the same issue, merge it and note that both caught it.
 Also merge their proposed tracker follow-ups into the consolidated action list.
 Do not create, update, comment on, or close tracker items until this
-consolidation is complete. The Step 1 record of only the resolved BASE,
-COMMIT and TREE ids is an explicit exception. The other exceptions are the
+consolidation is complete. The Step 1 review-input record is an explicit
+exception. The other exceptions are the
 Step 2 gate-failure record and recording an unavailable Codex's or Claude's
 refusal text (Steps 3 and 5): a
 note on the Engram item the change lands under — the held item, or, when none
@@ -312,27 +307,40 @@ Authority text is the text whose change conditions (a), (b) and (c) of the
 Commit and push section of AGENTS.md and CLAUDE.md cover. When the reviewed
 change touches it, the session that holds the final frozen input, the
 parent or, where integration changed the input, the integration owner,
-sends the final frozen change (the diff of its tracked files and the
-content of each untracked file), the input fingerprint that the gate's run
-recorded for it, and the list of recorded messages that word each changed
-passage of authority text to the auditing coordinator by TermAl mailbox.
+sends the final frozen change against its recorded base, the recorded
+complete `source_id` and the review and launcher results, and the list of
+recorded messages that word each changed passage of authority text to the
+auditing coordinator by TermAl mailbox.
 The change is neither landed nor pushed before the audit of that input
 is recorded on the item as passed.
+For an authority change using a remote test ref, complete the final-diff
+audit before the test-ref push, using the exact focused compile and test
+results required for that push. After the push, the remote landing gate
+must pass on the same candidate commit and complete source_id before
+master moves.
 
 The auditing coordinator is the project's task coordinator; where the task
-coordinator wrote the change, it is the other project's coordinator. A
-changed passage is each sentence or heading of authority text that the
-word-level diff of the change against its base commit (`git diff
---word-diff BASE`) adds, alters or removes, each sentence and heading of an
-untracked file of authority text counting as added; text that differs only
-in whitespace is not a changed passage. The
-auditing coordinator reads the final frozen change line by line against the
+coordinator wrote the change, it is the other project's coordinator.
+Before judging the authority passages, the auditing coordinator reads the
+complete committed authority diff from the commit in the parent's
+`source_id` record against its recorded base. Confirm it matches the supplied
+diff, including each added authority file and its placement. With the
+holder's confirmation that no check is carried in that root, verify the
+read-only Git boundaries in Step 1 before and after reading the diff.
+Record the base, root, source record locator and both boundary results with
+the audit. Investigate a missing or mismatched result before passing the
+audit. Boundary checks cannot exclude transient edits.
+
+A changed passage is each sentence or heading of authority text that the
+word-level diff of the change against its base commit adds, alters or
+removes. Text that differs only in whitespace is not a changed passage.
+The auditing coordinator reads the final frozen change line by line against the
 sentences whose concurrence is recorded on the item, runs a script that
 looks for each added or altered passage in those sentences, as an exact
 string after whitespace normalisation and with Markdown list and quote
 markers at line starts removed, and judges for each removed passage whether
 a recorded concurrence names it as removed. The auditing coordinator notes
-on the item the input fingerprint, which recorded message governs each
+on the item the review `source_id`, which recorded message governs each
 changed passage, the script's result for each added or altered passage and
 the judgement for each removed one. The audit passes when the script finds
 every added or altered passage and every removed passage is named as
@@ -343,8 +351,8 @@ A passage of authority text that no recorded concurrence quotes whole is
 concurred, word for word, or taken out before the landing. A change of the
 input, such as taking a passage out, needs a new freeze, gate, review pair
 and audit. A candidate committed afresh with an identical contribution adopts
-the review pair under the Commit and push sections, and still needs its own
-freeze, gate and audit. A concurrence recorded after the freeze leaves the input
+the review pair under the Commit and push sections. Its own gate and audit
+cite that candidate's recorded complete `source_id`. A concurrence recorded after the freeze leaves the input
 unchanged: it needs no new freeze, gate or review pair, but the audit is
 repeated, and the conditions of the Commit and push section hold for that
 wording as for any other.

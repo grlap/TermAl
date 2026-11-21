@@ -28,11 +28,16 @@ struct TestRunEvidenceAssociation {
 // above. Never serialize the owner's identity into automatic run summaries.
 fn test_run_source_summary(basis: &EngramExecutionSourceBasis) -> String {
     match &basis.source_id {
-        Some(source) => format!("source_id: commit {}, tree {}, {} changes, {} submodules, {} submodule changes",
-            source.commit.chars().take(12).collect::<String>(),
-            source.tree.chars().take(12).collect::<String>(),
-            source.changes.len(), source.submodules.len(),
-            source.submodules.iter().map(|child| child.changes.len()).sum::<usize>()),
+        Some(source) => {
+            let changes = source.git_delta_description().unwrap_or_else(|| format!(
+                "{} changes, {} submodules, {} submodule changes",
+                source.changes.len(), source.submodules.len(),
+                source.submodules.iter().map(|child| child.changes.len()).sum::<usize>(),
+            ));
+            format!("source_id: commit {}, tree {}, {changes}",
+                source.commit.chars().take(12).collect::<String>(),
+                source.tree.chars().take(12).collect::<String>())
+        }
         None => basis.source_revision.clone(),
     }
 }

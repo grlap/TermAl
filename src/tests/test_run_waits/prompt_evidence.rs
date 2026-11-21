@@ -55,7 +55,11 @@ fn resume_evidence_regression_compares_before_and_after_conservatively() {
     let source = launcher_source_id_fixture();
     let mut changed = source.clone();
     changed["tree"] = json!("c".repeat(40));
+    let delta = launcher_git_delta_id_fixture();
     for (before, after, expected) in [
+        (delta.clone(), delta.clone(), "matched"),
+        (source.clone(), delta.clone(), "incomparable"),
+        (delta, source.clone(), "incomparable"),
         (source.clone(), source.clone(), "matched"),
         (source.clone(), changed, "mismatched"),
         (Value::Null, source.clone(), "unknown"),

@@ -573,8 +573,6 @@ fn changed_consumer(consumer: &Consumer, change: Change) {
             })
             .collect();
         let pins: Vec<(&str, &str)> = pins.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
-        assert!(matches!(source_revision(&matrix.fixture.root, true),
-            Ok(SourceRevision::Taken { revision, .. }) if revision == format!("git-commit:{commit}")));
         matrix
             .begin("Check clean nested pinned input derived inside the disposable consumer clone.");
         let check = launch_consumer(&matrix, &commit, &pins);
@@ -598,18 +596,6 @@ fn changed_consumer(consumer: &Consumer, change: Change) {
     let request_bytes = fs::read(check.directory.join("request.json")).unwrap();
     let result_bytes = fs::read(check.directory.join("results.json")).unwrap();
     mutate(&matrix, consumer, change);
-    let current = source_revision(&matrix.fixture.root, true);
-    if matches!(change, Change::NewRootCommit) {
-        let SourceRevision::Taken { revision, .. } = current.unwrap() else {
-            panic!("new commit is readable");
-        };
-        assert_ne!(revision, format!("git-commit:{}", consumer.commit));
-    } else {
-        assert!(
-            !matches!(current, Ok(SourceRevision::Taken { .. })),
-            "{change:?} must fail fresh admission"
-        );
-    }
     // Both decisions use the original valid declared revision. No new closing
     // report is supplied to teach either product about this actual change.
     matrix.refuse(&check, || {});

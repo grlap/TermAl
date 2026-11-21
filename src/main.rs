@@ -1198,7 +1198,6 @@ include!("delegation_mcp_review_freeze.rs");
 include!("review_freeze.rs");
 include!("capture_lifetime.rs");
 include!("source_capture.rs");
-include!("ordinary_commit_input.rs");
 include!("engram_source_id.rs");
 include!("engram_source_command.rs");
 include!("engram_source_owner.rs");

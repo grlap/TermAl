@@ -239,16 +239,8 @@ fn lost_project_root_does_not_discover_an_enclosing_repository() {
         None,
         "a lost project must not inherit another repository's run history"
     );
-    assert!(
-        matches!(engram_execution_source_capture_with(&root, false), Ok(None)),
-        "a missing source directory must not acquire its ancestor's identity"
-    );
     fs::write(&root, "not a project directory").unwrap();
     assert_eq!(test_runs_git_common_dir(&root), None);
-    assert!(matches!(
-        engram_execution_source_capture_with(&root, false),
-        Ok(None)
-    ));
 }
 
 #[test]

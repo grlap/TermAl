@@ -7,33 +7,11 @@ const COMMAND: &str =
 const KEY: &str = "live-launcher";
 const COMMITTED_COMMAND: &str = "node scripts/test-launcher.mjs focused --input commit -- node --test scripts/test-launcher.test.mjs";
 
-fn clean_owner_source(root: &FsPath) -> Value {
-    assert!(
-        run_git_test_command_output(root, &["status", "--porcelain"]).is_empty(),
-        "the receipt fixture measures an actual clean checkout"
-    );
-    json!({
-        "commit": run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim(),
-        "tree": run_git_test_command_output(root, &["rev-parse", "HEAD^{tree}"]).trim(),
-        "submodules": [], "changes": [],
-    })
-}
-
-// Scoped protocol input, not a source cache. Real pinned-Git controls below
-// bypass it. Dropping a fixture removes its unique run's reply on every exit.
-struct NoticeSourceReply(String);
-
-impl Drop for NoticeSourceReply {
-    fn drop(&mut self) {
-        TEST_RECEIVED_NOTICE_SOURCE_RESULTS
-            .lock()
-            .unwrap()
-            .remove(&self.0);
-        TEST_RECEIVED_NOTICE_SOURCE_READ
-            .lock()
-            .unwrap()
-            .remove(&self.0);
-    }
+fn receipt_source_fixture(root: &FsPath) -> Value {
+    // Bind the supplied owner record to the fixture's committed run.
+    let mut source = launcher_source_id_fixture();
+    source["commit"] = json!(run_git_test_command_output(root, &["rev-parse", "HEAD"]).trim());
+    source
 }
 
 struct RegisteredLauncherTurn {
@@ -44,7 +22,6 @@ struct RegisteredLauncherTurn {
     started: String,
     command: String,
     source_id: Option<Value>,
-    notice_source: std::cell::RefCell<Option<NoticeSourceReply>>,
 }
 
 impl RegisteredLauncherTurn {
@@ -152,7 +129,7 @@ impl RegisteredLauncherTurn {
             "stages": [{ "name": "focused", "command": "node",
                 "args": ["--test", "scripts/test-launcher.test.mjs"] }],
         });
-        let source_id = committed.then(|| clean_owner_source(&root));
+        let source_id = committed.then(|| receipt_source_fixture(&root));
         if let Some(source) = &source_id {
             request["input"] = json!("commit");
             request["sourceId"] = source.clone();
@@ -176,7 +153,6 @@ impl RegisteredLauncherTurn {
             started,
             command,
             source_id,
-            notice_source: std::cell::RefCell::new(None),
         };
         fixture.write_results("running");
         assert_eq!(
@@ -269,17 +245,12 @@ impl RegisteredLauncherTurn {
     ) {
         let registration =
             self.turn.state.inner.lock().unwrap().test_run_registrations[&self.run_id].clone();
-        let git = ReviewFreezeGit::new(FsPath::new(&registration.worktree))
-            .expect("fixture root must satisfy the pinned Git reader");
-        let (head, dirty) =
-            committed_source_status(&git).expect("fixture Git reads must be complete");
-        assert!(dirty.is_empty(), "receipt fixture must be clean: {dirty:?}");
-        self.set_notice_source(TestReceivedNoticeSourceResult::Status(head.clone(), dirty));
         let source_before = self
             .source_id
             .as_ref()
             .expect("a native receipt has an admitted owner identity");
-        let source_after = clean_owner_source(FsPath::new(&registration.worktree));
+        let head = source_before["commit"].as_str().unwrap();
+        let source_after = source_before.clone();
         let at = test_run_timestamp();
         fs::write(self.directory.join("results.json"), serde_json::to_vec(&json!({
             "runId":self.run_id, "state":if passed {"passed"} else {"failed"},
@@ -319,16 +290,6 @@ impl RegisteredLauncherTurn {
         (receipt, settlement)
     }
 
-    fn set_notice_source(&self, result: TestReceivedNoticeSourceResult) {
-        TEST_RECEIVED_NOTICE_SOURCE_RESULTS
-            .lock()
-            .unwrap()
-            .insert(self.run_id.clone(), result);
-        if self.notice_source.borrow().is_none() {
-            *self.notice_source.borrow_mut() = Some(NoticeSourceReply(self.run_id.clone()));
-        }
-    }
-
     fn receive_not_durable(&mut self) -> EngramVerificationRecordReceipt {
         let original_writer = self.turn.state.persist_tx.clone();
         let (held_tx, held_writer) = mpsc::channel();
@@ -356,20 +317,6 @@ impl RegisteredLauncherTurn {
             "a held receipt cannot start presentation or renew its failed association fence"
         );
         receipt
-    }
-
-    fn capture_dirty_notice_source(&self) {
-        let registration =
-            self.turn.state.inner.lock().unwrap().test_run_registrations[&self.run_id].clone();
-        // Predicate correctness uses the real pinned reader's default bound.
-        // Presentation then consumes this known Dirty result deterministically.
-        let git = ReviewFreezeGit::new(FsPath::new(&registration.worktree)).unwrap();
-        let (head, dirty) = committed_source_status(&git).unwrap();
-        assert!(
-            dirty.iter().any(|path| path.path == "README.md"),
-            "{dirty:?}"
-        );
-        self.set_notice_source(TestReceivedNoticeSourceResult::Status(head, dirty));
     }
 
     fn assert_unindexed(&self) {
@@ -702,62 +649,6 @@ fn a_codex_delta_locator_names_the_same_commands_received_verification() {
 }
 
 #[test]
-fn registered_launcher_closures_discriminate_checkout_conversion_from_clean_source() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let turn = RegisteredLauncherTurn::committed_turn("receipt-checkout-conversion");
-    let clean = turn.record(|record| record.engram.observed_source_root().unwrap().root.clone());
-    assert!(committed_source_clean_head_within(FsPath::new(&clean), None).is_some());
-    let converted = turn.root.join(".worktrees").join("converted");
-    // Models the inherited Windows autocrlf=true checkout of the failed
-    // fixture, independently of the machine running this diagnostic.
-    run_git_test_command(
-        &turn.root,
-        &[
-            "-c",
-            "core.autocrlf=true",
-            "worktree",
-            "add",
-            "--quiet",
-            "-b",
-            "converted",
-            converted.to_str().unwrap(),
-        ],
-    );
-    assert!(
-        fs::read(converted.join("README.md"))
-            .unwrap()
-            .windows(2)
-            .any(|pair| pair == b"\r\n")
-    );
-    assert!(
-        run_git_test_command_output(
-            &converted,
-            &["-c", "core.autocrlf=true", "status", "--porcelain"]
-        )
-        .is_empty(),
-        "conversion-aware fixture Git sees a clean checkout"
-    );
-    // Force a content reread instead of depending on Git's stat-cache age.
-    fs::OpenOptions::new()
-        .write(true)
-        .open(converted.join("README.md"))
-        .unwrap()
-        .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1))
-        .unwrap();
-    let git = ReviewFreezeGit::new(&converted).unwrap();
-    let (_, dirty) = committed_source_status(&git).unwrap();
-    assert!(
-        dirty.iter().any(|path| path.path == "README.md"),
-        "{dirty:?}"
-    );
-    assert!(
-        committed_source_clean_head_within(&converted, None).is_none(),
-        "the unchanged production predicate must reject conversion-dependent bytes"
-    );
-    assert_ordinary_observation_has_no_native_credit(&turn, &turn.finish());
-}
-
-#[test]
 fn a_received_registered_launcher_names_its_record_before_or_after_turn_close() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for late in [false, true] {
@@ -821,7 +712,6 @@ fn a_received_record_does_not_associate_an_unrelated_launcher_or_hide_dirty_sour
                 "changed after verification\n",
             )
             .unwrap();
-            fixture.capture_dirty_notice_source();
         }
         let (line, closed) = fixture.finish();
         // This named-root fixture has no provider end. The pre-existing
@@ -843,10 +733,17 @@ fn a_received_record_does_not_associate_an_unrelated_launcher_or_hide_dirty_sour
                             && carry.check.end.is_none())),
             "{line}"
         );
-        assert!(
-            !line.contains(&receipt.verifications[0].record_id),
+        assert_eq!(
+            line.contains(&receipt.verifications[0].record_id),
+            correlated,
             "{line}"
         );
+        if correlated {
+            assert!(
+                line.contains("no current-input or ordinary-check credit"),
+                "{line}"
+            );
+        }
         if !correlated {
             assert!(
                 line.contains("relationship to this command is unconfirmed")
@@ -1171,10 +1068,6 @@ fn received_notice_batch_expiry_is_typed_and_visible_without_rerun() {
         .state
         .prepare_registered_check_notices_until(&fixture.turn.session_id, expired);
     assert_eq!(prepared.len(), 1);
-    assert_eq!(
-        prepared[0].received.as_ref().unwrap().source(),
-        ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Deadline)
-    );
     let (lines, correlated) = {
         let mut inner = fixture.turn.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
@@ -1303,15 +1196,13 @@ fn an_unavailable_notice_source_confirms_only_the_historical_receipt() {
     let mut fixture = RegisteredLauncherTurn::committed();
     fixture.background_reply();
     let receipt = fixture.receive(true);
-    fixture.set_notice_source(TestReceivedNoticeSourceResult::Unavailable);
     let (line, closed) = fixture.finish();
     assert!(
         !closed
             && line.contains(&fixture.run_id)
             && line.contains(&receipt.verifications[0].record_id)
-            && line.contains("source read unavailable")
+            && line.contains("no source observation")
             && line.contains("confirms no current-input or ordinary-check credit")
-            && line.contains("No rerun is requested")
             && !line.contains("unchanged input")
             && !line.contains("outcome Unknown"),
         "{line}"
@@ -1322,7 +1213,7 @@ fn an_unavailable_notice_source_confirms_only_the_historical_receipt() {
         .prompt;
     assert!(
         prompt.contains(&receipt.verifications[0].record_id)
-            && prompt.contains("source read unavailable")
+            && prompt.contains("no source observation")
             && prompt.contains("confirms no current-input or ordinary-check credit")
             && !prompt.contains("unchanged input")
             && !prompt.contains("Make that item"),
@@ -1331,123 +1222,26 @@ fn an_unavailable_notice_source_confirms_only_the_historical_receipt() {
 }
 
 #[test]
-fn received_notice_real_clean_reader_confirms_current_without_the_protocol_seam() {
+fn received_notice_publication_never_renews_an_expired_notice_budget() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     let mut fixture = RegisteredLauncherTurn::committed();
     fixture.background_reply();
     let receipt = fixture.receive(true);
-    fixture.notice_source.borrow_mut().take();
-    let registration = fixture
-        .turn
-        .state
-        .inner
-        .lock()
-        .unwrap()
-        .test_run_registrations[&fixture.run_id]
-        .clone();
-    let notice = ReceivedCheckNotice::read(
-        &registration,
-        std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
-    )
-    .expect("real pinned Git clean proof");
-    assert_eq!(notice.source(), ReceivedNoticeSource::Current);
-    assert!(
-        notice.line().contains(&receipt.verifications[0].record_id)
-            && notice.line().contains("unchanged input"),
-        "{}",
-        notice.line()
-    );
-    assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
-    fixture.wait_for_received_notices();
-}
-
-#[test]
-fn received_notice_source_change_and_read_unavailability_stay_distinct() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    for changed in [false, true] {
-        let mut fixture = RegisteredLauncherTurn::committed();
-        fixture.background_reply();
-        fixture.receive(true);
-        let registration = fixture
-            .turn
-            .state
-            .inner
-            .lock()
-            .unwrap()
-            .test_run_registrations[&fixture.run_id]
-            .clone();
-        // Independent real-reader control: no scripted protocol result.
-        fixture.notice_source.borrow_mut().take();
-        let root = FsPath::new(&registration.worktree);
-        if changed {
-            fs::write(root.join("README.md"), "changed after receipt\n").unwrap();
-        } else {
-            // This reader refuses configured filters before any source read.
-            // It cannot establish clean input or silently call that dirt.
-            run_git_test_command(
-                root,
-                &["config", "filter.notice.clean", "unreachable-filter"],
-            );
-        }
-        // This is a predicate integration control, not the protocol's timed
-        // availability test: use the pinned reader's existing default bound.
-        let notice = ReceivedCheckNotice::read(
-            &registration,
-            std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
-        );
-        if changed {
-            assert!(
-                notice.is_none(),
-                "changed source must not produce a received-current notice"
-            );
-        } else {
-            let notice =
-                notice.expect("a valid historical receipt survives an unavailable source read");
-            assert_eq!(
-                notice.source(),
-                ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Read)
-            );
-            assert!(
-                notice.line().contains("source read unavailable")
-                    && !notice.line().contains("unchanged input")
-            );
-            run_git_test_command(root, &["config", "--unset", "filter.notice.clean"]);
-        }
-        assert!(
-            ReviewFreezeGit::new_with_deadline(
-                root,
-                Some(std::time::Instant::now() - Duration::from_secs(1))
-            )
-            .is_err(),
-            "the real pinned reader must refuse an expired deadline"
-        );
-        assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
-    }
-}
-
-#[test]
-fn received_notice_publication_never_renews_an_expired_source_proof() {
-    let _placement = TestTempRootDirectoryScope::repository_local();
-    let mut fixture = RegisteredLauncherTurn::committed();
-    fixture.background_reply();
-    fixture.receive(true);
     let mut prepared = fixture.turn.state.prepare_registered_check_notices_until(
         &fixture.turn.session_id,
         std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET,
     );
-    let notice = prepared[0].received.as_mut().unwrap();
-    assert_eq!(notice.source(), ReceivedNoticeSource::Current);
     // Deterministically model the interval between off-lock read and locked
     // publication, without a wall-clock sleep or a larger production bound.
-    notice.deadline = std::time::Instant::now() - Duration::from_secs(1);
+    prepared[0].received.as_mut().unwrap().deadline =
+        std::time::Instant::now() - Duration::from_secs(1);
     let (lines, _) = {
         let mut inner = fixture.turn.state.inner.lock().unwrap();
         let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
         registered_check_notices_locked(&mut inner, index, &prepared)
     };
-    assert!(
-        lines[0].contains("confirmation is unavailable") && !lines[0].contains("unchanged input")
-    );
+    assert!(lines[0].contains(&receipt.verifications[0].record_id));
+    assert!(lines[0].contains("deadline elapsed"));
     assert_ordinary_observation_has_no_native_credit(&fixture.turn, &fixture.turn.finish());
 }
 
@@ -1576,7 +1370,7 @@ fn a_late_received_notice_reads_off_lock_after_durable_settlement() {
 }
 
 #[test]
-fn a_companion_root_reminder_uses_only_that_items_own_current_received_record() {
+fn a_companion_root_reminder_keeps_placement_with_a_historical_receipt() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for case in [
         "received",
@@ -1650,7 +1444,6 @@ fn a_companion_root_reminder_uses_only_that_items_own_current_received_record() 
         }
         if case == "dirty" {
             fs::write(FsPath::new(&primary.root).join("README.md"), "changed\n").unwrap();
-            fixture.capture_dirty_notice_source();
         }
         if case == "mirror-only" || case == "generation" {
             fixture
@@ -1734,11 +1527,13 @@ fn a_companion_root_reminder_uses_only_that_items_own_current_received_record() 
                 .clone()
                 .unwrap_or_default()
         });
-        assert_eq!(
-            line.contains("Make that item"),
-            case != "received",
-            "{case}: {line}"
-        );
+        assert!(line.contains("Make that item"), "{case}: {line}");
+        if matches!(case, "received" | "dirty") {
+            assert!(
+                line.contains(&receipt.verifications[0].record_id),
+                "{case}: {line}"
+            );
+        }
         if case == "not-durable" {
             assert!(
                 !line.contains(&receipt.verifications[0].record_id),
@@ -1766,11 +1561,7 @@ fn a_companion_root_reminder_uses_only_that_items_own_current_received_record() 
             .turn
             .begin_prompt("Report the current check.")
             .prompt;
-        assert_eq!(
-            prompt.contains("Make that item"),
-            case != "received",
-            "{case}: {prompt}"
-        );
+        assert!(prompt.contains("Make that item"), "{case}: {prompt}");
         if case == "not-durable" {
             assert!(
                 !prompt.contains(&receipt.verifications[0].record_id),
@@ -1781,12 +1572,12 @@ fn a_companion_root_reminder_uses_only_that_items_own_current_received_record() 
 }
 
 #[test]
-fn a_test_in_another_root_does_not_request_a_duplicate_of_the_bound_items_received_run() {
+fn a_test_in_another_root_keeps_placement_with_the_bound_items_historical_receipt() {
     let _placement = TestTempRootDirectoryScope::repository_local();
     for received in [false, true] {
         let mut fixture = RegisteredLauncherTurn::committed();
         fixture.background_reply();
-        fixture.receive(true);
+        let receipt = fixture.receive(true);
         fixture.finish();
         let (primary, binding) = {
             let inner = fixture.turn.state.inner.lock().unwrap();
@@ -1884,7 +1675,12 @@ fn a_test_in_another_root_does_not_request_a_duplicate_of_the_bound_items_receiv
                 .clone()
                 .unwrap_or_default()
         });
-        assert_eq!(line.contains("Make that item"), !received, "{line}");
+        assert!(line.contains("Make that item"), "{line}");
+        assert_eq!(
+            line.contains(&receipt.verifications[0].record_id),
+            received,
+            "{line}"
+        );
         assert!(
             fixture
                 .turn
@@ -1905,7 +1701,7 @@ fn a_test_in_another_root_does_not_request_a_duplicate_of_the_bound_items_receiv
             .turn
             .begin_prompt("Report the unrelated check.")
             .prompt;
-        assert_eq!(prompt.contains("Make that item"), !received, "{prompt}");
+        assert!(prompt.contains("Make that item"), "{prompt}");
     }
 }
 

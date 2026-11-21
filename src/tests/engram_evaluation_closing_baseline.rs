@@ -273,7 +273,7 @@ fn unavailable_unadmitted_or_other_root_measurements_do_not_supply_a_checkpoint(
             let admission = AcceptanceCommittedInputAdmission {
                 run_id: "test-fixture".into(),
                 commit: "f".repeat(40),
-                native_source: None,
+                recorded_source: None,
             };
             assert!(
                 turn.state

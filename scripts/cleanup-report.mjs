@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 
 export function parseWorktrees(text) {
   return text.split("\0\0").filter(Boolean).map(block => {

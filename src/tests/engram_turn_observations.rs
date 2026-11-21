@@ -609,30 +609,6 @@ fn public_delete_keeps_an_actual_changed_child_until_its_ordinary_report_is_sett
 }
 
 #[test]
-fn a_worktree_root_over_engrams_basis_bound_leaves_the_report_without_a_basis() {
-    let workdir = FsPath::new("C:/w");
-    let at_bound = format!("C:/{}", "w".repeat(ENGRAM_SOURCE_BASIS_MAX_BYTES - 3));
-    assert_eq!(
-        engram_bounded_source_basis(workdir, FsPath::new(&at_bound), "revision".into()),
-        Some(EngramExecutionSourceBasis {
-            source_id: None,
-            source_root_generation: None,
-            source_root_state: None,
-            workspace_id: at_bound.clone(),
-            source_revision: "revision".into()
-        })
-    );
-    assert_eq!(
-        engram_bounded_source_basis(
-            workdir,
-            FsPath::new(&format!("{at_bound}w")),
-            "revision".into()
-        ),
-        None
-    );
-}
-
-#[test]
 fn ordinary_source_comparison_uses_actual_contents_and_retains_its_exact_endpoint() {
     for (edit, watcher) in [(false, false), (false, true), (true, false), (true, true)] {
         let turn = begin_with_passive_measured_baseline("ordinary-source-endpoint");

@@ -37,8 +37,8 @@ TermAl data directory (`~/.termal`).
   TermAl's own `.gitignore` ignores `/.worktrees/`.
 
 Because the location is ignored, the parent's `git status`, its dirty-state
-capture for the next spawn, the review freeze and the test fingerprint do not
-see the nested worktree. The file watcher drops its events for the parent's
+capture for the next spawn and its Engram source identity exclude the nested
+worktree. The file watcher drops its events for the parent's
 root and keeps them for the child's own root. Instruction search does not
 descend into `.worktrees/`, so a delegation's copy of `AGENTS.md` or
 `CLAUDE.md` is never reported as the workdir's own.

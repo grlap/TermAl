@@ -1305,8 +1305,7 @@ fn acceptance_binding_source_revision(basis: &AcceptanceVerificationSourceBasis)
     match &basis.identity {
         AcceptanceSourceBasis::Shared(shared) => {
             acceptance_source_bytes(&shared.source_id).ok()?;
-            Some(format!("source-id:{} ({} changes, {} submodules)",
-                &shared.source_id.commit[..12], shared.source_id.changes.len(), shared.source_id.submodules.len()))
+            Some(acceptance_attempt_source_label(Some(&shared.source_id), None))
         }
         AcceptanceSourceBasis::Legacy(legacy) if (1..=96).contains(&legacy.fingerprint.len()) && legacy.fingerprint.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '.')) =>

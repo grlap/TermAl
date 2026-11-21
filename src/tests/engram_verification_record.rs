@@ -1724,7 +1724,9 @@ fn stage_kinds_follow_the_actual_argv_then_the_stage_rule() {
     // Node's own test runner, Vitest and cargo tests, in any mode.
     let node_test = with_node("--test --test-force-exit --test-timeout=60000 scripts/a.test.mjs");
     assert_eq!(kind(Focused, "focused", node_test.clone(), &[]), test);
-    assert_eq!(kind(Full, "fingerprint-tests", node_test, &full_gate), test);
+    for stage in ["node-helper-tests", "fingerprint-tests"] {
+        assert_eq!(kind(Full, stage, node_test.clone(), &full_gate), test);
+    }
     assert_eq!(kind(Focused, "focused", words("npx vitest run"), &[]), test);
     assert_eq!(kind(Full, "ui", words("npx vitest run"), &full_gate), test);
     let vitest = with_node("node_modules/vitest/vitest.mjs run");

@@ -15,6 +15,7 @@ fn source(root: &FsPath) -> EngramSourceId {
         String::from_utf8(output.stdout).unwrap().trim().to_owned()
     };
     EngramSourceId {
+        git_delta: None,
         commit: git("HEAD"),
         tree: git("HEAD^{tree}"),
         changes: vec![],

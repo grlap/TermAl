@@ -286,39 +286,11 @@ condition→action table. `class` is `routine` only until tm-uwx.3.
 
 ### 7.2 Rules earned from incidents
 
-1. **Freeze fingerprints** (binds both agents). Every freeze declaration
-   carries the complete labeled packet emitted by EXACTLY this repository
-   helper so declarer and auditor cannot diverge:
-
-   ```
-   node scripts/review-freeze-fingerprint.mjs
-   ```
-
-   The helper emits the exact `HEAD` commit plus labeled SHA-256 values for
-   the index-relative-to-`HEAD`, the complete worktree-relative-to-`HEAD`,
-   the exact short status, and a NUL-safe path/content stream for untracked
-   files. Git output and regular-file content are hashed incrementally with
-   bounded memory. Untracked regular files also include normalized Git
-   executable semantics: any Unix execute bit is executable; Windows records
-   them as non-executable because worktree execute bits are not meaningful
-   there. Before/after filesystem metadata must match; removal or mutation
-   during hashing fails with an explicit instruction to rerun instead of
-   declaring an incoherent tree. All patch/status/untracked scopes use
-   the same paths. (They once excluded the Beads tracker export under
-   `.beads`; that exclusion went with Beads on 2026-10-03.) Every
-   declaration includes the exact helper command beside its full output; bare hashes are invalid because verification
-   must be mechanical. The auditor recomputes at audit start AND end; any
-   mismatch voids the audit, and ANY post-declaration edit — including an
-   approved cleanup — requires an immediate fresh declaration before
-   downstream work consumes the freeze. A worked declaration is one mailbox
-   message: stamp line naming the frozen scope, `Type: freeze`, the change
-   summary, and the helper command/output block. Paid for by: a frozen tree
-   that drifted mid-audit, index-only changes hidden behind unchanged
-   worktree bytes, a moved `HEAD`, whitespace-bearing untracked paths,
-   executable-mode changes, Git output larger than a child-process capture
-   buffer, a declaration that raced its own template substitution, and
-   tracker export writes that invalidated otherwise unchanged product-tree
-   hashes.
+1. **Frozen input** (binds both agents). The parent records the complete
+   Engram `source_id` of the clean candidate and the Git range selecting the
+   changes. The auditor reads the committed diff and checks HEAD and clean
+   status at both boundaries. A changed candidate needs its own recorded
+   input. See [the review command](../.claude/commands/review-changes.md#freeze-the-review-input).
 2. **Atomic placement** (binds anyone writing files a reader watches).
    Compose outside the watched directory, move in with one rename, then
    signal. Paid for by: two read-races (a half-written audit file; a

@@ -90,7 +90,7 @@ impl AppState {
         prepared
     }
 
-    // Component tests can prepare the same source proof the owned observer
+    // Component tests can prepare the same receipt the owned observer
     // reads. Terminal callers use only the cheap preparation above.
     #[cfg(test)]
     fn prepare_registered_check_notices_until(

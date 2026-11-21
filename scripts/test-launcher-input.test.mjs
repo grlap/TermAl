@@ -3,7 +3,7 @@ import { readFileSync, realpathSync, mkdirSync, mkdtempSync, writeFileSync } fro
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { captureCommitInputStatus, sourceIdsEqual, encodeRunRecord, encodeTerminalRunResult,
+import { captureCommitInputStatus, compareSourceIds, sourceIdsEqual, encodeRunRecord, encodeTerminalRunResult,
   RUN_RECORD_JSON_BYTES, runSourceCommand } from "./test-launcher-input.mjs";
 import { sourceOwnerMetadata } from "./test-run-registration.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
@@ -169,6 +169,29 @@ test("complete clean and dirty owner values compare without a clean policy", asy
     });
     assert.deepEqual(captured.sourceId, source);
   }
+});
+
+test("Git delta capture preserves the producer identity and compares its link pins", async () => {
+  const [cleanEnvelope, dirtyEnvelope] = JSON.parse(readFileSync(
+    new URL("../src/tests/fixtures/engram-source-r13.json", import.meta.url), "utf8",
+  ));
+  const base = cleanEnvelope.source_id;
+  const dirty = dirtyEnvelope.source_id;
+  for (const envelope of [cleanEnvelope, dirtyEnvelope]) {
+    const captured = await captureCommitInputStatus(root, { ENGRAM_SOURCE_BINARY: process.execPath },
+      { run: () => reply({ ...envelope, root }) });
+    assert.deepEqual(captured.sourceId, envelope.source_id);
+    assert.equal(sourceIdsEqual(captured.sourceId, envelope.source_id), true);
+  }
+  assert.equal(compareSourceIds(base, dirty), "mismatch");
+  assert.equal(compareSourceIds(clean(), base), "incomparable");
+  assert.equal(compareSourceIds(base, clean()), "incomparable");
+  const offPin = structuredClone(dirty);
+  offPin.git_delta.gitlinks[0].checkout_head = offPin.git_delta.gitlinks[0].head_pin;
+  assert.equal(sourceIdsEqual(dirty, offPin), false);
+  const partial = structuredClone(dirty);
+  delete partial.git_delta.gitlinks[0].head_pin;
+  assert.equal(sourceIdsEqual(partial, partial), false);
 });
 
 test("root, child, mode and newly untracked changes cannot borrow equal commits", () => {

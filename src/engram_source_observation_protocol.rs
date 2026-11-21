@@ -305,7 +305,8 @@ impl EngramInterTurnObservation {
                 || baseline.source_basis.source_root_state != basis.source_root_state
                 || (baseline.source_basis.source_id == basis.source_id
                     && baseline.source_basis.source_revision == basis.source_revision)
-                || baseline.source_basis.source_id.is_some() != basis.source_id.is_some()
+                || !engram_observation_source_formats_match(
+                    baseline.source_basis.source_id.as_ref(), basis.source_id.as_ref())
                 || !engram_observation_identity_valid(&baseline.source_basis.source_revision,
                     baseline.source_basis.source_id.as_ref()) || from > through
             {

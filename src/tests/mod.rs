@@ -118,6 +118,14 @@ mod engram_source_roots;
 fn launcher_source_id_fixture() -> Value {
     json!({"commit":"a".repeat(40),"tree":"b".repeat(40),"submodules":[],"changes":[]})
 }
+
+fn launcher_git_delta_id_fixture() -> Value {
+    json!({
+        "commit": "a".repeat(40),
+        "tree": "b".repeat(40),
+        "git_delta": {"sha256": "c".repeat(64), "dirty": false, "gitlinks": []}
+    })
+}
 mod engram_declared_source_fixture;
 mod engram_source_command;
 mod engram_source_id;
@@ -173,7 +181,6 @@ mod opencode_approvals;
 mod opencode_config;
 mod orchestrator;
 mod ordered_publication;
-mod ordinary_commit_input;
 pub(crate) mod phase_sync;
 mod read_only_orientation;
 mod review_freeze;

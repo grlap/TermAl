@@ -571,13 +571,19 @@ impl CompletionFixture {
                         post_run.clean_before = false
                     }
                     EngramVerificationRecordPostRun::SourceId(post_run) => {
-                        post_run.source_id.changes.push(EngramSourceIdChange {
-                            path: "src/lib.rs".into(),
-                            status: " M".into(),
-                            origin: None,
-                            blob: Some("e".repeat(40)),
-                            mode: Some(EngramSourceIdMode::Regular),
-                        })
+                        let root = FsPath::new(&registration.worktree);
+                        let path = root.join("README.md");
+                        let original = fs::read(&path).unwrap();
+                        let mut modified = original.clone();
+                        modified.extend_from_slice(b"\nDirty verification control.\n");
+                        fs::write(&path, modified).unwrap();
+                        let dirty = self.source_id_now(session, root);
+                        fs::write(&path, original).unwrap();
+                        assert!(!dirty.is_clean());
+                        assert_eq!(post_run.source_id.compare(&dirty), Some(false));
+                        let wire = serde_json::to_value(dirty).unwrap();
+                        post_run.source_id = serde_json::from_value(wire).unwrap();
+                        assert!(!post_run.source_id.is_clean());
                     }
                 },
                 "claim-fence" => refused.registration.binding.claim_fence += 1,

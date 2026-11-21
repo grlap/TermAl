@@ -14,7 +14,7 @@ import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
 const launcher = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
-const names = ["fmt", "cargo-check", "typescript", "fingerprint-tests", "rust-tests", "vitest"];
+const names = ["fmt", "cargo-check", "typescript", "node-helper-tests", "rust-tests", "vitest"];
 const bindings = (resolved) => Object.fromEntries(names.map((name) => [name, resolved[name]]));
 
 const mac = {
@@ -27,7 +27,7 @@ const mac = {
     fmt: "/Users/runner/.cargo/bin/cargo",
     "cargo-check": "/Users/runner/.cargo/bin/cargo",
     typescript: "/opt/homebrew/bin/node",
-    "fingerprint-tests": "/opt/homebrew/bin/node",
+    "node-helper-tests": "/opt/homebrew/bin/node",
     "rust-tests": "/bin/sh",
     vitest: "/opt/homebrew/bin/node",
   }),
@@ -44,7 +44,7 @@ const windows = {
     fmt: "C:\\Users\\runner\\.cargo\\bin\\cargo.exe",
     "cargo-check": "C:\\Users\\runner\\.cargo\\bin\\cargo.exe",
     typescript: "C:\\Program Files\\nodejs\\node.exe",
-    "fingerprint-tests": "C:\\Program Files\\nodejs\\node.exe",
+    "node-helper-tests": "C:\\Program Files\\nodejs\\node.exe",
     "rust-tests": "C:\\Program Files\\Git\\bin\\bash.exe",
     vitest: "C:\\Program Files\\nodejs\\node.exe",
   }),
@@ -65,9 +65,9 @@ test("full gate plan: a Mac run's stages and entries use that run's values and P
   assert.equal(entry(plan, "typescript").cwd, `${mac.root}/ui`);
   const vitest = entry(plan, "vitest").command;
   assert.equal(vitest.at(-1), `--outputFile.json=${mac.runDir}/vitest-durations.json`);
-  const helpers = entry(plan, "fingerprint-tests").command;
+  const helpers = entry(plan, "node-helper-tests").command;
   assert.ok(helpers.includes(`--test-reporter=${mac.reporterUrl}`));
-  assert.ok(helpers.includes(`--test-reporter-destination=${mac.runDir}/fingerprint-tests-durations.jsonl`));
+  assert.ok(helpers.includes(`--test-reporter-destination=${mac.runDir}/node-helper-tests-durations.jsonl`));
 });
 
 test("full gate plan: a Windows run's stages and entries use that run's values and Windows paths", () => {
@@ -79,8 +79,8 @@ test("full gate plan: a Windows run's stages and entries use that run's values a
   assert.equal(entry(plan, "typescript").cwd, `${windows.root}\\ui`);
   assert.equal(entry(plan, "vitest").command.at(-1),
     "--outputFile.json=F:/GitHub/TermAl/.git/worktrees/wt-ref/review-runs/test-win/vitest-durations.json");
-  assert.ok(entry(plan, "fingerprint-tests").command.includes(
-    `--test-reporter-destination=${windows.runDir}\\fingerprint-tests-durations.jsonl`));
+  assert.ok(entry(plan, "node-helper-tests").command.includes(
+    `--test-reporter-destination=${windows.runDir}\\node-helper-tests-durations.jsonl`));
 });
 
 test("full gate plan: the plan never depends on the host computing it", () => {

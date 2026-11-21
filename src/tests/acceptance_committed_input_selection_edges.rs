@@ -24,7 +24,7 @@ fn passed_baseline() -> (AppState, String, String, String, TestRunRegistration) 
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone()
             }
@@ -86,7 +86,7 @@ fn a_terminal_failure_before_input_capture_does_not_supersede_an_older_pass() {
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
-                    native_source: None,
+                    recorded_source: None,
                     run_id: older.run_id,
                     commit: head,
                 }
@@ -224,7 +224,7 @@ fn a_running_result_before_input_capture_does_not_supersede_a_terminal_pass() {
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: older.run_id,
                 commit: head
             }
@@ -299,7 +299,7 @@ fn a_compacted_newer_failure_still_supersedes_an_older_pass() {
         decide_task(&state, &parent, &task, deadline()),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: older.run_id,
                 commit: head.clone(),
             }
@@ -357,7 +357,7 @@ fn a_compacted_newer_failure_still_supersedes_an_older_pass() {
         decide_task(&state, &parent, &task, deadline()),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head
             }
@@ -386,7 +386,7 @@ fn an_acknowledged_pass_survives_installed_compaction_before_or_during_the_read(
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
-                    native_source: None,
+                    recorded_source: None,
                     run_id: registration.run_id.clone(),
                     commit: head
                 }

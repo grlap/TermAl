@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { createRun, executeRun, recoverRun, summarize } from "./test-launcher.mjs";
 import { runOwnedCommand } from "./test-process-owner.mjs";
 import { bootstrapUiDependencies, resolveNpmCli, uiDependencyFiles } from "./test-ui-bootstrap.mjs";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
 import { writeUiBootstrapFixture } from "./test-ui-bootstrap-fixtures.mjs";

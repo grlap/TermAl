@@ -179,6 +179,39 @@ fn details_and_waits_report_current_actual_objects_without_using_a_parent_fence(
 }
 
 #[test]
+fn native_wait_compares_git_delta_and_preserves_incomparable_endpoints() {
+    let legacy = launcher_source_id_fixture();
+    let [clean, dirty]: [Value; 2] =
+        serde_json::from_str(include_str!("fixtures/engram-source-r13.json")).unwrap();
+    let delta = clean["source_id"].clone();
+    let (request, equal) = records(&delta);
+    assert!(test_run_source_input_matches(&request, &equal));
+    assert_eq!(
+        TestRunWaitEvidence::from_results(&equal).source_comparison,
+        "matched"
+    );
+
+    let changed = json!({"sourceIdBefore":delta, "sourceIdAfter":dirty["source_id"]});
+    assert_eq!(
+        TestRunWaitEvidence::from_results(&changed).source_comparison,
+        "mismatched"
+    );
+
+    for (before, after) in [(&legacy, &delta), (&delta, &legacy)] {
+        let mixed = json!({"sourceIdBefore":before, "sourceIdAfter":after});
+        assert_eq!(
+            TestRunWaitEvidence::from_results(&mixed).source_comparison,
+            "incomparable"
+        );
+        assert!(!test_run_source_input_matches(&request, &mixed));
+        assert_eq!(
+            serde_json::to_value(test_run_native_input(&mixed)).unwrap(),
+            json!({"kind":"source_id", "source_id_before":before, "source_id_after":after})
+        );
+    }
+}
+
+#[test]
 fn compact_source_records_remain_readable_at_the_host_byte_limit() {
     let fixture = RunFixture::new("source-input-byte-limit");
     let source = dirty_source();

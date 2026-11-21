@@ -62,21 +62,45 @@ pub(super) fn owner_run(progress: &str) -> (AppState, String, String, String, Te
 fn new_source_record_passes_the_termal_acceptance_acknowledgement_boundary() {
     for progress in ["received", "settled"] {
         let (state, parent, _root, head, registration) = owner_run(progress);
-        assert!(
-            acceptance_committed_input_record_acknowledged(&registration, &head).is_ok(),
-            "{progress}"
-        );
+        let body = acceptance_committed_input_record_acknowledged(&registration, &head)
+            .unwrap_or_else(|error| panic!("{progress}: {error:?}"));
+        let EngramVerificationRecordInput::SourceId { source_id } = body.input else {
+            panic!("{progress}: expected a full source identity");
+        };
         assert_eq!(
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
-                    native_source: None,
+                    recorded_source: Some(source_id),
                     run_id: COMMITTED_RUN_ID.into(),
                     commit: head
                 }
             ))
         );
     }
+}
+
+#[test]
+fn full_launcher_source_cannot_borrow_a_matching_commit() {
+    let (_state, _parent, _root, head, registration) = owner_run("settled");
+    let body = acceptance_committed_input_record_acknowledged(&registration, &head).unwrap();
+    let EngramVerificationRecordInput::SourceId { source_id } = body.input else {
+        panic!("expected the frozen launcher's full source identity");
+    };
+    let outcome = |current: &EngramSourceId| {
+        acceptance_registered_input_outcome(&registration, current).unwrap()
+    };
+    assert_eq!(outcome(&source_id), Some(true));
+
+    let mut current = serde_json::to_value(&source_id).unwrap();
+    current["submodules"] = json!([{
+        "path": "child",
+        "commit": "a".repeat(40),
+        "changes": [],
+    }]);
+    let current: EngramSourceId = serde_json::from_value(current).unwrap();
+    assert_eq!(current.commit, source_id.commit);
+    assert_eq!(outcome(&current), Some(false));
 }
 
 #[test]
@@ -96,7 +120,7 @@ fn historical_commit_record_keeps_its_acceptance_acknowledgement() {
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.into(),
                 commit: head
             }
@@ -106,11 +130,13 @@ fn historical_commit_record_keeps_its_acceptance_acknowledgement() {
 
 #[test]
 fn new_source_record_keeps_its_received_check_notice() {
-    let (_state, _parent, root, head, registration) = owner_run("settled");
-    assert!(
-        acceptance_committed_input_record_acknowledged(&registration, &head).is_ok(),
-        "the settled fixture body and receipt still answer the run"
-    );
+    let (_state, _parent, _root, head, registration) = owner_run("settled");
+    let body = acceptance_committed_input_record_acknowledged(&registration, &head)
+        .expect("the settled fixture body and receipt still answer the run");
+    assert!(matches!(
+        body.input,
+        EngramVerificationRecordInput::SourceId { .. }
+    ));
     let disk = TestRunDisk::read(FsPath::new(&registration.run_directory), None).unwrap();
     assert!(
         test_run_registered_disk_matches(&registration, &disk),
@@ -119,17 +145,6 @@ fn new_source_record_keeps_its_received_check_notice() {
     assert!(
         registered_closing_clean_input(&registration, &disk),
         "the actual clean-input gates admit the fixture"
-    );
-    let current =
-        committed_source_status(&ReviewFreezeGit::new(FsPath::new(&root)).unwrap()).unwrap();
-    assert_eq!(
-        current.0, head,
-        "the real notice source is still at its recorded commit"
-    );
-    assert!(
-        current.1.is_empty(),
-        "the real notice source is still clean: {:?}",
-        current.1
     );
     assert!(
         ReceivedCheckNotice::read(

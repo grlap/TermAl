@@ -12,7 +12,7 @@ import {
 import { dirname, isAbsolute, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 import {
   commitInputSummaryLine,
   commitInputOutcome,

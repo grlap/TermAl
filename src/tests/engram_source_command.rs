@@ -42,6 +42,21 @@ fn source_owner_envelopes_preserve_clean_dirty_and_exit_one_refusals() {
     assert_eq!(dirty.entries[0].path, "new file.txt");
     assert!(dirty.entries[0].origin.is_none());
     assert_eq!(dirty.source_id.unwrap().changes.len(), 1);
+    // Producer-emitted Windows R13 envelopes. Only the test workspace path is local.
+    let envelopes: [Value; 2] =
+        serde_json::from_str(include_str!("fixtures/engram-source-r13.json")).unwrap();
+    for (mut envelope, expected_status) in envelopes
+        .into_iter()
+        .zip([EngramSourceStatus::Clean, EngramSourceStatus::NotClean])
+    {
+        envelope["root"] = json!(engram_exact_path_key(&root));
+        let observation = decode(&root, &envelope, Some(0)).unwrap();
+        assert_eq!(observation.status, expected_status);
+        assert_eq!(
+            serde_json::to_value(observation.source_id.unwrap()).unwrap(),
+            envelope["source_id"]
+        );
+    }
     for code in ["input_unavailable", "deadline", "output_limit"] {
         let mut value = source_envelope(&root, "unavailable");
         value["root"] = Value::Null; // A refused root need not have been established.

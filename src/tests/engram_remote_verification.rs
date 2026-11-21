@@ -44,6 +44,7 @@ fn sealed_producer_bounds_refuse_original_facts_without_truncation_or_coercion()
 fn source() -> EngramSourceId {
     let oid = sha256_hex(Uuid::new_v4().as_bytes());
     EngramSourceId {
+        git_delta: None,
         commit: oid[..40].to_owned(),
         tree: oid[..40].to_owned(),
         submodules: Vec::new(),

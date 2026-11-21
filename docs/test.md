@@ -259,11 +259,13 @@ these bytes; it uses the producing host's own retained copy.
 The launcher measures input through `engram source --root ROOT --json`.
 It stores the complete admitted value in `request.sourceId` and `input.json`,
 then records actual execution-boundary observations in
-`results.sourceIdBefore` and `results.sourceIdAfter`. These closed objects
-include root commit/tree, recursive child commits, and root/child local changes.
-The shared validator checks shape, bounds and producer ordering; comparison
-uses the entire object. No automatic input fingerprint or `.git/info` image is
-computed. Explicit review-freeze identity remains separate and unchanged.
+`results.sourceIdBefore` and `results.sourceIdAfter`. The current object
+contains the root commit and tree plus Engram's `git_delta` value. The shared
+validator checks shape, bounds and producer ordering. Compare every field of
+two values in the same format. A stored per-file value and a Git delta value
+are incomparable, so neither can establish equality or a source change across
+the switch. No automatic input fingerprint or `.git/info` image is
+computed. Review source verification also uses Engram's complete value.
 
 In a native TermAl context, the launcher first gets the existing session
 `source-owner` metadata pin. The pin supplies executable provenance, not source
@@ -555,7 +557,7 @@ Pinned registration requires a visible native local root session, including on
 replay. An ACK retry also requires the configured executable still to match its
 saved pin; upgrading or replacing it refuses the retry instead of relabelling
 the historical registration. The GET endpoint has its own two-permit
-limiter, independent of review-freeze verification capacity. On Unix, script
+limiter, independent of review source verification capacity. On Unix, script
 wrappers are refused before probing: the configured file needs a native ELF
 or Mach-O header as well as successful bounded version/schema probes.
 This additive bootstrap does not yet make the launcher call the endpoint or
@@ -563,17 +565,17 @@ switch the committed-input predicate. The later switch requires the endpoint
 to be present in the running host. Installing a build does not change the
 running host; the established restart procedure still applies.
 
-The source command's additive v1 response includes a required `source_id`.
-On a complete measurement it is a closed object with `commit`, `tree`,
-`submodules` and `changes`. Each submodule has its root-relative `path`,
-actual `commit` and repo-relative `changes`; expected pins are implied by
-the committed parent tree. Each change requires `path`, `status`, `origin`,
-`blob` and `mode`. Origin is null except for a rename or copy. Blob and mode
-are null for an absent path; a staged deletion whose path still exists
-contains its current blob and mode. Modes are strings `100644`, `100755`
-or `120000`. Ignored files and gitlink placeholders are excluded from the
-file changes. Arrays retain the owner's UTF-8 byte order; two porcelain
-records for one path, such as `??` followed by `D `, remain separate.
+The source command's v1 response includes a required `source_id`. A complete
+current measurement has `commit`, `tree` and `git_delta`. The latter contains
+the producer's `sha256`, `dirty` flag and the selected `gitlinks`, in UTF-8
+path order. Each gitlink has `path` and the required nullable fields
+`head_pin`, `index_pin` and `checkout_head`. An indexed link needs a
+checkout. Off-pin, changed or locally dirty selected links make the
+observation dirty. The launcher never computes a source digest.
+
+Stored values containing `commit`, `tree`, `submodules` and `changes` remain
+readable in that format and retain their owner's order and distinct change
+records. Neither format may be combined with fields of the other.
 An unavailable measurement has `source_id: null`, never a partial value.
 
 The ignored Rust test
@@ -585,8 +587,10 @@ candidate's recorded absolute path and digest, and `TERMAL_TEST_SOURCE_FIXTURES`
 to an absolute module exported from that same owner candidate's
 `scripts/source-input-fixtures.mjs`. Keep that module and fixture scratch inside
 the TermAl repository. The test honors the owner's platform skips, creates
-repository-local disposable roots, compares the entire runtime-derived
-`fixture.sourceId`, and prints actual identities with their case names.
+repository-local disposable roots and compares the root ids, selected
+gitlink pins and cleanliness supplied by the current fixture. Existing
+per-file fixtures still compare the complete supplied `fixture.sourceId`.
+The test prints actual producer identities with their case names.
 The first measurement consumes the same validated source observation that
 establishes the pin's source schema, rather than issuing a second full read.
 It retains that invocation's root and observation time; a separate GET or later
@@ -692,10 +696,10 @@ stops the command. Post-run drift or unavailability prevents a passing run;
 actual command failures keep their outcome and exit code. `execution.lock`
 prevents rerunning the same plan.
 
-Old artifacts retain their recorded fingerprints as attributed history. They
-are never accepted as proof for a new source_id run. Explicit review-freeze
-commands, reviewer identities, test-ref names and Review-Freeze trailers keep
-their existing fingerprint format; this cutover does not change them.
+Old artifacts retain their recorded fingerprints as attributed history.
+New review and launcher input verification use the complete Engram
+`source_id`. A historical fingerprint supplies no evidence for a new
+`source_id` comparison.
 
 <a id="detached-gate-delivery"></a>
 
@@ -989,18 +993,16 @@ helpers require absolute paths without `..` components. A manually supplied
 Paths are normalized lexically, not canonicalized through filesystem aliases;
 product and run directory components must not be symlinks or junctions.
 
-The review-integrity helper tests run on Linux, macOS, and Windows in CI: the
-same maintained suites as the full gate's `fingerprint-tests` stage
-(`helperTestFiles` in `scripts/test-launcher.mjs`), which a launcher test keeps
-in step with the workflow.
+The full gate's `node-helper-tests` stage runs the maintained suites listed
+in `helperTestFiles` in `scripts/test-launcher.mjs` on the gate host.
 
 The launcher's own tests (`scripts/test-launcher.test.mjs`) wait for the
 processes they start by events: an exit or close, a readiness message, or a
 barrier file. No deadline decides whether one passed, so a slow host makes them
 slower, not failed. A hang in any helper test is surfaced by one liveness
 guard, the runner's per-test timeout (`--test-timeout`, set by
-`HELPER_TEST_HANG_GUARD_MS` in `scripts/test-launcher.mjs` for both the stage
-and CI). It is sized as a hang detector, not a performance bound: 600 s, over
+`HELPER_TEST_HANG_GUARD_MS` in `scripts/test-launcher.mjs`). It is sized as a
+hang detector, not a performance bound: 600 s, over
 13 times the slowest helper test measured on a loaded gate host (about 45 s,
 2026-10-09). A timeout does not stop what the hung test started, so
 `--test-force-exit` ends each test process once its tests have finished; the
@@ -1008,7 +1010,7 @@ fixture processes waiting on a barrier see their owner gone and exit too, and
 the stage ends with the failure instead of waiting on them. A product process
 stuck outside a barrier is not stopped and outlives the stage. Force-exit also
 means a passing test that leaks a handle no longer keeps its suite running, so
-leak detection needs its own check. CI runs these suites on the gate host's
+leak detection needs its own check. The gate runs these suites on the gate host's
 Node (`.nvmrc`), whose runner these rules were checked against.
 
 A launcher test the guard stops is reported as `hung: <test>`, and a failed one
@@ -1016,7 +1018,7 @@ as `failed: <test>`. Either keeps its fixture directory, with its worker logs,
 and names its path on stderr, so a slow worker and a hung one can be told apart
 (`scripts/test-fixture-cleanup.mjs`); a passing test removes it. The other
 helper suites still remove their fixtures unconditionally. The
-`fingerprint-tests` stage runs `node` directly, without the Rust wrapper's run
+`node-helper-tests` stage runs `node` directly, without the Rust wrapper's run
 folder, so a kept directory lies in the product test folder itself
 (`termal/tests` under the user temp folder), gate or not; with
 `TERMAL_TEST_RUN_ROOT` set it lies in that `run-*` folder instead. It survives
@@ -1094,9 +1096,9 @@ into the run directory beside their human log:
 
 - `vitest` adds Vitest's JSON reporter beside its default one and writes
   `vitest-durations.json`;
-- `fingerprint-tests` keeps Node's `spec` output in its log and adds
+- `node-helper-tests` keeps Node's `spec` output in its log and adds
   `scripts/node-test-duration-reporter.mjs`, which writes the runner's test
-  events to `fingerprint-tests-durations.jsonl`.
+  events to `node-helper-tests-durations.jsonl`.
 
 After each of those stages, `results.json` records a `durations` report:
 

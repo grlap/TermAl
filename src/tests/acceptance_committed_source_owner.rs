@@ -53,7 +53,7 @@ fn committed_preflight_keeps_long_host_deadlines_and_issues_owner_compatible_arg
         decide_by(&state, &parent, deadline),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head,
             }

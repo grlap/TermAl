@@ -10,7 +10,7 @@ import {
 import { isAbsolute, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { HELPER_TEST_HANG_GUARD_MS } from "./test-launcher.mjs";
 import { registrationHost } from "./test-launcher-registration-fixtures.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";

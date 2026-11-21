@@ -333,6 +333,8 @@ async fn supervisor_delivers_original_once_and_settled_receipts_stop_federation_
             .unwrap(),
         saved
     );
+    // Close the reopened backup before the fixture removes its directory.
+    drop(copied);
     assert_eq!(saved.admissions[0].receipt, Some(accepted));
     assert_eq!(writes(&transport).len(), 1);
     assert_eq!(writes(&transport)[0].connection.session_id, fixture.native);

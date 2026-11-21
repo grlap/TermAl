@@ -385,12 +385,18 @@ impl AppState {
             Some(Err(reason)) => (None, Some(reason)),
             None => (None, Some("native after-run source capture unavailable: deadline/capacity/cleanup".to_owned())),
         };
-        let endpoint_matches = after.as_ref().is_some_and(|after|
-            after.root == start.source.root && after.source_id == start.source.source_id);
-        let source_change = after.as_ref().filter(|after| after.root == start.source.root
-            && after.source_owner == start.source.source_owner && after.source_id != start.source.source_id)
-            .map(|after| engram_source_id_change_detail(&engram_source_id_differences(&start.source.source_id, &after.source_id)));
-        let mut eligible = endpoint_matches && self.native_declared_scope_current(start);
+        let same_scope_after = after.as_ref().filter(|after|
+            after.root == start.source.root && after.source_owner == start.source.source_owner);
+        let source_comparison = same_scope_after
+            .and_then(|after| start.source.source_id.compare(&after.source_id));
+        let source_refusal = source_refusal.or_else(|| {
+            (same_scope_after.is_some() && source_comparison.is_none())
+                .then(|| "native source_id formats are incomparable".to_owned())
+        });
+        let source_change = same_scope_after.filter(|_| source_comparison == Some(false))
+            .map(|after| engram_source_id_change_detail(&engram_source_id_differences(
+                &start.source.source_id, &after.source_id)));
+        let mut eligible = source_comparison == Some(true) && self.native_declared_scope_current(start);
         if eligible {
             let clock = self.engram_budget_clock();
             let deadline = test_run_registration_deadline(&clock, std::time::Instant::now());

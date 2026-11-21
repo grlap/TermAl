@@ -72,6 +72,7 @@ fn acceptance_owner_reports(
     fs::create_dir_all(&directory).unwrap();
     let binary = source_owner_fixture_binary(&directory);
     let identity = EngramSourceId {
+        git_delta: None,
         commit: run_git_test_command_output(&root, &["rev-parse", "HEAD"]),
         tree: run_git_test_command_output(&root, &["show", "-s", "--format=%T", "HEAD"]),
         changes,
@@ -563,7 +564,7 @@ fn an_acknowledged_committed_run_at_head_is_admitted_without_a_sighting_read() {
             decide(&state, &parent),
             Ok(AcceptanceCommittedInputDecision::Admitted(
                 AcceptanceCommittedInputAdmission {
-                    native_source: None,
+                    recorded_source: None,
                     run_id: COMMITTED_RUN_ID.to_owned(),
                     commit: head.clone(),
                 }
@@ -654,7 +655,6 @@ fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses
     run_git_test_command(&root, &["add", "--", "judged.txt"]);
     run_git_test_command(&root, &["commit", "--quiet", "-m", "pin child"]);
     let head = run_git_test_command_output(&root, &["rev-parse", "HEAD"]);
-    assert_eq!(committed_source_clean_head(&root), Some(head.clone()));
     let transport = install_sighting_transport(&state, &named_root, 1, json!({"state":"absent"}));
     let registration = register_committed_run(
         &state,
@@ -676,7 +676,7 @@ fn a_pinned_child_uses_the_existing_record_and_acceptance_but_child_dirt_refuses
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head
             },
@@ -963,7 +963,7 @@ fn acknowledged_doc_link_lint_admits_only_a_pass_on_the_clean_named_commit() {
                     AcceptanceCommittedInputAdmission {
                         run_id: COMMITTED_RUN_ID.to_owned(),
                         commit: head,
-                        native_source: None,
+                        recorded_source: None,
                     }
                 ))
             );
@@ -1813,7 +1813,7 @@ fn a_received_record_settled_for_the_same_body_during_the_check_is_still_admitte
         decide(&state, &parent),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head,
             }
@@ -1880,7 +1880,7 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         decide_task(&state, &parent, &task_under(live), deadline()),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone(),
             }
@@ -1949,7 +1949,7 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: COMMITTED_RUN_ID.to_owned(),
                 commit: head.clone(),
             }
@@ -2014,7 +2014,7 @@ fn a_committed_run_survives_recovery_only_with_the_same_work_run_binding() {
         ),
         Ok(AcceptanceCommittedInputDecision::Admitted(
             AcceptanceCommittedInputAdmission {
-                native_source: None,
+                recorded_source: None,
                 run_id: renamed_id.to_owned(),
                 commit: head,
             }
@@ -2051,7 +2051,7 @@ const {readFileSync,writeFileSync}=await import('node:fs');
 const {join}=await import('node:path');
 const source=process.argv[2], root=process.argv[3], owner=process.argv[4], code=Number(process.argv[5]);
 const {createRun,executeRun}=await import(pathToFileURL(join(source,'scripts/test-launcher.mjs')));
-const {isolatedGitEnvironment}=await import(pathToFileURL(join(source,'scripts/review-freeze-fingerprint.mjs')));
+const {isolatedGitEnvironment}=await import(pathToFileURL(join(source,'scripts/git-environment.mjs')));
 const {withHostedRegistrationFixture}=await import(pathToFileURL(join(source,'scripts/test-launcher-registration-fixtures.mjs')));
 const env=isolatedGitEnvironment({...process.env,TERMAL_BASE_URL:'http://127.0.0.1:0',TERMAL_SESSION_ID:owner,TERMAL_CLI:process.execPath});
 await withHostedRegistrationFixture(root,env,async hosted=>{

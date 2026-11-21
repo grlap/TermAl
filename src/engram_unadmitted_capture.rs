@@ -582,27 +582,30 @@ impl EngramRuntimeClosingCapture {
     fn source_change(&self) -> Option<EngramObservedSourceChange> {
         let sighting = self.source.sighting()?;
         let source = &sighting.source_basis;
-        let compatible = self.baseline.as_ref().filter(|basis| {
+        let same_scope = |basis: &EngramRuntimeCheckpointBasis| {
             basis.binding == self.binding
                 && basis.endpoint.workspace_id == source.workspace_id
                 && basis.source_root_generation == source.source_root_generation
                 && basis.source_root_state == source.source_root_state
-                && basis.endpoint.source_id.is_some() == source.source_id.is_some()
-        });
-        let checked = !self.registered_check_baselines.is_empty()
-            && self.registered_check_baselines.iter().all(|basis| {
-                basis.binding == self.binding
-                    && basis.endpoint.workspace_id == source.workspace_id
-                    && basis.source_root_generation == source.source_root_generation
-                    && basis.source_root_state == source.source_root_state
-                    && basis.endpoint.source_id.is_some() == source.source_id.is_some()
-                    && EngramHost::check_timestamp(&basis.endpoint.observed_at).zip(
-                        EngramHost::check_timestamp(&sighting.observed_at))
-                        .is_some_and(|(before, after)| before <= after)
-            });
+        };
+        let mixed = |basis: &EngramRuntimeCheckpointBasis| {
+            same_scope(basis) && basis.endpoint.source_id.as_ref().zip(source.source_id.as_ref())
+                .is_some_and(|(before, after)| !before.same_format(after))
+        };
+        let comparable = |basis: &EngramRuntimeCheckpointBasis| {
+            same_scope(basis) && engram_observation_source_formats_match(
+                basis.endpoint.source_id.as_ref(), source.source_id.as_ref())
+        };
+        let compatible = self.baseline.as_ref().filter(|basis| comparable(basis));
+        let closed_at = EngramHost::check_timestamp(&sighting.observed_at);
+        let mut checked = self.registered_check_baselines.iter().filter(|basis| {
+            comparable(basis) && EngramHost::check_timestamp(&basis.endpoint.observed_at)
+                .zip(closed_at).is_some_and(|(before, after)| before <= after)
+        }).peekable();
+        let has_comparable_check = checked.peek().is_some();
         // Every qualifying check participates, even when the previous
         // checkpoint or the last check equals the close (X -> Y -> X).
-        if checked && let Some(basis) = self.registered_check_baselines.iter().find(|basis|
+        if let Some(basis) = checked.find(|basis|
             !engram_observation_same_source(&basis.endpoint, source))
         {
             return Some(EngramObservedSourceChange::ContentComparison {
@@ -621,7 +624,9 @@ impl EngramRuntimeClosingCapture {
                 baseline: basis.endpoint.clone(),
                 sighting: sighting.clone(),
             }),
-            None if checked => None,
+            None if has_comparable_check => None,
+            // A known on-scope baseline in a different wire format is not missing.
+            None if self.baseline.iter().chain(&self.registered_check_baselines).any(mixed) => None,
             None => Some(EngramObservedSourceChange::AssumedMissingBaseline {
                 workspace_id: source.workspace_id.clone(),
                 sighting: sighting.clone(),

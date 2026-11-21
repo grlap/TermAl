@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 
 export const uiDependencyFiles = Object.freeze([
   "node_modules/typescript/bin/tsc",

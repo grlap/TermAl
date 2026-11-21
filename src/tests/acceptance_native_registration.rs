@@ -160,7 +160,7 @@ fn an_acknowledged_clean_native_run_admits_its_named_root() {
             AcceptanceCommittedInputAdmission {
                 run_id: start.run_id,
                 commit: source.commit.clone(),
-                native_source: Some(source)
+                recorded_source: Some(source)
             }
         )),
         "an acknowledged native record on clean HEAD must not be malformed launcher input"
@@ -310,7 +310,7 @@ fn native_admission_fences_the_full_source_at_selection_recheck_and_owner_captur
         .unwrap();
     assert!(
         matches!(basis, Some(AcceptanceSourceBasis::Shared(ref basis))
-        if Some(&basis.source_id) == admission.native_source.as_ref())
+        if Some(&basis.source_id) == admission.recorded_source.as_ref())
     );
     current_source(&native, other);
     assert!(

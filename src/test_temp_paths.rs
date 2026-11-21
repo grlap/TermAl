@@ -137,7 +137,18 @@ fn fixture_directory_within_budget(directory: &FsPath, remedy: &str) -> Result<(
 #[cfg(windows)]
 fn windows_fixture_directory_check(directory: &FsPath, remedy: &str) -> Result<(), String> {
     let spelled = fs::canonicalize(directory)
-        .map(|canonical| normalize_user_facing_path(&canonical))
+        .map(|canonical| {
+            // This fixture helper is included directly by integration tests.
+            // Measure the ordinary Win32 spelling that Git receives.
+            let path = canonical.to_string_lossy();
+            if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+                PathBuf::from(format!(r"\\{rest}"))
+            } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+                PathBuf::from(rest)
+            } else {
+                canonical
+            }
+        })
         .unwrap_or_else(|_| directory.to_owned());
     fixture_directory_within_budget(&spelled, remedy)
 }

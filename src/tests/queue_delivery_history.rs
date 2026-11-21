@@ -132,7 +132,8 @@ fn dismissing_a_history_row_keeps_its_delivery_record_and_never_resends_it() {
             .cancel_queued_prompt(&session_id, &prompt_id)
             .expect("dismiss succeeds");
 
-        for state in [&state, &reload(&state)] {
+        let reloaded = reload(&state);
+        for state in [&state, &reloaded] {
             let inner = state.inner.lock().expect("state mutex poisoned");
             let record = &inner.sessions[inner.find_session_index(&session_id).expect("session")];
             assert!(
@@ -175,5 +176,7 @@ fn dismissing_a_history_row_keeps_its_delivery_record_and_never_resends_it() {
                 "{row:?}: nothing is left to dispatch"
             );
         }
+        // Join the reloaded writer while the original fixture still owns its directory.
+        reloaded.shutdown_persist_blocking();
     }
 }

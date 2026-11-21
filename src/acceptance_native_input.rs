@@ -7,11 +7,7 @@ fn acceptance_native_local_changes(
     registration: &TestRunRegistration,
 ) -> Option<AcceptanceCommittedInputRefusal> {
     let source = &registration.declared_native.as_ref()?.source.source_id;
-    (!source.changes.is_empty()
-        || source
-            .submodules
-            .iter()
-            .any(|child| !child.changes.is_empty()))
+    (!source.is_clean())
     .then(|| AcceptanceCommittedInputRefusal::NativeLocalChanges {
         run_id: registration.run_id.clone(),
     })
@@ -57,7 +53,7 @@ fn acceptance_registered_input_outcome(
         return acceptance_committed_input_run_outcome(
             &registration.run_id,
             &registration.run_directory,
-            &current.commit,
+            current,
         );
     };
     let directory = FsPath::new(&registration.run_directory);

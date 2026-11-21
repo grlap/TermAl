@@ -483,7 +483,7 @@ termal/
 ├── scripts/
 │   ├── test-launcher.mjs    # Shared full/focused launcher and run recovery
 │   ├── test-rust.sh         # Native Rust test wrapper
-│   └── review-freeze-fingerprint.mjs # Reviewed-input fingerprints
+│   └── git-environment.mjs          # Isolated environment for Git reads
 ├── Cargo.toml
 └── Cargo.lock
 ```

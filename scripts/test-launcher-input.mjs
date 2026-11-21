@@ -1,7 +1,6 @@
 // Automatic launcher source input uses the producer-owned source contract.
 // Owns closed value comparison and compact run-record fit/refusal helpers;
 // source overflow never trims an observation or replaces actual stage facts.
-// Explicit review-freeze identity stays in review-freeze-fingerprint.mjs.
 import { createHash } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
@@ -136,11 +135,34 @@ function sourceChanges(changes) {
   return result;
 }
 
+function sourceGitDelta(delta) {
+  if (!fieldsExactly(delta, ["sha256", "dirty", "gitlinks"])
+      || typeof delta.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(delta.sha256)
+      || typeof delta.dirty !== "boolean" || !Array.isArray(delta.gitlinks)
+      || (!delta.dirty && delta.gitlinks.length !== 0)) return null;
+  const gitlinks = [];
+  for (const link of delta.gitlinks) {
+    if (!fieldsExactly(link, ["path", "head_pin", "index_pin", "checkout_head"])
+        || !sourcePath(link.path) || (link.head_pin === null && link.index_pin === null)
+        || (link.index_pin !== null && link.checkout_head === null)
+        || [link.head_pin, link.index_pin, link.checkout_head].some((oid) => oid !== null && !sourceOid(oid))
+        || (gitlinks.length && byteOrder(gitlinks.at(-1).path, link.path) >= 0)) return null;
+    gitlinks.push({ path: link.path, head_pin: link.head_pin, index_pin: link.index_pin,
+      checkout_head: link.checkout_head });
+  }
+  return { sha256: delta.sha256, dirty: delta.dirty, gitlinks };
+}
+
 // Rebuild only object key order. Array/path order is validated, never repaired.
 // This compares the owner's complete value without introducing another hash.
 function sourceValue(value) {
   try { if (Buffer.byteLength(JSON.stringify(value)) > SOURCE_JSON_BYTES) return null; }
   catch { return null; }
+  if (fieldsExactly(value, ["commit", "tree", "git_delta"])) {
+    if (!sourceOid(value.commit) || !sourceOid(value.tree)) return null;
+    const delta = sourceGitDelta(value.git_delta);
+    return delta === null ? null : { commit: value.commit, tree: value.tree, git_delta: delta };
+  }
   if (!fieldsExactly(value, ["commit", "tree", "submodules", "changes"])
       || !sourceOid(value.commit) || !sourceOid(value.tree) || !Array.isArray(value.submodules)) return null;
   const changes = sourceChanges(value.changes);
@@ -156,9 +178,15 @@ function sourceValue(value) {
   return { commit: value.commit, tree: value.tree, submodules, changes };
 }
 
-export function sourceIdsEqual(before, after) {
+export function compareSourceIds(before, after) {
   const a = sourceValue(before), b = sourceValue(after);
-  return a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b);
+  if (a === null || b === null) return "unknown";
+  if (Object.hasOwn(a, "git_delta") !== Object.hasOwn(b, "git_delta")) return "incomparable";
+  return JSON.stringify(a) === JSON.stringify(b) ? "matched" : "mismatch";
+}
+
+export function sourceIdsEqual(before, after) {
+  return compareSourceIds(before, after) === "matched";
 }
 
 export const sourceIdLimitations = () => [
@@ -170,10 +198,17 @@ export const sourceIdLimitations = () => [
 export function sourceIdDifference(before, after) {
   const a = sourceValue(before), b = sourceValue(after);
   if (!a || !b) return "source identity unavailable or malformed; inspect results.json";
+  if (Object.hasOwn(a, "git_delta") !== Object.hasOwn(b, "git_delta")) {
+    return "source_id formats are incomparable; inspect results.json";
+  }
   const lines = [];
   const add = (text) => { if (lines.length < 12) lines.push(text); };
   if (a.commit !== b.commit) add(`root commit: ${a.commit} -> ${b.commit}`);
   if (a.tree !== b.tree) add(`root tree: ${a.tree} -> ${b.tree}`);
+  if (a.git_delta) {
+    if (JSON.stringify(a.git_delta) !== JSON.stringify(b.git_delta)) add("Git delta differs");
+    return lines.join("\n") + "\nComplete observations: results.json sourceIdBefore/sourceIdAfter";
+  }
   const repositories = [["", a.changes, b.changes]];
   const children = new Map(b.submodules.map((child) => [child.path, child]));
   const label = (path) => JSON.stringify(path.slice(0, 160)) + (path.length > 160 ? "…" : "");
@@ -272,8 +307,10 @@ export async function captureCommitInputStatus(startDirectory = process.cwd(), s
     const sourceId = sourceValue(observation.source_id);
     if (sourceId === null || sourceId.commit !== observation.source.slice("git-commit:".length)
         || sourceId.tree !== observation.tree
-        || (observation.status === "clean" && (sourceId.changes.length
-          || sourceId.submodules.some((child) => child.changes.length)))) {
+        || (sourceId.git_delta
+          ? sourceId.git_delta.dirty !== (observation.status === "not_clean")
+          : observation.status === "clean" && (sourceId.changes.length
+            || sourceId.submodules.some((child) => child.changes.length)))) {
       throw unavailable("owner returned an inconsistent source_id");
     }
     for (const entry of observation.entries) {

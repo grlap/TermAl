@@ -22,8 +22,8 @@ fn owner_fixture(module: &FsPath, parent: &FsPath, id: &str) -> Value {
         .arg(module)
         .arg(parent)
         .arg(id);
-    // Fixture construction is test setup, separate from each production capture's
-    // eight-second budget. Reuse the existing finite Git setup/read budget.
+    // Fixture construction is test setup, separate from each production capture.
+    // Reuse the existing finite Git setup/read budget.
     let output = run_bounded_read_command(
         &mut command,
         std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
@@ -116,6 +116,36 @@ fn measure_owner_source(
     captured
 }
 
+fn assert_owner_fixture_identity(id: &str, fixture: &Value, actual: &EngramSourceId) {
+    let wire = serde_json::to_value(actual).unwrap();
+    if let Some(expected) = fixture.get("sourceId") {
+        assert_eq!(
+            &wire, expected,
+            "{id}: preserve every historical wire field"
+        );
+        return;
+    }
+    let delta = actual
+        .git_delta
+        .as_ref()
+        .expect("expected the producer's Git delta");
+    assert_eq!(wire["commit"], fixture["commit"], "{id}: root commit");
+    assert_eq!(wire["tree"], fixture["tree"], "{id}: root tree");
+    assert_eq!(
+        wire["git_delta"]["gitlinks"], fixture["gitlinks"],
+        "{id}: selected gitlinks"
+    );
+    assert_eq!(
+        delta.dirty,
+        fixture["status"] == "not_clean",
+        "{id}: producer cleanliness"
+    );
+    assert!(
+        is_lowercase_sha256(&delta.sha256),
+        "{id}: complete producer digest"
+    );
+}
+
 #[test]
 #[ignore = "requires a pinned candidate Engram binary and its exact shared fixture module"]
 fn source_owner_live_shared_fixtures_preserve_complete_producer_identity() {
@@ -175,15 +205,11 @@ fn source_owner_live_shared_fixtures_preserve_complete_producer_identity() {
             eprintln!("source_owner case={id} unavailable={error}");
         } else {
             let actual = captured.unwrap_or_else(|error| panic!("{id}: {error:#}"));
-            let expected: EngramSourceId = serde_json::from_value(fixture["sourceId"].clone())
-                .expect("runtime-derived owner identity");
-            assert_eq!(actual, expected, "{id}: compare the whole owner value");
-            let actual = serde_json::to_value(actual).unwrap();
-            assert_eq!(
-                actual, fixture["sourceId"],
-                "{id}: preserve every wire field"
+            assert_owner_fixture_identity(id, &fixture, &actual);
+            eprintln!(
+                "source_owner case={id} source_id={}",
+                serde_json::to_value(actual).unwrap()
             );
-            eprintln!("source_owner case={id} source_id={actual}");
         }
         passed += 1;
     }
@@ -224,7 +250,6 @@ fn source_owner_live_child_fixture_reports_observation_costs() {
     let root = FsPath::new(fixture["root"].as_str().expect("owner fixture root"));
     assert!(root.is_absolute() && root.starts_with(parent.as_ref()));
     assert_eq!(fixture["status"], "not_clean");
-    let expected: EngramSourceId = serde_json::from_value(fixture["sourceId"].clone()).unwrap();
     eprintln!("source_owner diagnostic_fixture_root={}", root.display());
     let started = std::time::Instant::now();
     let mut pin = None;
@@ -234,10 +259,7 @@ fn source_owner_live_child_fixture_reports_observation_costs() {
         "source_owner case=child-dirty-first source_id={}",
         serde_json::to_value(&first).unwrap()
     );
-    assert_eq!(
-        first, expected,
-        "the first observation preserves the owner's complete identity"
-    );
+    assert_owner_fixture_identity("child-dirty-first", &fixture, &first);
     let second = measure_owner_source("child-dirty-second", &binary, &digest, root, &mut pin)
         .expect("the subsequent bounded observation must return a complete source_id");
     eprintln!(
@@ -249,7 +271,7 @@ fn source_owner_live_child_fixture_reports_observation_costs() {
         started.elapsed().as_millis()
     );
     assert_eq!(
-        second, expected,
+        second, first,
         "the subsequent observation preserves the same owner identity"
     );
 }

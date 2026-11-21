@@ -83,7 +83,7 @@ export interface TestRunDetail {
   sourceId?: unknown;
   sourceIdBefore?: unknown;
   sourceIdAfter?: unknown;
-  sourceComparison?: "matched" | "mismatched" | "unknown" | null;
+  sourceComparison?: "matched" | "mismatched" | "incomparable" | "unknown" | null;
   expectedFingerprint: string | null;
   before: string | null;
   after: string | null;

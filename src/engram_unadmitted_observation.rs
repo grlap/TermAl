@@ -247,7 +247,9 @@ fn engram_validate_observed_source_change(
             if &baseline.workspace_id != workspace_id || &sighting.source_basis.workspace_id != workspace_id {
                 return Err("a measured source change names one workspace throughout".into());
             }
-            if baseline.source_id.is_some() != sighting.source_basis.source_id.is_some() {
+            if !engram_observation_source_formats_match(
+                baseline.source_id.as_ref(), sighting.source_basis.source_id.as_ref(),
+            ) {
                 return Err("a source comparison cannot mix identity formats".into());
             }
             if engram_observation_same_source(baseline, &sighting.source_basis) {

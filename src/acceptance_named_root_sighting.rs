@@ -66,6 +66,8 @@ struct AcceptanceSightingSourceSummary {
     tree: String,
     changes: usize,
     submodules: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    git_delta_dirty: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for EngramRootSighting {

@@ -1024,7 +1024,7 @@ shape, then compares it for equality.
   on-disk spelling Git lists, so their rename can move the value. Git-listed
   path spellings remain the hash input. On Windows, a tracked file another process
   holds open without read sharing cannot be read, which fails the capture.
-- **When there is none.** The capture uses the review freeze's pinned Git
+- **When there is none.** The historical capture uses the pinned Git
   runner and budget. A repository with a submodule gets none: what is inside
   a submodule is not read, so a checkout, an edit or a deinit there would
   leave the revision equal, a false "unchanged"; the capture fails closed,
@@ -1066,14 +1066,9 @@ shape, then compares it for equality.
   keeps one budget for its basis and its checks together. The thread is left
   to finish its read; at most 32 such threads take turn bases in the host at
   once, and past that a turn's basis is not taken.
-- **Not the review-freeze fingerprint.** Review freezes keep their schema-1
-  fingerprint, which hashes HEAD, both diffs and the untracked files. The two
-  values differ by construction, even for an uncommitted tree.
-- **Switching from the earlier revision.** Before this, the source revision
-  was the schema-1 fingerprint. On a run open across the upgrade, the first
-  basis after it differs from every earlier one although nothing changed.
-  Such a run needs one more passing test and, where it was evaluated, one
-  more evaluation. Upgrade while no evaluation is pending.
+- **Historical source evidence.** Stored schema-1 fingerprints retain their
+  original interpretation. Comparisons that cross identity formats supply
+  no evidence of either continuity or source change.
 - **Ignored files are not source.** A write only to a path the revision does
   not cover (an ignored file, a nested worktree under an ignored folder)
   leaves the revision where it was, so a turn whose closing basis is compared

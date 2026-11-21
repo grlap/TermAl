@@ -1,16 +1,9 @@
 // Read-only presentation of a host-held receipt. Neither a file beside a run
-// nor an ordinary check can supply this authority. All disk/Git work is off-lock.
+// nor an ordinary check can supply this authority. Artifact reads are off-lock.
 // EngramOtherRootNoticeRead moved here from engram_turn_checks.rs, extended
 // with receipt presentation; its existing owned-observer lifecycle is reused.
-// Source observations share the owner's 30 s bound. This does not extend
-// registration durability or allow a partial observation after expiry.
+// Presentation confirms receipt of the registered run's historical record.
 const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReceivedNoticeSource {
-    Current,
-    SourceUnavailable(ReceivedNoticeSourceUnavailable),
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReceivedNoticeSourceUnavailable {
@@ -27,26 +20,10 @@ static TEST_RECEIVED_NOTICE_SOURCE_READ: std::sync::LazyLock<std::sync::Mutex<
     HashMap<String, Box<dyn FnOnce(std::time::Instant) + Send>>,
 >> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
-// Protocol fixtures may supply only the off-lock source result. They still
-// pass every registration, receipt, disk, claim and publication fence. Key by
-// unique run rather than thread: companion notices use owned worker threads.
-#[cfg(test)]
-#[derive(Clone)]
-enum TestReceivedNoticeSourceResult {
-    Status(String, Vec<SourceRevisionDirtyPath>),
-    Unavailable,
-}
-
-#[cfg(test)]
-static TEST_RECEIVED_NOTICE_SOURCE_RESULTS: std::sync::LazyLock<std::sync::Mutex<
-    HashMap<String, TestReceivedNoticeSourceResult>,
->> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
-
 #[derive(Clone)]
 struct ReceivedCheckNotice {
     registration: TestRunRegistration,
     receipt: EngramVerificationRecordReceipt,
-    source: ReceivedNoticeSource,
     deadline: std::time::Instant,
 }
 
@@ -68,48 +45,13 @@ impl ReceivedCheckNotice {
         let disk = TestRunDisk::read(directory, None)?;
         if !test_run_registered_disk_matches(registration, &disk)
             || !registered_closing_clean_input(registration, &disk) { return None; }
-        let commit = frozen.body.input.clean_commit()?;
+        frozen.body.input.clean_commit()?;
         #[cfg(test)]
         {
             let hook = TEST_RECEIVED_NOTICE_SOURCE_READ.lock().unwrap().remove(&registration.run_id);
             if let Some(hook) = hook { hook(deadline); }
         }
-        let source = if std::time::Instant::now() >= deadline {
-            ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Deadline)
-        } else {
-            let read_source = || ReviewFreezeGit::new_with_deadline(FsPath::new(&registration.worktree), Some(deadline))
-                .and_then(|git| committed_source_status(&git));
-            #[cfg(not(test))]
-            let status = read_source();
-            #[cfg(test)]
-            let status = {
-                let scripted = TEST_RECEIVED_NOTICE_SOURCE_RESULTS.lock().unwrap()
-                    .get(&registration.run_id).cloned();
-                match scripted {
-                    Some(TestReceivedNoticeSourceResult::Status(head, dirty)) => Ok((head, dirty)),
-                    Some(TestReceivedNoticeSourceResult::Unavailable) => Err(anyhow::anyhow!("fixture source read unavailable")),
-                    None => read_source(),
-                }
-            };
-            match status {
-                Ok((head, dirty)) => {
-                    if head != commit || !dirty.is_empty() { return None; }
-                    if std::time::Instant::now() >= deadline {
-                        ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Deadline)
-                    } else { ReceivedNoticeSource::Current }
-                }
-                Err(_) => ReceivedNoticeSource::SourceUnavailable(if std::time::Instant::now() >= deadline {
-                    ReceivedNoticeSourceUnavailable::Deadline
-                } else { ReceivedNoticeSourceUnavailable::Read }),
-            }
-        };
-        Some(Self { registration: registration.clone(), receipt: receipt.clone(), source, deadline })
-    }
-
-    fn source(&self) -> ReceivedNoticeSource {
-        if std::time::Instant::now() >= self.deadline {
-            ReceivedNoticeSource::SourceUnavailable(ReceivedNoticeSourceUnavailable::Deadline)
-        } else { self.source }
+        Some(Self { registration: registration.clone(), receipt: receipt.clone(), deadline })
     }
 
     fn matches_root(&self, root: &EngramWorkSourceRoot, binding: &EngramControlWorkBinding) -> bool {
@@ -142,20 +84,15 @@ impl ReceivedCheckNotice {
             .collect::<Vec<_>>().join(", ");
         let more = self.receipt.verifications.len().saturating_sub(8);
         let records = if more == 0 { records } else { format!("{records} (+{more} more in the run record)") };
-        if let ReceivedNoticeSource::SourceUnavailable(reason) = self.source() {
-            let reason = match reason {
-                ReceivedNoticeSourceUnavailable::Deadline => "notice capture deadline elapsed",
-                ReceivedNoticeSourceUnavailable::Read => "source read unavailable",
-            };
-            return format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} registered launcher run {} {outcome}; \
-                Engram received verification record(s) {records} for that run. Current input \
-                confirmation is unavailable ({reason}); this notice confirms no current-input \
-                or ordinary-check credit. No rerun is requested.", self.registration.run_id);
-        }
-        format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} registered launcher run {} {outcome}; \
-            Engram received verification record(s) {records} for its own claim and unchanged input. \
-            This is the registered outcome; the ordinary check supplies no credit. Do not start a duplicate run.",
-            self.registration.run_id)
+        let recorded = format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} registered launcher run {} {outcome}; \
+            Engram received verification record(s) {records} for that run.", self.registration.run_id);
+        let reason = if std::time::Instant::now() >= self.deadline {
+            "notice capture deadline elapsed"
+        } else {
+            "no source observation available for this notice"
+        };
+        format!("{recorded} Current input confirmation is unavailable ({reason}); \
+            this notice confirms no current-input or ordinary-check credit.")
     }
 }
 
@@ -181,9 +118,9 @@ impl AppState {
         }
     }
 
-    // Terminal paths publish their original native correlation first. Source
-    // confirmation belongs to the existing cancellable capture owner, never
-    // the shared provider reader. One absolute budget covers the whole batch.
+    // Terminal paths publish their original native correlation first. The
+    // existing cancellable observer reads settled receipts off the provider
+    // reader. One absolute budget covers the whole batch.
     fn schedule_received_launcher_notices(&self, mut prepared: Vec<RegisteredCheckNotice>) {
         prepared.retain(|notice| notice.runs.iter().any(|(run, _)| matches!(run.verification_record,
             Some(TestRunVerificationAck::Settled { .. }))));
@@ -308,8 +245,8 @@ impl EngramOtherRootNoticeRead {
             entry.store == *store && entry.named_by_session == *session_id
                 && entry.work_id == binding.work_id && entry.claim_id == binding.claim_id).cloned();
         // Bounded in-memory selection of this naming session's settled
-        // receipts. Selection alone suppresses nothing; the body and current
-        // source and canonical live binding are checked off-lock below.
+        // receipts. The body and canonical live binding are checked off-lock
+        // below. A historical receipt does not change placement guidance.
         let mut received_candidates = Vec::new();
         for root in roots.iter().chain(bound_root.iter()) {
             let mut runs = inner.test_run_registrations.values().filter(|run|
@@ -385,7 +322,7 @@ impl EngramOtherRootNoticeRead {
         let owner = state.clone();
         if let Err(error) = state.capture_lifetime.spawn_observer("termal-other-root-notice", move || {
             let deadline = std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET;
-            let (mut roots, received, authority_unavailable) = match self.read(deadline, shared) {
+            let (roots, received, authority_unavailable) = match self.read(deadline, shared) {
                 Ok((roots, received)) => (roots, received, None),
                 Err(_) if self.received_candidates.is_empty() => return,
                 Err(reason) => (Vec::new(), Vec::new(), Some(reason)),
@@ -399,31 +336,19 @@ impl EngramOtherRootNoticeRead {
             let received = received.iter().filter(|(root, notice)|
                 inner.engram_work_source_roots.contains(root) && notice.is_current(&inner))
                 .collect::<Vec<_>>();
-            let mut unavailable = if let Some(reason) = authority_unavailable {
+            let mut details = if let Some(reason) = authority_unavailable {
                 let reason = match reason {
                     ReceivedNoticeSourceUnavailable::Deadline => "notice capture deadline elapsed",
                     ReceivedNoticeSourceUnavailable::Read => "held-claim read unavailable",
                 };
                 vec![format!("[TermAl] Named-root claim confirmation is unavailable ({reason}); this notice confirms no current-input or ordinary-check credit. No rerun is requested.")]
             } else { Vec::new() };
-            if shared {
-                roots.retain(|root| {
-                    let Some((_, notice)) = received.iter().find(|(verified, _)| verified == root) else { return true; };
-                    if matches!(notice.source(), ReceivedNoticeSource::SourceUnavailable(_)) {
-                        unavailable.push(notice.line());
-                    }
-                    false
-                });
-            } else if let Some((_, notice)) = received.iter().find(|(root, _)| Some(root) == self.bound_root.as_ref()) {
-                if notice.source() == ReceivedNoticeSource::Current { return; }
-                unavailable.push(notice.line());
-                roots.clear();
-            }
-            if roots.is_empty() && unavailable.is_empty() { return; }
+            details.extend(received.into_iter().map(|(_, notice)| notice.line()));
+            if roots.is_empty() && details.is_empty() { return; }
             let others = roots.iter().map(|entry| entry.short_ref.as_str())
                 .collect::<Vec<_>>().join(", ");
             let line = if roots.is_empty() {
-                unavailable.join("\n")
+                details.join("\n")
             } else if shared {
                 format!("[TermAl] A recognised test in a shared named root is reported for \
                     bound item {bound} only; {others} receives no credit. Make that item \
@@ -433,8 +358,8 @@ impl EngramOtherRootNoticeRead {
                     outside bound item {bound}'s root, and gets no credit for {bound}. \
                     Make that item the focus and run its test in the next turn.")
             };
-            let line = if !roots.is_empty() && !unavailable.is_empty() {
-                format!("{line}\n{}", unavailable.join("\n"))
+            let line = if !roots.is_empty() && !details.is_empty() {
+                format!("{line}\n{}", details.join("\n"))
             } else { line };
             if self.is_current(&inner, index)
                 && inner.sessions[index].engram.uncredited_feedback_revision == feedback_revision

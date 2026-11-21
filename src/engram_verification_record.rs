@@ -136,9 +136,7 @@ impl EngramVerificationRecordInput {
     fn clean_commit(&self) -> Option<&str> {
         match self {
             Self::Commit { commit } => Some(commit),
-            Self::SourceId { source_id } if source_id.changes.is_empty()
-                && source_id.submodules.iter().all(|child| child.changes.is_empty()) =>
-                    Some(&source_id.commit),
+            Self::SourceId { source_id } if source_id.is_clean() => Some(&source_id.commit),
             _ => None,
         }
     }
@@ -769,7 +767,9 @@ fn engram_verification_record_is_script_shim(program: &str) -> bool {
 /// run `node --test` behind duration-reporter flags, a form the shared focused
 /// classifier does not read. Local to the sender; the shared stage rule
 /// (`engram_launcher_test_stages`) and the focused classifier stay as they are.
-const ENGRAM_VERIFICATION_RECORD_LAUNCHER_TEST_STAGES: &[&str] = &["fingerprint-tests"];
+// Retained results keep the original stage id during record readback.
+const ENGRAM_VERIFICATION_RECORD_LAUNCHER_TEST_STAGES: &[&str] =
+    &["node-helper-tests", "fingerprint-tests"];
 
 /// A results stage's name and argv. Legacy routes can fall back to the
 /// request's plan when no command was recorded.
@@ -1162,10 +1162,14 @@ fn engram_verification_record_build_with_stage_policy(
             .ok_or("the admitted owner source_id is unavailable")?;
         let (before, after) = test_run_source_endpoints(results)
             .ok_or("the owner source_id endpoints are unavailable")?;
-        if admitted != before || before != after || before.commit != commit {
-            return Err("the owner source_id differs across the run boundaries".to_owned());
+        match (admitted.compare(&before), before.compare(&after)) {
+            (None, _) | (_, None) => {
+                return Err("the owner source_id formats across the run boundaries are incomparable".to_owned());
+            }
+            (Some(true), Some(true)) if before.commit == commit => {}
+            _ => return Err("the owner source_id differs across the run boundaries".to_owned()),
         }
-        if !before.changes.is_empty() || before.submodules.iter().any(|child| !child.changes.is_empty()) {
+        if !before.is_clean() {
             return Err("the owner source_id contradicts the clean committed input".to_owned());
         }
         Some((before, after))
@@ -1222,8 +1226,11 @@ fn engram_verification_record_native_body(
     {
         return Err("native terminal does not match its host reservation".to_owned());
     }
-    if after.source_id != start.source.source_id {
-        return Err(engram_source_id_change_detail(&engram_source_id_differences(&start.source.source_id, &after.source_id)));
+    match start.source.source_id.compare(&after.source_id) {
+        Some(true) => {}
+        Some(false) => return Err(engram_source_id_change_detail(&engram_source_id_differences(
+            &start.source.source_id, &after.source_id))),
+        None => return Err("native source_id formats are incomparable".to_owned()),
     }
     if results.get("nativeEligible").and_then(Value::as_bool) != Some(true) {
         return Err("native run is ineligible under its host authority checks".to_owned());

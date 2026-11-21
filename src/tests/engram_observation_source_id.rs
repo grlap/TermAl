@@ -92,6 +92,78 @@ fn ordinary_source_wire_preserves_complete_baseline_sighting_and_quiet_identity(
 }
 
 #[test]
+fn mixed_source_formats_keep_the_sighting_and_check_without_claiming_a_change() {
+    let old = identity();
+    let new = serde_json::from_value::<EngramSourceId>(launcher_git_delta_id_fixture()).unwrap();
+    for (before, after) in [(&old, &new), (&new, &old)] {
+        let mut capture = capture_with(after.clone());
+        capture.baseline = Some(EngramRuntimeCheckpointBasis::of_sighting(
+            observation_binding(),
+            &owner_basis(before.clone()),
+            &observation_at(5),
+        ));
+        capture
+            .registered_check_baselines
+            .push(EngramRuntimeCheckpointBasis::of_sighting(
+                observation_binding(),
+                &owner_basis(before.clone()),
+                &observation_at(20),
+            ));
+        let mut trace = observation_trace();
+        let mut command = observation_command("check-one");
+        command.check.source_basis = None;
+        trace.commands.push(command);
+        let requests = prepare_runtime_observations(&trace, capture, chrono::Utc::now()).unwrap();
+        assert!(requests[0]["occurrence"]["source_change"].is_null());
+        assert_eq!(
+            requests[0]["occurrence"]["observed_checks"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            requests[1]["occurrence"]["source_basis"]["source_id"],
+            serde_json::to_value(after).unwrap(),
+        );
+    }
+}
+
+#[test]
+fn legacy_checkpoint_does_not_hide_a_registered_git_delta_change_at_close() {
+    let old = identity();
+    let before = launcher_git_delta_id_fixture();
+    let mut after = before.clone();
+    after["git_delta"]["sha256"] = json!("d".repeat(64));
+    after["git_delta"]["dirty"] = json!(true);
+    let mut capture = capture_with(serde_json::from_value(after.clone()).unwrap());
+    capture.baseline = Some(EngramRuntimeCheckpointBasis::of_sighting(
+        observation_binding(),
+        &owner_basis(old.clone()),
+        &observation_at(5),
+    ));
+    capture.registered_check_baselines = vec![
+        EngramRuntimeCheckpointBasis::of_sighting(
+            observation_binding(),
+            &owner_basis(old),
+            &observation_at(10),
+        ),
+        EngramRuntimeCheckpointBasis::of_sighting(
+            observation_binding(),
+            &owner_basis(serde_json::from_value(before.clone()).unwrap()),
+            &observation_at(20),
+        ),
+    ];
+
+    let requests =
+        prepare_runtime_observations(&observation_trace(), capture, chrono::Utc::now()).unwrap();
+    let change = &requests[0]["occurrence"]["source_change"];
+    assert_eq!(change["baseline"]["source_id"], before);
+    assert_eq!(change["baseline"]["observed_at"], observation_at(20));
+    assert_eq!(change["sighting"]["source_basis"]["source_id"], after);
+}
+
+#[test]
 fn registered_endpoints_compare_whole_objects_and_keep_the_middle_of_x_y_x() {
     let first = identity();
     for component in ["tree", "submodule", "blob", "origin", "mode"] {

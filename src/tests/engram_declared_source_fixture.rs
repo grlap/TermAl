@@ -27,6 +27,7 @@ impl NativeSourceOwner {
         )
         .unwrap();
         let identity = EngramSourceId {
+            git_delta: None,
             commit: run_git_test_command_output(root, &["rev-parse", "HEAD"]),
             tree: run_git_test_command_output(root, &["show", "-s", "--format=%T", "HEAD"]),
             submodules: Vec::new(),

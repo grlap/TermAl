@@ -589,7 +589,9 @@ const MAX_ACCEPTANCE_SOURCE_WORKSPACE_BYTES: usize = 512;
 /// summary cannot reconstruct an identity or participate in evidence matching.
 fn acceptance_window_source_revision(value: &Value) -> Option<String> {
     let summary = value.as_object()?;
-    if summary.len() != 5 { return None; }
+    if summary.len() != if summary.contains_key("git_delta_dirty") { 6 } else { 5 } {
+        return None;
+    }
     let commit = summary.get("commit")?.as_str()?;
     let tree = summary.get("tree")?.as_str()?;
     let valid_hash = |hash: &str| hash.len() == 40
@@ -598,6 +600,14 @@ fn acceptance_window_source_revision(value: &Value) -> Option<String> {
     let submodules = summary.get("submodules")?.as_u64()?;
     let changes = summary.get("changes")?.as_u64()?;
     let child_changes = summary.get("submodule_changes")?.as_u64()?;
+    if let Some(dirty) = summary.get("git_delta_dirty") {
+        let dirty = dirty.as_bool()?;
+        if changes != 0 || child_changes != 0 || (!dirty && submodules != 0) {
+            return None;
+        }
+        let state = if dirty { "dirty" } else { "clean" };
+        return Some(format!("source-id:{} (Git delta {state}, {submodules} selected gitlinks)", &commit[..12]));
+    }
     if child_changes > 0 && submodules == 0 { return None; }
     Some(format!("source-id:{} ({} changes, {} submodules, {} child changes)",
         &commit[..12], changes, submodules, child_changes))

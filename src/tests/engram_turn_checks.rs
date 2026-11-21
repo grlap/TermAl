@@ -851,6 +851,10 @@ impl EOCheckedTurn {
         Self::prepare_in(label, claimed, None, false)
     }
 
+    pub(in crate::tests) fn set_source_id(&self, root: &FsPath, source_id: EngramSourceId) {
+        self.sources.set(root, source_id);
+    }
+
     pub(super) fn idle_real(label: &str, claimed: bool) -> Self {
         Self::prepare_with_clock(label, claimed, None, false, true)
     }

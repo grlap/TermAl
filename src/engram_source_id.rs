@@ -3,23 +3,111 @@
 // Also presents diagnostic differences without changing source equality.
 // Git measurement, executable trust and consumer policy remain their owners.
 
-#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, PartialEq, Eq)]
 struct EngramSourceId {
+    commit: String,
+    tree: String,
+    submodules: Vec<EngramSourceIdSubmodule>,
+    changes: Vec<EngramSourceIdChange>,
+    git_delta: Option<EngramSourceGitDelta>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum EngramSourceIdWire {
+    GitDelta(EngramSourceIdDeltaWire),
+    Legacy(EngramSourceIdLegacyWire),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EngramSourceIdDeltaWire {
+    commit: String,
+    tree: String,
+    git_delta: EngramSourceGitDelta,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EngramSourceIdLegacyWire {
     commit: String,
     tree: String,
     submodules: Vec<EngramSourceIdSubmodule>,
     changes: Vec<EngramSourceIdChange>,
 }
 
+impl<'de> Deserialize<'de> for EngramSourceId {
+    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> std::result::Result<Self, D::Error> {
+        Ok(match EngramSourceIdWire::deserialize(decoder)? {
+            EngramSourceIdWire::GitDelta(delta) => Self {
+                commit: delta.commit,
+                tree: delta.tree,
+                submodules: Vec::new(),
+                changes: Vec::new(),
+                git_delta: Some(delta.git_delta),
+            },
+            EngramSourceIdWire::Legacy(legacy) => Self {
+                commit: legacy.commit,
+                tree: legacy.tree,
+                submodules: legacy.submodules,
+                changes: legacy.changes,
+                git_delta: None,
+            },
+        })
+    }
+}
+
+impl Serialize for EngramSourceId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct as _;
+        let mut object =
+            serializer.serialize_struct("EngramSourceId", if self.git_delta.is_some() { 3 } else { 4 })?;
+        object.serialize_field("commit", &self.commit)?;
+        object.serialize_field("tree", &self.tree)?;
+        if let Some(delta) = &self.git_delta {
+            object.serialize_field("git_delta", delta)?;
+        } else {
+            object.serialize_field("submodules", &self.submodules)?;
+            object.serialize_field("changes", &self.changes)?;
+        }
+        object.end()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct EngramSourceGitDelta {
+    sha256: String,
+    dirty: bool,
+    gitlinks: Vec<EngramSourceGitlink>,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct EngramSourceGitlink {
+    path: String,
+    #[serde(deserialize_with = "engram_source_required_nullable")]
+    head_pin: Option<String>,
+    #[serde(deserialize_with = "engram_source_required_nullable")]
+    index_pin: Option<String>,
+    #[serde(deserialize_with = "engram_source_required_nullable")]
+    checkout_head: Option<String>,
+}
+
 // Diagnostics may reach agent notices. Keep identity data on the producer
 // wire and in durable records, never in automatic Debug output.
 impl std::fmt::Debug for EngramSourceId {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        out.debug_struct("EngramSourceIdSummary")
-            .field("commit", &self.commit).field("tree", &self.tree)
-            .field("submodules", &self.submodules.len())
-            .field("changes", &self.changes.len()).finish()
+        let mut summary = out.debug_struct("EngramSourceIdSummary");
+        summary.field("commit", &self.commit).field("tree", &self.tree);
+        if let Some(delta) = &self.git_delta {
+            summary.field("git_delta_dirty", &delta.dirty)
+                .field("gitlinks", &delta.gitlinks.len());
+        } else {
+            summary.field("submodules", &self.submodules.len())
+                .field("changes", &self.changes.len());
+        }
+        summary.finish()
     }
 }
 
@@ -76,8 +164,22 @@ fn engram_source_id_differences(before: &EngramSourceId, after: &EngramSourceId)
         }
     }
     let mut out = Vec::new();
+    if before.compare(after).is_none() {
+        return out;
+    }
     for (kind, old, new) in [("root_commit", &before.commit, &after.commit), ("root_tree", &before.tree, &after.tree)] {
         if old != new { out.push(EngramSourceIdDifference { path:".".into(),kind:kind.into(),before:json!(old),after:json!(new) }); }
+    }
+    if let (Some(old), Some(new)) = (&before.git_delta, &after.git_delta) {
+        if old != new {
+            out.push(EngramSourceIdDifference {
+                path: ".".into(),
+                kind: "git_delta".into(),
+                before: json!({"dirty": old.dirty, "gitlinks": old.gitlinks.len()}),
+                after: json!({"dirty": new.dirty, "gitlinks": new.gitlinks.len()}),
+            });
+        }
+        return out;
     }
     files("", &before.changes, &after.changes, &mut out);
     let old_children: BTreeMap<_, _> = before.submodules.iter().map(|child| (&child.path, child)).collect();
@@ -103,6 +205,7 @@ fn engram_source_id_change_detail(changes: &[EngramSourceIdDifference]) -> Strin
             "tracked_file" => "edited tracked file",
             "submodule_head" => "changed submodule HEAD",
             "root_commit" => "changed root commit",
+            "git_delta" => "changed Git delta",
             _ => "changed root tree",
         };
         format!("{kind} {:?}", change.path)
@@ -164,10 +267,55 @@ fn engram_source_id_changes(
 }
 
 impl EngramSourceId {
+    fn git_delta_description(&self) -> Option<String> {
+        self.git_delta.as_ref().map(|delta| {
+            let state = if delta.dirty { "dirty" } else { "clean" };
+            format!("Git delta {state}, {} selected gitlinks", delta.gitlinks.len())
+        })
+    }
+
+    fn same_format(&self, other: &Self) -> bool {
+        self.git_delta.is_some() == other.git_delta.is_some()
+    }
+
+    fn compare(&self, other: &Self) -> Option<bool> {
+        self.same_format(other).then(|| self == other)
+    }
+
+    fn is_clean(&self) -> bool {
+        match &self.git_delta {
+            Some(delta) => !delta.dirty,
+            None => self.changes.is_empty() && self.submodules.iter().all(|child| child.changes.is_empty()),
+        }
+    }
+
     fn validate(&self, deadline: std::time::Instant) -> Result<()> {
         engram_source_before_deadline(deadline)?;
         if !engram_source_id_oid(&self.commit) || !engram_source_id_oid(&self.tree) {
             bail!("Engram source_id returned an invalid root commit or tree");
+        }
+        if let Some(delta) = &self.git_delta {
+            if !self.changes.is_empty() || !self.submodules.is_empty()
+                || delta.sha256.len() != 64 || !is_lowercase_hex(&delta.sha256)
+                || (!delta.dirty && !delta.gitlinks.is_empty())
+            {
+                bail!("Engram source_id returned an invalid Git delta");
+            }
+            let mut previous: Option<&str> = None;
+            for link in &delta.gitlinks {
+                engram_source_before_deadline(deadline)?;
+                if !engram_source_id_path(&link.path) || link.path.contains('\r')
+                    || (link.head_pin.is_none() && link.index_pin.is_none())
+                    || (link.index_pin.is_some() && link.checkout_head.is_none())
+                    || [&link.head_pin, &link.index_pin, &link.checkout_head].into_iter()
+                        .flatten().any(|commit| !engram_source_id_oid(commit))
+                    || previous.is_some_and(|path| path >= link.path.as_str())
+                {
+                    bail!("Engram source_id returned an invalid or unordered gitlink");
+                }
+                previous = Some(&link.path);
+            }
+            return engram_source_before_deadline(deadline);
         }
         engram_source_id_changes(&self.changes, deadline)?;
         let mut previous: Option<&[u8]> = None;

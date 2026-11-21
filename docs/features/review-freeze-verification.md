@@ -61,8 +61,9 @@ for reviewer authority or attempt conflicts, not a busy checker.
 big-endian 64-bit label length and payload length, then UTF-8 label and raw
 payload. Chunks are `schema=1`, `head=HEAD|UNBORN`, staged binary/full-index
 diff, unstaged binary/full-index diff, then byte-sorted untracked paths with
-mode/content or symlink target. This is not the different fingerprint format
-used by TermAl's own `scripts/review-freeze-fingerprint.mjs`.
+mode/content or symlink target. This schema describes the historical
+Engram manifest profile. TermAl's clean-commit review workflow cites the
+complete owner `source_id`.
 
 The compiled checker does not load repository code. Git is resolved to an
 absolute PATH executable outside the target root, with no shell/current-directory

@@ -11,7 +11,7 @@ import { createRun, executeRun, startDetachedRun, summarize } from "./test-launc
 import { registerTestRun, validateRunRegistration, validateRequestMessageId } from "./test-run-registration.mjs";
 import { registrationHost } from "./test-launcher-registration-fixtures.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
 
 const selector = "mailbox-message-11111111-1111-4111-8111-111111111111";

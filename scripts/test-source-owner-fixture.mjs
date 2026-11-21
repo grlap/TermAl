@@ -20,5 +20,6 @@ if (id === "--list") {
   const fixture = createSourceFixture(parent, id);
   process.stdout.write(JSON.stringify({
     root: fixture.root, status: fixture.status, sourceId: fixture.sourceId,
+    commit: fixture.commit, tree: fixture.tree, gitlinks: fixture.gitlinks,
   }));
 }

@@ -56,7 +56,7 @@ import {
   summarize,
 } from "./test-launcher.mjs";
 import { sourceIdsEqual, RUN_RECORD_JSON_BYTES } from "./test-launcher-input.mjs";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
 import { removeFixture, removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
@@ -93,7 +93,7 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const copiedLauncherFiles = Object.freeze([
   "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
   "source-id-budget.mjs", "source-id-budget-ms.json", "engram-call-budget-ms.json",
-  "review-freeze-fingerprint.mjs",
+  "git-environment.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
   "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
   "test-command-progress.mjs", "test-process-owner-posix.mjs",
@@ -938,7 +938,7 @@ test("required stages preserve the TermAl six-gate order and direct JavaScript e
       "fmt",
       "cargo-check",
       "typescript",
-      "fingerprint-tests",
+      "node-helper-tests",
       "rust-tests",
       "vitest",
     ]);
@@ -1007,7 +1007,7 @@ test("full plan prerequisites cover every maintained helper and direct UI entryp
   const files = new Set(requiredFiles(projectRoot));
   for (const path of [...helperTestFiles,
     "scripts/node-test-duration-reporter.mjs",
-    "scripts/review-freeze-fingerprint.mjs",
+    "scripts/git-environment.mjs",
     "scripts/test-counts.mjs",
     "scripts/test-durations.mjs",
     "scripts/test-fixture-cleanup.mjs",
@@ -2838,11 +2838,6 @@ test("helper scripts run when started through a linked directory", async (t) => 
   const tempRoot = await run("test-temp-root.mjs");
   assert.match(tempRoot.output, /Usage: node scripts\/test-temp-root\.mjs/u, tempRoot.output);
   assert.equal(tempRoot.code, 2);
-  await repository(t, async (root) => {
-    const fingerprint = await run("review-freeze-fingerprint.mjs", [], root);
-    assert.match(fingerprint.output, /^headCommit=[0-9a-f]{40}$/mu, fingerprint.output);
-    assert.equal(fingerprint.code, 0);
-  });
 });
 
 test("a foreground run prints its run receipt before any stage completes", async (t) => {

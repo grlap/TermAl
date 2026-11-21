@@ -21,8 +21,8 @@ import fs, {
 import nodePath, { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
-import { captureCommitInputStatus, sourceBinaryPath, sourceIdsEqual, sourceIdDifference,
+import { isolatedGitEnvironment } from "./git-environment.mjs";
+import { captureCommitInputStatus, compareSourceIds, sourceBinaryPath, sourceIdsEqual, sourceIdDifference,
   sourceOwnerPinValid, sourceIdLimitations, encodeRunRecord, encodeTerminalRunResult,
   refuseRunSource } from "./test-launcher-input.mjs";
 import { processMayBeAlive } from "./test-temp-root.mjs";
@@ -72,7 +72,6 @@ export const ORDINARY_COMMIT_INPUT_DEFAULT = true;
 export const helperTestFiles = Object.freeze([
   "scripts/cleanup-report.test.mjs",
   "scripts/export-review-attempt.test.mjs",
-  "scripts/review-freeze-fingerprint.test.mjs",
   "scripts/test-categories-plan.test.mjs",
   "scripts/test-durations.test.mjs",
   "scripts/test-launcher.test.mjs",
@@ -114,7 +113,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/cleanup-report.mjs",
   "scripts/export-review-attempt.mjs",
   nodeDurationReporterFile,
-  "scripts/review-freeze-fingerprint.mjs",
+  "scripts/git-environment.mjs",
   "scripts/test-categories-plan.mjs",
   "scripts/test-counts.mjs",
   "scripts/test-durations.mjs",
@@ -353,7 +352,7 @@ export function requiredStages(platform = process.platform, env = process.env, n
       cwd: "ui",
     },
     {
-      name: "fingerprint-tests",
+      name: "node-helper-tests",
       command: node,
       args: [...helperTestArgs],
       durationReport: "node-test-events",
@@ -1720,9 +1719,18 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     childEnv.ENGRAM_SOURCE_BINARY = request.sourceBinary;
     const before = await captureCommitInputStatus(request.root, childEnv, { pin: request.sourceOwner });
     result.sourceIdBefore = before.sourceId;
-    if (!sourceIdsEqual(request.sourceId, result.sourceIdBefore)) {
-      result.reason = "input-changed";
-      throw new Error(driftError("source_id changed before execution; no stages run", request.sourceId, before.sourceId));
+    const admissionComparison = compareSourceIds(request.sourceId, result.sourceIdBefore);
+    if (admissionComparison !== "matched") {
+      const changed = admissionComparison === "mismatch";
+      result.reason = changed ? "input-changed" : "input-unverified";
+      const detail = driftError(changed ? "source_id changed before execution; no stages run"
+        : "source_id cannot be verified before execution; no stages run", request.sourceId, before.sourceId);
+      if (!changed) {
+        result.sourceInputReason = "input-unverified";
+        result.sourceUnavailableReason = detail;
+        if (result.input?.kind === "commit") result.input.unavailableReason = detail;
+      }
+      throw new Error(detail);
     }
     if (request.input === "commit" && (result.input?.kind !== "commit" ||
         !commitInputStatusClean(before) || result.input.cleanBefore !== true || result.input.commit !== before.commit)) {
@@ -1871,18 +1879,28 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     // A stage failed by its accounting exited 0 itself; the run still fails.
     const failedStage = result.stages.find((stage) => stage.state === "failed");
     result.exitCode = failedStage ? failedStage.code || 1 : result.state === "passed" ? 0 : 1;
-    const sourceMatches = sourceIdsEqual(request.sourceId, result.sourceIdBefore)
-      && sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter);
+    const terminalComparison = compareSourceIds(result.sourceIdBefore, result.sourceIdAfter);
+    const sourceMatches = terminalComparison === "matched";
     if (!sourceMatches) {
-      const sourceReason = sourceRefusal ? "input-unverified" : "input-changed";
+      const changed = terminalComparison === "mismatch";
+      const sourceReason = changed ? "input-changed" : "input-unverified";
+      const sourceDetail = sourceRefusal ?? driftError(changed ? "source_id changed during execution"
+        : "source_id cannot be verified after execution", result.sourceIdBefore, result.sourceIdAfter);
       result.sourceInputReason = sourceReason;
-      result.error ??= sourceRefusal ?? driftError("source_id changed during execution", result.sourceIdBefore, result.sourceIdAfter);
+      result.error ??= sourceDetail;
+      if (!changed) {
+        result.sourceUnavailableReason = sourceDetail;
+        if (result.input?.kind === "commit") {
+          result.input.unavailableReason = sourceDetail;
+          delete result.input.outcome;
+        }
+      }
       // Keep an actual command failure and its code. A passed stage alone
       // cannot turn missing or changed source evidence into a passing run.
       if (result.state === "passed") {
         result.state = "failed"; result.exitCode = 1; result.reason = sourceReason;
       } else { result.reason ??= sourceReason; }
-      if (result.input?.kind === "commit" && status) result.input.outcome = "input_changed";
+      if (result.input?.kind === "commit" && changed) result.input.outcome = "input_changed";
     }
     if (result.input?.kind === "commit") {
       result.input.eligible = result.input.outcome === "clean" && result.state === "passed"
@@ -1997,12 +2015,12 @@ export async function summarize(runDir) {
   if (Object.hasOwn(result, "sourceIdBefore") || Object.hasOwn(result, "sourceIdAfter")) {
     let request;
     try { request = readJson(join(runDir, "request.json")); } catch { /* Missing input is unknown. */ }
-    const complete = sourceIdsEqual(request?.sourceId, request?.sourceId)
-      && sourceIdsEqual(result.sourceIdBefore, result.sourceIdBefore)
-      && sourceIdsEqual(result.sourceIdAfter, result.sourceIdAfter);
-    const comparison = !complete ? "unknown"
-      : sourceIdsEqual(request.sourceId, result.sourceIdBefore)
-        && sourceIdsEqual(result.sourceIdBefore, result.sourceIdAfter) ? "matched" : "mismatch";
+    const comparisons = [
+      compareSourceIds(request?.sourceId, result.sourceIdBefore),
+      compareSourceIds(result.sourceIdBefore, result.sourceIdAfter),
+    ];
+    const comparison = ["unknown", "incomparable", "mismatch"].find((state) => comparisons.includes(state))
+      ?? "matched";
     lines.push(`input: ${comparison}; source_id; boundary comparison only, not host check credit`);
   }
   // The host writes this separately after launcher completion. Reading it

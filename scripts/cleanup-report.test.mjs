@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { collectReport, contains, parseOptions, parseWorktrees, readNamedRoots, readRetentions, shapeReport, validateRetentions } from "./cleanup-report.mjs";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { removeFixture } from "./test-fixture-cleanup.mjs";
 
 const project = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
@@ -218,7 +218,7 @@ test("successful CLI uses Git discovery through an alias and imports remain quie
   // Every link target stays inside this fixture, including after a crashed test.
   const privateCopy = path.join(base, "private-checkout");
   await fs.mkdir(path.join(privateCopy, "scripts"), { recursive: true });
-  for (const name of ["cleanup-report.mjs", "review-freeze-fingerprint.mjs"]) {
+  for (const name of ["cleanup-report.mjs", "git-environment.mjs"]) {
     await fs.copyFile(path.join(project, "scripts", name), path.join(privateCopy, "scripts", name));
   }
   const alias = path.join(base, "checkout-alias");

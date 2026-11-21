@@ -1,0 +1,62 @@
+[
+  {
+    "version": 1,
+    "status": "clean",
+    "root": "C:\\fixture\\parent",
+    "source": "git-commit:e72214d381902b5e4d73e9dbd3fe065efe78bd9a",
+    "tree": "b145297a4a21c3748bf18ce23ce986740091616f",
+    "entries": [],
+    "refusal": null,
+    "source_id": {
+      "commit": "e72214d381902b5e4d73e9dbd3fe065efe78bd9a",
+      "tree": "b145297a4a21c3748bf18ce23ce986740091616f",
+      "git_delta": {
+        "sha256": "5430cbcb9ad1e16d75f34cdb7da09e49cccdde83d652cd7665eeabb31e855631",
+        "dirty": false,
+        "gitlinks": []
+      }
+    }
+  },
+  {
+    "version": 1,
+    "status": "not_clean",
+    "root": "C:\\fixture\\parent",
+    "source": "git-commit:e72214d381902b5e4d73e9dbd3fe065efe78bd9a",
+    "tree": "b145297a4a21c3748bf18ce23ce986740091616f",
+    "entries": [
+      {
+        "status": " M",
+        "path": "child"
+      },
+      {
+        "status": "M ",
+        "path": "staged.txt"
+      },
+      {
+        "status": " M",
+        "path": "unstaged.txt"
+      },
+      {
+        "status": "??",
+        "path": "untracked.txt"
+      }
+    ],
+    "refusal": null,
+    "source_id": {
+      "commit": "e72214d381902b5e4d73e9dbd3fe065efe78bd9a",
+      "tree": "b145297a4a21c3748bf18ce23ce986740091616f",
+      "git_delta": {
+        "sha256": "35be818001d22aa2c36fd6c3de1c60451064cd68024c4beeb8120b44bc00174e",
+        "dirty": true,
+        "gitlinks": [
+          {
+            "path": "child",
+            "head_pin": "f109240200f4a5d77103f5a06f645c0b79423c79",
+            "index_pin": "f109240200f4a5d77103f5a06f645c0b79423c79",
+            "checkout_head": "d4e060912024d749945175475f7523158eb1eba4"
+          }
+        ]
+      }
+    }
+  }
+]

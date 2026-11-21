@@ -200,12 +200,10 @@ fn acceptance_attempt_source_label(
     legacy: Option<&str>,
 ) -> String {
     if let Some(source) = source_id {
-        format!(
-            "source-id:{} ({} changes, {} submodules)",
-            source.commit.get(..12).unwrap_or("unavailable"),
-            source.changes.len(),
-            source.submodules.len()
-        )
+        let changes = source.git_delta_description().unwrap_or_else(|| format!(
+            "{} changes, {} submodules", source.changes.len(), source.submodules.len(),
+        ));
+        format!("source-id:{} ({changes})", source.commit.get(..12).unwrap_or("unavailable"))
     } else {
         acceptance_brief_text(legacy.unwrap_or("unmeasured"), 160)
     }
@@ -676,17 +674,24 @@ impl AppState {
             evaluation_checkpoint_scope_locked(&inner, owner, place)
         };
         let Some(source_id) = self.acceptance_shared_source_capture(owner, place) else {
-            if admission.is_some_and(|admission| admission.native_source.is_some()) {
+            if admission.is_some_and(|admission| admission.recorded_source.is_some()) {
                 return Err(ApiError::conflict(
-                    "the admitted native source could not be captured; no evaluator was started",
+                    "the admitted source could not be captured; no evaluator was started",
                 ));
             }
             return Ok((None, None, None));
         };
+        if admission.and_then(|admission| admission.recorded_source.as_ref())
+            .is_some_and(|expected| !expected.same_format(&source_id))
+        {
+            return Err(ApiError::conflict(
+                "the named source_id format is incomparable with committed-input admission; no evaluator was started",
+            ));
+        }
         if admission.is_some_and(|admission| {
             admission.commit != source_id.commit
                 || admission
-                    .native_source
+                    .recorded_source
                     .as_ref()
                     .is_some_and(|expected| expected != &source_id)
         }) {
@@ -701,12 +706,7 @@ impl AppState {
         if let Some(scope) = checkpoint_scope {
             self.retain_evaluation_checkpoint(owner, place, &scope, &source_id);
         }
-        let label = format!(
-            "source-id:{} ({} changes, {} submodules)",
-            &source_id.commit[..12],
-            source_id.changes.len(),
-            source_id.submodules.len()
-        );
+        let label = acceptance_attempt_source_label(Some(&source_id), None);
         Ok((
             Some(AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
                 workspace_id: workspace.clone(),

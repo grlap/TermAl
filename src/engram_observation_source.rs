@@ -33,6 +33,16 @@ fn engram_observation_stored_identity_valid(
             && revision.trim() == revision && revision.len() <= 512
 }
 
+fn engram_observation_source_formats_match(
+    before: Option<&EngramSourceId>, after: Option<&EngramSourceId>,
+) -> bool {
+    match (before, after) {
+        (Some(before), Some(after)) => before.same_format(after),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 fn engram_observation_same_source(
     baseline: &EngramMeasuredBaseline, source: &EngramExecutionSourceBasis,
 ) -> bool {

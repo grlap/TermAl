@@ -1,7 +1,7 @@
 # Remote full gates
 
 A remote full gate is the maintained six-stage gate
-(`node scripts/test-launcher.mjs full`), run on a satellite host of the
+(`node scripts/test-launcher.mjs full --input commit`), run on a satellite host of the
 [central control plane](central-control-plane.md) instead of the coordinator's
 own machine. Its results are reported back to the central coordinator. It lets
 a change be gated on a platform the coordinator does not run, such as macOS,
@@ -25,19 +25,17 @@ Related:
    it is idle.
 2. **The runner prepares an exact input.** In its own clone, the satellite
    session creates a fresh detached worktree at the requested commit. It holds
-   no untracked files. The runner checks that the commit's tree id equals the
-   one the coordinator named.
-   - For a change not yet landed, the integration owner first pushes a test
-     ref: a detached commit, on the frozen base, of the reviewed tree. The
-     runner fetches that ref. The repository's instructions set who may push
-     such a ref and how it is named and deleted.
+   no untracked files. The runner checks that HEAD equals the named candidate.
+   - For a change not yet landed, the integration owner publishes the
+     merge-ready candidate under the repository's Test refs rule and records
+     its complete `source_id`. The runner fetches that ref.
    - A commit already on master can be gated the same way, as evidence after
      the landing.
 3. **The runner launches the gate detached** and sends its completion to the
    coordinator:
 
    ```bash
-   node scripts/test-launcher.mjs full --detach --notify host:<central host UUID>::<coordinator session id>
+   node scripts/test-launcher.mjs full --input commit --detach --notify host:<central host UUID>::<coordinator session id>
    ```
 
    - On a satellite, a bare `session-*` id selects a local root, so the central
@@ -45,13 +43,13 @@ Related:
      [native mailbox relay](native-mailbox-relay.md).
    - The runner must be a root session that inherits its own
      `TERMAL_SESSION_ID`, as for any detached gate.
-   - The launcher records its own input fingerprint before and after the run,
+   - The launcher records the complete Engram `source_id` before and after the run,
      and keeps complete logs and an atomic terminal result under Git metadata,
      as on any host.
 4. **The runner returns the evidence** through the existing channels, never by
    pushing to Git: by mailbox to the coordinator and a note on the item. The
-   evidence is the run id, the result, the per-stage counts and the launcher's
-   before and after fingerprints.
+   evidence includes the candidate commit, run id, result, per-stage counts,
+   `request.sourceId`, `results.sourceIdBefore` and `results.sourceIdAfter`.
 
 ## What a remote result counts for
 
@@ -60,14 +58,11 @@ remote runs") are the authority. In short:
 
 - A focused run on a test ref is evidence only.
 - A full gate run by the standard launcher on the exact test ref counts as the
-  landing gate for that tree on any host, with the same weight as one run on
-  Windows, when two things hold:
-  - its results record the same fingerprint before and after;
-  - the result has been imported, on the host that evaluates and lands the
-    change, as a recognized check record bound to the recorded tree id.
-- **It gates only a landing whose master commit has that tree id.** Until then
-  it is evidence only. A gate of a commit already on master is evidence after
-  the landing, not a landing gate.
+  landing gate when the launcher's admitted, before and after source identities
+  all equal the complete Engram `source_id` recorded by the integration owner.
+  The integration owner records the run and those values on the item.
+- It gates only a landing of that exact input. Until then it is evidence only.
+  A gate of a commit already on master is evidence after the landing.
 - A change that touches Windows-only code or tests still needs the relevant
   gate on Windows.
 - A failed remote gate sends the input back to its owner, like any failed

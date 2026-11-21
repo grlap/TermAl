@@ -3,15 +3,13 @@
 // Owns: what a run records about the source it started from (commit, tree,
 // whether the checkout was clean, the platform, the launcher's own blob at
 // HEAD) and the Rust toolchain record built from the launcher's preflight
-// output. Does not own running any preflight or stage, the run directory,
-// the review-freeze fingerprint (review-freeze-fingerprint.mjs), or any
-// judgement of a run: these are observations a reader checks, never credit.
+// output. These observations do not decide execution or test credit.
 // New file; not split from an existing one.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { isolatedGitEnvironment } from "./review-freeze-fingerprint.mjs";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 
 export const SOURCE_SCHEMA = 1;
 const launcherPath = "scripts/test-launcher.mjs";

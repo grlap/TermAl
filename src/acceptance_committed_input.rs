@@ -68,7 +68,7 @@ struct AcceptanceCommittedInputAdmission {
     // Native and predecessor-generation evidence retain their complete identity
     // through the request's independent owner capture; commit equality alone
     // never admits either route.
-    native_source: Option<EngramSourceId>,
+    recorded_source: Option<EngramSourceId>,
 }
 
 /// Which flow an evaluation request is in, when it is not refused.
@@ -290,7 +290,7 @@ fn acceptance_committed_input_read_results(run_directory: &str) -> TestRunJson {
 fn acceptance_committed_input_run_outcome(
     run_id: &str,
     run_directory: &str,
-    commit: &str,
+    current: &EngramSourceId,
 ) -> Result<Option<bool>, AcceptanceCommittedInputRefusal> {
     let TestRunJson::Parsed(results, _, _) = acceptance_committed_input_read_results(run_directory)
     else {
@@ -311,18 +311,32 @@ fn acceptance_committed_input_run_outcome(
     }
     let terminal =
         test_run_terminal_state(&results).ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
-    if input.commit.as_deref() != Some(commit) {
+    if input.commit.as_deref() != Some(current.commit.as_str()) {
         return Ok(None);
     }
+    if terminal != TestRunState::Passed {
+        return Ok(Some(false));
+    }
+    let source_matches = if results.get("sourceIdBefore").is_some()
+        || results.get("sourceIdAfter").is_some()
+    {
+        let (before, after) = test_run_source_endpoints(&results)
+            .ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
+        before == *current && after == *current
+    } else {
+        // A genuine historical Commit record retains its original path.
+        // A full source_id receipt is checked separately against current.
+        true
+    };
     Ok(Some(
-        terminal == TestRunState::Passed
+        source_matches
             && input.clean_before
             && input.outcome == Some(TestRunCommittedInputOutcome::Clean)
             && input.eligible == Some(true)
             && input
                 .after
                 .as_ref()
-                .is_some_and(|after| after.clean && after.commit == commit),
+                .is_some_and(|after| after.clean && after.commit == current.commit),
     ))
 }
 
@@ -670,10 +684,10 @@ fn acceptance_committed_input_registration_unchanged(
         && digest(row) == digest(admitted)
 }
 
-/// The source revision an evaluation admitted on `commit` judges and
-/// declares: `git-commit:<commit>`, spelled as the run's verification record
-/// (`engram_verification_record_basis`) and every committed source revision
-/// (`source_revision`) spell it, whatever the committed-input default.
+/// The scheme used by retained committed source revisions and verification records.
+const COMMITTED_SOURCE_REVISION_SCHEME: &str = "git-commit";
+
+/// The source revision an evaluation admitted on `commit` judges and declares.
 fn acceptance_committed_judged_revision(commit: &str) -> String {
     format!("{COMMITTED_SOURCE_REVISION_SCHEME}:{commit}")
 }
@@ -978,7 +992,7 @@ impl AppState {
         };
         let commit = source.commit.clone();
         let mut admitting: Option<TestRunRegistration> = None;
-        let mut predecessor_source = None;
+        let mut recorded_source = None;
         #[cfg(test)]
         TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION.with(|slot| {
             if let Some(step) = slot.borrow_mut().take() {
@@ -999,22 +1013,27 @@ impl AppState {
                 return Err(Refusal::NoEligibleRun { commit });
             }
             let body = acceptance_committed_input_record_acknowledged(&registration, &commit)?;
-            if let Some(checked) = registration.named_root.as_ref()
-                .filter(|checked| checked.generation < root.generation)
-            {
-                // The verified original body, not mutable result projections
-                // or a commit-only historical receipt, proves equivalence.
-                match body.input {
-                    EngramVerificationRecordInput::SourceId { source_id } if source_id == source => {
-                        predecessor_source = Some(source_id);
-                    }
-                    _ => return Err(Refusal::RootRebound {
-                        run_id: registration.run_id.clone(), checked: checked.clone(),
-                        current: TestRunNamedRoot {
-                            workspace_id: root.root.clone(), generation: root.generation,
-                        },
-                    }),
+            // The frozen body and its acknowledgment bind the original
+            // source, including the full identity for launcher records.
+            recorded_source = match body.input {
+                EngramVerificationRecordInput::SourceId { source_id } if source_id == source => {
+                    Some(source_id)
                 }
+                EngramVerificationRecordInput::SourceId { .. } => {
+                    return Err(Refusal::NoEligibleRun { commit });
+                }
+                _ => None,
+            };
+            if recorded_source.is_none()
+                && let Some(checked) = registration.named_root.as_ref()
+                    .filter(|checked| checked.generation < root.generation)
+            {
+                return Err(Refusal::RootRebound {
+                    run_id: registration.run_id.clone(), checked: checked.clone(),
+                    current: TestRunNamedRoot {
+                        workspace_id: root.root.clone(), generation: root.generation,
+                    },
+                });
             }
             admitting = Some(registration);
             break;
@@ -1034,15 +1053,15 @@ impl AppState {
                 step();
             }
         });
-        let native_source = admitting
-            .declared_native
-            .as_ref()
-            .map(|start| start.source.source_id.clone())
-            .or(predecessor_source);
-        if self
-            .acceptance_judged_clean_source(parent_session_id, FsPath::new(&root.root), deadline)
-            .is_none_or(|current| {
-                if let Some(expected) = &native_source {
+        let rechecked =
+            self.acceptance_judged_clean_source(parent_session_id, FsPath::new(&root.root), deadline);
+        if rechecked.as_ref().zip(recorded_source.as_ref())
+            .is_some_and(|(current, expected)| !current.same_format(expected))
+        {
+            return Err(Refusal::ScanIncomplete);
+        }
+        if rechecked.is_none_or(|current| {
+                if let Some(expected) = &recorded_source {
                     &current != expected
                 } else {
                     current.commit != commit
@@ -1078,7 +1097,7 @@ impl AppState {
         let admission = AcceptanceCommittedInputAdmission {
             run_id: admitting.run_id,
             commit,
-            native_source,
+            recorded_source,
         };
         eprintln!(
             "acceptance evaluation> `{}` admitted on committed-input run {} at {}, its \

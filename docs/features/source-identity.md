@@ -276,15 +276,16 @@ from string equality or turn a failed eligibility check into a mismatch value.
 For new measurements, the complete owner object is the identity:
 
 ```text
-source_id = { commit, tree, submodules, changes }
+source_id = { commit, tree, git_delta: { sha256, dirty, gitlinks } }
 ```
 
-The producer's envelope also retains its `git-commit:<full commit id>`
-projection, and the registered input stays `Commit { commit }`. Neither is a
-substitute for the complete object. Root commits identify their trees and
-recorded child pins; actual child commits and local deltas remain in the owner
-observation. Do not wrap that object in a new digest or reinterpret a stored
-historical revision as one.
+Engram's `sha256` covers the staged, unstaged and untracked Git delta.
+Each gitlink carries its path, HEAD pin, index pin and checkout HEAD, with
+null for absent endpoints. The envelope also retains its
+`git-commit:<full commit id>` projection. New registered verification retains
+the complete `source_id`; stored per-file identities and `Commit { commit }`
+records retain their original formats. Mixed identity formats are
+incomparable.
 
 The source object incorporates no absolute checkout root, host name, PID,
 timestamp, run id or store identity. Supported copies of the same source state
@@ -299,10 +300,9 @@ consumer admission checks at each execution boundary.
 
 ## Consumer migration and authority
 
-`source_revision` in `src/ordinary_commit_input.rs` and its historical capture
-wrappers remain `#[cfg(test)]`. Their callers pass the committed-input choice
-explicitly. The former Rust default selector and its implicit-choice wrappers
-have been removed.
+TermAl removed its former local clean-commit capture and default selector.
+Stored revision strings remain readable, and producer-shaped fixtures exercise
+the active readers.
 
 Production ordinary observations use `engram_observation_source_capture`
 in `engram_observation_source.rs`; named-root capture uses
@@ -315,8 +315,7 @@ or clean-commit revision.
 The launcher's independent automatic input selection is enabled: clean
 admitted checkouts select the existing Commit lane, while dirty or unsupported
 checkouts select a plain run without committed verification credit. Explicit
-`--input commit` remains strict. This production selection is independent of
-the historical Rust helpers.
+`--input commit` remains strict.
 
 Automatic launcher input and its host readers use only the existing complete
 `request.sourceId`, `results.sourceIdBefore` and `results.sourceIdAfter`.
@@ -324,28 +323,27 @@ Equal dirty values qualify for this comparison; any difference, including a
 newly untracked file, cannot qualify. Missing or invalid objects never compare
 as equal. Waits retain request/locator identity and authority guards without a
 parent-held source copy. Detail and remote completion carry actual observations
-within existing bounds. Historical fingerprints stay attributed history;
-review-freeze identity remains deferred. See [the launcher contract](../test.md#ordinary-committed-input-runs---input-commit).
+within existing bounds. Historical fingerprints stay attributed history.
+See [the launcher contract](../test.md#ordinary-committed-input-runs---input-commit).
 
 | Consumer | Source identity use | Additional facts retained |
 | --- | --- | --- |
 | Ordinary observations and test credit | Complete Engram-owned source_id; the registered Commit lane also checks its eligibility predicate at both boundaries | Root commit, command/check identity, real execution/result, root/work/run/claim/fence and frozen input |
-| TermAl review_freeze/review_identity, next | Reuse the appropriate scheme and admission result after explicit versioned consumer migration | Existing review scope, expected independent fingerprint, reviewer identity and any packaging components required by that consumer |
+| TermAl clean-commit reviews and gates | Cite the complete Engram-owned source_id and compare the launcher's admitted and boundary values for the exact candidate | Base and candidate commits, diff scope, read-only checkout checks and review and gate results |
 | Engram's separate freeze consumer | Requires explicit migration without replacing its packaging checks | HEAD, index, untracked/cleanliness components and before/after execution identity |
 
 Engram's freeze answers whether the worktree changed, including packaging
 state. Source-content equality does not answer that question alone. No consumer
 may silently replace its old freeze hash with source_id, reinterpret a stored
 fingerprint, or drop a cleanliness or authority check because source_id matches.
-TermAl's existing schema-1 review-freeze verifier remains unchanged by the
-test-credit rollout and continues its current refusals until its own migration.
+The schema-1 verifier belongs to the separate Engram manifest profile.
 
 The direct source-basis producer and registered committed-input flow must use
-the same eligibility rules for the committed-input lane. Reuse the existing typed Commit
-record and cleanliness validator where applicable; align Node input capture,
+the same eligibility rules for the committed-input lane. Reuse the existing
+cleanliness validator and align Node input capture,
 launcher eligibility and Rust input coherence. Removing one producer refusal
 does not establish end-to-end credit. This contract does not widen the staged
-lane or replace the existing verification wire form.
+lane. Historical verification records retain their original wire form.
 
 Stored historical source revisions and acceptance fingerprints retain their
 opaque scheme-prefixed strings and prior interpretation. Current source
