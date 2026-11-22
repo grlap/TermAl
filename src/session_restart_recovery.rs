@@ -2,18 +2,20 @@
 // available and the listener is ready. The existing queue and its content
 // durability fence own delivery; this marker grants no runtime authority.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionRestartRecovery {
-    notice: String,
-    restarted_at: String,
-    queued_prompt_count: usize,
+pub(crate) struct SessionRestartRecovery {
+    pub(crate) notice: String,
+    pub(crate) restarted_at: String,
+    pub(crate) queued_prompt_count: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    prompt_id: Option<String>,
+    pub(crate) prompt_id: Option<String>,
 }
 
 impl SessionRecord {
-    fn remap_restart_recovery_prompt(&mut self, previous_id: &str, next_id: &str) {
+    pub(crate) fn remap_restart_recovery_prompt(&mut self, previous_id: &str, next_id: &str) {
         if let Some(recovery) = &mut self.restart_recovery
             && recovery.prompt_id.as_deref() == Some(previous_id)
         {
@@ -22,7 +24,7 @@ impl SessionRecord {
     }
 }
 
-fn restart_recovery_is_suppressed(record: &SessionRecord) -> bool {
+pub(crate) fn restart_recovery_is_suppressed(record: &SessionRecord) -> bool {
     record.orchestrator_auto_dispatch_blocked
         || record.engram.operator_paused
         || record.engram.stopped_prompt_id.is_some()
@@ -30,7 +32,7 @@ fn restart_recovery_is_suppressed(record: &SessionRecord) -> bool {
 }
 
 impl AppState {
-    fn resume_interrupted_root_sessions_after_boot(&self) {
+    pub(crate) fn resume_interrupted_root_sessions_after_boot(&self) {
         let queued = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let children = inner

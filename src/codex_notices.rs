@@ -23,11 +23,13 @@
 // rerouting) go through `push_shared_codex_turn_notice` in
 // `codex_events.rs` instead.
 
+use super::*;
+
 /// Intercepts top-level `configWarning` / `deprecationNotice` events
 /// that are not scoped to a thread and records them as session-wide
 /// notices. Returns `true` when the event was a recognized global
 /// notice so the caller can short-circuit further dispatch.
-fn handle_shared_codex_global_notice(
+pub(crate) fn handle_shared_codex_global_notice(
     method: &str,
     message: &Value,
     state: &AppState,
@@ -63,7 +65,10 @@ fn handle_shared_codex_global_notice(
 /// Builds a runtime-level notice for unknown method-bearing events that
 /// lack a thread id — used as a fallback so diagnostics from Codex do
 /// not get silently dropped.
-fn build_shared_codex_runtime_notice(method: &str, message: &Value) -> Option<CodexNotice> {
+pub(crate) fn build_shared_codex_runtime_notice(
+    method: &str,
+    message: &Value,
+) -> Option<CodexNotice> {
     build_shared_codex_global_notice(
         CodexNoticeKind::RuntimeNotice,
         infer_shared_codex_notice_level(method, message),
@@ -105,7 +110,7 @@ fn infer_shared_codex_notice_level(method: &str, message: &Value) -> CodexNotice
 /// Assembles a `CodexNotice` from a payload by probing a set of
 /// pointer paths for code/title/detail. Returns `None` if none of the
 /// pointers yielded enough text to form a notice worth surfacing.
-fn build_shared_codex_global_notice(
+pub(crate) fn build_shared_codex_global_notice(
     kind: CodexNoticeKind,
     level: CodexNoticeLevel,
     default_title: &str,

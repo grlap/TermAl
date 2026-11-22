@@ -1,46 +1,48 @@
 // Process-local ownership of read-only capture workers. Caller timeouts do not
 // retire workers: the host retains their handles and cancels them at shutdown.
+
+use super::*;
 #[derive(Default)]
-struct CaptureLifetime {
-    state: Mutex<CaptureLifetimeState>,
-    changed: std::sync::Condvar,
+pub(crate) struct CaptureLifetime {
+    pub(crate) state: Mutex<CaptureLifetimeState>,
+    pub(crate) changed: std::sync::Condvar,
     #[cfg(test)]
-    root: Mutex<Option<Arc<TestTempRoot>>>,
+    pub(crate) root: Mutex<Option<Arc<TestTempRoot>>>,
     #[cfg(test)]
-    before_capture: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub(crate) before_capture: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
-    expire_shutdown: std::sync::atomic::AtomicBool,
+    pub(crate) expire_shutdown: std::sync::atomic::AtomicBool,
     #[cfg(test)]
-    before_shutdown_wait: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub(crate) before_shutdown_wait: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 #[derive(Default)]
-struct CaptureLifetimeState {
-    stopping: bool,
-    pending_logged: bool,
-    draining: Option<Arc<std::sync::atomic::AtomicBool>>,
-    workers: Vec<CaptureWorkerHandle>,
+pub(crate) struct CaptureLifetimeState {
+    pub(crate) stopping: bool,
+    pub(crate) pending_logged: bool,
+    pub(crate) draining: Option<Arc<std::sync::atomic::AtomicBool>>,
+    pub(crate) workers: Vec<CaptureWorkerHandle>,
 }
 
-struct CaptureWorkerHandle {
-    thread: std::thread::JoinHandle<()>,
-    cancel: Arc<CaptureCancellation>,
-    done: Arc<std::sync::atomic::AtomicBool>,
+pub(crate) struct CaptureWorkerHandle {
+    pub(crate) thread: std::thread::JoinHandle<()>,
+    pub(crate) cancel: Arc<CaptureCancellation>,
+    pub(crate) done: Arc<std::sync::atomic::AtomicBool>,
 }
 
-struct CaptureCancellation {
-    deadline: Option<std::time::Instant>,
-    state: Mutex<CaptureCancellationState>,
+pub(crate) struct CaptureCancellation {
+    pub(crate) deadline: Option<std::time::Instant>,
+    pub(crate) state: Mutex<CaptureCancellationState>,
     cleanup_changed: std::sync::Condvar,
     #[cfg(any(unix, windows))]
-    owner: std::sync::Weak<CaptureLifetime>,
+    pub(crate) owner: std::sync::Weak<CaptureLifetime>,
 }
 
 #[derive(Default)]
-struct CaptureCancellationState {
-    stopped: bool,
-    next: u64,
-    children: HashMap<u64, Arc<dyn Fn() + Send + Sync>>,
+pub(crate) struct CaptureCancellationState {
+    pub(crate) stopped: bool,
+    pub(crate) next: u64,
+    pub(crate) children: HashMap<u64, Arc<dyn Fn() + Send + Sync>>,
     // Unresolved cleanup outlives its capture thread and the bounded diagnostic
     // table. Only a complete group-cleanup certificate releases this custody.
     #[cfg(unix)]
@@ -69,7 +71,7 @@ impl Drop for CaptureCancellationScope {
     }
 }
 
-fn current_capture_cancellation() -> Option<Arc<CaptureCancellation>> {
+pub(crate) fn current_capture_cancellation() -> Option<Arc<CaptureCancellation>> {
     CAPTURE_CANCELLATION.with(|slot| slot.borrow().clone())
 }
 
@@ -77,17 +79,16 @@ fn current_capture_cancellation() -> Option<Arc<CaptureCancellation>> {
 /// caller's scope afterwards, even if `run` panics. For checks that only read
 /// memory and carry their own deadline: their answer must not depend on when
 /// a host shutdown cancels the capture they happen to run on.
-fn without_capture_cancellation<T>(run: impl FnOnce() -> T) -> T {
-    let _restore =
-        CaptureCancellationScope(CAPTURE_CANCELLATION.with(|slot| slot.replace(None)));
+pub(crate) fn without_capture_cancellation<T>(run: impl FnOnce() -> T) -> T {
+    let _restore = CaptureCancellationScope(CAPTURE_CANCELLATION.with(|slot| slot.replace(None)));
     run()
 }
 
-fn check_capture_cancellation() -> Result<()> {
+pub(crate) fn check_capture_cancellation() -> Result<()> {
     check_capture_cancellation_at(std::time::Instant::now())
 }
 
-fn check_capture_cancellation_at(now: std::time::Instant) -> Result<()> {
+pub(crate) fn check_capture_cancellation_at(now: std::time::Instant) -> Result<()> {
     if let Some(cancel) = current_capture_cancellation() {
         if cancel.state.lock().unwrap().stopped {
             return Err(io::Error::new(
@@ -96,10 +97,7 @@ fn check_capture_cancellation_at(now: std::time::Instant) -> Result<()> {
             )
             .into());
         }
-        if cancel
-            .deadline
-            .is_some_and(|deadline| now >= deadline)
-        {
+        if cancel.deadline.is_some_and(|deadline| now >= deadline) {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "capture shared deadline exceeded",
@@ -110,15 +108,15 @@ fn check_capture_cancellation_at(now: std::time::Instant) -> Result<()> {
     Ok(())
 }
 
-fn capture_deadline(deadline: std::time::Instant) -> std::time::Instant {
+pub(crate) fn capture_deadline(deadline: std::time::Instant) -> std::time::Instant {
     current_capture_cancellation()
         .and_then(|cancel| cancel.deadline)
         .map_or(deadline, |limit| deadline.min(limit))
 }
 
-struct CaptureChildRegistration {
-    cancel: Arc<CaptureCancellation>,
-    id: u64,
+pub(crate) struct CaptureChildRegistration {
+    pub(crate) cancel: Arc<CaptureCancellation>,
+    pub(crate) id: u64,
 }
 impl Drop for CaptureChildRegistration {
     fn drop(&mut self) {
@@ -128,7 +126,7 @@ impl Drop for CaptureChildRegistration {
 
 // Register before resuming a suspended Windows child or waiting on a Unix
 // child. A stop racing process creation kills the new child immediately.
-fn register_capture_child(
+pub(crate) fn register_capture_child(
     kill: impl Fn() + Send + Sync + 'static,
 ) -> Option<CaptureChildRegistration> {
     let cancel = current_capture_cancellation()?;
@@ -147,7 +145,7 @@ fn register_capture_child(
 }
 
 impl CaptureCancellation {
-    fn cleanup_pending(&self) -> bool {
+    pub(crate) fn cleanup_pending(&self) -> bool {
         #[cfg(unix)]
         {
             !self.state.lock().unwrap().pending_reads.is_empty()
@@ -163,16 +161,24 @@ impl CaptureCancellation {
     }
 
     #[cfg(windows)]
-    fn retain_job(self: &Arc<Self>, job: Arc<windows_launch::CaptureJob>) {
+    pub(crate) fn retain_job(self: &Arc<Self>, job: Arc<windows_launch::CaptureJob>) {
         let id = Arc::as_ptr(&job) as usize;
-        if self.state.lock().unwrap().pending_jobs.insert(id, job.clone()).is_some() {
+        if self
+            .state
+            .lock()
+            .unwrap()
+            .pending_jobs
+            .insert(id, job.clone())
+            .is_some()
+        {
             return;
         }
         // The bounded worker can finish, but its job and root cannot. A late
         // certificate alone releases this custody. Native errors retain it.
         let retained = Arc::new(Mutex::new(Some((self.owner.upgrade(), self.clone(), job))));
         let draining = retained.clone();
-        if let Err(error) = std::thread::Builder::new().name("termal-capture-job-drain".into())
+        if let Err(error) = std::thread::Builder::new()
+            .name("termal-capture-job-drain".into())
             .spawn(move || {
                 let (owner, cancel, job) = draining.lock().unwrap().take().unwrap();
                 match job.finish(None) {
@@ -192,14 +198,15 @@ impl CaptureCancellation {
                         std::mem::forget((owner, cancel, job));
                     }
                 }
-            }) {
+            })
+        {
             eprintln!("capture_cleanup_pending Windows job drainer: {error}");
             std::mem::forget(retained);
         }
     }
 
     #[cfg(unix)]
-    fn retain_read(&self, process: Arc<SharedChild>) {
+    pub(crate) fn retain_read(&self, process: Arc<SharedChild>) {
         self.state
             .lock()
             .unwrap()
@@ -208,7 +215,7 @@ impl CaptureCancellation {
     }
 
     #[cfg(unix)]
-    fn complete_read(&self, process: &Arc<SharedChild>) {
+    pub(crate) fn complete_read(&self, process: &Arc<SharedChild>) {
         {
             let mut state = self.state.lock().unwrap();
             state.pending_reads.remove(&(Arc::as_ptr(process) as usize));
@@ -240,7 +247,7 @@ impl CaptureCancellation {
         let _ = &self.cleanup_changed;
     }
 
-    fn stop(&self) {
+    pub(crate) fn stop(&self) {
         let children = {
             let mut state = self.state.lock().unwrap();
             state.stopped = true;
@@ -255,14 +262,18 @@ impl CaptureCancellation {
 
 impl CaptureLifetime {
     #[cfg(test)]
-    fn with_test_root(root: Option<Arc<TestTempRoot>>) -> Self {
+    pub(crate) fn with_test_root(root: Option<Arc<TestTempRoot>>) -> Self {
         Self {
             root: Mutex::new(root),
             ..Self::default()
         }
     }
 
-    fn spawn(self: &Arc<Self>, name: &str, run: impl FnOnce() + Send + 'static) -> io::Result<()> {
+    pub(crate) fn spawn(
+        self: &Arc<Self>,
+        name: &str,
+        run: impl FnOnce() + Send + 'static,
+    ) -> io::Result<()> {
         self.spawn_owned(
             name,
             Some(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT),
@@ -272,7 +283,7 @@ impl CaptureLifetime {
 
     // Observer workers may run several separately bounded operations. Each
     // nested capture keeps its own budget; shutdown still cancels every child.
-    fn spawn_observer(
+    pub(crate) fn spawn_observer(
         self: &Arc<Self>,
         name: &str,
         run: impl FnOnce() + Send + 'static,
@@ -280,7 +291,7 @@ impl CaptureLifetime {
         self.spawn_owned(name, None, run)
     }
 
-    fn spawn_owned(
+    pub(crate) fn spawn_owned(
         self: &Arc<Self>,
         name: &str,
         deadline: Option<std::time::Instant>,
@@ -359,7 +370,7 @@ impl CaptureLifetime {
         result
     }
 
-    fn stop(&self) {
+    pub(crate) fn stop(&self) {
         let workers = {
             let mut state = self.state.lock().unwrap();
             state.stopping = true;
@@ -377,7 +388,7 @@ impl CaptureLifetime {
     /// Returns false only for an uninterruptible read/failed termination. The
     /// retained drainer owns handles and root custody until actual completion;
     /// the exiting host never waits beyond the workers' existing shared budget.
-    fn stop_and_join(self: &Arc<Self>) -> bool {
+    pub(crate) fn stop_and_join(self: &Arc<Self>) -> bool {
         self.stop();
         let backstop = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
         let mut state = self.state.lock().unwrap();

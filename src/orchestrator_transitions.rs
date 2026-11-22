@@ -37,8 +37,10 @@
 // Extracted from orchestrators.rs so that file can stay focused on
 // template CRUD + instance lifecycle (create/pause/resume/stop).
 
+use super::*;
+
 /// Applies orchestrator template session settings.
-fn apply_orchestrator_template_session_settings(
+pub(crate) fn apply_orchestrator_template_session_settings(
     record: &mut SessionRecord,
     template_session: &OrchestratorSessionTemplate,
 ) {
@@ -101,7 +103,7 @@ fn apply_orchestrator_template_session_settings(
 }
 
 /// Acknowledges pending orchestrator transition.
-fn acknowledge_pending_orchestrator_transition(
+pub(crate) fn acknowledge_pending_orchestrator_transition(
     inner: &mut StateInner,
     instance_index: usize,
     pending: &PendingTransition,
@@ -118,7 +120,7 @@ fn acknowledge_pending_orchestrator_transition(
 }
 
 /// Handles orchestrator template session for runtime session.
-fn orchestrator_template_session_for_runtime_session(
+pub(crate) fn orchestrator_template_session_for_runtime_session(
     inner: &StateInner,
     session_id: &str,
 ) -> Option<OrchestratorSessionTemplate> {
@@ -162,7 +164,7 @@ fn orchestrator_template_session_for_instance_session(
 }
 
 /// Handles schedule orchestrator transitions for completed session.
-fn schedule_orchestrator_transitions_for_completed_session(
+pub(crate) fn schedule_orchestrator_transitions_for_completed_session(
     inner: &mut StateInner,
     stopping_orchestrator_session_ids: &HashMap<String, HashSet<String>>,
     session_id: &str,
@@ -291,7 +293,7 @@ fn schedule_orchestrator_transitions_for_completed_session(
 }
 
 /// Updates orchestrator delivery cursor.
-fn update_orchestrator_delivery_cursor(
+pub(crate) fn update_orchestrator_delivery_cursor(
     instance: &mut OrchestratorInstance,
     source_session_id: &str,
     completion_revision: u64,
@@ -318,7 +320,7 @@ fn update_orchestrator_delivery_cursor(
     }
 }
 
-fn referenced_sessions_for_orchestrators(
+pub(crate) fn referenced_sessions_for_orchestrators(
     local_instance_id: &str,
     inner: &StateInner,
     orchestrators: &[OrchestratorInstance],
@@ -359,12 +361,12 @@ fn referenced_sessions_for_orchestrators(
         .sessions
         .iter()
         .filter(|record| referenced_session_ids.contains(record.session.id.as_str()))
-        .map(|record| AppState::wire_session_summary_from_record( local_instance_id, record))
+        .map(|record| AppState::wire_session_summary_from_record(local_instance_id, record))
         .collect()
 }
 
 /// Marks deadlocked orchestrator instances.
-fn mark_deadlocked_orchestrator_instances(
+pub(crate) fn mark_deadlocked_orchestrator_instances(
     inner: &mut StateInner,
     stopping_orchestrator_ids: &HashSet<String>,
 ) -> bool {
@@ -439,7 +441,7 @@ fn mark_deadlocked_orchestrator_instances(
 }
 
 /// Detects deadlocked consolidate session IDs.
-fn detect_deadlocked_consolidate_session_ids(
+pub(crate) fn detect_deadlocked_consolidate_session_ids(
     inner: &StateInner,
     instance: &OrchestratorInstance,
 ) -> Vec<String> {
@@ -575,7 +577,7 @@ fn build_transition_result_text(
 }
 
 /// Returns the next pending transition action.
-fn next_pending_transition_action(
+pub(crate) fn next_pending_transition_action(
     inner: &StateInner,
     stopping_orchestrator_ids: &HashSet<String>,
 ) -> Option<PendingTransitionAction> {
@@ -954,7 +956,7 @@ fn render_transition_prompt(
 }
 
 /// Builds orchestrator destination prompt.
-fn build_orchestrator_destination_prompt(
+pub(crate) fn build_orchestrator_destination_prompt(
     destination_record: &SessionRecord,
     instructions: &str,
     rendered_prompt: &str,

@@ -24,6 +24,8 @@
 // outcome rule and near misses, which would otherwise have grown
 // `engram_check_recognition.rs`.
 
+use super::*;
+
 /// At most this many bytes of a test's own command are named in a remedy
 /// (`engram_one_call_template`); a longer one is named `<test>`, so an
 /// agent's long command line does not swell its next prompt.
@@ -50,7 +52,7 @@ const ENGRAM_ONE_CALL_REMEDY_TEST_MAX_BYTES: usize = 256;
 ///   run it where the shell was after a failed one).
 ///
 /// Anything else, `cd DIR && TEST` included, is not this form.
-fn engram_one_call_prefix(line: &str) -> Option<(String, &str)> {
+pub(crate) fn engram_one_call_prefix(line: &str) -> Option<(String, &str)> {
     let rest = line.strip_prefix("pushd ")?.trim_start_matches(' ');
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
@@ -79,7 +81,7 @@ fn engram_one_call_prefix(line: &str) -> Option<(String, &str)> {
 /// Whether the one-call form can name `root` (as the host lines show it) as
 /// its DIR, so that a remedy may offer the form for a test there: one path
 /// outside the form's grammar (`José`, `(x)`, `$`) cannot be named at all.
-fn engram_one_call_reads(root: &str) -> bool {
+pub(crate) fn engram_one_call_reads(root: &str) -> bool {
     engram_one_call_prefix(&format!("pushd \"{root}\" && cargo test")).is_some()
 }
 
@@ -99,7 +101,7 @@ fn engram_one_call_reads(root: &str) -> bool {
 /// (`engram_check_command_outcome`). That holds only because of what TermAl
 /// records: a test Claude runs through its `PowerShell` tool is not recorded
 /// at all, so it gets no check and no host line, in whatever shape.
-fn engram_one_call_offered_up_front(agent: Agent) -> bool {
+pub(crate) fn engram_one_call_offered_up_front(agent: Agent) -> bool {
     agent == Agent::Claude
 }
 
@@ -113,7 +115,7 @@ fn engram_one_call_offered_up_front(agent: Agent) -> bool {
 /// as its last command did. A size inventory is the test's output, not the
 /// runner's result line, and does not count. Its success needs both to have
 /// run, so it is the test's own.
-fn engram_check_exit_is_the_tests(
+pub(crate) fn engram_check_exit_is_the_tests(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
     result_lines: &[String],
@@ -122,8 +124,9 @@ fn engram_check_exit_is_the_tests(
         return match exit {
             // Only the completion parser generates this line, after validating
             // the focused stage. Test summaries never prove build execution.
-            EngramCommandExit::Code(code) if check.program == "node" => result_lines
-                == [format!("focused build: native exit {code}")],
+            EngramCommandExit::Code(code) if check.program == "node" => {
+                result_lines == [format!("focused build: native exit {code}")]
+            }
             EngramCommandExit::Code(code) => code == 0 || check.directory.is_none(),
             _ => false,
         };
@@ -141,7 +144,7 @@ fn engram_check_exit_is_the_tests(
 /// (`engram_check_exit_is_the_tests`), or a test launcher's that came with
 /// no sign its run executed (`engram_launcher_exit_without_run`), is
 /// unknown.
-fn engram_check_command_outcome(
+pub(crate) fn engram_check_command_outcome(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
     result_lines: &[String],
@@ -165,7 +168,7 @@ fn engram_check_command_outcome(
 /// (`EngramTurnCheckEnd::launcher_ran_no_stage`): a run refused before its
 /// first stage prints a `FAIL RUN exit=1` verdict, but tested nothing.
 #[cfg(test)]
-fn engram_check_end_outcome(
+pub(crate) fn engram_check_end_outcome(
     command: &EngramCheckCommand,
     end: &EngramTurnCheckEnd,
 ) -> Option<EngramExecutionOutcome> {
@@ -214,7 +217,7 @@ fn engram_launcher_exit_without_run(
 /// `;`, so a test after `||` or on a later line of a script still goes
 /// without a word, and a backslash escape (`\"`) is not read, so a quote it
 /// escapes may end a quoted string early.
-fn engram_embedded_test(command: &str) -> Option<EngramCheckCommand> {
+pub(crate) fn engram_embedded_test(command: &str) -> Option<EngramCheckCommand> {
     let (script, dialect) = engram_unwrap_shell_command(command.trim());
     let mut segments = Vec::new();
     let mut start = 0;
@@ -256,7 +259,7 @@ fn engram_embedded_test(command: &str) -> Option<EngramCheckCommand> {
 /// Where on its line a recognised test that is no check ran
 /// (`engram_embedded_test`), when not alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramNearMiss {
+pub(crate) enum EngramNearMiss {
     /// After another command (`cd "DIR" && TEST`, `A; TEST`).
     AfterCommand,
     /// After the one-call form's `pushd "DIR" &&`, but with something the
@@ -274,7 +277,7 @@ enum EngramNearMiss {
 
 impl EngramNearMiss {
     /// How the test of `command`, a line that is no check itself, sits on it.
-    fn of(command: &str) -> Self {
+    pub(crate) fn of(command: &str) -> Self {
         let command = command.trim();
         if engram_one_call_prefix(command).is_some() {
             Self::AfterPushd
@@ -292,7 +295,7 @@ impl EngramNearMiss {
 /// `engram_msys_drive_path`): whether the line so written would be the form
 /// itself, its test alone. `None` for any other line, and always on another
 /// system, where `/c/…` is a path of its own.
-fn engram_one_call_git_bash_dir(line: &str) -> Option<bool> {
+pub(crate) fn engram_one_call_git_bash_dir(line: &str) -> Option<bool> {
     let rest = line.strip_prefix("pushd ")?.trim_start_matches(' ');
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
@@ -315,7 +318,10 @@ fn engram_one_call_git_bash_dir(line: &str) -> Option<bool> {
 /// with DIR the absolute directory in the worktree where the test runs):
 /// TermAl names no directory it would have to guess, since a test meant for
 /// one inside the worktree would run somewhere else.
-fn engram_one_call_template(check: &EngramCheckCommand, measured_in: &FsPath) -> Option<String> {
+pub(crate) fn engram_one_call_template(
+    check: &EngramCheckCommand,
+    measured_in: &FsPath,
+) -> Option<String> {
     let root = engram_source_root_display(&measured_in.to_string_lossy());
     let carried = check.simple
         && (check.dialect == EngramShellDialect::Unknown || check.literal_pipe)
@@ -331,13 +337,13 @@ fn engram_one_call_template(check: &EngramCheckCommand, measured_in: &FsPath) ->
 
 /// Placement feedback permits later admission when a runtime supplies cwd;
 /// argument refusals retain the once-per-command withholding marker.
-enum EngramUncreditedLine {
+pub(crate) enum EngramUncreditedLine {
     Placement(String),
     Arguments(String),
 }
 
 impl EngramUncreditedLine {
-    fn into_arguments(self) -> Option<String> {
+    pub(crate) fn into_arguments(self) -> Option<String> {
         match self {
             Self::Arguments(line) => Some(line),
             Self::Placement(_) => None,
@@ -360,7 +366,7 @@ impl EngramUncreditedLine {
 /// network path is never resolved here, on the runtime's event reader, since
 /// that can block for a network timeout (`engram_network_path`). Resolves on
 /// the file system, so never under the state lock.
-fn engram_uncredited_test_line(
+pub(crate) fn engram_uncredited_test_line(
     check: &EngramCheckCommand,
     near_miss: Option<EngramNearMiss>,
     workdir: &str,
@@ -488,9 +494,9 @@ fn engram_uncredited_test_line(
 /// A recognized check placed inside its root was refused by argument guards.
 /// Feedback explains that refusal; it never changes what the guards admit.
 fn engram_uncredited_arguments_line(check: &EngramCheckCommand) -> String {
-    let (reason, remedy) = if !check.literal_pipe && engram_has_unquoted_expression(engram_check_line(
-        &check.normalized, check.simple,
-    )) {
+    let (reason, remedy) = if !check.literal_pipe
+        && engram_has_unquoted_expression(engram_check_line(&check.normalized, check.simple))
+    {
         (
             "unquoted shell expression or escape",
             "Quote literal patterns and arguments, then run the check again in the worktree where this turn is measured.",

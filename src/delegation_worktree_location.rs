@@ -8,15 +8,17 @@
 // spawning parent removes them. New module; the default location formerly
 // lived under the TermAl data dir in delegations.rs.
 
+use super::*;
+
 /// The Git-ignored directory, relative to a source repository's root, that
 /// holds its delegation worktrees by default.
-const DELEGATION_WORKTREES_DIR: &str = ".worktrees";
+pub(crate) const DELEGATION_WORKTREES_DIR: &str = ".worktrees";
 
 /// The default folder, under `DELEGATION_WORKTREES_DIR`, for a delegation's
 /// worktree: `d-` and the first twelve hex digits of its id. Git also names
 /// the worktree's administrative directory after this folder, so a short name
 /// keeps both paths clear of Git's limit on Windows.
-fn delegation_worktree_folder_name(delegation_id: &str) -> String {
+pub(crate) fn delegation_worktree_folder_name(delegation_id: &str) -> String {
     let digits = delegation_id
         .strip_prefix("delegation-")
         .unwrap_or(delegation_id)
@@ -57,7 +59,7 @@ fn git_worktree_admin_dir(common: &str, name: &str) -> String {
 /// directory it creates, so the longer of the two must fit. Other platforms
 /// allow paths far longer than any worktree TermAl creates.
 #[cfg(windows)]
-fn refuse_worktree_beyond_git_path_limit(
+pub(crate) fn refuse_worktree_beyond_git_path_limit(
     source_repo_root: &FsPath,
     worktree_root: &FsPath,
 ) -> Result<(), ApiError> {
@@ -93,7 +95,7 @@ fn refuse_worktree_beyond_git_path_limit(
 }
 
 #[cfg(not(windows))]
-fn refuse_worktree_beyond_git_path_limit(
+pub(crate) fn refuse_worktree_beyond_git_path_limit(
     _source_repo_root: &FsPath,
     _worktree_root: &FsPath,
 ) -> Result<(), ApiError> {
@@ -101,11 +103,11 @@ fn refuse_worktree_beyond_git_path_limit(
 }
 
 /// Longest path or Git detail kept in a refusal.
-const DELEGATION_WORKTREE_DETAIL_MAX_CHARS: usize = 400;
+pub(crate) const DELEGATION_WORKTREE_DETAIL_MAX_CHARS: usize = 400;
 
 /// The worktree's path relative to the source repository's root, refused
 /// unless it lies strictly inside that root and outside its `.git`.
-fn isolated_worktree_relative_path(
+pub(crate) fn isolated_worktree_relative_path(
     source_repo_root: &FsPath,
     worktree_root: &FsPath,
 ) -> Result<PathBuf, ApiError> {
@@ -142,7 +144,7 @@ fn isolated_worktree_relative_path(
 
 /// Refuses a worktree location Git does not ignore: an unignored nested
 /// worktree would show in the parent's status and block its next spawn.
-fn ensure_isolated_worktree_ignored(
+pub(crate) fn ensure_isolated_worktree_ignored(
     source_repo_root: &FsPath,
     relative: &FsPath,
 ) -> Result<(), ApiError> {

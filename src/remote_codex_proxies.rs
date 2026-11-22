@@ -21,12 +21,14 @@
 // The underlying thread actions themselves (what the remote does
 // when it receives these calls) are in `codex_thread_actions.rs`.
 
+use super::*;
+
 impl AppState {
     /// Forks a remote Codex thread and persists a brand-new local proxy
     /// `SessionRecord` for the forked session, carrying the forked
     /// session's `remote_session_id` — this is the session-creation
     /// variant rather than a plain state-mutating proxy.
-    fn proxy_remote_fork_codex_thread(
+    pub(crate) fn proxy_remote_fork_codex_thread(
         &self,
         session_id: &str,
     ) -> Result<CreateSessionResponse, ApiError> {
@@ -97,7 +99,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session =
-                AppState::wire_session_from_record( &self.server_instance_id, &local_record);
+                AppState::wire_session_from_record(&self.server_instance_id, &local_record);
             let revision = if changed {
                 self.commit_remote_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
@@ -115,7 +117,7 @@ impl AppState {
                 inner.revision
             };
             let delta_session = changed.then(|| {
-                AppState::wire_session_summary_from_record( &self.server_instance_id, &local_record)
+                AppState::wire_session_summary_from_record(&self.server_instance_id, &local_record)
             });
             (
                 revision,
@@ -148,7 +150,7 @@ impl AppState {
         })
     }
 
-    fn proxy_remote_archive_codex_thread(
+    pub(crate) fn proxy_remote_archive_codex_thread(
         &self,
         session_id: &str,
     ) -> Result<StateResponse, ApiError> {
@@ -170,7 +172,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_unarchive_codex_thread(
+    pub(crate) fn proxy_remote_unarchive_codex_thread(
         &self,
         session_id: &str,
     ) -> Result<StateResponse, ApiError> {
@@ -192,7 +194,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_compact_codex_thread(
+    pub(crate) fn proxy_remote_compact_codex_thread(
         &self,
         session_id: &str,
     ) -> Result<StateResponse, ApiError> {
@@ -214,7 +216,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_rollback_codex_thread(
+    pub(crate) fn proxy_remote_rollback_codex_thread(
         &self,
         session_id: &str,
         num_turns: usize,

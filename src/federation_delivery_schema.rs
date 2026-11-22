@@ -1,7 +1,7 @@
 // Owns the version-3 coordination schema extension for delivery intents.
 // Does not migrate or reinterpret historical mailbox messages and cursors.
 // Canonical SQL is immutable once released; later changes need a migration.
-const FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL: &str = "
+pub(crate) const FEDERATION_MAILBOX_DELIVERY_SCHEMA_SQL: &str = "
     CREATE TABLE federation_mailbox_intents (
       sender_session_id TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,

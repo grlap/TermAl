@@ -1,52 +1,66 @@
 // Owns the sender's durable retry registry and aggregate admission bounds.
 // Does not serve mailbox content or infer canonical outcomes from absence.
 // Every mutation uses the shared coordination writer before taking state locks.
+
+use super::*;
 const FEDERATION_INTENT_MAX_COUNT: u64 = 1000;
 const FEDERATION_INTENT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum FederationIntentRefusal {
+pub(crate) enum FederationIntentRefusal {
     CentralCapabilityUnsupported,
 }
 
-fn federation_delivery_unsupported() -> ApiError {
-    ApiError::conflict("central does not support durable sender intents; this request made no delivery attempt")
+pub(crate) fn federation_delivery_unsupported() -> ApiError {
+    ApiError::conflict(
+        "central does not support durable sender intents; this request made no delivery attempt",
+    )
 }
 
-fn federation_delivery_local_refusal() -> ApiError {
-    ApiError::conflict("delivery locally refused: centralCapabilityUnsupported; terminal outcome retained")
+pub(crate) fn federation_delivery_local_refusal() -> ApiError {
+    ApiError::conflict(
+        "delivery locally refused: centralCapabilityUnsupported; terminal outcome retained",
+    )
 }
 
-struct FederationIntent {
-    sender: String,
-    key: String,
-    owner: String,
-    creation: String,
-    target: String,
-    digest: String,
-    state: String,
-    payload: Option<String>,
-    receipt: Option<String>,
+pub(crate) struct FederationIntent {
+    pub(crate) sender: String,
+    pub(crate) key: String,
+    pub(crate) owner: String,
+    pub(crate) creation: String,
+    pub(crate) target: String,
+    pub(crate) digest: String,
+    pub(crate) state: String,
+    pub(crate) payload: Option<String>,
+    pub(crate) receipt: Option<String>,
     identity_json: String,
 }
 
 impl FederationIntent {
-    fn local_refusal(&self) -> Option<FederationIntentRefusal> {
-        (self.state == "refused").then(|| self.receipt.as_deref()
-            .and_then(|value| serde_json::from_str::<FederationIntentRefusal>(value).ok())).flatten()
+    pub(crate) fn local_refusal(&self) -> Option<FederationIntentRefusal> {
+        (self.state == "refused")
+            .then(|| {
+                self.receipt
+                    .as_deref()
+                    .and_then(|value| serde_json::from_str::<FederationIntentRefusal>(value).ok())
+            })
+            .flatten()
     }
 
-    fn terminal_error(&self) -> Option<ApiError> {
+    pub(crate) fn terminal_error(&self) -> Option<ApiError> {
         if self.local_refusal().is_some() {
             return Some(federation_delivery_local_refusal());
         }
         matches!(self.state.as_str(), "refused" | "abandoned").then(|| {
-            ApiError::conflict(format!("central delivery is {}; authoritative outcome retained", self.state))
+            ApiError::conflict(format!(
+                "central delivery is {}; authoritative outcome retained",
+                self.state
+            ))
         })
     }
 
-    fn identity(&self) -> Result<FederationDeliveryIdentity> {
+    pub(crate) fn identity(&self) -> Result<FederationDeliveryIdentity> {
         let identity: FederationDeliveryIdentity = serde_json::from_str(&self.identity_json)?;
         if identity.version != 1
             || identity.sender.participant_key() != self.sender
@@ -57,7 +71,7 @@ impl FederationIntent {
         }
         Ok(identity)
     }
-    fn status(&self) -> Value {
+    pub(crate) fn status(&self) -> Value {
         let mut status = json!({"idempotencyKey":self.key,"targetSessionId":self.target,
             "canonicalDigest":self.digest,"state":self.state});
         // receipt_json is state-tagged: only homeCommitted decodes a receipt;
@@ -71,14 +85,14 @@ impl FederationIntent {
         status
     }
 
-    fn matches_owner(&self, session: &str, creation: &str) -> Result<()> {
+    pub(crate) fn matches_owner(&self, session: &str, creation: &str) -> Result<()> {
         if self.owner != session || self.creation != creation {
             return Err(federation_delivery_conflict());
         }
         Ok(())
     }
 
-    fn committed_receipt(&self) -> Result<Option<MailboxAppendReceipt>> {
+    pub(crate) fn committed_receipt(&self) -> Result<Option<MailboxAppendReceipt>> {
         if self.state != "homeCommitted" {
             return Ok(None);
         }
@@ -93,7 +107,7 @@ impl FederationIntent {
     }
 }
 
-fn federation_intent_read(
+pub(crate) fn federation_intent_read(
     connection: &rusqlite::Connection,
     sender: &str,
     key: &str,
@@ -122,25 +136,39 @@ fn federation_intent_read(
         .optional()?)
 }
 
-fn federation_intent_for_owner(connection: &rusqlite::Connection,
-    owner: &str, creation: &str, key: &str) -> Result<Option<FederationIntent>>
-{
+pub(crate) fn federation_intent_for_owner(
+    connection: &rusqlite::Connection,
+    owner: &str,
+    creation: &str,
+    key: &str,
+) -> Result<Option<FederationIntent>> {
     let mut statement = connection.prepare(
         "SELECT sender_session_id FROM federation_mailbox_intents
-         WHERE owner_session_id=?1 AND owner_creation_id=?2 AND idempotency_key=?3 LIMIT 2")?;
-    let senders = statement.query_map(rusqlite::params![owner, creation, key], |row| row.get::<_, String>(0))?
+         WHERE owner_session_id=?1 AND owner_creation_id=?2 AND idempotency_key=?3 LIMIT 2",
+    )?;
+    let senders = statement
+        .query_map(rusqlite::params![owner, creation, key], |row| {
+            row.get::<_, String>(0)
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     if senders.len() > 1 {
-        return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
-            "delivery key has multiple retained authority epochs"));
+        return Err(mailbox_store_error(
+            MailboxStoreErrorKind::Conflict,
+            "delivery key has multiple retained authority epochs",
+        ));
     }
-    senders.first().map(|sender| federation_intent_read(connection, sender, key)
-        .and_then(|intent| intent.ok_or_else(|| anyhow!("retained delivery intent disappeared"))))
+    senders
+        .first()
+        .map(|sender| {
+            federation_intent_read(connection, sender, key).and_then(|intent| {
+                intent.ok_or_else(|| anyhow!("retained delivery intent disappeared"))
+            })
+        })
         .transpose()
 }
 
 impl MailboxStore {
-    fn refuse_unattempted_federation_intent<G>(
+    pub(crate) fn refuse_unattempted_federation_intent<G>(
         &self,
         delivery: &FederationDelivery,
         owner: &str,
@@ -149,9 +177,14 @@ impl MailboxStore {
     ) -> Result<Option<FederationIntentRefusal>> {
         let _writer = self.lock_writer("refusing an unsupported queued delivery")?;
         let mut connection = self.connection()?;
-        let transaction = begin_mailbox_write(&mut connection, "refusing an unsupported queued delivery")?;
+        let transaction =
+            begin_mailbox_write(&mut connection, "refusing an unsupported queued delivery")?;
         let mut refusal = None;
-        if let Some(intent) = federation_intent_read(&transaction, &delivery.sender.participant_key(), &delivery.key)? {
+        if let Some(intent) = federation_intent_read(
+            &transaction,
+            &delivery.sender.participant_key(),
+            &delivery.key,
+        )? {
             intent.matches_owner(owner, creation)?;
             if intent.digest != delivery.digest() {
                 return Err(federation_delivery_conflict());
@@ -163,10 +196,18 @@ impl MailboxStore {
                     "UPDATE federation_mailbox_intents SET state='refused',receipt_json=?4
                      WHERE sender_session_id=?1 AND idempotency_key=?2 AND canonical_digest=?3
                      AND state='localIntentDurable'",
-                    rusqlite::params![delivery.sender.participant_key(),delivery.key,delivery.digest(),
-                        serde_json::to_string(&FederationIntentRefusal::CentralCapabilityUnsupported)?],
+                    rusqlite::params![
+                        delivery.sender.participant_key(),
+                        delivery.key,
+                        delivery.digest(),
+                        serde_json::to_string(
+                            &FederationIntentRefusal::CentralCapabilityUnsupported
+                        )?
+                    ],
                 )?;
-                if changed != 1 { return Err(federation_delivery_conflict()); }
+                if changed != 1 {
+                    return Err(federation_delivery_conflict());
+                }
                 refusal = Some(FederationIntentRefusal::CentralCapabilityUnsupported);
             } else {
                 refusal = intent.local_refusal();
@@ -179,7 +220,7 @@ impl MailboxStore {
         Ok(refusal)
     }
 
-    fn prepare_federation_intent<G>(
+    pub(crate) fn prepare_federation_intent<G>(
         &self,
         delivery: &FederationDelivery,
         owner: &str,
@@ -191,7 +232,8 @@ impl MailboxStore {
         let transaction =
             begin_mailbox_write(&mut connection, "persisting sender delivery intent")?;
         if mailbox_message_for_idempotency_key(&transaction, owner, &delivery.key)?.is_some()
-            || native_sender_has_relay_intent(&transaction, owner, &delivery.key)? {
+            || native_sender_has_relay_intent(&transaction, owner, &delivery.key)?
+        {
             return Err(federation_delivery_conflict());
         }
         let sender = delivery.sender.participant_key();
@@ -208,8 +250,12 @@ impl MailboxStore {
         if retired {
             return Err(federation_delivery_conflict());
         }
-        if let Some(existing) = federation_intent_for_owner(&transaction, owner, creation, &delivery.key)? {
-            if existing.sender != sender { return Err(federation_delivery_conflict()); }
+        if let Some(existing) =
+            federation_intent_for_owner(&transaction, owner, creation, &delivery.key)?
+        {
+            if existing.sender != sender {
+                return Err(federation_delivery_conflict());
+            }
             existing.matches_owner(owner, creation)?;
             if existing.digest != delivery.digest()
                 || matches!(existing.state.as_str(), "refused" | "abandoned")
@@ -253,7 +299,7 @@ impl MailboxStore {
         Ok(result)
     }
 
-    fn mark_federation_intent_unknown<G>(
+    pub(crate) fn mark_federation_intent_unknown<G>(
         &self,
         delivery: &FederationDelivery,
         authorize: impl FnOnce() -> Result<G>,
@@ -279,7 +325,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn settle_federation_intent(
+    pub(crate) fn settle_federation_intent(
         &self,
         delivery: &FederationDelivery,
         receipt: &MailboxAppendReceipt,
@@ -301,7 +347,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn settle_federation_terminal_intent<G>(
+    pub(crate) fn settle_federation_terminal_intent<G>(
         &self,
         delivery: &FederationDelivery,
         state: FederationDeliveryTerminalState,
@@ -309,13 +355,21 @@ impl MailboxStore {
     ) -> Result<()> {
         let _writer = self.lock_writer("retaining authoritative terminal delivery outcome")?;
         let mut connection = self.connection()?;
-        let transaction =
-            begin_mailbox_write(&mut connection, "retaining authoritative terminal delivery outcome")?;
+        let transaction = begin_mailbox_write(
+            &mut connection,
+            "retaining authoritative terminal delivery outcome",
+        )?;
         let changed = transaction.execute(
             "UPDATE federation_mailbox_intents SET state=?4 WHERE sender_session_id=?1
              AND idempotency_key=?2 AND canonical_digest=?3
              AND state IN ('localIntentDurable','appendOutcomeUnknown',?4)",
-            rusqlite::params![delivery.sender.participant_key(),delivery.key,delivery.digest(),state.as_str()])?;
+            rusqlite::params![
+                delivery.sender.participant_key(),
+                delivery.key,
+                delivery.digest(),
+                state.as_str()
+            ],
+        )?;
         if changed != 1 {
             return Err(federation_delivery_conflict());
         }
@@ -324,7 +378,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn retire_federation_intent_owner(&self, owner: &str, creation: &str) -> Result<()> {
+    pub(crate) fn retire_federation_intent_owner(&self, owner: &str, creation: &str) -> Result<()> {
         if self.connection_if_enabled().is_none() {
             return Ok(());
         }
@@ -343,7 +397,7 @@ impl MailboxStore {
     }
 }
 
-fn federation_delivery_settlement_error(error: anyhow::Error) -> ApiError {
+pub(crate) fn federation_delivery_settlement_error(error: anyhow::Error) -> ApiError {
     let mut error = mailbox_api_error(error);
     error.message = "central append committed, but local outcome retention failed; retry the exact delivery to recover the original receipt".to_owned();
     error

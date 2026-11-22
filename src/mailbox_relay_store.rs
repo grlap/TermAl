@@ -1,11 +1,13 @@
 // Home-owned relay membership, atomic append/wake, and metadata-only sender pins.
 // Does not choose a host, authorize a caller, mirror bodies, or send network traffic.
 
-fn relay_store_error(message: &str) -> anyhow::Error {
+use super::*;
+
+pub(crate) fn relay_store_error(message: &str) -> anyhow::Error {
     mailbox_store_error(MailboxStoreErrorKind::Conflict, message)
 }
 
-fn check_mailbox_relay_home(
+pub(crate) fn check_mailbox_relay_home(
     connection: &rusqlite::Connection,
     relay: &MailboxRelayAppend,
 ) -> Result<()> {
@@ -20,7 +22,7 @@ fn check_mailbox_relay_home(
     Ok(())
 }
 
-fn commit_mailbox_relay_append(
+pub(crate) fn commit_mailbox_relay_append(
     connection: &rusqlite::Connection,
     relay: &MailboxRelayAppend,
     peer: &FederationPeerSnapshot,
@@ -128,7 +130,7 @@ fn remember_mailbox_relay_association(
 }
 
 impl MailboxStore {
-    fn mailbox_relay_intent(
+    pub(crate) fn mailbox_relay_intent(
         &self,
         owner: &str,
         key: &str,
@@ -147,7 +149,7 @@ impl MailboxStore {
         .transpose()
     }
 
-    fn mailbox_relay_conversations(
+    pub(crate) fn mailbox_relay_conversations(
         &self,
         actor: &MailboxRelayPrincipal,
     ) -> Result<Vec<MailboxRelayConversation>> {
@@ -167,7 +169,7 @@ impl MailboxStore {
         Ok(conversations)
     }
 
-    fn append_mailbox_relay<G>(
+    pub(crate) fn append_mailbox_relay<G>(
         &self,
         relay: &MailboxRelayAppend,
         peer: &FederationPeerSnapshot,
@@ -194,7 +196,7 @@ impl MailboxStore {
         Ok(receipt)
     }
 
-    fn mailbox_relay_association(
+    pub(crate) fn mailbox_relay_association(
         &self,
         actor: &MailboxRelayPrincipal,
         mailbox_id: &str,
@@ -223,7 +225,7 @@ impl MailboxStore {
         Ok(Some(conversation))
     }
 
-    fn remember_mailbox_relay<G>(
+    pub(crate) fn remember_mailbox_relay<G>(
         &self,
         conversation: &MailboxRelayConversation,
         mailbox_id: &str,
@@ -251,7 +253,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn pin_mailbox_relay<G>(
+    pub(crate) fn pin_mailbox_relay<G>(
         &self,
         relay: &MailboxRelayAppend,
         peer: &FederationPeerSnapshot,
@@ -260,7 +262,7 @@ impl MailboxStore {
         self.pin_mailbox_relay_with_test_scope(relay, peer, None, authorize)
     }
 
-    fn pin_mailbox_relay_with_test_scope<G>(
+    pub(crate) fn pin_mailbox_relay_with_test_scope<G>(
         &self,
         relay: &MailboxRelayAppend,
         peer: &FederationPeerSnapshot,
@@ -371,7 +373,12 @@ impl MailboxStore {
                 rusqlite::params![sender,relay.sender.native_session_id,relay.idempotency_key,digest,serde_json::to_string(&relay.conversation)?,serde_json::to_string(peer)?,stamp_now(),relay.requested_target,relay.test_request.as_ref().map(serde_json::to_string).transpose()?,scope.map(serde_json::to_string).transpose()?],
             )?;
             if relay.test_request.is_some() {
-                create_causal_pending(&transaction, true, &relay.sender.native_session_id, &relay.idempotency_key)?;
+                create_causal_pending(
+                    &transaction,
+                    true,
+                    &relay.sender.native_session_id,
+                    &relay.idempotency_key,
+                )?;
             }
             None
         };
@@ -380,7 +387,7 @@ impl MailboxStore {
         Ok(receipt)
     }
 
-    fn settle_mailbox_relay<G>(
+    pub(crate) fn settle_mailbox_relay<G>(
         &self,
         relay: &MailboxRelayAppend,
         receipt: &MailboxAppendReceipt,

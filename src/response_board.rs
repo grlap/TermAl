@@ -7,30 +7,32 @@ message snapshots and an explicit staged/placed state; geometry never doubles
 as workflow state.
 */
 
-const RESPONSE_BOARD_DEFAULT_TAB_ID: &str = "response-board-default";
-const RESPONSE_BOARD_DEFAULT_TAB_NAME: &str = "Board";
+use super::*;
 
-const RESPONSE_BOARD_DEFAULT_WIDTH: f64 = 360.0;
-const RESPONSE_BOARD_DEFAULT_HEIGHT: f64 = 420.0;
+pub(crate) const RESPONSE_BOARD_DEFAULT_TAB_ID: &str = "response-board-default";
+pub(crate) const RESPONSE_BOARD_DEFAULT_TAB_NAME: &str = "Board";
+
+pub(crate) const RESPONSE_BOARD_DEFAULT_WIDTH: f64 = 360.0;
+pub(crate) const RESPONSE_BOARD_DEFAULT_HEIGHT: f64 = 420.0;
 const RESPONSE_BOARD_MIN_WIDTH: f64 = 240.0;
 const RESPONSE_BOARD_MAX_WIDTH: f64 = 1_600.0;
 const RESPONSE_BOARD_MIN_HEIGHT: f64 = 160.0;
 const RESPONSE_BOARD_MAX_HEIGHT: f64 = 1_600.0;
 const RESPONSE_BOARD_MAX_COORDINATE: f64 = 1_000_000.0;
-const RESPONSE_BOARD_MAX_CARDS: i64 = 256;
+pub(crate) const RESPONSE_BOARD_MAX_CARDS: i64 = 256;
 const RESPONSE_BOARD_MAX_SNAPSHOT_BYTES: usize = 1_048_576;
-const RESPONSE_BOARD_MAX_TAB_NAME_BYTES: usize = 120;
-const RESPONSE_BOARD_MAX_CUSTOM_TABS: usize = 64;
+pub(crate) const RESPONSE_BOARD_MAX_TAB_NAME_BYTES: usize = 120;
+pub(crate) const RESPONSE_BOARD_MAX_CUSTOM_TABS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum ResponseBoardCardPlacement {
+pub(crate) enum ResponseBoardCardPlacement {
     Staged,
     Placed,
 }
 
 impl ResponseBoardCardPlacement {
-    fn as_db_str(self) -> &'static str {
+    pub(crate) fn as_db_str(self) -> &'static str {
         match self {
             Self::Staged => "staged",
             Self::Placed => "placed",
@@ -48,13 +50,13 @@ impl ResponseBoardCardPlacement {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum ResponseBoardTabKind {
+pub(crate) enum ResponseBoardTabKind {
     Custom,
     ProjectDefault,
 }
 
 impl ResponseBoardTabKind {
-    fn as_db_str(self) -> &'static str {
+    pub(crate) fn as_db_str(self) -> &'static str {
         match self {
             Self::Custom => "custom",
             Self::ProjectDefault => "projectDefault",
@@ -81,89 +83,89 @@ struct ResponseBoardSnapshotRecord {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResponseBoardCard {
-    id: String,
-    tab_id: String,
-    placement: ResponseBoardCardPlacement,
-    has_canvas_position: bool,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    snapshot: Message,
-    source_session_id: String,
-    source_message_id: String,
+pub(crate) struct ResponseBoardCard {
+    pub(crate) id: String,
+    pub(crate) tab_id: String,
+    pub(crate) placement: ResponseBoardCardPlacement,
+    pub(crate) has_canvas_position: bool,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) w: f64,
+    pub(crate) h: f64,
+    pub(crate) snapshot: Message,
+    pub(crate) source_session_id: String,
+    pub(crate) source_message_id: String,
     source_message_position: usize,
     source_session_name: String,
     source_agent: Agent,
-    created_at: String,
+    pub(crate) created_at: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResponseBoardTab {
-    id: String,
-    name: String,
-    kind: ResponseBoardTabKind,
-    project_id: Option<String>,
-    sort_order: i64,
-    created_at: String,
+pub(crate) struct ResponseBoardTab {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) kind: ResponseBoardTabKind,
+    pub(crate) project_id: Option<String>,
+    pub(crate) sort_order: i64,
+    pub(crate) created_at: String,
     placed_card_count: i64,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResponseBoardTabs {
-    tabs: Vec<ResponseBoardTab>,
+pub(crate) struct ResponseBoardTabs {
+    pub(crate) tabs: Vec<ResponseBoardTab>,
     staged_card_count: i64,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResponseBoardTabView {
-    tab: ResponseBoardTab,
-    cards: Vec<ResponseBoardCard>,
+pub(crate) struct ResponseBoardTabView {
+    pub(crate) tab: ResponseBoardTab,
+    pub(crate) cards: Vec<ResponseBoardCard>,
     staged_cards: Vec<ResponseBoardCard>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StageResponseBoardCardRequest {
-    session_id: String,
-    message_id: String,
-    tab_id: Option<String>,
-    project_id: Option<String>,
-    placement: Option<ResponseBoardCardPlacement>,
-    x: Option<f64>,
-    y: Option<f64>,
+pub(crate) struct StageResponseBoardCardRequest {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
+    pub(crate) tab_id: Option<String>,
+    pub(crate) project_id: Option<String>,
+    pub(crate) placement: Option<ResponseBoardCardPlacement>,
+    pub(crate) x: Option<f64>,
+    pub(crate) y: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UpdateResponseBoardCardRequest {
-    x: Option<f64>,
-    y: Option<f64>,
-    w: Option<f64>,
-    h: Option<f64>,
-    tab_id: Option<String>,
-    placement: Option<ResponseBoardCardPlacement>,
+pub(crate) struct UpdateResponseBoardCardRequest {
+    pub(crate) x: Option<f64>,
+    pub(crate) y: Option<f64>,
+    pub(crate) w: Option<f64>,
+    pub(crate) h: Option<f64>,
+    pub(crate) tab_id: Option<String>,
+    pub(crate) placement: Option<ResponseBoardCardPlacement>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateResponseBoardTabRequest {
-    name: String,
+pub(crate) struct CreateResponseBoardTabRequest {
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UpdateResponseBoardTabRequest {
-    name: String,
+pub(crate) struct UpdateResponseBoardTabRequest {
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReorderResponseBoardTabsRequest {
+pub(crate) struct ReorderResponseBoardTabsRequest {
     tab_ids: Vec<String>,
 }
 
@@ -235,7 +237,9 @@ fn response_board_invalid_data(message: String) -> rusqlite::Error {
 /// Establishes the non-table invariants of the current tabbed/staging schema.
 /// The canonical state schema owns the tables and columns; this helper owns the
 /// default-tab row and the board-card lookup index.
-fn ensure_sqlite_response_board_schema(connection: &rusqlite::Connection) -> anyhow::Result<()> {
+pub(crate) fn ensure_sqlite_response_board_schema(
+    connection: &rusqlite::Connection,
+) -> anyhow::Result<()> {
     connection.execute(
         "INSERT OR IGNORE INTO response_board_tabs(
            id, name, kind, project_id, sort_order, created_at
@@ -279,7 +283,7 @@ fn decode_response_board_card_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<R
     })
 }
 
-fn response_board_select_columns() -> &'static str {
+pub(crate) fn response_board_select_columns() -> &'static str {
     "id, tab_id, placement, has_canvas_position, x, y, w, h, snapshot_json, source_session_id, source_message_id, created_at"
 }
 
@@ -296,7 +300,7 @@ fn decode_response_board_tab_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Re
     })
 }
 
-fn response_board_tab_select_sql() -> &'static str {
+pub(crate) fn response_board_tab_select_sql() -> &'static str {
     "SELECT t.id, t.name, t.kind, t.project_id, t.sort_order, t.created_at,
             COUNT(c.id)
        FROM response_board_tabs t
@@ -1110,7 +1114,7 @@ fn stage_response_board_card_in_storage(
     Ok((StatusCode::CREATED, card))
 }
 
-fn convert_deleted_project_response_board_tab(
+pub(crate) fn convert_deleted_project_response_board_tab(
     path: &FsPath,
     project_id: &str,
     last_project_name: &str,
@@ -1186,7 +1190,7 @@ fn apply_live_project_tab_names(
     }
 }
 
-async fn list_response_board_tabs(
+pub(crate) async fn list_response_board_tabs(
     State(state): State<AppState>,
 ) -> Result<Json<ResponseBoardTabs>, ApiError> {
     let project_names = response_board_project_names(&state)?;
@@ -1196,7 +1200,7 @@ async fn list_response_board_tabs(
     Ok(Json(tabs))
 }
 
-async fn get_response_board_tab(
+pub(crate) async fn get_response_board_tab(
     AxumPath(tab_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ResponseBoardTabView>, ApiError> {
@@ -1207,7 +1211,7 @@ async fn get_response_board_tab(
     Ok(Json(view))
 }
 
-async fn create_response_board_tab(
+pub(crate) async fn create_response_board_tab(
     State(state): State<AppState>,
     request: Result<Json<CreateResponseBoardTabRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ResponseBoardTab>), ApiError> {
@@ -1218,7 +1222,7 @@ async fn create_response_board_tab(
     Ok((StatusCode::CREATED, Json(tab)))
 }
 
-async fn update_response_board_tab(
+pub(crate) async fn update_response_board_tab(
     AxumPath(tab_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<UpdateResponseBoardTabRequest>, JsonRejection>,
@@ -1230,7 +1234,7 @@ async fn update_response_board_tab(
     Ok(Json(tab))
 }
 
-async fn delete_response_board_tab(
+pub(crate) async fn delete_response_board_tab(
     AxumPath(tab_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, ApiError> {
@@ -1239,7 +1243,7 @@ async fn delete_response_board_tab(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn reorder_response_board_tabs(
+pub(crate) async fn reorder_response_board_tabs(
     State(state): State<AppState>,
     request: Result<Json<ReorderResponseBoardTabsRequest>, JsonRejection>,
 ) -> Result<Json<ResponseBoardTabs>, ApiError> {
@@ -1253,7 +1257,7 @@ async fn reorder_response_board_tabs(
     Ok(Json(tabs))
 }
 
-async fn stage_response_board_card(
+pub(crate) async fn stage_response_board_card(
     State(state): State<AppState>,
     request: Result<Json<StageResponseBoardCardRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ResponseBoardCard>), ApiError> {
@@ -1287,7 +1291,7 @@ async fn stage_response_board_card(
     Ok((status, Json(card)))
 }
 
-async fn update_response_board_card(
+pub(crate) async fn update_response_board_card(
     AxumPath(card_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<UpdateResponseBoardCardRequest>, JsonRejection>,
@@ -1300,7 +1304,7 @@ async fn update_response_board_card(
     Ok(Json(card))
 }
 
-async fn delete_response_board_card(
+pub(crate) async fn delete_response_board_card(
     AxumPath(card_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, ApiError> {

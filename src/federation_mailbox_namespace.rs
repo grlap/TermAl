@@ -2,21 +2,24 @@
 // Does not migrate data or enroll participants. Split from mailboxes.rs and
 // federation_mailbox_bindings.rs to serialize the raw-to-qualified transition.
 
+use super::*;
+
 #[derive(Clone, Copy)]
-enum NativeMailboxNamespace {
+pub(crate) enum NativeMailboxNamespace {
     Standalone,
     Local,
 }
 
-fn require_domain_mailbox_target(target: &str) -> Result<(), ApiError> {
+pub(crate) fn require_domain_mailbox_target(target: &str) -> Result<(), ApiError> {
     if target.starts_with("session-") {
         return Err(ApiError::not_found(
-            "bare native ids select local sends; this domain-only endpoint requires a qualified participant id or domain alias"));
+            "bare native ids select local sends; this domain-only endpoint requires a qualified participant id or domain alias",
+        ));
     }
     Ok(())
 }
 
-fn native_mailbox_local_target_error(mut error: ApiError) -> ApiError {
+pub(crate) fn native_mailbox_local_target_error(mut error: ApiError) -> ApiError {
     if error.status == StatusCode::NOT_FOUND {
         error.message = "bare session ids select a local root; for a remote native session use host:<host UUID>::<native session id>".into();
     }
@@ -25,35 +28,57 @@ fn native_mailbox_local_target_error(mut error: ApiError) -> ApiError {
 impl AppState {
     // Normalize spelling only: retained native receipts do not require the
     // original recipient to remain live. Fresh sends validate the root below.
-    fn canonical_local_native_mailbox_target(&self, target: &str) -> Result<Option<String>, ApiError> {
-        if target.starts_with("session-") { return Ok(Some(target.to_owned())); }
-        if !target.starts_with("host:") { return Ok(None); }
+    pub(crate) fn canonical_local_native_mailbox_target(
+        &self,
+        target: &str,
+    ) -> Result<Option<String>, ApiError> {
+        if target.starts_with("session-") {
+            return Ok(Some(target.to_owned()));
+        }
+        if !target.starts_with("host:") {
+            return Ok(None);
+        }
         let alias = FederationMailboxAlias::parse(target, None)
             .map_err(|error| ApiError::bad_request(error.to_string()))?;
         if let FederationMailboxAlias::HostNative { host, session_id } = alias {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.federation.local.as_ref().is_some_and(|local| local.host_id == host.to_string()) {
+            if inner
+                .federation
+                .local
+                .as_ref()
+                .is_some_and(|local| local.host_id == host.to_string())
+            {
                 return Ok(Some(session_id.to_owned()));
             }
         }
         Ok(None)
     }
 
-    fn local_native_mailbox_target(&self, target: &str) -> Result<Option<String>, ApiError> {
-        let Some(target) = self.canonical_local_native_mailbox_target(target)? else { return Ok(None); };
+    pub(crate) fn local_native_mailbox_target(
+        &self,
+        target: &str,
+    ) -> Result<Option<String>, ApiError> {
+        let Some(target) = self.canonical_local_native_mailbox_target(target)? else {
+            return Ok(None);
+        };
         let inner = self.inner.lock().expect("state mutex poisoned");
-        federation_mailbox_root_locked(&inner, &target).map_err(native_mailbox_local_target_error)?;
+        federation_mailbox_root_locked(&inner, &target)
+            .map_err(native_mailbox_local_target_error)?;
         Ok(Some(target))
     }
 
-    fn native_mailbox_creations(&self, sessions: [&str; 2], namespace: NativeMailboxNamespace)
-        -> Result<[String; 2], ApiError>
-    {
+    pub(crate) fn native_mailbox_creations(
+        &self,
+        sessions: [&str; 2],
+        namespace: NativeMailboxNamespace,
+    ) -> Result<[String; 2], ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let mut creations = [String::new(), String::new()];
         for (index, session) in sessions.into_iter().enumerate() {
             let record = federation_mailbox_root_locked(&inner, session)?;
-            if matches!(namespace, NativeMailboxNamespace::Standalone) && record.mailbox_binding().is_some() {
+            if matches!(namespace, NativeMailboxNamespace::Standalone)
+                && record.mailbox_binding().is_some()
+            {
                 return Err(ApiError::conflict(
                     "standalone mailbox participants must both be unbound; target or sender participates in the central domain; use an explicitly bound sender and qualified id",
                 ));
@@ -65,9 +90,12 @@ impl AppState {
 
     /// Called after writer admission and SQLite preparation. The returned
     /// state guard fences both exact native creations through append commit.
-    fn authorize_native_mailbox<'a>(&'a self, sessions: [&str; 2], creations: &[String; 2],
-        namespace: NativeMailboxNamespace) -> Result<StateMutexGuard<'a, StateInner>>
-    {
+    pub(crate) fn authorize_native_mailbox<'a>(
+        &'a self,
+        sessions: [&str; 2],
+        creations: &[String; 2],
+        namespace: NativeMailboxNamespace,
+    ) -> Result<StateMutexGuard<'a, StateInner>> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         for (session, creation) in sessions.into_iter().zip(creations) {
             let record = federation_mailbox_root_locked(&inner, session).map_err(|_| {
@@ -76,11 +104,14 @@ impl AppState {
                     "standalone mailbox participant changed; retry admission",
                 )
             })?;
-            if (matches!(namespace, NativeMailboxNamespace::Standalone) && record.mailbox_binding().is_some())
+            if (matches!(namespace, NativeMailboxNamespace::Standalone)
+                && record.mailbox_binding().is_some())
                 || record.federation_native_creation_id != *creation
             {
-                return Err(mailbox_store_error(MailboxStoreErrorKind::Conflict,
-                    "standalone mailbox participant changed namespace or native creation; retry admission"));
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::Conflict,
+                    "standalone mailbox participant changed namespace or native creation; retry admission",
+                ));
             }
         }
         Ok(inner)
@@ -88,7 +119,7 @@ impl AppState {
 
     // Legacy routes retain their original unbound validation and error text.
     // Protocol and domain routes still require a valid native root explicitly.
-    fn federation_mailbox_actor_if_bound(
+    pub(crate) fn federation_mailbox_actor_if_bound(
         &self,
         session: &str,
     ) -> Result<Option<FederationMailboxActor>, ApiError> {
@@ -107,14 +138,21 @@ impl AppState {
 }
 
 impl MailboxStore {
-    fn native_sender_has_domain_intent(&self, session: &str, creation: &str, key: &str) -> Result<bool> {
-        let Some(connection) = self.connection_if_enabled() else { return Ok(false); };
+    pub(crate) fn native_sender_has_domain_intent(
+        &self,
+        session: &str,
+        creation: &str,
+        key: &str,
+    ) -> Result<bool> {
+        let Some(connection) = self.connection_if_enabled() else {
+            return Ok(false);
+        };
         native_sender_has_domain_intent(&connection, session, creation, key)
     }
 
     /// The caller holds this store's writer admission through the binding
     /// installation. No SQLite connection remains locked while taking state.
-    fn standalone_mailbox_history(&self, session: &str) -> Result<Vec<String>> {
+    pub(crate) fn standalone_mailbox_history(&self, session: &str) -> Result<Vec<String>> {
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(Vec::new());
         };
@@ -128,28 +166,36 @@ impl MailboxStore {
     }
 }
 
-fn native_sender_has_domain_intent(connection: &rusqlite::Connection,
-    session: &str, creation: &str, key: &str) -> Result<bool>
-{
+pub(crate) fn native_sender_has_domain_intent(
+    connection: &rusqlite::Connection,
+    session: &str,
+    creation: &str,
+    key: &str,
+) -> Result<bool> {
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM federation_mailbox_intents
          WHERE owner_session_id=?1 AND owner_creation_id=?2 AND idempotency_key=?3)",
-        rusqlite::params![session, creation, key], |row| row.get(0))?)
+        rusqlite::params![session, creation, key],
+        |row| row.get(0),
+    )?)
 }
 
-fn native_sender_has_relay_intent(connection: &rusqlite::Connection,
-    session: &str, key: &str) -> Result<bool>
-{
+pub(crate) fn native_sender_has_relay_intent(
+    connection: &rusqlite::Connection,
+    session: &str,
+    key: &str,
+) -> Result<bool> {
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM mailbox_relay_intents WHERE owner_session_id=?1 AND idempotency_key=?2)",
         rusqlite::params![session, key], |row| row.get(0))?)
 }
-fn refuse_standalone_mailbox_history(history: &[String]) -> Result<(), ApiError> {
+pub(crate) fn refuse_standalone_mailbox_history(history: &[String]) -> Result<(), ApiError> {
     if history.is_empty() {
         return Ok(());
     }
     Err(ApiError::conflict(format!(
         "cannot bind session with standalone history in {} mailbox(es): {}; use a fresh session; existing mail remains readable and acknowledgeable locally",
-        history.len(), history.join(", "),
+        history.len(),
+        history.join(", "),
     )))
 }

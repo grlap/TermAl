@@ -2,8 +2,10 @@
 // Does not choose an authority or maintain a satellite replica. New adapters
 // reuse mailboxes.rs transactions, deduplication, issuance, and cursor CAS.
 
+use super::*;
+
 impl MailboxStore {
-    fn domain_get_or_create(
+    pub(crate) fn domain_get_or_create(
         &self,
         actor: &FederationMailboxParticipant,
         target: &FederationMailboxParticipant,
@@ -54,7 +56,7 @@ impl MailboxStore {
         Ok(summary)
     }
 
-    fn domain_list(
+    pub(crate) fn domain_list(
         &self,
         actor: &str,
         authority: &FederationMailboxAuthority,
@@ -65,7 +67,7 @@ impl MailboxStore {
         Ok(summaries)
     }
 
-    fn domain_read_message(
+    pub(crate) fn domain_read_message(
         &self,
         actor: &str,
         message_id: &str,

@@ -3,7 +3,9 @@
 // Kimi's permission fallback is single-select; option IDs are opaque values,
 // and rejecting the request means the question was dismissed.
 
-fn kimi_permission_is_question(params: &Value, options: &[Value]) -> bool {
+use super::*;
+
+pub(crate) fn kimi_permission_is_question(params: &Value, options: &[Value]) -> bool {
     params.pointer("/toolCall/title").and_then(Value::as_str) == Some("AskUserQuestion")
         || params.get("toolName").and_then(Value::as_str) == Some("AskUserQuestion")
         || options
@@ -13,7 +15,10 @@ fn kimi_permission_is_question(params: &Value, options: &[Value]) -> bool {
             > 1
 }
 
-fn kimi_permission_question(params: &Value, options: &[Value]) -> Option<UserInputQuestion> {
+pub(crate) fn kimi_permission_question(
+    params: &Value,
+    options: &[Value],
+) -> Option<UserInputQuestion> {
     let mut ids = HashSet::new();
     let mut choices = Vec::new();
     for option in options {
@@ -69,7 +74,7 @@ fn kimi_permission_question(params: &Value, options: &[Value]) -> Option<UserInp
 
 /// Validates the submitted opaque value against this still-live question.
 /// Labels are presentation only, so equal labels cannot alias two choices.
-fn kimi_question_answer(
+pub(crate) fn kimi_question_answer(
     pending: &AcpPendingApproval,
     answers: BTreeMap<String, Vec<String>>,
     declined: bool,

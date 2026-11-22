@@ -4,39 +4,39 @@
 // Included by test_run_observations.rs beside its borrowed projection owner.
 // Session bodies, runtime state and persistence waiters are not summary inputs.
 
-struct TestRunProjectionSession {
-    id: String,
-    name: String,
-    hidden: bool,
-    child: bool,
+pub(crate) struct TestRunProjectionSession {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) hidden: bool,
+    pub(crate) child: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct TestRunProjectionSessionRef<'a> {
-    id: &'a str,
-    name: &'a str,
-    hidden: bool,
-    child: bool,
+pub(crate) struct TestRunProjectionSessionRef<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) name: &'a str,
+    pub(crate) hidden: bool,
+    pub(crate) child: bool,
 }
 
-struct TestRunProjectionCarried {
-    run_directory: Option<PathBuf>,
-    terminal_digest: Option<String>,
-    terminal_conflict: bool,
-    ambiguous: bool,
+pub(crate) struct TestRunProjectionCarried {
+    pub(crate) run_directory: Option<PathBuf>,
+    pub(crate) terminal_digest: Option<String>,
+    pub(crate) terminal_conflict: bool,
+    pub(crate) ambiguous: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct TestRunProjectionCarriedRef<'a> {
-    run_directory: Option<&'a FsPath>,
-    terminal_digest: Option<&'a str>,
-    terminal_conflict: bool,
-    ambiguous: bool,
+pub(crate) struct TestRunProjectionCarriedRef<'a> {
+    pub(crate) run_directory: Option<&'a FsPath>,
+    pub(crate) terminal_digest: Option<&'a str>,
+    pub(crate) terminal_conflict: bool,
+    pub(crate) ambiguous: bool,
 }
 
 // Both the live model and an owned cut use the same proof/summary functions.
 // Keeping their readable surface explicit makes new summary inputs an audit.
-trait TestRunProjectionSource {
+pub(crate) trait TestRunProjectionSource {
     fn projection_index(&self) -> &TestRunIndex;
     fn projection_registrations(&self) -> &BTreeMap<String, TestRunRegistration>;
     fn projection_observations(&self) -> &BTreeMap<String, TestRunCommandObservation>;
@@ -106,7 +106,7 @@ impl TestRunProjectionSource for StateInner {
     }
 }
 
-fn test_run_projection_carried_matches(
+pub(crate) fn test_run_projection_carried_matches(
     source: &impl TestRunProjectionSource,
     directory: &FsPath,
     digest: Option<&str>,
@@ -123,7 +123,7 @@ fn test_run_projection_carried_matches(
     })
 }
 
-fn test_run_project_entries(
+pub(crate) fn test_run_project_entries(
     source: &impl TestRunProjectionSource,
     scanned: &[TestRunScanned],
 ) -> Vec<TestRunEntry> {
@@ -169,16 +169,16 @@ impl<T: std::ops::Deref<Target = StateInner>> TestRunProjectionSource for T {
     }
 }
 
-struct TestRunProjectionScope {
-    complete: bool,
-    run_ids: HashSet<String>,
-    references: HashSet<String>,
+pub(crate) struct TestRunProjectionScope {
+    pub(crate) complete: bool,
+    pub(crate) run_ids: HashSet<String>,
+    pub(crate) references: HashSet<String>,
     reference_names: HashSet<String>,
-    paths: HashSet<String>,
+    pub(crate) paths: HashSet<String>,
 }
 
 impl TestRunProjectionScope {
-    fn new(scanned: &[TestRunScanned]) -> Self {
+    pub(crate) fn new(scanned: &[TestRunScanned]) -> Self {
         let references: HashSet<_> = scanned
             .iter()
             .flat_map(|run| run.disk.owner.iter().chain(run.disk.notify_to.iter()))
@@ -198,18 +198,18 @@ impl TestRunProjectionScope {
                 .collect(),
         }
     }
-    fn observation(&self, row: &TestRunCommandObservation) -> bool {
+    pub(crate) fn observation(&self, row: &TestRunCommandObservation) -> bool {
         self.complete || row.artifact
             .as_ref()
             .is_some_and(|artifact| self.run_ids.contains(&artifact.run_id))
     }
-    fn session(&self, row: TestRunProjectionSessionRef<'_>) -> bool {
+    pub(crate) fn session(&self, row: TestRunProjectionSessionRef<'_>) -> bool {
         self.complete || self.references.contains(row.id)
             || self
                 .reference_names
                 .contains(&row.name.to_ascii_lowercase())
     }
-    fn carried(&self, row: TestRunProjectionCarriedRef<'_>) -> bool {
+    pub(crate) fn carried(&self, row: TestRunProjectionCarriedRef<'_>) -> bool {
         self.complete || row.run_directory.is_some_and(|path| {
             self.paths
                 .contains(&test_run_path_key(&test_run_display_path(path)))
@@ -247,26 +247,26 @@ fn test_run_selected_set_matches<T: Eq + std::hash::Hash>(
     count == saved.len()
 }
 
-struct TestRunProjectionCut {
-    attention_ids: HashSet<String>,
-    scope: TestRunProjectionScope,
+pub(crate) struct TestRunProjectionCut {
+    pub(crate) attention_ids: HashSet<String>,
+    pub(crate) scope: TestRunProjectionScope,
     observation_ids: HashSet<String>,
     observation_presence: BTreeMap<String, bool>,
-    project_ids: HashSet<String>,
-    index: TestRunIndex,
-    registrations: BTreeMap<String, TestRunRegistration>,
-    observations: BTreeMap<String, TestRunCommandObservation>,
-    compacted: BTreeMap<String, TestRunCompacted>,
-    projects: Vec<String>,
-    sessions: Vec<TestRunProjectionSession>,
-    carried: Vec<TestRunProjectionCarried>,
+    pub(crate) project_ids: HashSet<String>,
+    pub(crate) index: TestRunIndex,
+    pub(crate) registrations: BTreeMap<String, TestRunRegistration>,
+    pub(crate) observations: BTreeMap<String, TestRunCommandObservation>,
+    pub(crate) compacted: BTreeMap<String, TestRunCompacted>,
+    pub(crate) projects: Vec<String>,
+    pub(crate) sessions: Vec<TestRunProjectionSession>,
+    pub(crate) carried: Vec<TestRunProjectionCarried>,
 }
 
 impl TestRunProjectionCut {
     // The same summary/proof inputs as a scanner cut, covering the complete
     // catalogue for off-lock overview and paged reads. No files, runtime
     // handles, persistence waiters, or mutable StateInner borrow escape.
-    fn capture_history(inner: &StateInner) -> Self {
+    pub(crate) fn capture_history(inner: &StateInner) -> Self {
         let run_ids = inner.test_runs.entries.iter().map(|row| row.summary.run_id.clone())
             .chain(inner.test_run_registrations.keys().cloned())
             .chain(inner.test_run_compacted.keys().cloned()).collect();
@@ -276,7 +276,7 @@ impl TestRunProjectionCut {
         })
     }
 
-    fn capture(inner: &StateInner, mut scope: TestRunProjectionScope) -> Self {
+    pub(crate) fn capture(inner: &StateInner, mut scope: TestRunProjectionScope) -> Self {
         // Candidate rows are selected by artifact run id before the shared
         // exact association predicates run. Validation repeats that selection
         // over live rows, so a previously absent/newly relevant association
@@ -413,7 +413,7 @@ impl TestRunProjectionCut {
         }
     }
 
-    fn matches(&self, inner: &StateInner) -> bool {
+    pub(crate) fn matches(&self, inner: &StateInner) -> bool {
         let live = &inner.test_runs;
         if self.scope.complete && (
             self.registrations.len() != inner.test_run_registrations.len()

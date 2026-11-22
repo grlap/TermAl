@@ -2,7 +2,9 @@
 // Does not own result handoff, integration, read-only policy or path containment.
 // Split from the delegation creation/settings path in delegations.rs.
 
-fn validate_worker_write_policy(
+use super::*;
+
+pub(crate) fn validate_worker_write_policy(
     mode: DelegationMode,
     policy: &DelegationWritePolicy,
 ) -> Result<(), ApiError> {
@@ -26,7 +28,10 @@ fn validate_worker_write_policy(
     Ok(())
 }
 
-fn resolve_worker_base_revision(repo_root: &FsPath, base: &str) -> Result<String, ApiError> {
+pub(crate) fn resolve_worker_base_revision(
+    repo_root: &FsPath,
+    base: &str,
+) -> Result<String, ApiError> {
     let base = base.trim();
     if base.is_empty()
         || base.starts_with('-')
@@ -63,7 +68,7 @@ fn resolve_worker_base_revision(repo_root: &FsPath, base: &str) -> Result<String
     Ok(oid.to_owned())
 }
 
-fn prepare_committed_worker_worktree(
+pub(crate) fn prepare_committed_worker_worktree(
     source_repo_root: &FsPath,
     worktree_root: &FsPath,
     relative_cwd: &FsPath,
@@ -95,7 +100,7 @@ fn prepare_committed_worker_worktree(
 // Worker mode deliberately overrides app approval defaults for coding.
 // Existing lifecycle/read-only responders are not worker operation/path guards;
 // worktree separation is not containment. Codex alone has the sandbox below.
-fn configure_worker_prompt_settings(child: &mut SessionRecord) {
+pub(crate) fn configure_worker_prompt_settings(child: &mut SessionRecord) {
     match child.session.agent {
         Agent::Codex => {
             // Host AutoApprove keeps native Codex on-request and answers routine

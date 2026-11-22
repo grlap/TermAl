@@ -43,60 +43,62 @@
 // `src/tests/session_stop.rs` + `src/tests/session_stop_runtime.rs`
 // (invariant pins for deferred replay + stop lifecycle).
 
-struct EngramMcpRuntimeRevocationTarget {
-    session_id: String,
-    token: RuntimeToken,
-    runtime: KillableRuntime,
-    owner_generation: u64,
-    stop_options: Option<StopSessionOptions>,
+use super::*;
+
+pub(crate) struct EngramMcpRuntimeRevocationTarget {
+    pub(crate) session_id: String,
+    pub(crate) token: RuntimeToken,
+    pub(crate) runtime: KillableRuntime,
+    pub(crate) owner_generation: u64,
+    pub(crate) stop_options: Option<StopSessionOptions>,
 }
 
 #[derive(Default)]
-struct EngramMcpRuntimeRevocationBatch {
-    targets: Vec<EngramMcpRuntimeRevocationTarget>,
-    pending_session_ids: Vec<String>,
-    newly_pending_session_ids: Vec<String>,
+pub(crate) struct EngramMcpRuntimeRevocationBatch {
+    pub(crate) targets: Vec<EngramMcpRuntimeRevocationTarget>,
+    pub(crate) pending_session_ids: Vec<String>,
+    pub(crate) newly_pending_session_ids: Vec<String>,
 }
 
 #[cfg(test)]
 #[derive(Default)]
-struct EngramMcpRuntimeRevocationRelease {
-    deferred_callbacks: Vec<(String, RuntimeToken, Vec<DeferredStopCallback>)>,
+pub(crate) struct EngramMcpRuntimeRevocationRelease {
+    pub(crate) deferred_callbacks: Vec<(String, RuntimeToken, Vec<DeferredStopCallback>)>,
 }
 
 #[derive(Debug, Default)]
-struct EngramMcpRuntimeRevocationCompletion {
-    session_id: String,
-    should_dispatch_next: bool,
-    should_refresh_delegation: bool,
-    should_resume_orchestrator_transitions: bool,
-    orchestrator_stop_instance_id: Option<String>,
+pub(crate) struct EngramMcpRuntimeRevocationCompletion {
+    pub(crate) session_id: String,
+    pub(crate) should_dispatch_next: bool,
+    pub(crate) should_refresh_delegation: bool,
+    pub(crate) should_resume_orchestrator_transitions: bool,
+    pub(crate) orchestrator_stop_instance_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
-struct EngramMcpRuntimeRevocationFinalization {
-    completion: Option<EngramMcpRuntimeRevocationCompletion>,
-    failures: Vec<String>,
+pub(crate) struct EngramMcpRuntimeRevocationFinalization {
+    pub(crate) completion: Option<EngramMcpRuntimeRevocationCompletion>,
+    pub(crate) failures: Vec<String>,
 }
 
-struct EngramMcpRuntimeRevocationShutdown {
-    target: EngramMcpRuntimeRevocationTarget,
-    shutdown_error: Option<String>,
-    retain_runtime_for_retry: bool,
-    suppress_codex_thread_resume: bool,
-}
-
-#[derive(Default)]
-struct EngramMcpRuntimeRevocationShutdownBatch {
-    shutdowns: Vec<EngramMcpRuntimeRevocationShutdown>,
-    pending_session_ids: Vec<String>,
+pub(crate) struct EngramMcpRuntimeRevocationShutdown {
+    pub(crate) target: EngramMcpRuntimeRevocationTarget,
+    pub(crate) shutdown_error: Option<String>,
+    pub(crate) retain_runtime_for_retry: bool,
+    pub(crate) suppress_codex_thread_resume: bool,
 }
 
 #[derive(Default)]
-struct EngramMcpRuntimeRevocationOutcome {
-    completions: Vec<EngramMcpRuntimeRevocationCompletion>,
-    pending_session_ids: Vec<String>,
-    failures: Vec<String>,
+pub(crate) struct EngramMcpRuntimeRevocationShutdownBatch {
+    pub(crate) shutdowns: Vec<EngramMcpRuntimeRevocationShutdown>,
+    pub(crate) pending_session_ids: Vec<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct EngramMcpRuntimeRevocationOutcome {
+    pub(crate) completions: Vec<EngramMcpRuntimeRevocationCompletion>,
+    pub(crate) pending_session_ids: Vec<String>,
+    pub(crate) failures: Vec<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -147,7 +149,7 @@ impl<'a> AtomicTurnFailureMode<'a> {
 /// Captures every stale runtime while the settings mutation still owns the
 /// state lock. The settings update and these fences are committed together, so
 /// a new descriptor can never be mistaken for part of the stale batch.
-fn claim_engram_mcp_runtime_revocations_locked(
+pub(crate) fn claim_engram_mcp_runtime_revocations_locked(
     inner: &mut StateInner,
     session_ids: &[String],
 ) -> EngramMcpRuntimeRevocationBatch {
@@ -201,7 +203,7 @@ fn claim_engram_mcp_runtime_revocations_locked(
 
 /// Restores claims that were never made visible because their enclosing
 /// settings/delete commit failed under the same state lock.
-fn rollback_engram_mcp_runtime_revocations_locked(
+pub(crate) fn rollback_engram_mcp_runtime_revocations_locked(
     inner: &mut StateInner,
     batch: &EngramMcpRuntimeRevocationBatch,
 ) {
@@ -236,7 +238,7 @@ fn rollback_engram_mcp_runtime_revocations_locked(
 
 /// Transfers a failed ordinary Stop's existing callback fence to the pending
 /// revocation without a lock gap in which a queued prompt could run.
-fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
+pub(crate) fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
     inner: &mut StateInner,
     index: usize,
     stop_owner_generation: u64,
@@ -281,7 +283,7 @@ fn take_pending_engram_mcp_revocation_after_stop_failure_locked(
 /// releasing their project-generation fence in the same critical section, so
 /// a newer mutation cannot install pending teardown state between the two.
 #[cfg(test)]
-fn release_engram_mcp_runtime_revocations_without_teardown_locked(
+pub(crate) fn release_engram_mcp_runtime_revocations_without_teardown_locked(
     inner: &mut StateInner,
     batch: EngramMcpRuntimeRevocationBatch,
 ) -> (EngramMcpRuntimeRevocationRelease, bool) {
@@ -331,7 +333,7 @@ impl AppState {
     /// boundary, while terminal callbacks captured during the bounded revoke
     /// window are returned for replay after the project fence is released.
     #[cfg(test)]
-    fn release_engram_mcp_runtime_revocations_without_teardown(
+    pub(crate) fn release_engram_mcp_runtime_revocations_without_teardown(
         &self,
         batch: EngramMcpRuntimeRevocationBatch,
     ) -> EngramMcpRuntimeRevocationRelease {
@@ -344,7 +346,7 @@ impl AppState {
         release
     }
 
-    fn replay_deferred_runtime_stop_callbacks(
+    pub(crate) fn replay_deferred_runtime_stop_callbacks(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -381,9 +383,7 @@ impl AppState {
                             &outcome,
                             federation.as_ref(),
                         );
-                        outcome
-                            .map(|_| ())
-                            .map_err(|error| anyhow!(error.message))
+                        outcome.map(|_| ()).map_err(|error| anyhow!(error.message))
                     } else {
                         Ok(())
                     }
@@ -469,7 +469,7 @@ impl AppState {
     /// terminal mutation. Successful revocation resumes queued work against a
     /// fresh descriptor; degraded process cleanup leaves the session in Error
     /// with automatic dispatch blocked and reports the failure to the caller.
-    fn finish_revoked_engram_mcp_runtime_if_matches(
+    pub(crate) fn finish_revoked_engram_mcp_runtime_if_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -492,8 +492,7 @@ impl AppState {
             persist_error,
             effective_shutdown_error,
         ) = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return EngramMcpRuntimeRevocationFinalization::default();
             };
@@ -563,12 +562,16 @@ impl AppState {
                 .iter()
                 .any(|callback| matches!(callback, DeferredStopCallback::RuntimeExited { .. }));
             #[cfg(windows)]
-            let dedicated_tree_confirmed = inner.sessions[index].runtime.dedicated_tree_owner()
+            let dedicated_tree_confirmed = inner.sessions[index]
+                .runtime
+                .dedicated_tree_owner()
                 .is_none_or(|(tree, _, _)| tree.is_confirmed());
             #[cfg(not(windows))]
             let dedicated_tree_confirmed = true;
             let buffered_exit_confirms_cleanup = retain_runtime_for_retry
-                && !is_shared_codex_runtime && runtime_exit_was_buffered && dedicated_tree_confirmed;
+                && !is_shared_codex_runtime
+                && runtime_exit_was_buffered
+                && dedicated_tree_confirmed;
             let retain_runtime_for_retry =
                 retain_runtime_for_retry && !buffered_exit_confirms_cleanup;
             let shutdown_error = if buffered_exit_confirms_cleanup {
@@ -578,7 +581,10 @@ impl AppState {
             };
 
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, EngramObservedTurnOutcome::Unknown, &registered_check_notices,
+                &mut inner,
+                index,
+                EngramObservedTurnOutcome::Unknown,
+                &registered_check_notices,
             );
             let was_busy = matches!(
                 inner.sessions[index].session.status,
@@ -853,7 +859,7 @@ impl AppState {
     /// applying. Pushes a "Turn failed" assistant message, finalizes any
     /// active file-change tracking, and dispatches the next queued prompt
     /// if one is waiting.
-    fn fail_turn_if_runtime_matches(
+    pub(crate) fn fail_turn_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -863,7 +869,7 @@ impl AppState {
             .map(|_| ())
     }
 
-    fn fail_turn_if_runtime_and_generation_match(
+    pub(crate) fn fail_turn_if_runtime_and_generation_match(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -879,19 +885,17 @@ impl AppState {
         .map(|_| ())
     }
 
-    fn fail_turn_if_runtime_matches_and_report(
+    pub(crate) fn fail_turn_if_runtime_matches_and_report(
         &self,
         session_id: &str,
         token: &RuntimeToken,
         expected_active_turn_generation: Option<u64>,
         error_message: &str,
     ) -> Result<bool> {
-
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
         let (should_dispatch_next, failed_mailbox_notification) = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return Ok(false);
             };
@@ -925,7 +929,10 @@ impl AppState {
             }
             let _ = record;
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
+                &mut inner,
+                index,
+                EngramObservedTurnOutcome::Failed,
+                &registered_check_notices,
             );
             let record = &mut inner.sessions[index];
             // A turn that failed before its runtime acknowledged a receipted
@@ -1017,28 +1024,37 @@ impl AppState {
     /// transition. The runtime handle, pending runtime state, failure message,
     /// and public Error status must share one revision so restart recovery can
     /// never observe an Active session whose dead runtime was already cleared.
-    fn fail_rejected_turn_delivery(
+    pub(crate) fn fail_rejected_turn_delivery(
         &self,
         session_id: &str,
         token: &RuntimeToken,
         active_turn_generation: u64,
         error_message: &str,
     ) -> Result<bool> {
-        self.fail_rejected_turn_delivery_with_federation(session_id, token, active_turn_generation,
-            error_message, None)
-    }
-
-    fn fail_rejected_turn_delivery_with_federation(
-        &self, session_id: &str, token: &RuntimeToken, active_turn_generation: u64,
-        error_message: &str,
-        federation_identity: Option<&FederationExecutorHandoffIdentity>,
-    ) -> Result<bool> {
-        let Some(owner_generation) = self.claim_turn_terminalization_if_runtime_matches_with_federation(
+        self.fail_rejected_turn_delivery_with_federation(
             session_id,
             token,
             active_turn_generation,
-            federation_identity,
-        )?
+            error_message,
+            None,
+        )
+    }
+
+    pub(crate) fn fail_rejected_turn_delivery_with_federation(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
+        error_message: &str,
+        federation_identity: Option<&FederationExecutorHandoffIdentity>,
+    ) -> Result<bool> {
+        let Some(owner_generation) = self
+            .claim_turn_terminalization_if_runtime_matches_with_federation(
+                session_id,
+                token,
+                active_turn_generation,
+                federation_identity,
+            )?
         else {
             return Ok(false);
         };
@@ -1057,7 +1073,7 @@ impl AppState {
     /// disappeared and no stop owner is coordinating callbacks. This is the
     /// narrow recovery path for Stop and late shared-Codex turn/start errors;
     /// a stale error cannot affect a live successor runtime.
-    fn fail_active_turn_if_runtime_missing(
+    pub(crate) fn fail_active_turn_if_runtime_missing(
         &self,
         session_id: &str,
         active_turn_generation: u64,
@@ -1095,27 +1111,37 @@ impl AppState {
     /// Claims the exact runtime before an accepted shared-Codex turn is
     /// interrupted off-lock. The owner prevents a successor dispatch or a
     /// terminal callback from entering between interruption and finalization.
-    fn claim_turn_terminalization_if_runtime_matches(
+    pub(crate) fn claim_turn_terminalization_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
         active_turn_generation: u64,
     ) -> Result<Option<u64>> {
-        self.claim_turn_terminalization_if_runtime_matches_with_federation(session_id, token,
-            active_turn_generation, None)
+        self.claim_turn_terminalization_if_runtime_matches_with_federation(
+            session_id,
+            token,
+            active_turn_generation,
+            None,
+        )
     }
 
     fn claim_turn_terminalization_if_runtime_matches_with_federation(
-        &self, session_id: &str, token: &RuntimeToken, active_turn_generation: u64,
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        active_turn_generation: u64,
         federation_identity: Option<&FederationExecutorHandoffIdentity>,
     ) -> Result<Option<u64>> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        if federation_identity.is_some_and(|identity|
-            identity.server_instance_id != self.server_instance_id || !identity.matches(&inner.sessions[index]))
-        { return Ok(None); }
+        if federation_identity.is_some_and(|identity| {
+            identity.server_instance_id != self.server_instance_id
+                || !identity.matches(&inner.sessions[index])
+        }) {
+            return Ok(None);
+        }
         if !inner.sessions[index].runtime.matches_runtime_token(token)
             || inner.sessions[index].active_turn_generation != active_turn_generation
             || inner.sessions[index].runtime_stop_in_progress
@@ -1140,7 +1166,7 @@ impl AppState {
     /// shared-Codex recheck proves that `turn/started` or a successor won the
     /// race. Deferred terminal callbacks are replayed only after the owner is
     /// gone so none remain stranded behind a cancelled watchdog.
-    fn release_turn_terminalization_if_owned(
+    pub(crate) fn release_turn_terminalization_if_owned(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1168,7 +1194,7 @@ impl AppState {
         true
     }
 
-    fn fail_turn_and_clear_runtime_if_owned(
+    pub(crate) fn fail_turn_and_clear_runtime_if_owned(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1225,8 +1251,7 @@ impl AppState {
             failed_mailbox_notification,
             deferred_stop_callbacks,
         ) = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return Ok(false);
             };
@@ -1332,7 +1357,10 @@ impl AppState {
                 return Ok(false);
             }
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
+                &mut inner,
+                index,
+                EngramObservedTurnOutcome::Failed,
+                &registered_check_notices,
             );
             let message_id = (!cleaned.is_empty()).then(|| inner.next_message_id());
             let file_change_message_id = (preserve_accepted_turn_state
@@ -1512,7 +1540,7 @@ impl AppState {
     /// Applies a shared-Codex failure to the matching runtime, then recovers
     /// the same turn if the runtime handle vanished before the late response
     /// arrived. Both guards reject a live successor runtime.
-    fn fail_turn_if_runtime_matches_or_missing(
+    pub(crate) fn fail_turn_if_runtime_matches_or_missing(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1542,7 +1570,7 @@ impl AppState {
     /// while the runtime retries under the covers. De-duplicates
     /// consecutive identical retry messages so repeated retries don't
     /// spam the transcript.
-    fn note_turn_retry_if_runtime_matches(
+    pub(crate) fn note_turn_retry_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1554,7 +1582,7 @@ impl AppState {
     /// `note_turn_retry_if_runtime_matches`, only while the session's turn is
     /// still the one dispatched under `active_turn_generation`: a delayed
     /// retry of a stopped turn notes nothing on the turn after it.
-    fn note_turn_retry_if_runtime_and_generation_match(
+    pub(crate) fn note_turn_retry_if_runtime_and_generation_match(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1626,7 +1654,7 @@ impl AppState {
     // (`turn_retry_allowed_if_runtime_and_generation_match`); this token-only
     // form remains for tests.
     #[cfg(test)]
-    fn turn_retry_allowed_if_runtime_matches(
+    pub(crate) fn turn_retry_allowed_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1642,7 +1670,7 @@ impl AppState {
     /// is still the one dispatched under `active_turn_generation`: a stop
     /// followed at once by a new prompt leaves the session Active, but under
     /// another generation.
-    fn turn_retry_allowed_if_runtime_and_generation_match(
+    pub(crate) fn turn_retry_allowed_if_runtime_and_generation_match(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1665,7 +1693,7 @@ impl AppState {
     // Production Claude results finalize by turn generation
     // (`claude_runtime_turns.rs`); this token-only form remains for tests.
     #[cfg(test)]
-    fn mark_turn_error_if_runtime_matches(
+    pub(crate) fn mark_turn_error_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1674,7 +1702,7 @@ impl AppState {
         self.mark_turn_error_if_runtime_matches_guarded(session_id, token, None, error_message)
     }
 
-    fn mark_turn_error_if_runtime_and_generation_match(
+    pub(crate) fn mark_turn_error_if_runtime_and_generation_match(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1696,12 +1724,10 @@ impl AppState {
         expected_active_turn_generation: Option<u64>,
         error_message: &str,
     ) -> Result<()> {
-
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
         let (commit_result, should_dispatch_next, failed_mailbox_notification) = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return Ok(());
             };
@@ -1734,7 +1760,10 @@ impl AppState {
             }
             let _ = record;
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, EngramObservedTurnOutcome::Failed, &registered_check_notices,
+                &mut inner,
+                index,
+                EngramObservedTurnOutcome::Failed,
+                &registered_check_notices,
             );
             let record = &mut inner.sessions[index];
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
@@ -1794,7 +1823,7 @@ impl AppState {
     /// buffers a `DeferredStopCallback::TurnCompleted` for replay. Also
     /// schedules any orchestrator transitions keyed off this session's
     /// completion and dispatches the next queued prompt.
-    fn finish_turn_ok_if_runtime_matches(
+    pub(crate) fn finish_turn_ok_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1802,7 +1831,7 @@ impl AppState {
         self.finish_turn_ok_if_runtime_matches_guarded(session_id, token, None)
     }
 
-    fn finish_turn_ok_if_runtime_and_generation_match(
+    pub(crate) fn finish_turn_ok_if_runtime_and_generation_match(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1815,7 +1844,7 @@ impl AppState {
         )
     }
 
-    fn finish_turn_ok_if_runtime_matches_guarded(
+    pub(crate) fn finish_turn_ok_if_runtime_matches_guarded(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -1838,10 +1867,11 @@ impl AppState {
                     let record = &inner.sessions[index];
                     (record.runtime.matches_runtime_token(token)
                         && !record.runtime_stop_in_progress
-                        && expected_active_turn_generation.is_none_or(|generation|
-                            record.active_turn_generation == generation))
-                        .then(|| record.runtime.dedicated_tree_owner()).flatten()
-                        .filter(|(tree, _, _)| tree.is_in_progress())
+                        && expected_active_turn_generation
+                            .is_none_or(|generation| record.active_turn_generation == generation))
+                    .then(|| record.runtime.dedicated_tree_owner())
+                    .flatten()
+                    .filter(|(tree, _, _)| tree.is_in_progress())
                 })
             };
             if let Some((tree, _, label)) = joining_owner {
@@ -1861,8 +1891,7 @@ impl AppState {
         let stopping_orchestrator_session_ids = self.stopping_orchestrator_session_ids_snapshot();
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let (should_dispatch_next, _orchestrator_delta) = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return Ok(());
             };
@@ -1923,15 +1952,24 @@ impl AppState {
             if !record.runtime_projection_allowed() {
                 return Ok(());
             }
-            if matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval) {
+            if matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            ) {
                 if let Some(slot) = evaluator_usage_limit_slot(record.session.agent) {
-                    self.agent_readiness_cache.write().expect("agent readiness cache poisoned")
+                    self.agent_readiness_cache
+                        .write()
+                        .expect("agent readiness cache poisoned")
                         .evaluator_usage_limits[slot] = None;
                 }
             }
             let _ = record;
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, EngramObservedTurnOutcome::Succeeded, &registered_check_notices);
+                &mut inner,
+                index,
+                EngramObservedTurnOutcome::Succeeded,
+                &registered_check_notices,
+            );
             let record = &mut inner.sessions[index];
 
             if record.session.status == SessionStatus::Active {
@@ -2012,7 +2050,7 @@ impl AppState {
     /// Active/Approval pushes a "Turn failed" message so the user sees a
     /// reason rather than a silent stall. Dispatches any queued prompt
     /// into the fresh slot once the runtime spins back up.
-    fn handle_runtime_exit_if_matches(
+    pub(crate) fn handle_runtime_exit_if_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -2021,8 +2059,12 @@ impl AppState {
         self.handle_runtime_exit_if_matches_guarded(session_id, token, None, error_message, false)
     }
 
-    fn handle_runtime_root_exit_if_matches(&self, session_id: &str, token: &RuntimeToken,
-        provider_error: Option<&str>) -> Result<()> {
+    pub(crate) fn handle_runtime_root_exit_if_matches(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        provider_error: Option<&str>,
+    ) -> Result<()> {
         self.handle_runtime_exit_if_matches_guarded(session_id, token, None, provider_error, true)
     }
 
@@ -2062,16 +2104,23 @@ impl AppState {
         };
         let record = &inner.sessions[index];
         if !record.runtime.matches_runtime_token(token)
-            || expected_active_turn_generation.is_some_and(|generation| record.active_turn_generation != generation)
+            || expected_active_turn_generation
+                .is_some_and(|generation| record.active_turn_generation != generation)
             || record.runtime_stop_in_progress
-            || record.engram.unadmitted_active_turn.as_ref()
+            || record
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
                 .is_none_or(|trace| trace.generation != record.active_turn_generation)
         {
             return Ok(());
         }
         let messages_before = session_message_count(record);
         self.queue_runtime_observation_close_with_notices_locked(
-            &mut inner, index, outcome, &registered_check_notices,
+            &mut inner,
+            index,
+            outcome,
+            &registered_check_notices,
         );
         inner.stamp_session_at_index(index);
         if session_message_count(&inner.sessions[index]) != messages_before {
@@ -2096,8 +2145,10 @@ impl AppState {
             inner.find_session_index(session_id).and_then(|index| {
                 let record = &inner.sessions[index];
                 (record.runtime.matches_runtime_token(token)
-                    && expected_active_turn_generation.is_none_or(|generation| record.active_turn_generation == generation))
-                    .then(|| record.runtime.dedicated_tree_owner()).flatten()
+                    && expected_active_turn_generation
+                        .is_none_or(|generation| record.active_turn_generation == generation))
+                .then(|| record.runtime.dedicated_tree_owner())
+                .flatten()
             })
         };
         // A provider error is a known failure; an otherwise silent exit says
@@ -2122,8 +2173,12 @@ impl AppState {
             });
             // Drained communication callbacks join the exact attempt; they
             // never retire the token needed by the root waiter's checkpoint.
-            if !root_exit && !claimed_callback && tree.is_confirmed() { return Ok(()); }
-            if tree.is_in_progress() { return Ok(()); }
+            if !root_exit && !claimed_callback && tree.is_confirmed() {
+                return Ok(());
+            }
+            if tree.is_in_progress() {
+                return Ok(());
+            }
         }
         #[cfg(not(windows))]
         let _ = root_exit;
@@ -2136,8 +2191,7 @@ impl AppState {
             exited_mailbox_notification,
             commit_result,
         ) = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return Ok(());
             };
@@ -2176,32 +2230,43 @@ impl AppState {
                     .deferred_stop_callbacks
                     .push(DeferredStopCallback::RuntimeExited {
                         active_turn_generation,
-                        message: cleanup_failure.clone().or_else(|| error_message.map(str::to_owned)),
+                        message: cleanup_failure
+                            .clone()
+                            .or_else(|| error_message.map(str::to_owned)),
                     });
                 return Ok(());
             }
-            if retain_cleanup_owner && inner.sessions[index].session.status == SessionStatus::Error
-                && inner.sessions[index].session.preview == make_preview(cleaned) {
+            if retain_cleanup_owner
+                && inner.sessions[index].session.status == SessionStatus::Error
+                && inner.sessions[index].session.preview == make_preview(cleaned)
+            {
                 return Ok(());
             }
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, observed_outcome, &registered_check_notices,
+                &mut inner,
+                index,
+                observed_outcome,
+                &registered_check_notices,
             );
             let was_busy = matches!(
                 inner.sessions[index].session.status,
                 SessionStatus::Active | SessionStatus::Approval
             );
             #[cfg(windows)]
-            let preserve_dedicated_hold = dedicated_owner.is_some() && inner.sessions[index].orchestrator_auto_dispatch_blocked;
+            let preserve_dedicated_hold = dedicated_owner.is_some()
+                && inner.sessions[index].orchestrator_auto_dispatch_blocked;
             #[cfg(not(windows))]
             let preserve_dedicated_hold = false;
-            let preserve_dedicated_reset = preserve_dedicated_hold && inner.sessions[index].runtime_reset_required;
+            let preserve_dedicated_reset =
+                preserve_dedicated_hold && inner.sessions[index].runtime_reset_required;
             let preserve_automatic_resume_block = inner.sessions[index]
                 .engram_mcp_runtime_quarantined
-                && inner.sessions[index].orchestrator_auto_dispatch_blocked || preserve_dedicated_hold;
+                && inner.sessions[index].orchestrator_auto_dispatch_blocked
+                || preserve_dedicated_hold;
             let quarantined_exit = inner.sessions[index].engram_mcp_runtime_quarantined;
-            let message_id = ((!quarantined_exit || retain_cleanup_owner) && (was_busy || !cleaned.is_empty()))
-                .then(|| inner.next_message_id());
+            let message_id = ((!quarantined_exit || retain_cleanup_owner)
+                && (was_busy || !cleaned.is_empty()))
+            .then(|| inner.next_message_id());
             let detail = if quarantined_exit && !retain_cleanup_owner {
                 None
             } else if !cleaned.is_empty() || was_busy {
@@ -2240,11 +2305,16 @@ impl AppState {
                     .flatten();
                 if !retain_cleanup_owner {
                     record.clear_runtime();
-                    if !preserve_dedicated_reset { record.clear_runtime_reset(); }
+                    if !preserve_dedicated_reset {
+                        record.clear_runtime_reset();
+                    }
                 }
                 let operator_paused = record.engram.operator_paused;
                 record.set_auto_dispatch_blocked(
-                    retain_cleanup_owner || preserve_automatic_resume_block || exited_mailbox_notification.is_some() || operator_paused,
+                    retain_cleanup_owner
+                        || preserve_automatic_resume_block
+                        || exited_mailbox_notification.is_some()
+                        || operator_paused,
                 );
                 record.engram.operator_paused = operator_paused;
                 record.clear_runtime_stop();
@@ -2354,11 +2424,16 @@ impl AppState {
         // release must not immediately consume this owner's retry obligation.
         let retains_cleanup = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner.find_session_index(session_id).is_some_and(|index|
+            inner.find_session_index(session_id).is_some_and(|index| {
                 inner.sessions[index].runtime.matches_runtime_token(token)
-                && inner.sessions[index].runtime.dedicated_cleanup_failure().is_some())
+                    && inner.sessions[index]
+                        .runtime
+                        .dedicated_cleanup_failure()
+                        .is_some()
+            })
         };
-        if !retains_cleanup && let Err(err) = self.refresh_delegation_for_child_session(session_id) {
+        if !retains_cleanup && let Err(err) = self.refresh_delegation_for_child_session(session_id)
+        {
             eprintln!("state warning> failed to refresh delegation after runtime exit: {err:#}");
         }
 
@@ -2400,7 +2475,7 @@ impl AppState {
     /// `update_approval` in `src/state.rs` looks up the entry by
     /// `message_id` when the user clicks accept/reject and routes the
     /// decision back to the Claude runtime using the stored handle.
-    fn register_claude_pending_approval(
+    pub(crate) fn register_claude_pending_approval(
         &self,
         session_id: &str,
         message_id: String,
@@ -2418,7 +2493,7 @@ impl AppState {
 
     /// Stores a Claude AskUserQuestion dialog keyed by transcript message id
     /// so the generic user-input route can answer the still-running runtime.
-    fn register_claude_pending_user_input(
+    pub(crate) fn register_claude_pending_user_input(
         &self,
         session_id: &str,
         message_id: String,
@@ -2437,7 +2512,7 @@ impl AppState {
     /// Stores a Codex pending approval keyed by `message_id`.
     /// `update_approval` in `src/state.rs` looks it up on user action
     /// and sends the decision back over JSON-RPC.
-    fn register_codex_pending_approval(
+    pub(crate) fn register_codex_pending_approval(
         &self,
         session_id: &str,
         message_id: String,
@@ -2456,7 +2531,7 @@ impl AppState {
     /// Stores a Codex pending user-input request keyed by `message_id`.
     /// `submit_user_input` in `src/state.rs` looks it up when the
     /// user answers the form and returns the answers to Codex.
-    fn register_codex_pending_user_input(
+    pub(crate) fn register_codex_pending_user_input(
         &self,
         session_id: &str,
         message_id: String,
@@ -2476,7 +2551,7 @@ impl AppState {
     /// `submit_codex_mcp_elicitation` in `src/state.rs` looks it up when
     /// the user chooses accept/decline/cancel and returns the result to
     /// the MCP server via Codex.
-    fn register_codex_pending_mcp_elicitation(
+    pub(crate) fn register_codex_pending_mcp_elicitation(
         &self,
         session_id: &str,
         message_id: String,
@@ -2495,7 +2570,7 @@ impl AppState {
     /// Stores a Codex pending app request keyed by `message_id`.
     /// `submit_codex_app_request` in `src/state.rs` looks it up when the
     /// user responds and returns the result to the Codex app-server.
-    fn register_codex_pending_app_request(
+    pub(crate) fn register_codex_pending_app_request(
         &self,
         session_id: &str,
         message_id: String,
@@ -2514,7 +2589,7 @@ impl AppState {
     /// Stores an ACP pending approval keyed by `message_id`.
     /// `update_approval` in `src/state.rs` looks it up when the user
     /// responds and dispatches the decision over the ACP protocol.
-    fn register_acp_pending_approval(
+    pub(crate) fn register_acp_pending_approval(
         &self,
         session_id: &str,
         message_id: String,
@@ -2538,7 +2613,7 @@ impl AppState {
     /// identifier) rather than the `message_id` that keys the register —
     /// so this is the only clear path that walks the map to find matching
     /// entries instead of looking up by the store's key directly.
-    fn clear_claude_pending_interaction_by_request(
+    pub(crate) fn clear_claude_pending_interaction_by_request(
         &self,
         session_id: &str,
         request_id: &str,

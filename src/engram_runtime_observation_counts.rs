@@ -2,23 +2,25 @@
 // Read only known wire metadata; never clone, serialize or return requests,
 // receipts, identities, error text or connection details, and never open a store.
 
+use super::*;
+
 #[derive(Default, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeObservationCounters {
-    reports: u64,
+pub(crate) struct RuntimeObservationCounters {
+    pub(crate) reports: u64,
     unsettled_reports: u64,
     local_failure_reports: u64,
-    envelopes: u64,
-    pending: u64,
-    recorded: u64,
-    refused: u64,
-    local_failure: u64,
+    pub(crate) envelopes: u64,
+    pub(crate) pending: u64,
+    pub(crate) recorded: u64,
+    pub(crate) refused: u64,
+    pub(crate) local_failure: u64,
 }
 
 #[derive(Default, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeObservationCounts {
-    total: RuntimeObservationCounters,
+pub(crate) struct RuntimeObservationCounts {
+    pub(crate) total: RuntimeObservationCounters,
     by_wire: RuntimeObservationWireCounts,
 }
 
@@ -62,7 +64,7 @@ impl RuntimeObservationWireCounts {
 }
 
 impl RuntimeObservationCounters {
-    fn report(&mut self, report: &EngramRuntimeObservationReport) {
+    pub(crate) fn report(&mut self, report: &EngramRuntimeObservationReport) {
         self.reports += 1;
         self.unsettled_reports += u64::from(!report.is_settled());
         self.local_failure_reports += u64::from(report.envelopes.iter().any(|envelope| {
@@ -73,7 +75,7 @@ impl RuntimeObservationCounters {
         }));
     }
 
-    fn envelope(&mut self, delivery: &EngramRuntimeObservationDelivery) {
+    pub(crate) fn envelope(&mut self, delivery: &EngramRuntimeObservationDelivery) {
         self.envelopes += 1;
         match delivery {
             EngramRuntimeObservationDelivery::Pending { .. } => self.pending += 1,
@@ -200,7 +202,7 @@ fn runtime_observation_counts<'a>(
     counts
 }
 
-async fn get_runtime_observation_counts(
+pub(crate) async fn get_runtime_observation_counts(
     State(state): State<AppState>,
 ) -> Result<Json<RuntimeObservationCounts>, ApiError> {
     run_blocking_api(move || {

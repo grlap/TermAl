@@ -2,8 +2,10 @@
 // Does not persist history or decide ready-state delegation/root authority.
 // Split from boot loading so every consumer can distinguish unknown from empty.
 
+use super::*;
+
 #[derive(Clone, Debug, Default)]
-enum DelegationInventoryState {
+pub(crate) enum DelegationInventoryState {
     #[default]
     Ready,
     Loading {
@@ -16,12 +18,14 @@ enum DelegationInventoryState {
     },
 }
 
-fn delegation_inventory_file_identity(path: &FsPath) -> Result<FederationImageFileIdentity> {
+pub(crate) fn delegation_inventory_file_identity(
+    path: &FsPath,
+) -> Result<FederationImageFileIdentity> {
     let file = fs::File::open(path).context("opening delegation inventory source")?;
     Ok(federation_image_file_identity(&file, &file.metadata()?)?)
 }
 
-fn verify_delegation_inventory_source(
+pub(crate) fn verify_delegation_inventory_source(
     connection: &rusqlite::Connection,
     path: &FsPath,
     source: &FederationImageFileIdentity,
@@ -32,25 +36,33 @@ fn verify_delegation_inventory_source(
     );
     #[cfg(unix)]
     {
-        let opened_path = connection.path()
+        let opened_path = connection
+            .path()
             .context("delegation inventory connection source pathname unavailable")?;
-        anyhow::ensure!(delegation_inventory_file_identity(FsPath::new(opened_path))? == *source,
-            "delegation inventory connection source pathname differs from captured source");
+        anyhow::ensure!(
+            delegation_inventory_file_identity(FsPath::new(opened_path))? == *source,
+            "delegation inventory connection source pathname differs from captured source"
+        );
         let mut moved: std::ffi::c_int = 0;
         // SAFETY: the connection is exclusively borrowed on this worker, main
         // names its live database, and HAS_MOVED writes one initialized int.
         // The bundled Unix VFS compares its opened inode to its pathname.
         let status = unsafe {
             rusqlite::ffi::sqlite3_file_control(
-                connection.handle(), c"main".as_ptr(),
+                connection.handle(),
+                c"main".as_ptr(),
                 rusqlite::ffi::SQLITE_FCNTL_HAS_MOVED,
                 (&mut moved as *mut std::ffi::c_int).cast(),
             )
         };
-        anyhow::ensure!(status == rusqlite::ffi::SQLITE_OK,
-            "delegation inventory connection source check unavailable ({status})");
-        anyhow::ensure!(moved == 0,
-            "delegation inventory connection source no longer matches its pathname");
+        anyhow::ensure!(
+            status == rusqlite::ffi::SQLITE_OK,
+            "delegation inventory connection source check unavailable ({status})"
+        );
+        anyhow::ensure!(
+            moved == 0,
+            "delegation inventory connection source no longer matches its pathname"
+        );
     }
     #[cfg(windows)]
     {
@@ -60,32 +72,38 @@ fn verify_delegation_inventory_source(
         // Windows VFS writes its borrowed native database handle to this slot.
         let status = unsafe {
             rusqlite::ffi::sqlite3_file_control(
-                connection.handle(), c"main".as_ptr(),
+                connection.handle(),
+                c"main".as_ptr(),
                 rusqlite::ffi::SQLITE_FCNTL_WIN32_GET_HANDLE,
                 (&mut handle as *mut RawHandle).cast(),
             )
         };
-        anyhow::ensure!(status == rusqlite::ffi::SQLITE_OK && !handle.is_null()
-            && handle as isize != -1,
-            "delegation inventory connection source handle unavailable ({status})");
+        anyhow::ensure!(
+            status == rusqlite::ffi::SQLITE_OK && !handle.is_null() && handle as isize != -1,
+            "delegation inventory connection source handle unavailable ({status})"
+        );
         // SAFETY: SQLite owns this valid handle throughout the borrow. Clone
         // it before constructing File, so File never closes SQLite's handle.
         let owned = unsafe { BorrowedHandle::borrow_raw(handle) }.try_clone_to_owned()?;
         let file = fs::File::from(owned);
-        anyhow::ensure!(federation_image_file_identity(&file, &file.metadata()?)? == *source,
-            "delegation inventory connection source differs from captured source");
+        anyhow::ensure!(
+            federation_image_file_identity(&file, &file.metadata()?)? == *source,
+            "delegation inventory connection source differs from captured source"
+        );
     }
     Ok(())
 }
 
-fn delegation_inventory_hash_row(hash: &mut sha2::Sha256, id: &str, encoded: &str) {
+pub(crate) fn delegation_inventory_hash_row(hash: &mut sha2::Sha256, id: &str, encoded: &str) {
     hash.update((id.len() as u64).to_le_bytes());
     hash.update(id.as_bytes());
     hash.update((encoded.len() as u64).to_le_bytes());
     hash.update(encoded.as_bytes());
 }
 
-fn delegation_inventory_fingerprint(connection: &rusqlite::Connection) -> Result<String> {
+pub(crate) fn delegation_inventory_fingerprint(
+    connection: &rusqlite::Connection,
+) -> Result<String> {
     let mut statement =
         connection.prepare("SELECT id,value_json FROM delegations ORDER BY rowid")?;
     let mut rows = statement.query([])?;
@@ -101,11 +119,11 @@ fn delegation_inventory_fingerprint(connection: &rusqlite::Connection) -> Result
 }
 
 impl StateInner {
-    fn delegation_inventory_complete(&self) -> bool {
+    pub(crate) fn delegation_inventory_complete(&self) -> bool {
         matches!(self.delegation_inventory, DelegationInventoryState::Ready)
     }
 
-    fn require_delegation_inventory(&self) -> Result<(), ApiError> {
+    pub(crate) fn require_delegation_inventory(&self) -> Result<(), ApiError> {
         if self.delegation_inventory_complete() {
             return Ok(());
         }
@@ -129,11 +147,11 @@ impl StateInner {
 // StateInner. Only the full owned result crosses the publication boundary.
 impl AppState {
     #[cfg(test)]
-    fn load_delegation_inventory_after_listen(&self) -> Result<()> {
+    pub(crate) fn load_delegation_inventory_after_listen(&self) -> Result<()> {
         self.load_delegation_inventory_observed(|_| {}).map(|_| ())
     }
 
-    fn load_delegation_inventory_observed(
+    pub(crate) fn load_delegation_inventory_observed(
         &self,
         mut observe: impl FnMut(&str),
     ) -> Result<()> {
@@ -197,7 +215,15 @@ impl AppState {
                 "delegation inventory load interrupted by shutdown"
             );
             read_connection = Some(connection);
-            Ok((records, quarantined, running, links, catalog_children, version, fingerprint))
+            Ok((
+                records,
+                quarantined,
+                running,
+                links,
+                catalog_children,
+                version,
+                fingerprint,
+            ))
         })();
         observe("before_publish");
         let writer = sqlite_state_write_lock(&self.persistence_path);
@@ -205,8 +231,14 @@ impl AppState {
         let mut loaded = loaded;
         let mut inner = if let Ok((_, _, _, _, _, version, fingerprint)) = &loaded {
             match self.lock_delegation_inventory_publication(
-                read_connection.as_ref().expect("successful inventory owns its connection"),
-                &writer, *version, fingerprint, &source, &mut observe,
+                read_connection
+                    .as_ref()
+                    .expect("successful inventory owns its connection"),
+                &writer,
+                *version,
+                fingerprint,
+                &source,
+                &mut observe,
             ) {
                 Ok((inner, transaction, admission)) => {
                     publication = Some((transaction, admission));
@@ -242,8 +274,10 @@ impl AppState {
                 inner.delegations = records;
                 inner.quarantined_persisted_delegation_ids = quarantined;
                 inner.running_read_only_delegations = running;
-                *inner.delegation_catalog_children.get_mut().expect("catalog child index poisoned") =
-                    catalog_children;
+                *inner
+                    .delegation_catalog_children
+                    .get_mut()
+                    .expect("catalog child index poisoned") = catalog_children;
                 inner.repair_delegation_child_session_links_with(links);
                 inner.delegation_inventory = DelegationInventoryState::Ready;
                 // Publication is linearized while external SQL writers are
@@ -283,7 +317,7 @@ impl AppState {
 
 /// Requests which can classify, mutate or consume delegation history must not
 /// turn an unloaded Vec into absence. Metadata-only GET routes remain live.
-async fn delegation_inventory_http_guard(
+pub(crate) async fn delegation_inventory_http_guard(
     State(state): State<AppState>,
     request: axum::extract::Request,
     next: axum::middleware::Next,

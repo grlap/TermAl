@@ -1,13 +1,18 @@
 // Native cross-host routine-mail identities and immutable conversation ownership.
 // Does not enroll sessions, dispatch prompts, perform I/O, or store message bodies.
 
-const MAILBOX_RELAY_VERSION: u16 = 1;
-const MAILBOX_RELAY_RPC_ROUTE: &str = "/federation/v1/mailbox/relay";
+use super::*;
+
+pub(crate) const MAILBOX_RELAY_VERSION: u16 = 1;
+pub(crate) const MAILBOX_RELAY_RPC_ROUTE: &str = "/federation/v1/mailbox/relay";
 
 // Reconnection itself advances transport_generation. The logical request stays
 // pinned to enrollment material, while every attempt separately requires its
 // exact current authenticated lease. Never weaken the shared transport check.
-fn same_mailbox_relay_enrollment(a: &FederationPeerSnapshot, b: &FederationPeerSnapshot) -> bool {
+pub(crate) fn same_mailbox_relay_enrollment(
+    a: &FederationPeerSnapshot,
+    b: &FederationPeerSnapshot,
+) -> bool {
     a.validate().is_ok()
         && b.validate().is_ok()
         && a.local == b.local
@@ -19,31 +24,31 @@ fn same_mailbox_relay_enrollment(a: &FederationPeerSnapshot, b: &FederationPeerS
         && a.endpoint == b.endpoint
 }
 
-fn valid_mailbox_relay_id(value: &str) -> bool {
+pub(crate) fn valid_mailbox_relay_id(value: &str) -> bool {
     value
         .strip_prefix("mailbox-")
         .is_some_and(mailbox_relay_uuid)
 }
 
-fn valid_mailbox_relay_name(value: &str) -> bool {
+pub(crate) fn valid_mailbox_relay_name(value: &str) -> bool {
     !value.is_empty() && value.chars().count() <= 160 && !value.chars().any(char::is_control)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayPrincipal {
-    host: FederationHostIdentity,
-    store_id: String,
-    native_session_id: String,
-    native_creation_id: String,
+pub(crate) struct MailboxRelayPrincipal {
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) store_id: String,
+    pub(crate) native_session_id: String,
+    pub(crate) native_creation_id: String,
 }
 
-fn mailbox_relay_uuid(value: &str) -> bool {
+pub(crate) fn mailbox_relay_uuid(value: &str) -> bool {
     Uuid::parse_str(value).is_ok_and(|id| !id.is_nil() && id.to_string() == value)
 }
 
 impl MailboxRelayPrincipal {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.host.validate()?;
         validate_federation_reference(&self.native_session_id)?;
         if !mailbox_relay_uuid(&self.native_creation_id) || !mailbox_relay_uuid(&self.store_id) {
@@ -54,7 +59,7 @@ impl MailboxRelayPrincipal {
         Ok(())
     }
 
-    fn participant_key(&self) -> String {
+    pub(crate) fn participant_key(&self) -> String {
         format!(
             "relay-principal-{}",
             sha256_hex(&serde_json::to_vec(self).expect("native mailbox identity serializes"),)
@@ -63,7 +68,10 @@ impl MailboxRelayPrincipal {
 
     // The authenticated originating host attests its own native caller. A
     // locator, display name, or request body cannot stand in for that channel.
-    fn require_origin(&self, authenticated_host: &FederationHostIdentity) -> Result<(), ApiError> {
+    pub(crate) fn require_origin(
+        &self,
+        authenticated_host: &FederationHostIdentity,
+    ) -> Result<(), ApiError> {
         self.validate()?;
         if &self.host != authenticated_host {
             return Err(ApiError::conflict("mailbox relay origin identity changed"));
@@ -74,13 +82,13 @@ impl MailboxRelayPrincipal {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayHome {
-    host: FederationHostIdentity,
-    store_id: String,
+pub(crate) struct MailboxRelayHome {
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) store_id: String,
 }
 
 impl MailboxRelayHome {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.host.validate()?;
         if !mailbox_relay_uuid(&self.store_id) {
             return Err(ApiError::bad_request("invalid mailbox home store identity"));
@@ -91,14 +99,14 @@ impl MailboxRelayHome {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayConversation {
-    version: u16,
-    home: MailboxRelayHome,
-    participants: [MailboxRelayPrincipal; 2],
+pub(crate) struct MailboxRelayConversation {
+    pub(crate) version: u16,
+    pub(crate) home: MailboxRelayHome,
+    pub(crate) participants: [MailboxRelayPrincipal; 2],
 }
 
 impl MailboxRelayConversation {
-    fn new(
+    pub(crate) fn new(
         home: MailboxRelayHome,
         a: MailboxRelayPrincipal,
         b: MailboxRelayPrincipal,
@@ -114,7 +122,7 @@ impl MailboxRelayConversation {
         Ok(conversation)
     }
 
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.home.validate()?;
         for participant in &self.participants {
             participant.validate()?;
@@ -136,7 +144,7 @@ impl MailboxRelayConversation {
         Ok(())
     }
 
-    fn require_home(&self, central: &MailboxRelayHome) -> Result<(), ApiError> {
+    pub(crate) fn require_home(&self, central: &MailboxRelayHome) -> Result<(), ApiError> {
         self.validate()?;
         if &self.home != central {
             return Err(ApiError::conflict(
@@ -146,7 +154,7 @@ impl MailboxRelayConversation {
         Ok(())
     }
 
-    fn require_member(&self, actor: &MailboxRelayPrincipal) -> Result<(), ApiError> {
+    pub(crate) fn require_member(&self, actor: &MailboxRelayPrincipal) -> Result<(), ApiError> {
         self.validate()?;
         actor.validate()?;
         if !self.participants.contains(actor) {
@@ -155,28 +163,28 @@ impl MailboxRelayConversation {
         Ok(())
     }
 
-    fn pair_key(&self) -> String {
+    pub(crate) fn pair_key(&self) -> String {
         sha256_hex(&serde_json::to_vec(self).expect("mailbox conversation serializes"))
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayWake {
-    version: u16,
-    conversation: MailboxRelayConversation,
-    sender: MailboxRelayPrincipal,
-    target: MailboxRelayPrincipal,
-    mailbox_id: String,
-    message_id: String,
-    sequence: u64,
-    unread_count: u64,
-    sender_name: String,
-    topic: Option<String>,
+pub(crate) struct MailboxRelayWake {
+    pub(crate) version: u16,
+    pub(crate) conversation: MailboxRelayConversation,
+    pub(crate) sender: MailboxRelayPrincipal,
+    pub(crate) target: MailboxRelayPrincipal,
+    pub(crate) mailbox_id: String,
+    pub(crate) message_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) unread_count: u64,
+    pub(crate) sender_name: String,
+    pub(crate) topic: Option<String>,
 }
 
 impl MailboxRelayWake {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.conversation.require_member(&self.sender)?;
         self.conversation.require_member(&self.target)?;
         if self.version != MAILBOX_RELAY_VERSION
@@ -201,23 +209,23 @@ impl MailboxRelayWake {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayAppend {
+pub(crate) struct MailboxRelayAppend {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    test_request: Option<MailboxTestPayload>,
-    requested_target: String,
-    conversation: MailboxRelayConversation,
-    sender: MailboxRelayPrincipal,
-    target: MailboxRelayPrincipal,
-    sender_name: String,
-    target_name: String,
-    message: String,
-    idempotency_key: String,
-    topic: Option<String>,
-    state_stamp: Option<String>,
+    pub(crate) test_request: Option<MailboxTestPayload>,
+    pub(crate) requested_target: String,
+    pub(crate) conversation: MailboxRelayConversation,
+    pub(crate) sender: MailboxRelayPrincipal,
+    pub(crate) target: MailboxRelayPrincipal,
+    pub(crate) sender_name: String,
+    pub(crate) target_name: String,
+    pub(crate) message: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) topic: Option<String>,
+    pub(crate) state_stamp: Option<String>,
 }
 
 impl MailboxRelayAppend {
-    fn input(&self) -> Result<MailboxAppendInput, ApiError> {
+    pub(crate) fn input(&self) -> Result<MailboxAppendInput, ApiError> {
         if let Some(payload) = &self.test_request {
             validate_mailbox_test_payload(payload)?;
             if payload.requester != self.sender {
@@ -267,7 +275,7 @@ impl MailboxRelayAppend {
         Ok(input)
     }
 
-    fn digest(&self) -> Result<String, ApiError> {
+    pub(crate) fn digest(&self) -> Result<String, ApiError> {
         self.input()?;
         // Display names can refresh without changing a previously admitted send.
         let mut value = json!({
@@ -290,20 +298,20 @@ impl MailboxRelayAppend {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayDescriptor {
-    principal: MailboxRelayPrincipal,
-    name: String,
+pub(crate) struct MailboxRelayDescriptor {
+    pub(crate) principal: MailboxRelayPrincipal,
+    pub(crate) name: String,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelaySummary {
-    conversation: MailboxRelayConversation,
-    summary: MailboxSummary,
+pub(crate) struct MailboxRelaySummary {
+    pub(crate) conversation: MailboxRelayConversation,
+    pub(crate) summary: MailboxSummary,
 }
 
 impl MailboxRelaySummary {
-    fn participant_names(&self) -> [String; 2] {
+    pub(crate) fn participant_names(&self) -> [String; 2] {
         self.conversation.participants.clone().map(|principal| {
             self.summary
                 .participants
@@ -316,10 +324,10 @@ impl MailboxRelaySummary {
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayRequest {
-    version: u16,
-    request_id: String,
-    operation: MailboxRelayOperation,
+pub(crate) struct MailboxRelayRequest {
+    pub(crate) version: u16,
+    pub(crate) request_id: String,
+    pub(crate) operation: MailboxRelayOperation,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -329,7 +337,7 @@ struct MailboxRelayRequest {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-enum MailboxRelayOperation {
+pub(crate) enum MailboxRelayOperation {
     /// Scheduling hint only; original authenticated completion must be pulled.
     CausalTestCompletionReady {
         hint: CausalTestCompletionReadyHint,
@@ -387,23 +395,27 @@ enum MailboxRelayOperation {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayResponse {
-    version: u16,
-    request_id: String,
-    host: FederationHostIdentity,
-    value: Value,
+pub(crate) struct MailboxRelayResponse {
+    pub(crate) version: u16,
+    pub(crate) request_id: String,
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) value: Value,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxRelayLocator {
-    version: u16,
-    home: MailboxRelayHome,
-    id: String,
+pub(crate) struct MailboxRelayLocator {
+    pub(crate) version: u16,
+    pub(crate) home: MailboxRelayHome,
+    pub(crate) id: String,
 }
 
 impl MailboxRelayLocator {
-    fn encode(home: &MailboxRelayHome, id: &str, message: bool) -> Result<String, ApiError> {
+    pub(crate) fn encode(
+        home: &MailboxRelayHome,
+        id: &str,
+        message: bool,
+    ) -> Result<String, ApiError> {
         use base64::Engine;
         let locator = Self {
             version: MAILBOX_RELAY_VERSION,
@@ -423,7 +435,7 @@ impl MailboxRelayLocator {
         ))
     }
 
-    fn decode(value: &str, message: bool) -> Result<Option<Self>, ApiError> {
+    pub(crate) fn decode(value: &str, message: bool) -> Result<Option<Self>, ApiError> {
         use base64::Engine;
         let prefix = if message {
             "relay-message-"
@@ -448,7 +460,7 @@ impl MailboxRelayLocator {
         Ok(Some(locator))
     }
 
-    fn validate(&self, message: bool) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self, message: bool) -> Result<(), ApiError> {
         self.home.validate()?;
         let valid = if message {
             self.id

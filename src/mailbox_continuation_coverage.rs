@@ -2,14 +2,16 @@
 Receipt durability is owned by MailboxStore. Coverage never authorizes a
 provider handoff, rewrites stored prompt history, or changes Stop/boot recovery. */
 
+use super::*;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct MailboxCoverageTurn {
-    generation: u64,
-    runtime: RuntimeToken,
+pub(crate) struct MailboxCoverageTurn {
+    pub(crate) generation: u64,
+    pub(crate) runtime: RuntimeToken,
 }
 
 impl MailboxCoverageTurn {
-    fn capture(record: &SessionRecord) -> Option<Self> {
+    pub(crate) fn capture(record: &SessionRecord) -> Option<Self> {
         if !(record.session.status == SessionStatus::Active
             && record.active_turn_generation != 0
             && !record.runtime_stop_in_progress
@@ -24,41 +26,41 @@ impl MailboxCoverageTurn {
         })
     }
 
-    fn matches(&self, record: &SessionRecord) -> bool {
+    pub(crate) fn matches(&self, record: &SessionRecord) -> bool {
         Self::capture(record).as_ref() == Some(self)
     }
 }
 
 #[derive(Clone)]
-struct MailboxCoverageRead {
-    receipt: String,
-    after: u64,
-    through: u64,
-    turn: MailboxCoverageTurn,
+pub(crate) struct MailboxCoverageRead {
+    pub(crate) receipt: String,
+    pub(crate) after: u64,
+    pub(crate) through: u64,
+    pub(crate) turn: MailboxCoverageTurn,
 }
 
 #[derive(Clone)]
-struct MailboxCoverageProof {
-    read: MailboxCoverageRead,
-    explicit: bool,
+pub(crate) struct MailboxCoverageProof {
+    pub(crate) read: MailboxCoverageRead,
+    pub(crate) explicit: bool,
 }
 
 #[derive(Clone)]
-struct MailboxCoverageAcceptance {
-    message: String,
-    sequence: u64,
-    generation: u64,
+pub(crate) struct MailboxCoverageAcceptance {
+    pub(crate) message: String,
+    pub(crate) sequence: u64,
+    pub(crate) generation: u64,
 }
 
 #[derive(Clone, Default)]
-struct MailboxContinuationCoverage {
-    accepted: BTreeMap<String, MailboxCoverageAcceptance>,
-    reads: BTreeMap<String, MailboxCoverageRead>,
-    proofs: BTreeMap<String, MailboxCoverageProof>,
-    removed: u64,
+pub(crate) struct MailboxContinuationCoverage {
+    pub(crate) accepted: BTreeMap<String, MailboxCoverageAcceptance>,
+    pub(crate) reads: BTreeMap<String, MailboxCoverageRead>,
+    pub(crate) proofs: BTreeMap<String, MailboxCoverageProof>,
+    pub(crate) removed: u64,
 }
 
-fn mailbox_coverage_diagnostic(
+pub(crate) fn mailbox_coverage_diagnostic(
     session_id: &str,
     mailbox_id: &str,
     boundary: u64,
@@ -93,7 +95,7 @@ fn mailbox_continuation_can_be_covered(
 }
 
 /// Called only at live enqueue/coalescing, never while loading persisted wakes.
-fn note_mailbox_continuation_boundary(record: &mut SessionRecord, prompt_id: &str) {
+pub(crate) fn note_mailbox_continuation_boundary(record: &mut SessionRecord, prompt_id: &str) {
     let coverage = &mut record.mailbox_continuations;
     coverage.accepted.retain(|id, _| {
         record
@@ -147,12 +149,12 @@ fn note_mailbox_continuation_boundary(record: &mut SessionRecord, prompt_id: &st
 }
 
 impl AppState {
-    fn mailbox_coverage_turn(&self, session_id: &str) -> Option<MailboxCoverageTurn> {
+    pub(crate) fn mailbox_coverage_turn(&self, session_id: &str) -> Option<MailboxCoverageTurn> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         MailboxCoverageTurn::capture(&inner.sessions[inner.find_session_index(session_id)?])
     }
 
-    fn observe_mailbox_coverage_read(
+    pub(crate) fn observe_mailbox_coverage_read(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -203,7 +205,7 @@ impl AppState {
         );
     }
 
-    fn observe_mailbox_coverage_ack(
+    pub(crate) fn observe_mailbox_coverage_ack(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -245,7 +247,7 @@ impl AppState {
 
     /// Remove covered entries before checkpoint selection, and at drain.
     /// Storage I/O is off-lock; exact head, turn, proof and holds are rechecked.
-    fn settle_covered_mailbox_continuations(
+    pub(crate) fn settle_covered_mailbox_continuations(
         &self,
         session_id: &str,
         expected: Option<(&RuntimeToken, Option<u64>)>,
@@ -255,7 +257,7 @@ impl AppState {
 
     // The callback is an off-lock boundary for deterministic race tests. The
     // production caller supplies no work; all state checks remain below it.
-    fn settle_covered_mailbox_continuations_before_apply(
+    pub(crate) fn settle_covered_mailbox_continuations_before_apply(
         &self,
         session_id: &str,
         expected: Option<(&RuntimeToken, Option<u64>)>,

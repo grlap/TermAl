@@ -1,25 +1,48 @@
 // Owns the shared reviewer/evaluator status worker and continuations.
 // Waits run off the JSON-RPC reader/writer and revalidate exact ownership.
+
+use super::*;
 struct CodexReviewerMcpRequestCleanup(CodexPendingRequestMap, String);
 
-fn settle_codex_reviewer_mcp(state: &AppState, scope: &CodexReviewerMcpScope, failure: Option<&str>) {
+pub(crate) fn settle_codex_reviewer_mcp(
+    state: &AppState,
+    scope: &CodexReviewerMcpScope,
+    failure: Option<&str>,
+) {
     {
         let mut inner = state.inner.lock().expect("state mutex poisoned");
         if !codex_reviewer_mcp_identity(&inner, scope)
-            || !inner.sessions.iter().any(|r| r.session.id == scope.session_id
-                && matches!(r.session.status, SessionStatus::Active | SessionStatus::Approval)) {
+            || !inner.sessions.iter().any(|r| {
+                r.session.id == scope.session_id
+                    && matches!(
+                        r.session.status,
+                        SessionStatus::Active | SessionStatus::Approval
+                    )
+            })
+        {
             return;
         }
-        let index = inner.find_session_index(&scope.session_id).expect("current child");
+        let index = inner
+            .find_session_index(&scope.session_id)
+            .expect("current child");
         let record = inner.session_mut_by_index(index).expect("current child");
         if record.runtime_stop_in_progress {
-            if failure.is_some() { record.deferred_stop_callbacks.retain(|c| !matches!(c,
-                DeferredStopCallback::TurnCompleted { active_turn_generation } if *active_turn_generation == scope.generation)); }
+            if failure.is_some() {
+                record.deferred_stop_callbacks.retain(|c| !matches!(c,
+                DeferredStopCallback::TurnCompleted { active_turn_generation } if *active_turn_generation == scope.generation));
+            }
             if record.deferred_stop_callbacks.iter().any(|c| match c {
-                DeferredStopCallback::TurnFailed { active_turn_generation, .. } => *active_turn_generation == scope.generation,
-                DeferredStopCallback::TurnCompleted { active_turn_generation } => failure.is_none() && *active_turn_generation == scope.generation,
+                DeferredStopCallback::TurnFailed {
+                    active_turn_generation,
+                    ..
+                } => *active_turn_generation == scope.generation,
+                DeferredStopCallback::TurnCompleted {
+                    active_turn_generation,
+                } => failure.is_none() && *active_turn_generation == scope.generation,
                 _ => false,
-            }) { return; }
+            }) {
+                return;
+            }
         }
     }
     #[cfg(test)]
@@ -27,9 +50,16 @@ fn settle_codex_reviewer_mcp(state: &AppState, scope: &CodexReviewerMcpScope, fa
     let token = RuntimeToken::Codex(scope.runtime_id.clone());
     let result = match failure {
         Some(detail) => state.fail_turn_if_runtime_and_generation_match(
-            &scope.session_id, &token, scope.generation, detail),
+            &scope.session_id,
+            &token,
+            scope.generation,
+            detail,
+        ),
         None => state.finish_turn_ok_if_runtime_matches_guarded(
-            &scope.session_id, &token, Some(scope.generation)),
+            &scope.session_id,
+            &token,
+            Some(scope.generation),
+        ),
     };
     if let Err(error) = result {
         eprintln!("reviewer MCP terminal persistence failed: {error:#}");
@@ -37,15 +67,25 @@ fn settle_codex_reviewer_mcp(state: &AppState, scope: &CodexReviewerMcpScope, fa
     // Publish the exact terminal child's parent result even when saving failed.
     // Do not consume waits here; publishing does not claim a durably saved result.
     let mut inner = state.inner.lock().expect("state mutex poisoned");
-    if codex_reviewer_mcp_identity(&inner, scope) && inner.sessions.iter().any(|r|
-        r.session.id == scope.session_id && matches!(r.session.status, SessionStatus::Error | SessionStatus::Idle)) {
-        let d = inner.find_delegation_index(&scope.delegation_id).expect("current delegation");
+    if codex_reviewer_mcp_identity(&inner, scope)
+        && inner.sessions.iter().any(|r| {
+            r.session.id == scope.session_id
+                && matches!(r.session.status, SessionStatus::Error | SessionStatus::Idle)
+        })
+    {
+        let d = inner
+            .find_delegation_index(&scope.delegation_id)
+            .expect("current delegation");
         refresh_delegation_from_child_locked(&mut inner, d);
         state.publish_state_locked(&inner);
     }
 }
 
-fn fail_codex_reviewer_mcp(state: &AppState, scope: &CodexReviewerMcpScope, detail: &str) {
+pub(crate) fn fail_codex_reviewer_mcp(
+    state: &AppState,
+    scope: &CodexReviewerMcpScope,
+    detail: &str,
+) {
     settle_codex_reviewer_mcp(state, scope, Some(detail));
 }
 
@@ -57,7 +97,7 @@ impl Drop for CodexReviewerMcpRequestCleanup {
     }
 }
 
-fn wait_codex_reviewer_mcp_response(
+pub(crate) fn wait_codex_reviewer_mcp_response(
     state: &AppState,
     sessions: &SharedCodexSessionMap,
     scope: &CodexReviewerMcpScope,
@@ -106,7 +146,7 @@ fn wait_codex_reviewer_mcp_response(
     }
 }
 
-fn spawn_codex_reviewer_mcp_observation(
+pub(crate) fn spawn_codex_reviewer_mcp_observation(
     state: AppState,
     sessions: SharedCodexSessionMap,
     scope: CodexReviewerMcpScope,
@@ -310,7 +350,7 @@ fn spawn_codex_reviewer_mcp_observation(
     })
 }
 
-fn defer_codex_reviewer_mcp_finish(
+pub(crate) fn defer_codex_reviewer_mcp_finish(
     state: &AppState,
     sessions: &SharedCodexSessionMap,
     session: &str,
@@ -323,7 +363,9 @@ fn defer_codex_reviewer_mcp_finish(
     let (RuntimeToken::Codex(runtime), Some(thread)) = (token, thread) else {
         return false;
     };
-    let Some(mut scope) = codex_reviewer_mcp_scope_with_stop(state, session, thread, runtime, false, true) else {
+    let Some(mut scope) =
+        codex_reviewer_mcp_scope_with_stop(state, session, thread, runtime, false, true)
+    else {
         return false;
     };
     if scope.generation != generation {

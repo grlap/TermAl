@@ -1,7 +1,9 @@
 // Owns fail-closed recovery from definitive thread-store resume failures.
 // Never edits rollout files or treats timeouts/transport loss as lost history.
 
-fn is_lost_codex_rollout_error(error: &CodexResponseError) -> bool {
+use super::*;
+
+pub(crate) fn is_lost_codex_rollout_error(error: &CodexResponseError) -> bool {
     let CodexResponseError::JsonRpc(detail) = error else {
         return false;
     };
@@ -40,7 +42,7 @@ fn lost_codex_thread_recovery_prompt(thread_id: &str, prompt: &str) -> String {
     )
 }
 
-fn handle_shared_codex_lost_thread_recovery(
+pub(crate) fn handle_shared_codex_lost_thread_recovery(
     writer: &mut impl Write,
     pending: &CodexPendingRequestMap,
     state: &AppState,

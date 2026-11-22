@@ -1,9 +1,11 @@
 // Original-request completion reads over the authenticated mailbox relay.
 // This owner never imports observer facts, probes artifacts, or grants credit.
 
-type TestRunCausalKey = (String, String, String);
+use super::*;
 
-fn test_run_causal_key(registration: &TestRunRegistration) -> Option<TestRunCausalKey> {
+pub(crate) type TestRunCausalKey = (String, String, String);
+
+pub(crate) fn test_run_causal_key(registration: &TestRunRegistration) -> Option<TestRunCausalKey> {
     let causal = test_run_causal_request(registration)?;
     Some((
         causal.payload.requester.participant_key(),
@@ -14,13 +16,13 @@ fn test_run_causal_key(registration: &TestRunRegistration) -> Option<TestRunCaus
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CausalTestCompletionSelector {
-    canonical_message_id: String,
-    payload: MailboxTestPayload,
+pub(crate) struct CausalTestCompletionSelector {
+    pub(crate) canonical_message_id: String,
+    pub(crate) payload: MailboxTestPayload,
 }
 
 impl CausalTestCompletionSelector {
-    fn key(&self) -> TestRunCausalKey {
+    pub(crate) fn key(&self) -> TestRunCausalKey {
         (
             self.payload.requester.participant_key(),
             self.payload.request_send_key.clone(),
@@ -28,13 +30,13 @@ impl CausalTestCompletionSelector {
         )
     }
 
-    fn runner(&self) -> Result<&MailboxRelayPrincipal, ApiError> {
+    pub(crate) fn runner(&self) -> Result<&MailboxRelayPrincipal, ApiError> {
         self.payload.recipient.as_ref().ok_or_else(|| {
             ApiError::bad_request("invalid_request: causal completion recipient is missing")
         })
     }
 
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         validate_mailbox_test_payload(&self.payload)?;
         self.runner()?.validate()?;
         if !self
@@ -49,7 +51,7 @@ impl CausalTestCompletionSelector {
         Ok(())
     }
 
-    fn matches(&self, row: &TestRunRegistration) -> bool {
+    pub(crate) fn matches(&self, row: &TestRunRegistration) -> bool {
         test_run_causal_request(row).is_some_and(|causal| {
             causal.canonical_message_id == self.canonical_message_id
                 && causal.request_send_key == self.payload.request_send_key
@@ -61,13 +63,13 @@ impl CausalTestCompletionSelector {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CausalTestCompletionReply {
+pub(crate) struct CausalTestCompletionReply {
     // No local destination association or private sender store is returned.
-    completion: Option<native_test_completion::Completion>,
+    pub(crate) completion: Option<native_test_completion::Completion>,
 }
 
-struct DurableNativeTestRun {
-    completion: Option<native_test_completion::Completion>,
+pub(crate) struct DurableNativeTestRun {
+    pub(crate) completion: Option<native_test_completion::Completion>,
 }
 
 // Both readers use the same exact registration and original-provider proof.
@@ -157,7 +159,7 @@ impl AppState {
     // Shared by causal and observer projections. One SQLite snapshot proves
     // both the exact registration and its original provider execution, even
     // after compaction. An in-memory terminal alone cannot be published.
-    fn read_durable_native_test_run(
+    pub(crate) fn read_durable_native_test_run(
         &self,
         expected: &TestRunRegistration,
     ) -> Result<Option<DurableNativeTestRun>, ApiError> {
@@ -192,7 +194,7 @@ impl AppState {
 
     // Notification work has an exact original key already. Keep read-back
     // bounded to those normalized rows, with the same proof as ordinary reads.
-    fn read_durable_native_test_run_for_notification(
+    pub(crate) fn read_durable_native_test_run_for_notification(
         &self,
         expected: &TestRunRegistration,
     ) -> Result<Option<DurableNativeTestRun>, ApiError> {
@@ -231,7 +233,7 @@ impl AppState {
         ))
     }
 
-    fn read_causal_test_completion(
+    pub(crate) fn read_causal_test_completion(
         &self,
         selector: &CausalTestCompletionSelector,
         lease: &FederationLinkLease,

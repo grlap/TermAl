@@ -1,52 +1,58 @@
 // A process-local scan cache, never new durable authority. Storage retains
 // every obligation and receipt; rebuilding this cache cannot grant a send.
-const FEDERATION_EXECUTOR_RESERVATION_WINDOW: usize = 1000;
+
+use super::*;
+pub(crate) const FEDERATION_EXECUTOR_RESERVATION_WINDOW: usize = 1000;
 const FEDERATION_EXECUTOR_SCAN_PAGE: usize = 100;
 
 #[derive(Clone, PartialEq, Eq)]
-struct FederationExecutorReservationDomain {
-    image: String,
-    central: Option<FederationHostIdentity>,
-    current: Vec<FederationMailboxBinding>,
+pub(crate) struct FederationExecutorReservationDomain {
+    pub(crate) image: String,
+    pub(crate) central: Option<FederationHostIdentity>,
+    pub(crate) current: Vec<FederationMailboxBinding>,
 }
 
 #[derive(Default)]
-struct FederationExecutorReservationCache {
-    domain: Option<FederationExecutorReservationDomain>,
-    floor: i64,
-    scan_after: i64,
-    exhausted: bool,
-    scanned: usize,
-    stale: u64,
-    unsupported: u64,
-    window: BTreeMap<i64, (String, FederationExecutorWakeRequest)>,
+pub(crate) struct FederationExecutorReservationCache {
+    pub(crate) domain: Option<FederationExecutorReservationDomain>,
+    pub(crate) floor: i64,
+    pub(crate) scan_after: i64,
+    pub(crate) exhausted: bool,
+    pub(crate) scanned: usize,
+    pub(crate) stale: u64,
+    pub(crate) unsupported: u64,
+    pub(crate) window: BTreeMap<i64, (String, FederationExecutorWakeRequest)>,
 }
 
 impl FederationExecutorReservationCache {
     // Crate-local read surface for the separately owned operator diagnostic.
     // It intentionally contains no payload or sender display metadata.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn summary(&self) -> Value {
+    pub(crate) fn summary(&self) -> Value {
         json!({"floorRowid":self.floor,"scannedLastPass":self.scanned,
             "windowOccupancy":self.window.len(),"excluded":{
                 "staleAuthority":self.stale,"unsupported":self.unsupported}})
     }
 
-    fn stale(&self, binding: &FederationMailboxBinding) -> bool {
-        self.domain.as_ref().is_some_and(|domain|
-            domain.central.as_ref() != Some(&binding.central) || !domain.current.contains(binding))
+    pub(crate) fn stale(&self, binding: &FederationMailboxBinding) -> bool {
+        self.domain.as_ref().is_some_and(|domain| {
+            domain.central.as_ref() != Some(&binding.central) || !domain.current.contains(binding)
+        })
     }
 
-    fn refresh(&mut self, connection: &rusqlite::Connection)
-        -> Result<Vec<(String, FederationExecutorWakeRequest)>>
-    {
+    pub(crate) fn refresh(
+        &mut self,
+        connection: &rusqlite::Connection,
+    ) -> Result<Vec<(String, FederationExecutorWakeRequest)>> {
         // Recheck cached state with one bounded indexed read, not one query
         // per message. A settled row frees its window position immediately.
         let rowids = serde_json::to_string(&self.window.keys().collect::<Vec<_>>())?;
-        let pending = connection.prepare(
-            "SELECT rowid FROM federation_mailbox_wake_obligations
-             WHERE rowid IN (SELECT value FROM json_each(?1)) AND state='pending'"
-        )?.query_map([rowids], |row| row.get::<_, i64>(0))?
+        let pending = connection
+            .prepare(
+                "SELECT rowid FROM federation_mailbox_wake_obligations
+             WHERE rowid IN (SELECT value FROM json_each(?1)) AND state='pending'",
+            )?
+            .query_map([rowids], |row| row.get::<_, i64>(0))?
             .collect::<rusqlite::Result<HashSet<_>>>()?;
         self.window.retain(|id, _| pending.contains(id));
         self.scanned = 0;
@@ -70,51 +76,82 @@ impl FederationExecutorReservationCache {
             // A store/I/O error above advances nothing in this page. Only a
             // deterministic content refusal below is an exclusion.
             self.exhausted = raw.len() < FEDERATION_EXECUTOR_SCAN_PAGE;
-            if raw.is_empty() { break; }
+            if raw.is_empty() {
+                break;
+            }
             for (id, state, binding, wake) in raw {
-                if self.window.len() == FEDERATION_EXECUTOR_RESERVATION_WINDOW { break; }
+                if self.window.len() == FEDERATION_EXECUTOR_RESERVATION_WINDOW {
+                    break;
+                }
                 self.scan_after = id;
                 self.scanned += 1;
-                if state != "pending" { continue; }
+                if state != "pending" {
+                    continue;
+                }
                 let target: FederationMailboxBinding = match serde_json::from_str(&binding) {
                     Ok(target) => target,
-                    Err(_) => { self.unsupported += 1; continue; }
+                    Err(_) => {
+                        self.unsupported += 1;
+                        continue;
+                    }
                 };
-                if target.identity.host_id == target.central.host_id { continue; }
-                if self.stale(&target) { self.stale += 1; continue; }
+                if target.identity.host_id == target.central.host_id {
+                    continue;
+                }
+                if self.stale(&target) {
+                    self.stale += 1;
+                    continue;
+                }
                 let request = FederationExecutorWakeRequest {
                     protocol_version: FEDERATION_PROTOCOL_VERSION,
-                    operation_key: format!("mailbox-wake:{}", wake.message_id), target,
+                    operation_key: format!("mailbox-wake:{}", wake.message_id),
+                    target,
                     wake: wake.with_display_copies(),
                 };
-                if request.operation(1).is_err() { self.unsupported += 1; continue; }
+                if request.operation(1).is_err() {
+                    self.unsupported += 1;
+                    continue;
+                }
                 self.window.insert(id, (binding, request));
             }
-            if self.exhausted { break; }
+            if self.exhausted {
+                break;
+            }
         }
-        self.floor = self.window.first_key_value().map_or(self.scan_after, |(id, _)| id - 1);
+        self.floor = self
+            .window
+            .first_key_value()
+            .map_or(self.scan_after, |(id, _)| id - 1);
         if !self.exhausted && self.window.len() < FEDERATION_EXECUTOR_RESERVATION_WINDOW {
             // Unknown older reservations may exist after restart. Finish the
             // prefix incrementally before new dispatch or receiver admission.
-            return Err(mailbox_store_error(MailboxStoreErrorKind::Capacity,
-                "remote wake reservation scan pending; retry without changing identity"));
+            return Err(mailbox_store_error(
+                MailboxStoreErrorKind::Capacity,
+                "remote wake reservation scan pending; retry without changing identity",
+            ));
         }
         let (count, bytes) = connection.query_row(
             "SELECT COUNT(*),COALESCE(SUM(payload_bytes),0) FROM federation_executor_operations",
-            [], |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
+            [],
+            |row| Ok((row.get::<_, u64>(0)?, row.get::<_, u64>(1)?)),
         )?;
         let mut requests = self.window.values().cloned().collect::<Vec<_>>();
-        let sizes = requests.iter().map(|(_, request)| request.operation(1)
-            .expect("cached candidates validated").payload.len() as u64);
+        let sizes = requests.iter().map(|(_, request)| {
+            request
+                .operation(1)
+                .expect("cached candidates validated")
+                .payload
+                .len() as u64
+        });
         let reserved = federation_executor_reserved_prefix(count, bytes, sizes);
         requests.truncate(reserved);
         Ok(requests)
     }
 }
 
-fn federation_executor_reservation_domain_locked(inner: &StateInner)
-    -> Result<FederationExecutorReservationDomain, ApiError>
-{
+pub(crate) fn federation_executor_reservation_domain_locked(
+    inner: &StateInner,
+) -> Result<FederationExecutorReservationDomain, ApiError> {
     if !inner.federation_durable || inner.federation_continuity_lost {
         return Err(federation_transport_unavailable());
     }
@@ -125,26 +162,44 @@ fn federation_executor_reservation_domain_locked(inner: &StateInner)
     let mut identities = BTreeMap::new();
     for (key, placement) in &inner.federation.placements {
         let valid = federation_placement_reserves_capacity(&inner.federation, placement);
-        let binding = FederationMailboxBinding { central: placement.peer.local.clone(),
-            identity: placement.identity.clone(), placement_generation: placement.placement_generation };
-        identities.insert(key.clone(), (binding.clone(), placement.peer.enrollment_generation, valid));
-        if valid { current.push(binding); }
+        let binding = FederationMailboxBinding {
+            central: placement.peer.local.clone(),
+            identity: placement.identity.clone(),
+            placement_generation: placement.placement_generation,
+        };
+        identities.insert(
+            key.clone(),
+            (binding.clone(), placement.peer.enrollment_generation, valid),
+        );
+        if valid {
+            current.push(binding);
+        }
     }
     let image = serde_json::to_string(&(&central, &identities, &inner.preferences.federation.role))
         .expect("durable reservation identities serialize");
-    Ok(FederationExecutorReservationDomain { image, central, current })
+    Ok(FederationExecutorReservationDomain {
+        image,
+        central,
+        current,
+    })
 }
 
 impl AppState {
-    fn refresh_federation_executor_reservation_domain(&self) -> Result<(), ApiError> {
+    pub(crate) fn refresh_federation_executor_reservation_domain(&self) -> Result<(), ApiError> {
         let domain = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             federation_executor_reservation_domain_locked(&inner)?
         };
-        let mut cache = self.mailbox_store.executor_reservations.lock()
+        let mut cache = self
+            .mailbox_store
+            .executor_reservations
+            .lock()
             .expect("executor reservation mutex poisoned");
         if cache.domain.as_ref() != Some(&domain) {
-            *cache = FederationExecutorReservationCache { domain: Some(domain), ..Default::default() };
+            *cache = FederationExecutorReservationCache {
+                domain: Some(domain),
+                ..Default::default()
+            };
         }
         Ok(())
     }

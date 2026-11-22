@@ -1,9 +1,11 @@
 // Owns bounded sender counters and MAC-verified machine-to-machine replies.
 // Does not settle application intents or retry with fresh keys. Split from federation_rpc.rs.
 
+use super::*;
+
 impl FederationRpcClient {
     #[cfg(test)]
-    async fn allocate_authenticated_counter(
+    pub(crate) async fn allocate_authenticated_counter(
         &self,
         context: &Arc<FederationSecurityContext>,
     ) -> Result<u64, ApiError> {
@@ -55,41 +57,74 @@ impl FederationRpcClient {
         }
     }
 
-    async fn request<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
+    pub(crate) async fn request<T: DeserializeOwned>(
+        &self,
+        route: FederationRpcRoute,
+    ) -> Result<T, ApiError> {
         let retry = match &route {
             FederationRpcRoute::Mailbox(lease, request)
-                if !matches!(request.operation, FederationMailboxOperation::ReadKeyed { .. }) =>
-                Some((lease.clone(), request.clone())),
+                if !matches!(
+                    request.operation,
+                    FederationMailboxOperation::ReadKeyed { .. }
+                ) =>
+            {
+                Some((lease.clone(), request.clone()))
+            }
             _ => None,
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         let first = self.request_once(route).await;
-        if first.as_ref().err().is_some_and(|error| matches!(error.kind,
-            Some(ApiErrorKind::FederationMailboxWriterAdmission | ApiErrorKind::FederationMailboxDirectoryFence))) {
+        if first.as_ref().err().is_some_and(|error| {
+            matches!(
+                error.kind,
+                Some(
+                    ApiErrorKind::FederationMailboxWriterAdmission
+                        | ApiErrorKind::FederationMailboxDirectoryFence
+                )
+            )
+        }) {
             if let Some((lease, request)) = retry {
-                return match tokio::time::timeout_at(deadline,
-                    self.request_once(FederationRpcRoute::Mailbox(lease, request))).await {
+                return match tokio::time::timeout_at(
+                    deadline,
+                    self.request_once(FederationRpcRoute::Mailbox(lease, request)),
+                )
+                .await
+                {
                     Ok(result) => result,
-                    Err(_) => Err(federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE,
-                        "central mailbox transport_loss during exact retry")),
+                    Err(_) => Err(federation_mailbox_unknown_outcome(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "central mailbox transport_loss during exact retry",
+                    )),
                 };
             }
         }
         first
     }
 
-    async fn request_once<T: DeserializeOwned>(&self, route: FederationRpcRoute) -> Result<T, ApiError> {
-        let policy_deadline = matches!(&route, FederationRpcRoute::PromptPolicy(_, _))
-            .then(|| tokio::time::Instant::from_std(self.channel.control.clock.now() + Duration::from_secs(10)));
+    pub(crate) async fn request_once<T: DeserializeOwned>(
+        &self,
+        route: FederationRpcRoute,
+    ) -> Result<T, ApiError> {
+        let policy_deadline = matches!(&route, FederationRpcRoute::PromptPolicy(_, _)).then(|| {
+            tokio::time::Instant::from_std(
+                self.channel.control.clock.now() + Duration::from_secs(10),
+            )
+        });
         let policy_permit = if matches!(&route, FederationRpcRoute::PromptPolicy(_, _)) {
             let permit = Arc::new(self.channel.bound.try_acquire()?);
             let job_permit = permit.clone();
             let check = self.ensure_current.clone();
-            self.channel.control.clock.timeout_at(policy_deadline.expect("policy deadline"),
-                run_blocking_api(move || {
-                    let _permit = job_permit;
-                    check()
-                })).await
+            self.channel
+                .control
+                .clock
+                .timeout_at(
+                    policy_deadline.expect("policy deadline"),
+                    run_blocking_api(move || {
+                        let _permit = job_permit;
+                        check()
+                    }),
+                )
+                .await
                 .map_err(|_| federation_prompt_policy_unknown_outcome())??;
             Some(permit)
         } else {
@@ -103,19 +138,32 @@ impl FederationRpcClient {
         let (lease, path) = match &route {
             FederationRpcRoute::Health(lease) => (lease, "/federation/v1/health"),
             FederationRpcRoute::PromptPolicy(lease, _) => (lease, FEDERATION_PROMPT_POLICY_ROUTE),
-            FederationRpcRoute::HostUtilization(lease) => (lease, "/federation/v1/host-utilization"),
+            FederationRpcRoute::HostUtilization(lease) => {
+                (lease, "/federation/v1/host-utilization")
+            }
             FederationRpcRoute::Onboarding(lease, probe) => (lease, probe.path()),
-            FederationRpcRoute::Mailbox(lease, request) => (lease,
-                if matches!(request.operation, FederationMailboxOperation::Directory { alias_basis: true }) {
+            FederationRpcRoute::Mailbox(lease, request) => (
+                lease,
+                if matches!(
+                    request.operation,
+                    FederationMailboxOperation::Directory { alias_basis: true }
+                ) {
                     "/federation/v1/mailbox?aliasBasis=true"
-                } else { "/federation/v1/mailbox" }),
+                } else {
+                    "/federation/v1/mailbox"
+                },
+            ),
             FederationRpcRoute::ExecutorWake(lease, _) => (lease, FEDERATION_EXECUTOR_WAKE_ROUTE),
-            FederationRpcRoute::ExecutorOutcome(lease, _) => (lease, FEDERATION_EXECUTOR_OUTCOME_ROUTE),
+            FederationRpcRoute::ExecutorOutcome(lease, _) => {
+                (lease, FEDERATION_EXECUTOR_OUTCOME_ROUTE)
+            }
             FederationRpcRoute::NativeBinding(lease, _) => {
                 (lease, "/federation/v1/mailbox/native-binding")
             }
             FederationRpcRoute::Binding(lease, _) => (lease, "/federation/v1/mailbox/binding"),
-            FederationRpcRoute::Participation(lease, _) => (lease, "/federation/v1/mailbox/participation"),
+            FederationRpcRoute::Participation(lease, _) => {
+                (lease, "/federation/v1/mailbox/participation")
+            }
             FederationRpcRoute::MailboxRelay(lease, _) => (lease, MAILBOX_RELAY_RPC_ROUTE),
         };
         lease.with_incarnation(|| Ok(()))?;
@@ -156,8 +204,12 @@ impl FederationRpcClient {
             .unwrap_or_default()
             .to_vec();
         let limit = match &route {
-            FederationRpcRoute::Mailbox(_, _) | FederationRpcRoute::MailboxRelay(_, _) => FEDERATION_MAILBOX_REQUEST_BYTES,
-            FederationRpcRoute::ExecutorWake(_, _) | FederationRpcRoute::ExecutorOutcome(_, _) => 32 * 1024,
+            FederationRpcRoute::Mailbox(_, _) | FederationRpcRoute::MailboxRelay(_, _) => {
+                FEDERATION_MAILBOX_REQUEST_BYTES
+            }
+            FederationRpcRoute::ExecutorWake(_, _) | FederationRpcRoute::ExecutorOutcome(_, _) => {
+                32 * 1024
+            }
             FederationRpcRoute::PromptPolicy(_, body) => {
                 body.validate()?;
                 FEDERATION_PROMPT_POLICY_REQUEST_BYTES
@@ -342,7 +394,8 @@ impl FederationRpcClient {
                 run_blocking_api(move || {
                     let _permit = job_permit;
                     check()
-                }).await
+                })
+                .await
             } else {
                 (self.ensure_current)()
             };
@@ -365,25 +418,46 @@ impl FederationRpcClient {
                 // application uncertainty and its idempotency key remain owned.
                 settle_verified!();
                 if let FederationRpcRoute::MailboxRelay(_, relay_request) = &route {
-                    return Ok(Err(if status == StatusCode::NOT_FOUND && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok() {
-                        ApiError::not_found("authenticated native mailbox resource or membership not found")
-                    } else if status == StatusCode::NOT_FOUND {
-                        ApiError::conflict("native mailbox relay capability or membership unavailable; both hosts must support the relay protocol; no local fallback")
-                    } else if status.is_client_error() {
-                        mailbox_relay_verified_refusal(relay_request, &body, status, &bytes)
-                    } else { federation_mailbox_unknown_outcome(status,"native mailbox relay response unavailable") }));
+                    return Ok(Err(
+                        if status == StatusCode::NOT_FOUND
+                            && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok()
+                        {
+                            ApiError::not_found(
+                                "authenticated native mailbox resource or membership not found",
+                            )
+                        } else if status == StatusCode::NOT_FOUND {
+                            ApiError::conflict(
+                                "native mailbox relay capability or membership unavailable; both hosts must support the relay protocol; no local fallback",
+                            )
+                        } else if status.is_client_error() {
+                            mailbox_relay_verified_refusal(relay_request, &body, status, &bytes)
+                        } else {
+                            federation_mailbox_unknown_outcome(
+                                status,
+                                "native mailbox relay response unavailable",
+                            )
+                        },
+                    ));
                 }
                 if matches!(&route, FederationRpcRoute::Binding(_, _)) {
                     return Ok(Err(federation_binding_rpc_error(status)));
                 }
                 if matches!(&route, FederationRpcRoute::Participation(_, _)) {
                     return Ok(Err(if status == StatusCode::NOT_FOUND {
-                        ApiError::conflict("automatic mailbox participation is unavailable on the peer; both hosts must support it; no local fallback")
-                    } else { federation_binding_rpc_error(status) }));
+                        ApiError::conflict(
+                            "automatic mailbox participation is unavailable on the peer; both hosts must support it; no local fallback",
+                        )
+                    } else {
+                        federation_binding_rpc_error(status)
+                    }));
                 }
                 if route.mailbox_lease().is_some() {
-                    let FederationRpcRoute::Mailbox(_, request) = &route else { unreachable!() };
-                    return Ok(Err(federation_mailbox_verified_error(request, status, &bytes)));
+                    let FederationRpcRoute::Mailbox(_, request) = &route else {
+                        unreachable!()
+                    };
+                    return Ok(Err(federation_mailbox_verified_error(
+                        request, status, &bytes,
+                    )));
                 }
                 return Ok(Err(match status {
                     StatusCode::LOCKED
@@ -400,7 +474,8 @@ impl FederationRpcClient {
                 Some(decoded) => decoded,
                 None => {
                     rpc_stage = "decode";
-                    serde_json::from_slice(&bytes).map_err(|_| federation_transport_unavailable())?
+                    serde_json::from_slice(&bytes)
+                        .map_err(|_| federation_transport_unavailable())?
                 }
             };
             settle_verified!();
@@ -408,9 +483,17 @@ impl FederationRpcClient {
         });
         #[cfg(test)]
         let request_started_at = std::time::Instant::now();
-        let timeout = if telemetry { host_utilization::PEER_DEADLINE } else { Duration::from_secs(10) };
+        let timeout = if telemetry {
+            host_utilization::PEER_DEADLINE
+        } else {
+            Duration::from_secs(10)
+        };
         let result = if let Some(deadline) = policy_deadline {
-            self.channel.control.clock.timeout_at(deadline, request).await
+            self.channel
+                .control
+                .clock
+                .timeout_at(deadline, request)
+                .await
         } else {
             self.channel.control.clock.timeout(timeout, request).await
         };
@@ -424,14 +507,22 @@ impl FederationRpcClient {
                 && rpc_status == Some(StatusCode::REQUEST_TIMEOUT.as_u16()));
         match result {
             Ok(Ok(result)) => result,
-            failure if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() => {
+            failure
+                if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() =>
+            {
                 // The blocking authority job still owns its permit. Its late
                 // result cannot supply policy to the expired caller.
                 allocated.retire("timeout");
                 Err(federation_prompt_policy_unknown_outcome())
             }
-            failure if telemetry && (failure.is_err()
-                || matches!(rpc_stage, "execute" | "responseBody" | "decode" | "retired")) => {
+            failure
+                if telemetry
+                    && (failure.is_err()
+                        || matches!(
+                            rpc_stage,
+                            "execute" | "responseBody" | "decode" | "retired"
+                        )) =>
+            {
                 // This GET has no application outcome to recover. Its counter
                 // is retired with a record on a bounded read failure; it must
                 // not retire a healthy pair merely because telemetry was
@@ -463,7 +554,10 @@ impl FederationRpcClient {
                 #[cfg(test)]
                 {
                     let reason = if let Ok(Err(error)) = &_failure {
-                        format!("inner_error status={} error={}", error.status, error.message)
+                        format!(
+                            "inner_error status={} error={}",
+                            error.status, error.message
+                        )
                     } else {
                         "unexpected".to_owned()
                     };
@@ -482,7 +576,7 @@ impl FederationRpcClient {
 impl FederationRpcRoute {
     /// The fixed local name of this request's operation. It never carries a
     /// path, query or payload, so a bounded record may repeat it.
-    fn operation(&self) -> &'static str {
+    pub(crate) fn operation(&self) -> &'static str {
         match self {
             Self::Health(_) => "health",
             Self::PromptPolicy(_, _) => "promptPolicy",

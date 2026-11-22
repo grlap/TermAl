@@ -2,18 +2,20 @@
 // Origin facts outlive any destination wait. This module grants no verification
 // credit and never reads a remote path, launches a test or creates a local run.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoteTestRunIdentity {
+pub(crate) struct RemoteTestRunIdentity {
     #[serde(
         serialize_with = "serialize_observer_test_origin",
         deserialize_with = "deserialize_observer_test_origin"
     )]
-    origin: TestRunNativeOrigin,
-    run_id: String,
-    request_identity: String,
-    locator_identity: String,
-    started_at: Option<String>,
+    pub(crate) origin: TestRunNativeOrigin,
+    pub(crate) run_id: String,
+    pub(crate) request_identity: String,
+    pub(crate) locator_identity: String,
+    pub(crate) started_at: Option<String>,
 }
 
 impl PartialEq for RemoteTestRunIdentity {
@@ -57,38 +59,38 @@ fn deserialize_observer_test_origin<'de, D: serde::Deserializer<'de>>(
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoteTestRunFacts {
-    identity: RemoteTestRunIdentity,
-    completion: Option<native_test_completion::Completion>,
+pub(crate) struct RemoteTestRunFacts {
+    pub(crate) identity: RemoteTestRunIdentity,
+    pub(crate) completion: Option<native_test_completion::Completion>,
     /// Keep the first contradictory terminal as well as the original.
-    conflict: Option<native_test_completion::Completion>,
-    identity_conflict: bool,
+    pub(crate) conflict: Option<native_test_completion::Completion>,
+    pub(crate) identity_conflict: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoteTestRunWaitLabel {
-    host: FederationHostIdentity,
-    project_id: String,
-    creation_id: String,
-    project_scope: Option<String>,
-    identity: Option<RemoteTestRunIdentity>,
-    facts: Option<RemoteTestRunFacts>,
-    detail: String,
+pub(crate) struct RemoteTestRunWaitLabel {
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) project_id: String,
+    pub(crate) creation_id: String,
+    pub(crate) project_scope: Option<String>,
+    pub(crate) identity: Option<RemoteTestRunIdentity>,
+    pub(crate) facts: Option<RemoteTestRunFacts>,
+    pub(crate) detail: String,
     // Restart requires current authenticated authority and durable read-back.
     #[serde(skip)]
-    confirmed: bool,
+    pub(crate) confirmed: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoteTestRunReply {
-    identity: Option<RemoteTestRunIdentity>,
-    completion: Option<native_test_completion::Completion>,
-    detail: String,
+pub(crate) struct RemoteTestRunReply {
+    pub(crate) identity: Option<RemoteTestRunIdentity>,
+    pub(crate) completion: Option<native_test_completion::Completion>,
+    pub(crate) detail: String,
 }
 
-fn remote_test_run_reference(value: &str) -> Result<Option<(String, String)>, ApiError> {
+pub(crate) fn remote_test_run_reference(value: &str) -> Result<Option<(String, String)>, ApiError> {
     let Some(qualified) = value.strip_prefix("host:") else {
         return Ok(None); // Local identifiers retain their existing validation.
     };
@@ -127,11 +129,11 @@ fn remote_test_run_scope(inner: &StateInner, project: &str) -> Option<String> {
         .filter(|scope| !scope.is_empty() && scope.len() <= 1024)
 }
 
-fn remote_test_run_facts_key(host: &FederationHostIdentity, run: &str) -> String {
+pub(crate) fn remote_test_run_facts_key(host: &FederationHostIdentity, run: &str) -> String {
     format!("{}:{}::{run}", host.host_id, host.host_generation)
 }
 
-fn remote_test_run_wait_label(
+pub(crate) fn remote_test_run_wait_label(
     inner: &StateInner,
     session: usize,
     project: &str,
@@ -194,7 +196,7 @@ fn remote_test_run_wait_current(
         })
 }
 
-fn remote_test_run_wait_verdict(
+pub(crate) fn remote_test_run_wait_verdict(
     inner: &StateInner,
     wait: &TestRunWaitRecord,
     remote: &RemoteTestRunWaitLabel,
@@ -219,7 +221,7 @@ fn remote_test_run_wait_verdict(
     })
 }
 
-fn remote_test_run_wait_section(
+pub(crate) fn remote_test_run_wait_section(
     label: &TestRunWaitRunLabel,
     remote: &RemoteTestRunWaitLabel,
     verdict: Option<TestRunWaitVerdict>,
@@ -248,7 +250,7 @@ fn remote_test_run_wait_section(
 impl AppState {
     // Called only inside the existing authenticated relay. The actor's host
     // vouches for its native caller/project; no caller supplies completion facts.
-    fn read_remote_test_run_origin(
+    pub(crate) fn read_remote_test_run_origin(
         &self,
         actor: &MailboxRelayPrincipal,
         scope: &str,
@@ -366,7 +368,7 @@ impl AppState {
             })
     }
 
-    fn ingest_remote_test_run_reply(
+    pub(crate) fn ingest_remote_test_run_reply(
         &self,
         expected_wait: &TestRunWaitRecord,
         reference: &str,
@@ -615,14 +617,14 @@ impl AppState {
 // Joined by the existing federation supervisor. Its periodic fallback retries
 // observations, never tests or imports. Each pass is a bounded round-robin batch.
 #[derive(Default)]
-struct RemoteTestRunWaitRecovery {
-    task: Option<tokio::task::JoinHandle<()>>,
-    observed_kick: u64,
-    after: usize,
+pub(crate) struct RemoteTestRunWaitRecovery {
+    pub(crate) task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) observed_kick: u64,
+    pub(crate) after: usize,
 }
 
 impl RemoteTestRunWaitRecovery {
-    async fn tick(&mut self, app: &AppState, fallback: bool) {
+    pub(crate) async fn tick(&mut self, app: &AppState, fallback: bool) {
         if self.task.as_ref().is_some_and(|task| !task.is_finished()) {
             return;
         }
@@ -758,7 +760,7 @@ impl RemoteTestRunWaitRecovery {
         }));
     }
 
-    async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         if let Some(task) = self.task {
             let _ = task.await;
         }

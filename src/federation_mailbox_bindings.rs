@@ -2,16 +2,18 @@
 // Does not discover aliases or copy mailbox data. Split from
 // federation_mailbox_directory.rs while adding central mailbox participation.
 
+use super::*;
+
 impl AppState {
     /// Local operator/API opt-in. No other session is enrolled by this action.
-    fn join_federation_mailbox_session(
+    pub(crate) fn join_federation_mailbox_session(
         &self,
         session_id: &str,
     ) -> Result<FederationMailboxParticipant, ApiError> {
         self.join_federation_mailbox_session_with_history(session_id, false)
     }
 
-    fn join_federation_mailbox_session_with_history(
+    pub(crate) fn join_federation_mailbox_session_with_history(
         &self,
         session_id: &str,
         preserve_history: bool,
@@ -23,9 +25,16 @@ impl AppState {
             federation_mailbox_central_locked(&inner)?;
             let root = federation_mailbox_root_locked(&inner, session_id)?;
             if let Some(binding) = root.mailbox_binding() {
-                return inner.federation.mailbox_directory.get(&binding.participant_key())
-                    .filter(|row| row.binding == *binding && federation_mailbox_participant_current_locked(&inner, row))
-                    .cloned().ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY));
+                return inner
+                    .federation
+                    .mailbox_directory
+                    .get(&binding.participant_key())
+                    .filter(|row| {
+                        row.binding == *binding
+                            && federation_mailbox_participant_current_locked(&inner, row)
+                    })
+                    .cloned()
+                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
         }
         let namespace_writer = self
@@ -108,7 +117,7 @@ impl AppState {
     /// Routing-only installation by an authenticated central command, not an
     /// agent payload. The caller supplies the exact current enrolled channel.
     #[cfg(test)]
-    fn install_federation_mailbox_binding(
+    pub(crate) fn install_federation_mailbox_binding(
         &self,
         peer: &FederationPeerSnapshot,
         binding: FederationMailboxBinding,
@@ -122,7 +131,7 @@ impl AppState {
         )
     }
 
-    fn install_federation_mailbox_binding_on_link(
+    pub(crate) fn install_federation_mailbox_binding_on_link(
         &self,
         peer: &FederationPeerSnapshot,
         binding: FederationMailboxBinding,
@@ -130,11 +139,15 @@ impl AppState {
         lease: Option<&FederationLinkLease>,
     ) -> Result<(), ApiError> {
         self.install_federation_mailbox_binding_preserving_history(
-            peer, binding, expected_native_creation_id, lease, false,
+            peer,
+            binding,
+            expected_native_creation_id,
+            lease,
+            false,
         )
     }
 
-    fn install_federation_mailbox_binding_preserving_history(
+    pub(crate) fn install_federation_mailbox_binding_preserving_history(
         &self,
         peer: &FederationPeerSnapshot,
         binding: FederationMailboxBinding,
@@ -171,19 +184,25 @@ impl AppState {
             if record.federation_native_creation_id != expected_native_creation_id {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
-            let replacing_automatic = preserve_history && record.federation_mailbox_binding.is_none()
-                && record.federation_automatic_mailbox_binding.as_ref().is_some_and(|old|
-                    old.central == binding.central && old.identity.host_id == binding.identity.host_id
-                        && old.identity.session_id == binding.identity.session_id
-                        && binding.placement_generation > old.placement_generation);
-            if !replacing_automatic && record.mailbox_binding().is_some_and(|old| old != &binding)
-            {
+            let replacing_automatic = preserve_history
+                && record.federation_mailbox_binding.is_none()
+                && record
+                    .federation_automatic_mailbox_binding
+                    .as_ref()
+                    .is_some_and(|old| {
+                        old.central == binding.central
+                            && old.identity.host_id == binding.identity.host_id
+                            && old.identity.session_id == binding.identity.session_id
+                            && binding.placement_generation > old.placement_generation
+                    });
+            if !replacing_automatic && record.mailbox_binding().is_some_and(|old| old != &binding) {
                 return Err(ApiError::conflict(
                     "session already has a different domain binding",
                 ));
             }
             if record.mailbox_binding() == Some(&binding)
-                && (preserve_history || record.federation_mailbox_binding.is_some()) {
+                && (preserve_history || record.federation_mailbox_binding.is_some())
+            {
                 return Ok(None);
             }
             if !preserve_history && record.federation_automatic_mailbox_binding.is_none() {
@@ -196,9 +215,16 @@ impl AppState {
             let root = inner.session_mut_by_index(index).expect("root checked");
             if preserve_history {
                 if replacing_automatic {
-                    let prior = root.federation_automatic_mailbox_binding.clone().expect("replacement checked");
-                    if !root.federation_retired_automatic_mailbox_bindings.contains(&prior) {
-                        root.federation_retired_automatic_mailbox_bindings.push(prior);
+                    let prior = root
+                        .federation_automatic_mailbox_binding
+                        .clone()
+                        .expect("replacement checked");
+                    if !root
+                        .federation_retired_automatic_mailbox_bindings
+                        .contains(&prior)
+                    {
+                        root.federation_retired_automatic_mailbox_bindings
+                            .push(prior);
                     }
                 }
                 root.federation_automatic_mailbox_binding = Some(binding);

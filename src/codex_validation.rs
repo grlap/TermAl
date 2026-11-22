@@ -17,8 +17,10 @@
 // stays focused on the core state model rather than protocol-specific
 // request-body validators.
 
+use super::*;
+
 /// Validates Codex user input answers.
-fn validate_codex_user_input_answers(
+pub(crate) fn validate_codex_user_input_answers(
     questions: &[UserInputQuestion],
     answers: BTreeMap<String, Vec<String>>,
 ) -> std::result::Result<
@@ -98,7 +100,7 @@ fn validate_codex_user_input_answers(
 }
 
 /// Validates Codex MCP elicitation submission.
-fn validate_codex_mcp_elicitation_submission(
+pub(crate) fn validate_codex_mcp_elicitation_submission(
     request: &McpElicitationRequestPayload,
     action: McpElicitationAction,
     content: Option<Value>,
@@ -135,7 +137,7 @@ fn validate_codex_mcp_elicitation_submission(
 }
 
 /// Validates Codex MCP elicitation form content.
-fn validate_codex_mcp_elicitation_form_content(
+pub(crate) fn validate_codex_mcp_elicitation_form_content(
     request: &McpElicitationRequestPayload,
     content: Value,
 ) -> std::result::Result<Value, ApiError> {
@@ -275,7 +277,9 @@ const CODEX_APP_REQUEST_RESULT_MAX_BYTES: usize = 64 * 1024;
 const CODEX_APP_REQUEST_RESULT_MAX_DEPTH: usize = 32;
 
 /// Validates Codex app request result.
-fn validate_codex_app_request_result(result: Value) -> std::result::Result<Value, ApiError> {
+pub(crate) fn validate_codex_app_request_result(
+    result: Value,
+) -> std::result::Result<Value, ApiError> {
     validate_codex_app_request_result_depth(&result, 0)?;
     let encoded = serde_json::to_vec(&result).map_err(|err| {
         ApiError::bad_request(format!(

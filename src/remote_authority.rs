@@ -4,15 +4,17 @@
 // This module deliberately does not own transport, connection caching, or
 // remote state/delta application.
 
-const REMOTE_CONNECTION_CHANGED_DURING_CREATE: &str =
+use super::*;
+
+pub(crate) const REMOTE_CONNECTION_CHANGED_DURING_CREATE: &str =
     "remote connection changed during remote creation";
-const REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST: &str =
+pub(crate) const REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST: &str =
     "remote connection changed before request dispatch";
-const REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE: &str =
+pub(crate) const REMOTE_PROJECT_BINDING_CHANGED_DURING_CREATE: &str =
     "project remote binding changed during remote creation";
 
 #[derive(Debug)]
-struct RemoteAuthorityApplyError(ApiError);
+pub(crate) struct RemoteAuthorityApplyError(pub(crate) ApiError);
 
 impl std::fmt::Display for RemoteAuthorityApplyError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -22,13 +24,13 @@ impl std::fmt::Display for RemoteAuthorityApplyError {
 
 impl std::error::Error for RemoteAuthorityApplyError {}
 
-fn remote_authority_apply_error(error: &anyhow::Error) -> Option<ApiError> {
+pub(crate) fn remote_authority_apply_error(error: &anyhow::Error) -> Option<ApiError> {
     error
         .downcast_ref::<RemoteAuthorityApplyError>()
         .map(|error| ApiError::from_status(error.0.status, error.0.message.clone()))
 }
 
-fn same_remote_routing_config(left: &RemoteConfig, right: &RemoteConfig) -> bool {
+pub(crate) fn same_remote_routing_config(left: &RemoteConfig, right: &RemoteConfig) -> bool {
     let RemoteConfig {
         id: left_id,
         name: _,
@@ -56,7 +58,7 @@ fn same_remote_routing_config(left: &RemoteConfig, right: &RemoteConfig) -> bool
         && left_user == right_user
 }
 
-fn ensure_remote_routing_config(
+pub(crate) fn ensure_remote_routing_config(
     current: Option<&RemoteConfig>,
     expected: &RemoteConfig,
 ) -> Result<(), ApiError> {
@@ -71,7 +73,7 @@ fn ensure_remote_routing_config(
 /// Create/fork requests have already crossed a remote mutation boundary when
 /// their lease loses authority. Preserve removal's 400 compatibility error,
 /// but report replacement/retirement with the create-specific retry contract.
-fn remote_create_authority_error(error: ApiError) -> ApiError {
+pub(crate) fn remote_create_authority_error(error: ApiError) -> ApiError {
     if error.status == StatusCode::CONFLICT
         && error.message == REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST
     {
@@ -82,7 +84,7 @@ fn remote_create_authority_error(error: ApiError) -> ApiError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteProjectBindingResolution {
+pub(crate) enum RemoteProjectBindingResolution {
     Current,
     ProjectMissing,
     ProjectChanged,
@@ -91,13 +93,13 @@ enum RemoteProjectBindingResolution {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteAuthorityResolution {
+pub(crate) enum RemoteAuthorityResolution {
     Current,
     RemoteMissing,
     RemoteChanged,
 }
 
-fn resolve_remote_authority_locked(
+pub(crate) fn resolve_remote_authority_locked(
     inner: &StateInner,
     remote: &RemoteConfig,
 ) -> RemoteAuthorityResolution {
@@ -117,7 +119,7 @@ fn resolve_remote_authority_locked(
 /// a concurrent project mutation cannot revive stale state and a response from
 /// an old endpoint cannot be attributed to a newly configured server that
 /// retained the same remote id.
-fn resolve_remote_project_binding_locked(
+pub(crate) fn resolve_remote_project_binding_locked(
     inner: &StateInner,
     binding: &RemoteProjectBinding,
 ) -> RemoteProjectBindingResolution {
@@ -142,7 +144,7 @@ impl AppState {
     /// When a decoded response is also malformed, routing authority wins the
     /// error-classification race. Otherwise endpoint replacement or removal
     /// can be hidden behind an unrelated 502 payload-validation error.
-    fn prefer_current_remote_response_error(
+    pub(crate) fn prefer_current_remote_response_error(
         &self,
         lease: &RemoteRequestLease,
         response_error: ApiError,
@@ -153,7 +155,7 @@ impl AppState {
         }
     }
 
-    fn prefer_current_remote_create_response_error(
+    pub(crate) fn prefer_current_remote_create_response_error(
         &self,
         lease: &RemoteRequestLease,
         response_error: ApiError,
@@ -180,7 +182,7 @@ impl AppState {
     /// A -> B -> A settings cycle restores the same bytes after retiring the
     /// original connection. Keeping this lease fence adjacent to the final
     /// mutation prevents a pre-cycle response from crossing that cycle.
-    fn ensure_remote_request_current_locked(
+    pub(crate) fn ensure_remote_request_current_locked(
         &self,
         inner: &StateInner,
         lease: &RemoteRequestLease,
@@ -191,7 +193,7 @@ impl AppState {
             .ensure_state_continuity_generation(lease.state_continuity_generation)
     }
 
-    fn ensure_remote_create_request_current_locked(
+    pub(crate) fn ensure_remote_create_request_current_locked(
         &self,
         inner: &StateInner,
         lease: &RemoteRequestLease,
@@ -200,7 +202,7 @@ impl AppState {
             .map_err(remote_create_authority_error)
     }
 
-    fn ensure_remote_apply_authority_locked(
+    pub(crate) fn ensure_remote_apply_authority_locked(
         &self,
         inner: &StateInner,
         expected_remote: &RemoteConfig,
@@ -220,9 +222,13 @@ impl AppState {
             // The latch can arrive while an already-issued request executes.
             // Its response cannot certify the mirror, and its remote effect
             // must remain explicitly uncertain rather than invite replay.
-            return Err(ApiError::internal("Remote output stopped while the request was in flight.").with_kind(
-                ApiErrorKind::OutputLimitExceeded { limit: MAX_ENCODED_OUTPUT_BYTES, outcome: ResponseMutationOutcome::Unknown },
-            ));
+            return Err(ApiError::internal(
+                "Remote output stopped while the request was in flight.",
+            )
+            .with_kind(ApiErrorKind::OutputLimitExceeded {
+                limit: MAX_ENCODED_OUTPUT_BYTES,
+                outcome: ResponseMutationOutcome::Unknown,
+            }));
         }
         Ok(())
     }

@@ -2,24 +2,35 @@
 // Base-service authority; ordinary observation admission is not a prerequisite.
 // Acceptance's historical revision capture remains a separate consumer.
 
+use super::*;
+
 fn engram_naming_root_current(root: &str, common_dir_key: &str) -> bool {
     let path = FsPath::new(root);
-    fs::canonicalize(path).is_ok_and(|canonical|
-        engram_exact_path_key(&canonical) == engram_exact_path_key(path))
-        && engram_source_root_common_dir(path).is_some_and(|common|
-            engram_exact_path_key(&common) == common_dir_key)
+    fs::canonicalize(path)
+        .is_ok_and(|canonical| engram_exact_path_key(&canonical) == engram_exact_path_key(path))
+        && engram_source_root_common_dir(path)
+            .is_some_and(|common| engram_exact_path_key(&common) == common_dir_key)
 }
 
 impl AppState {
-    fn engram_naming_source_basis_within(
-        &self, target: &EngramBindingTarget, root: &str, common_dir_key: &str,
+    pub(crate) fn engram_naming_source_basis_within(
+        &self,
+        target: &EngramBindingTarget,
+        root: &str,
+        common_dir_key: &str,
         budget: Duration,
     ) -> Option<EngramExecutionSourceBasis> {
-        if budget.is_zero() { return None; }
+        if budget.is_zero() {
+            return None;
+        }
         let budget = engram_operation_timeout(budget);
         let deadline = EngramSourcePhasePlan::from(std::time::Instant::now() + budget);
-        let live = self.inner.lock().expect("state mutex poisoned")
-            .engram_turn_basis_captures_live.clone();
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_turn_basis_captures_live
+            .clone();
         let state = self.clone();
         let target = target.clone();
         let root = root.to_owned();
@@ -37,19 +48,25 @@ impl AppState {
         )
     }
 
-    fn engram_naming_source_basis_until(
-        &self, target: &EngramBindingTarget, root: &str, common_dir_key: &str,
+    pub(crate) fn engram_naming_source_basis_until(
+        &self,
+        target: &EngramBindingTarget,
+        root: &str,
+        common_dir_key: &str,
         deadline: impl Into<EngramSourcePhasePlan>,
     ) -> Result<EngramExecutionSourceBasis> {
         let deadline = deadline.into();
         let current = |inner: &StateInner| {
             Self::engram_source_root_target_locked(inner, &target.connection.session_id)
-                .ok().flatten().is_some_and(|now|
+                .ok()
+                .flatten()
+                .is_some_and(|now| {
                     now.connection == target.connection
                         && now.project_id == target.project_id
                         && now.settings.same_work_service_settings(&target.settings)
                         && now.external_ref == target.external_ref
-                        && now.runtime_snapshot == target.runtime_snapshot)
+                        && now.runtime_snapshot == target.runtime_snapshot
+                })
         };
         deadline.check()?;
         if !current(&self.inner.lock().expect("state mutex poisoned"))
@@ -59,13 +76,22 @@ impl AppState {
         }
         let cwd = engram_host_workdir(self.persistence_path.as_ref())?;
         #[cfg(test)]
-        let scripted = self.inner.lock().expect("state mutex poisoned")
-            .test_observation_source_owner.clone();
+        let scripted = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_observation_source_owner
+            .clone();
         let (_, observation) = engram_source_owner_observe_with(
-            &target.connection.binary_path, FsPath::new(root), &cwd, deadline,
+            &target.connection.binary_path,
+            FsPath::new(root),
+            &cwd,
+            deadline,
             |binary, cwd, args, until, limit| {
                 #[cfg(test)]
-                if let Some(run) = &scripted { return run(binary, cwd, args, until, limit); }
+                if let Some(run) = &scripted {
+                    return run(binary, cwd, args, until, limit);
+                }
                 engram_source_owner_run(binary, cwd, args, until, limit)
             },
         )?;
@@ -77,8 +103,11 @@ impl AppState {
         }
         engram_source_before_deadline(deadline.completion_deadline)?;
         Ok(EngramExecutionSourceBasis {
-            workspace_id: root.to_owned(), source_revision: String::new(),
-            source_id: Some(source_id), source_root_generation: None, source_root_state: None,
+            workspace_id: root.to_owned(),
+            source_revision: String::new(),
+            source_id: Some(source_id),
+            source_root_generation: None,
+            source_root_state: None,
         })
     }
 }

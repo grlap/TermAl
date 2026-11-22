@@ -1,38 +1,47 @@
 // Process-local metadata only. Observes the existing authority decisions;
 // never persists, retries, changes admission or reads request payloads.
+
+use super::*;
 const FEDERATION_DURABILITY_HISTORY_LIMIT: usize = 64;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FederationDurabilityRecord {
-    sequence: u64,
-    at: String,
+pub(crate) struct FederationDurabilityRecord {
+    pub(crate) sequence: u64,
+    pub(crate) at: String,
     last_at: String,
-    count: u64,
+    pub(crate) count: u64,
     last_false_for_ms: Option<u64>,
-    kind: &'static str,
-    site: &'static str,
-    stage: Option<&'static str>,
-    durable: bool,
+    pub(crate) kind: &'static str,
+    pub(crate) site: &'static str,
+    pub(crate) stage: Option<&'static str>,
+    pub(crate) durable: bool,
     window_id: Option<u64>,
     false_for_ms: Option<u64>,
-    status: Option<u16>,
+    pub(crate) status: Option<u16>,
 }
 
 #[derive(Default)]
-struct FederationDurabilityHistory {
-    records: VecDeque<FederationDurabilityRecord>,
-    sequence: u64,
-    evicted: u64,
+pub(crate) struct FederationDurabilityHistory {
+    pub(crate) records: VecDeque<FederationDurabilityRecord>,
+    pub(crate) sequence: u64,
+    pub(crate) evicted: u64,
     false_since: Option<std::time::Instant>,
     window_id: Option<u64>,
 }
 
 impl FederationDurabilityHistory {
-    fn push(&mut self, kind: &'static str, site: &'static str, durable: bool, status: Option<u16>) {
+    pub(crate) fn push(
+        &mut self,
+        kind: &'static str,
+        site: &'static str,
+        durable: bool,
+        status: Option<u16>,
+    ) {
         self.sequence = self.sequence.saturating_add(1);
         let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let elapsed = self.false_since
+        let elapsed = self
+            .false_since
             .map(|start| start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
         let record = FederationDurabilityRecord {
             sequence: self.sequence,
@@ -56,14 +65,14 @@ impl FederationDurabilityHistory {
     }
 }
 
-struct FederationDurabilityDiagnostics {
+pub(crate) struct FederationDurabilityDiagnostics {
     observer_id: String,
-    history: Mutex<FederationDurabilityHistory>,
-    link_history: Mutex<FederationLinkDiagnosticHistory>,
+    pub(crate) history: Mutex<FederationDurabilityHistory>,
+    pub(crate) link_history: Mutex<FederationLinkDiagnosticHistory>,
 }
 
 impl FederationDurabilityDiagnostics {
-    fn new(durable: bool, site: &'static str) -> Self {
+    pub(crate) fn new(durable: bool, site: &'static str) -> Self {
         let mut history = FederationDurabilityHistory::default();
         if !durable {
             history.false_since = Some(std::time::Instant::now());
@@ -77,7 +86,7 @@ impl FederationDurabilityDiagnostics {
         }
     }
 
-    fn transition(&self, durable: bool, site: &'static str) {
+    pub(crate) fn transition(&self, durable: bool, site: &'static str) {
         let mut history = self
             .history
             .lock()
@@ -93,7 +102,7 @@ impl FederationDurabilityDiagnostics {
         }
     }
 
-    fn refusal(&self, durable: bool, stage: &'static str, status: u16) {
+    pub(crate) fn refusal(&self, durable: bool, stage: &'static str, status: u16) {
         let mut history = self
             .history
             .lock()
@@ -101,16 +110,25 @@ impl FederationDurabilityDiagnostics {
         // Repeated wire refusals during one hold must not evict its cause.
         // Keep first-observation order and update only bounded scalar metadata.
         let window = history.window_id;
-        let elapsed = history.false_since
+        let elapsed = history
+            .false_since
             .map(|start| start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
         let repeated = if window.is_some() {
-            history.records.iter_mut().rev().find(|row| row.kind == "refusal"
-                && row.window_id == window && row.stage == Some(stage)
-                && row.status == Some(status) && row.durable == durable)
+            history.records.iter_mut().rev().find(|row| {
+                row.kind == "refusal"
+                    && row.window_id == window
+                    && row.stage == Some(stage)
+                    && row.status == Some(status)
+                    && row.durable == durable
+            })
         } else {
-            history.records.back_mut().filter(|row| row.kind == "refusal"
-                && row.window_id.is_none() && row.stage == Some(stage)
-                && row.status == Some(status) && row.durable == durable)
+            history.records.back_mut().filter(|row| {
+                row.kind == "refusal"
+                    && row.window_id.is_none()
+                    && row.stage == Some(stage)
+                    && row.status == Some(status)
+                    && row.durable == durable
+            })
         };
         if let Some(row) = repeated {
             row.count = row.count.saturating_add(1);
@@ -121,7 +139,7 @@ impl FederationDurabilityDiagnostics {
         }
     }
 
-    fn snapshot(&self) -> Value {
+    pub(crate) fn snapshot(&self) -> Value {
         let history = self
             .history
             .lock()
@@ -140,7 +158,7 @@ impl FederationDurabilityDiagnostics {
 }
 
 impl StateInner {
-    fn set_federation_durable(&mut self, durable: bool, site: &'static str) {
+    pub(crate) fn set_federation_durable(&mut self, durable: bool, site: &'static str) {
         let changed = self.federation_durable != durable;
         self.federation_durable = durable;
         if changed {

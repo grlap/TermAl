@@ -1,15 +1,17 @@
 // Owns exact retained-outcome replay and definitive target-retirement fencing.
 // Does not authorize a new append from an old receipt or interpret lost links
 // as retirement. SQLite admission precedes the commit-adjacent state guard.
+
+use super::*;
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum FederationDeliveryTerminalState {
+pub(crate) enum FederationDeliveryTerminalState {
     Refused,
     Abandoned,
 }
 
 impl FederationDeliveryTerminalState {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Refused => "refused",
             Self::Abandoned => "abandoned",
@@ -19,20 +21,20 @@ impl FederationDeliveryTerminalState {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationDeliveryTerminal {
-    state: FederationDeliveryTerminalState,
-    canonical_digest: String,
+pub(crate) struct FederationDeliveryTerminal {
+    pub(crate) state: FederationDeliveryTerminalState,
+    pub(crate) canonical_digest: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(untagged)]
-enum FederationDeliveryOutcome {
+pub(crate) enum FederationDeliveryOutcome {
     Committed(MailboxAppendReceipt),
     Terminal(FederationDeliveryTerminal),
 }
 
 impl AppState {
-    fn execute_exact_federation_delivery(
+    pub(crate) fn execute_exact_federation_delivery(
         &self,
         central: FederationHostIdentity,
         participant: FederationMailboxParticipant,
@@ -46,12 +48,16 @@ impl AppState {
         // Replay is authorized only by the exact current sender. A completed
         // target's authority must not be required to read an immutable outcome.
         let sender_authority = FederationMailboxAuthority {
-            app: self.clone(), actor: participant.binding.clone(),
-            lease: authority.lease.clone(), target: None,
+            app: self.clone(),
+            actor: participant.binding.clone(),
+            lease: authority.lease.clone(),
+            target: None,
         };
-        if let Some(outcome) = self.mailbox_store.retained_federation_delivery(
-            &delivery, || sender_authority.lock(),
-        ).map_err(mailbox_api_error)? {
+        if let Some(outcome) = self
+            .mailbox_store
+            .retained_federation_delivery(&delivery, || sender_authority.lock())
+            .map_err(mailbox_api_error)?
+        {
             return federation_mailbox_response(central, &outcome);
         }
         let attempted = (|| {
@@ -65,7 +71,11 @@ impl AppState {
                         return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                     }
                     self.execute_federation_delivery(
-                        central.clone(), participant, target, delivery.clone(), authority,
+                        central.clone(),
+                        participant,
+                        target,
+                        delivery.clone(),
+                        authority,
                     )
                 }
                 Err(error) if error.status == StatusCode::NOT_FOUND => {
@@ -79,10 +89,13 @@ impl AppState {
                         // through the refusal transaction's COMMIT.
                         Ok(guard)
                     }).map_err(mailbox_api_error)?;
-                    federation_mailbox_response(central.clone(), &FederationDeliveryTerminal {
-                        state: FederationDeliveryTerminalState::Refused,
-                        canonical_digest: delivery.digest(),
-                    })
+                    federation_mailbox_response(
+                        central.clone(),
+                        &FederationDeliveryTerminal {
+                            state: FederationDeliveryTerminalState::Refused,
+                            canonical_digest: delivery.digest(),
+                        },
+                    )
                 }
                 Err(error) => Err(error),
             }
@@ -92,9 +105,11 @@ impl AppState {
             Err(error) => {
                 // Another append/cancel may have won after the first lookup.
                 // Recover that outcome under sender-only authority as well.
-                match self.mailbox_store.retained_federation_delivery(
-                    &delivery, || sender_authority.lock(),
-                ).map_err(mailbox_api_error)? {
+                match self
+                    .mailbox_store
+                    .retained_federation_delivery(&delivery, || sender_authority.lock())
+                    .map_err(mailbox_api_error)?
+                {
                     Some(outcome) => federation_mailbox_response(central, &outcome),
                     None => Err(error),
                 }
@@ -111,10 +126,13 @@ fn federation_delivery_target_retired_locked(
         // Enrollment assigns a domain creation independently of the native
         // creation UUID. Compare domain identities, including for hidden roots;
         // a present but unbound root does not prove the old creation retired.
-        return inner.find_session_index(&binding.identity.session_id).is_none_or(|index| {
-            inner.sessions[index].mailbox_binding()
-                .is_some_and(|current| current.identity != binding.identity)
-        });
+        return inner
+            .find_session_index(&binding.identity.session_id)
+            .is_none_or(|index| {
+                inner.sessions[index]
+                    .mailbox_binding()
+                    .is_some_and(|current| current.identity != binding.identity)
+            });
     }
     // Link loss, re-enrollment and missing directory/placement rows are not
     // evidence of retirement. Only the exact completed placement certifies it.
@@ -139,7 +157,9 @@ impl MailboxStore {
                 "SELECT EXISTS(SELECT 1 FROM federation_mailbox_retired_namespaces WHERE sender_session_id=?1)",
                 [&sender], |row| row.get(0),
             )?;
-            if retired { return Err(federation_delivery_conflict()); }
+            if retired {
+                return Err(federation_delivery_conflict());
+            }
             let row: Option<(String, String, String, Option<String>, Option<u64>)> = connection.query_row(
                 "SELECT canonical_digest,target_session_id,state,message_id,sequence
                  FROM federation_mailbox_dedup WHERE sender_host_id=?1 AND sender_session_id=?2 AND idempotency_key=?3",
@@ -154,12 +174,25 @@ impl MailboxStore {
                     }
                     Some(match state.as_str() {
                         "homeCommitted" => {
-                            let message = mailbox_message_for_idempotency_key(&connection, &sender, &delivery.key)?
-                                .ok_or_else(|| anyhow!("retained committed delivery is missing its message"))?;
+                            let message = mailbox_message_for_idempotency_key(
+                                &connection,
+                                &sender,
+                                &delivery.key,
+                            )?
+                            .ok_or_else(|| {
+                                anyhow!("retained committed delivery is missing its message")
+                            })?;
                             if message_id.as_deref() != Some(message.message_id.as_str())
-                                || sequence != Some(message.sequence) || message.target_session_id != target
-                            { return Err(federation_delivery_conflict()); }
-                            let cursor = mailbox_processed_through(&connection, &message.mailbox_id, &sender)?;
+                                || sequence != Some(message.sequence)
+                                || message.target_session_id != target
+                            {
+                                return Err(federation_delivery_conflict());
+                            }
+                            let cursor = mailbox_processed_through(
+                                &connection,
+                                &message.mailbox_id,
+                                &sender,
+                            )?;
                             FederationDeliveryOutcome::Committed(MailboxAppendReceipt {
                                 notification_cause: (delivery.target.identity.host_id != delivery.target.central.host_id)
                                     .then(|| "duplicate delivery; original notification decision retained".to_owned()),
@@ -169,11 +202,16 @@ impl MailboxStore {
                                 duplicate: true, sender_processed_through: cursor, sender_cursor_advanced: false, receipt_note: None,
                             })
                         }
-                        "refused" | "abandoned" => FederationDeliveryOutcome::Terminal(FederationDeliveryTerminal {
-                            state: if state == "refused" { FederationDeliveryTerminalState::Refused }
-                                else { FederationDeliveryTerminalState::Abandoned },
-                            canonical_digest: digest,
-                        }),
+                        "refused" | "abandoned" => {
+                            FederationDeliveryOutcome::Terminal(FederationDeliveryTerminal {
+                                state: if state == "refused" {
+                                    FederationDeliveryTerminalState::Refused
+                                } else {
+                                    FederationDeliveryTerminalState::Abandoned
+                                },
+                                canonical_digest: digest,
+                            })
+                        }
                         _ => return Err(federation_delivery_conflict()),
                     })
                 }

@@ -3,18 +3,20 @@
 // script execution. Wire algorithm matches Engram's review-freeze-fingerprint
 // schema 1; the implementation is host-owned, never loaded from the target tree.
 
+use super::*;
+
 #[cfg(windows)]
 const REVIEW_FREEZE_WINDOWS_LIMITATION: &str = "Review freeze limitation: untracked executable-mode and filesystem symlink properties are unverified on Windows; Git index modes and symlink targets are covered separately.\n";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewFreezeRequest {
-    manifest_path: String,
-    expected_fingerprint: String,
+pub(crate) struct ReviewFreezeRequest {
+    pub(crate) manifest_path: String,
+    pub(crate) expected_fingerprint: String,
 }
 
 impl ReviewFreezeRequest {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.manifest_path.is_empty()
             || self.manifest_path.len() > 4096
             || self.manifest_path.chars().any(char::is_control)
@@ -26,7 +28,7 @@ impl ReviewFreezeRequest {
     }
 }
 
-fn review_freeze_mode(args: &[String]) -> Result<()> {
+pub(crate) fn review_freeze_mode(args: &[String]) -> Result<()> {
     if args.len() != 4 {
         bail!("usage: termal review-freeze-check ROOT MANIFEST EXPECTED_SHA256");
     }
@@ -41,7 +43,7 @@ fn review_freeze_mode(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn review_freeze_chunk(hash: &mut Sha256, label: &str, bytes: &[u8]) {
+pub(crate) fn review_freeze_chunk(hash: &mut Sha256, label: &str, bytes: &[u8]) {
     hash.update((label.len() as u64).to_be_bytes());
     hash.update((bytes.len() as u64).to_be_bytes());
     hash.update(label.as_bytes());
@@ -51,36 +53,52 @@ fn review_freeze_chunk(hash: &mut Sha256, label: &str, bytes: &[u8]) {
 // Optional per-capture diagnostics. Names are host constants, never paths or
 // arguments. This observes the caller's existing deadline; it cannot renew it.
 #[derive(Debug, Default)]
-struct SourceReadTimings(Mutex<SourceReadTimingState>);
+pub(crate) struct SourceReadTimings(pub(crate) Mutex<SourceReadTimingState>);
 
 #[derive(Debug, Default)]
-struct SourceReadTimingState {
-    finished: Vec<(&'static str, Duration)>,
-    active: Option<(u64, &'static str, std::time::Instant)>,
-    sequence: u64,
-    omitted: bool,
+pub(crate) struct SourceReadTimingState {
+    pub(crate) finished: Vec<(&'static str, Duration)>,
+    pub(crate) active: Option<(u64, &'static str, std::time::Instant)>,
+    pub(crate) sequence: u64,
+    pub(crate) omitted: bool,
 }
 
-struct SourceReadTimingGuard { timings: Arc<SourceReadTimings>, sequence: u64 }
+pub(crate) struct SourceReadTimingGuard {
+    pub(crate) timings: Arc<SourceReadTimings>,
+    pub(crate) sequence: u64,
+}
 
 impl SourceReadTimings {
-    fn begin(self: &Arc<Self>, name: &'static str) -> SourceReadTimingGuard {
+    pub(crate) fn begin(self: &Arc<Self>, name: &'static str) -> SourceReadTimingGuard {
         let mut state = self.0.lock().expect("source timing mutex poisoned");
         state.sequence += 1;
         let sequence = state.sequence;
         state.active = Some((sequence, name, std::time::Instant::now()));
-        SourceReadTimingGuard { timings: self.clone(), sequence }
+        SourceReadTimingGuard {
+            timings: self.clone(),
+            sequence,
+        }
     }
 
-    fn summary(&self) -> String {
+    pub(crate) fn summary(&self) -> String {
         let state = self.0.lock().expect("source timing mutex poisoned");
-        let mut stages: Vec<_> = state.finished.iter().map(|(name, elapsed)|
-            format!("{name}:{}ms", elapsed.as_millis())).collect();
+        let mut stages: Vec<_> = state
+            .finished
+            .iter()
+            .map(|(name, elapsed)| format!("{name}:{}ms", elapsed.as_millis()))
+            .collect();
         if let Some((_, name, started)) = state.active {
-            stages.push(format!("{name}:running:{}ms", started.elapsed().as_millis()));
+            stages.push(format!(
+                "{name}:running:{}ms",
+                started.elapsed().as_millis()
+            ));
         }
-        if state.omitted { stages.push("earlier_stages_omitted".to_owned()); }
-        if stages.is_empty() { stages.push("not_started".to_owned()); }
+        if state.omitted {
+            stages.push("earlier_stages_omitted".to_owned());
+        }
+        if stages.is_empty() {
+            stages.push("not_started".to_owned());
+        }
         stages.join(",").chars().take(2048).collect()
     }
 }
@@ -89,32 +107,43 @@ impl Drop for SourceReadTimingGuard {
     fn drop(&mut self) {
         let mut state = self.timings.0.lock().expect("source timing mutex poisoned");
         if let Some((sequence, name, started)) = state.active {
-            if sequence != self.sequence { return; }
+            if sequence != self.sequence {
+                return;
+            }
             state.active = None;
-            if state.finished.len() == 32 { state.finished.remove(0); state.omitted = true; }
+            if state.finished.len() == 32 {
+                state.finished.remove(0);
+                state.omitted = true;
+            }
             state.finished.push((name, started.elapsed()));
         }
     }
 }
 
-struct ReviewFreezeGit {
-    root: PathBuf,
-    binary: PathBuf,
-    deadline: std::time::Instant,
-    timings: Option<Arc<SourceReadTimings>>,
+pub(crate) struct ReviewFreezeGit {
+    pub(crate) root: PathBuf,
+    pub(crate) binary: PathBuf,
+    pub(crate) deadline: std::time::Instant,
+    pub(crate) timings: Option<Arc<SourceReadTimings>>,
 }
 
 impl ReviewFreezeGit {
-    fn new(cwd: &FsPath) -> Result<Self> {
-        Self::new_with_deadline(cwd,None)
+    pub(crate) fn new(cwd: &FsPath) -> Result<Self> {
+        Self::new_with_deadline(cwd, None)
     }
 
-    fn new_with_deadline(cwd: &FsPath, deadline: Option<std::time::Instant>) -> Result<Self> {
+    pub(crate) fn new_with_deadline(
+        cwd: &FsPath,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<Self> {
         Self::new_with_deadline_and_timings(cwd, deadline, None)
     }
 
-    fn new_with_deadline_and_timings(cwd: &FsPath, deadline: Option<std::time::Instant>,
-        timings: Option<Arc<SourceReadTimings>>) -> Result<Self> {
+    pub(crate) fn new_with_deadline_and_timings(
+        cwd: &FsPath,
+        deadline: Option<std::time::Instant>,
+        timings: Option<Arc<SourceReadTimings>>,
+    ) -> Result<Self> {
         let git = Self::for_ignore_query(cwd, deadline, timings)?;
         let top = git.run(&["rev-parse", "--show-toplevel"], false)?;
         if fs::canonicalize(String::from_utf8(top)?.trim())? != git.root {
@@ -122,15 +151,28 @@ impl ReviewFreezeGit {
         }
         // Git diff can invoke filters. Ignore classification does not run
         // diff, filters or hooks and needs only the shared pinned transport.
-        let filters = git.run(&["config", "--null", "--get-regexp", r"^filter\..*\.(clean|smudge|process)$"], true)?;
-        if !filters.is_empty() { return Err(SourceBasisRefusal::ConfiguredGitFilters.into()); }
+        let filters = git.run(
+            &[
+                "config",
+                "--null",
+                "--get-regexp",
+                r"^filter\..*\.(clean|smudge|process)$",
+            ],
+            true,
+        )?;
+        if !filters.is_empty() {
+            return Err(SourceBasisRefusal::ConfiguredGitFilters.into());
+        }
         Ok(git)
     }
 
     // Transport setup only; never a source-identity admission. This is used
     // solely for bounded check-ignore queries on supplied notification paths.
-    fn for_ignore_query(cwd: &FsPath, deadline: Option<std::time::Instant>,
-        timings: Option<Arc<SourceReadTimings>>) -> Result<Self> {
+    pub(crate) fn for_ignore_query(
+        cwd: &FsPath,
+        deadline: Option<std::time::Instant>,
+        timings: Option<Arc<SourceReadTimings>>,
+    ) -> Result<Self> {
         check_capture_cancellation()?;
         let root = fs::canonicalize(cwd)?;
         // Never allow Windows' current-directory executable search, a relative
@@ -144,7 +186,9 @@ impl ReviewFreezeGit {
         let git = Self {
             root,
             binary,
-            deadline: capture_deadline(deadline.unwrap_or_else(||std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT)),
+            deadline: capture_deadline(
+                deadline.unwrap_or_else(|| std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT),
+            ),
             timings,
         };
         Ok(git)
@@ -153,12 +197,12 @@ impl ReviewFreezeGit {
     /// This worktree's own Git directory, canonical: `<root>/.git` for a main
     /// worktree, `<common>/worktrees/<name>` for a linked one. Read with the
     /// same pinned configuration and shared deadline as every other call.
-    fn own_git_dir(&self) -> Result<PathBuf> {
+    pub(crate) fn own_git_dir(&self) -> Result<PathBuf> {
         let dir = self.run(&["rev-parse", "--absolute-git-dir"], false)?;
         Ok(fs::canonicalize(String::from_utf8(dir)?.trim())?)
     }
 
-    fn command(&self, args: &[&str]) -> BoundedReadCommand {
+    pub(crate) fn command(&self, args: &[&str]) -> BoundedReadCommand {
         let mut command = BoundedReadCommand::new(&self.binary);
         for (name, _) in std::env::vars_os() {
             if name
@@ -214,11 +258,14 @@ impl ReviewFreezeGit {
         command
     }
 
-    fn run(&self, args: &[&str], allow_absent: bool) -> Result<Vec<u8>> {
+    pub(crate) fn run(&self, args: &[&str], allow_absent: bool) -> Result<Vec<u8>> {
         let name = match args.first().copied() {
-            Some("rev-parse") => "git_rev_parse", Some("config") => "git_config",
-            Some("submodule") => "git_submodule", Some("status" | "-c") => "git_status",
-            Some("cat-file") => "git_cat_file", _ => "git_other",
+            Some("rev-parse") => "git_rev_parse",
+            Some("config") => "git_config",
+            Some("submodule") => "git_submodule",
+            Some("status" | "-c") => "git_status",
+            Some("cat-file") => "git_cat_file",
+            _ => "git_other",
         };
         let _timing = self.timings.as_ref().map(|timings| timings.begin(name));
         check_capture_cancellation()?;
@@ -227,8 +274,11 @@ impl ReviewFreezeGit {
         let remaining_at_start = self.deadline.saturating_duration_since(started);
         #[cfg(test)]
         if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
-            eprintln!("Git timing thread={:?} args={args:?} remaining_ms={}",
-                std::thread::current().id(), remaining_at_start.as_millis());
+            eprintln!(
+                "Git timing thread={:?} args={args:?} remaining_ms={}",
+                std::thread::current().id(),
+                remaining_at_start.as_millis()
+            );
         }
         let output = run_bounded_read_command(
             &mut command,
@@ -257,26 +307,40 @@ impl ReviewFreezeGit {
     }
 }
 
-fn review_freeze_git_diagnostic(stderr: &[u8]) -> String {
+pub(crate) fn review_freeze_git_diagnostic(stderr: &[u8]) -> String {
     if [
         "filename too long",
         "file name too long",
         "path too long",
         "filename or extension is too long",
-    ].iter().any(|cause| stderr.windows(cause.len())
-        .any(|part| part.eq_ignore_ascii_case(cause.as_bytes()))) {
+    ]
+    .iter()
+    .any(|cause| {
+        stderr
+            .windows(cause.len())
+            .any(|part| part.eq_ignore_ascii_case(cause.as_bytes()))
+    }) {
         return "long-path read failed; shorten the worktree or child path, or check Git's Windows long-path support; no source revision was taken".to_owned();
     }
     let diagnostic = String::from_utf8_lossy(&stderr[..stderr.len().min(4096)]);
     if diagnostic.is_empty() {
         return "Git exited unsuccessfully without a diagnostic".to_owned();
     }
-    let safe: String = diagnostic.chars().take(512)
-        .map(|c| if c.is_ascii() && !c.is_ascii_control() { c } else { '?' }).collect();
+    let safe: String = diagnostic
+        .chars()
+        .take(512)
+        .map(|c| {
+            if c.is_ascii() && !c.is_ascii_control() {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect();
     format!("Git emitted stderr; source measurement refused: {safe}")
 }
 
-fn review_freeze_git_failure(
+pub(crate) fn review_freeze_git_failure(
     error: anyhow::Error,
     args: &[&str],
     elapsed: Duration,
@@ -299,7 +363,10 @@ fn review_freeze_file(path: &FsPath, limit: usize) -> Result<Vec<u8>> {
 /// were read from: the path, the opened handle and the path again after the
 /// read all showed that same entry, so the metadata belongs to these bytes
 /// and not to an earlier or later replacement.
-fn review_freeze_file_versioned(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
+pub(crate) fn review_freeze_file_versioned(
+    path: &FsPath,
+    limit: usize,
+) -> Result<(Vec<u8>, fs::Metadata)> {
     let (bytes, metadata, ()) = review_freeze_file_observed(path, limit, |_, _| Ok(()))?;
     Ok((bytes, metadata))
 }
@@ -329,7 +396,9 @@ fn review_freeze_file_observed<T>(
         Err(error) => return Err(error.into()),
     };
     let opened = file.metadata()?;
-    if review_freeze_reparse_appeared(&before, &opened) || !review_freeze_same_entry(&before, &opened) {
+    if review_freeze_reparse_appeared(&before, &opened)
+        || !review_freeze_same_entry(&before, &opened)
+    {
         bail!("review input changed while opening");
     }
     let observation = observe(&file, &opened)?;
@@ -356,7 +425,10 @@ fn review_freeze_file_observed<T>(
 /// was a non-link reparse file (deduplicated or a cloud placeholder) is opened
 /// as before, since opening its reparse point would not read its data. There
 /// are no FIFOs in the Windows namespace.
-fn review_freeze_open_without_waiting(path: &FsPath, inspected: &fs::Metadata) -> io::Result<fs::File> {
+fn review_freeze_open_without_waiting(
+    path: &FsPath,
+    inspected: &fs::Metadata,
+) -> io::Result<fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -388,7 +460,7 @@ fn review_freeze_open_without_waiting(path: &FsPath, inspected: &fs::Metadata) -
 
 /// Whether metadata carries a Windows reparse point of any kind. Always false
 /// elsewhere, where links show as symlinks.
-fn review_freeze_is_reparse(metadata: &fs::Metadata) -> bool {
+pub(crate) fn review_freeze_is_reparse(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -412,7 +484,7 @@ fn review_freeze_reparse_appeared(inspected: &fs::Metadata, opened: &fs::Metadat
 /// Whether metadata read without following describes a link of any kind,
 /// including a Windows reparse point (a junction or other) that std does not
 /// report as a symlink.
-fn review_freeze_is_link(metadata: &fs::Metadata) -> bool {
+pub(crate) fn review_freeze_is_link(metadata: &fs::Metadata) -> bool {
     review_freeze_is_reparse(metadata) || metadata.file_type().is_symlink()
 }
 
@@ -425,7 +497,10 @@ static TEST_REVIEW_FREEZE_BEFORE_OPEN: Mutex<Vec<(PathBuf, Box<dyn FnOnce() + Se
     Mutex::new(Vec::new());
 
 #[cfg(test)]
-fn install_test_review_freeze_before_open(path: PathBuf, replace: impl FnOnce() + Send + 'static) {
+pub(crate) fn install_test_review_freeze_before_open(
+    path: PathBuf,
+    replace: impl FnOnce() + Send + 'static,
+) {
     TEST_REVIEW_FREEZE_BEFORE_OPEN
         .lock()
         .expect("test hook mutex poisoned")
@@ -435,7 +510,9 @@ fn install_test_review_freeze_before_open(path: PathBuf, replace: impl FnOnce() 
 #[cfg(test)]
 fn test_review_freeze_before_open(path: &FsPath) {
     let hook = {
-        let mut hooks = TEST_REVIEW_FREEZE_BEFORE_OPEN.lock().expect("test hook mutex poisoned");
+        let mut hooks = TEST_REVIEW_FREEZE_BEFORE_OPEN
+            .lock()
+            .expect("test hook mutex poisoned");
         hooks
             .iter()
             .position(|(suffix, _)| path.ends_with(suffix))
@@ -446,7 +523,7 @@ fn test_review_freeze_before_open(path: &FsPath) {
     }
 }
 
-fn review_freeze_same_entry(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+pub(crate) fn review_freeze_same_entry(a: &fs::Metadata, b: &fs::Metadata) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -465,7 +542,7 @@ fn review_freeze_same_entry(a: &fs::Metadata, b: &fs::Metadata) -> bool {
         && a.file_type() == b.file_type()
 }
 
-fn review_freeze_untracked_path(root: &FsPath, path: &str) -> Result<PathBuf> {
+pub(crate) fn review_freeze_untracked_path(root: &FsPath, path: &str) -> Result<PathBuf> {
     if path.ends_with('/') {
         bail!("embedded untracked Git repositories are unsupported by review verification");
     }
@@ -489,7 +566,7 @@ fn review_freeze_untracked_path(root: &FsPath, path: &str) -> Result<PathBuf> {
     Ok(full)
 }
 
-fn capture_review_freeze(git: &ReviewFreezeGit) -> Result<String> {
+pub(crate) fn capture_review_freeze(git: &ReviewFreezeGit) -> Result<String> {
     let head = git.run(&["rev-parse", "--verify", "--quiet", "HEAD"], true)?;
     let head = String::from_utf8(head)?;
     let head = if head.trim().is_empty() {
@@ -598,7 +675,7 @@ fn capture_review_freeze(git: &ReviewFreezeGit) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn check_review_freeze(cwd: &FsPath, request: &ReviewFreezeRequest) -> Result<String> {
+pub(crate) fn check_review_freeze(cwd: &FsPath, request: &ReviewFreezeRequest) -> Result<String> {
     request.validate()?;
     let git = ReviewFreezeGit::new(cwd)?;
     let manifest_path = FsPath::new(&request.manifest_path);

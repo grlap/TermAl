@@ -1,7 +1,9 @@
 // Owns bounded stdio-to-async buffering for the one owned SSH control stream.
 // Does not open a TCP port or carry keys in logs. New pipe bridge beside federation_process.rs.
 
-fn federation_stdio_control(
+use super::*;
+
+pub(crate) fn federation_stdio_control(
     mut input: impl std::io::Write + Send + 'static,
     mut output: impl std::io::Read + Send + 'static,
 ) -> Result<FederationControlIo, ApiError> {

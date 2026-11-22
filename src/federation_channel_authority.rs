@@ -1,8 +1,10 @@
 // Owns M1 transport-basis validation and exact post-commit link registration.
 // Does not own wire identity or SSH. Split from federation_link.rs.
 
+use super::*;
+
 impl FederationChannel {
-    fn for_app(
+    pub(crate) fn for_app(
         snapshot: FederationPeerSnapshot,
         capability: FederationPairCapability,
         app: AppState,
@@ -13,19 +15,22 @@ impl FederationChannel {
         channel
     }
 
-    fn transport_basis(&self) -> FederationPeerSnapshot {
+    pub(crate) fn transport_basis(&self) -> FederationPeerSnapshot {
         self.basis
             .read()
             .expect("federation basis lock poisoned")
             .clone()
     }
 
-    fn current_authority(&self) -> Result<FederationPeerSnapshot, ApiError> {
+    pub(crate) fn current_authority(&self) -> Result<FederationPeerSnapshot, ApiError> {
         self.current_authority_checked(true)
     }
 
     // Monitoring and diagnostic predicates do not refuse an operation.
-    fn current_authority_checked(&self, record_refusal: bool) -> Result<FederationPeerSnapshot, ApiError> {
+    pub(crate) fn current_authority_checked(
+        &self,
+        record_refusal: bool,
+    ) -> Result<FederationPeerSnapshot, ApiError> {
         let (basis, recorded) = {
             let state = self.state.lock().expect("federation link mutex poisoned");
             (self.transport_basis(), state.recorded_incarnation.clone())
@@ -46,7 +51,10 @@ impl FederationChannel {
             if !inner.federation_durable && !inner.federation_continuity_lost {
                 if record_refusal {
                     inner.federation_durability_diagnostics.refusal(
-                        inner.federation_durable, "channel_authority_check", 423);
+                        inner.federation_durable,
+                        "channel_authority_check",
+                        423,
+                    );
                 }
                 ApiError::from_status(
                     StatusCode::LOCKED,
@@ -59,7 +67,10 @@ impl FederationChannel {
     }
 
     #[cfg(test)]
-    async fn record_connected(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
+    pub(crate) async fn record_connected(
+        &self,
+        lease: &FederationLinkLease,
+    ) -> Result<(), ApiError> {
         let expected = self.current_authority()?;
         let channel = self.clone();
         let settlement = self.basis.begin_settlement();
@@ -136,7 +147,9 @@ impl FederationChannel {
                 return Err(federation_stale_link());
             }
             state.recorded_incarnation = Some(incarnation);
-            if let Some(app) = &channel.app { app.federation_executor_wake_signal.kick(); }
+            if let Some(app) = &channel.app {
+                app.federation_executor_wake_signal.kick();
+            }
             Ok(())
         })
         .await
@@ -145,12 +158,16 @@ impl FederationChannel {
 
     // Called only under the link lock, then takes M1's state lock. This
     // immediate runtime-only CAS works while durable bookkeeping is held.
-    fn retire_recorded(&self, state: &mut FederationLinkState) {
+    pub(crate) fn retire_recorded(&self, state: &mut FederationLinkState) {
         if let Some(incarnation) = state.recorded_incarnation.take() {
             if let Some(app) = &self.app {
                 // This receipt is used only by the exact removal CAS, never
                 // to admit work or adopt authority from a poisoned basis.
-                let basis = self.basis.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+                let basis = self
+                    .basis
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
                 app.federation_peer_disconnected(&basis, &incarnation);
             }
         }

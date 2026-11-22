@@ -66,8 +66,10 @@
 // broadcaster thread) we fall back to synchronous serialize + broadcast so tests
 // can still assert SSE behaviour.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PersistDispatch {
+pub(crate) enum PersistDispatch {
     BackgroundQueued,
     // Global metadata committed. Session-bound owners still require their
     // exact row proof; an isolated sibling is not a failed metadata write.
@@ -75,29 +77,45 @@ enum PersistDispatch {
 }
 
 #[derive(Debug)]
-struct PersistDispatchOutcome {
-    dispatch: PersistDispatch,
-    rejected_sessions: Vec<PersistSessionRejection>,
+pub(crate) struct PersistDispatchOutcome {
+    pub(crate) dispatch: PersistDispatch,
+    pub(crate) rejected_sessions: Vec<PersistSessionRejection>,
 }
 
 impl PersistDispatchOutcome {
-    fn require_session_saved(&self, session_id: &str) -> Result<()> {
-        if let Some(rejected) = self.rejected_sessions.iter().find(|row| row.session_id == session_id) {
-            bail!("session `{}` was not saved: {}", rejected.session_id, rejected.error);
+    pub(crate) fn require_session_saved(&self, session_id: &str) -> Result<()> {
+        if let Some(rejected) = self
+            .rejected_sessions
+            .iter()
+            .find(|row| row.session_id == session_id)
+        {
+            bail!(
+                "session `{}` was not saved: {}",
+                rejected.session_id,
+                rejected.error
+            );
         }
         Ok(())
     }
 
-    fn rejected_remote_session<'a>(&'a self, inner: &StateInner) -> Option<&'a PersistSessionRejection> {
+    fn rejected_remote_session<'a>(
+        &'a self,
+        inner: &StateInner,
+    ) -> Option<&'a PersistSessionRejection> {
         self.rejected_sessions.iter().find(|row| {
-            inner.find_session_index(&row.session_id)
+            inner
+                .find_session_index(&row.session_id)
                 .is_some_and(|index| inner.sessions[index].remote_id.is_some())
         })
     }
 
-    fn require_remote_rows_saved(&self, inner: &StateInner) -> Result<()> {
+    pub(crate) fn require_remote_rows_saved(&self, inner: &StateInner) -> Result<()> {
         if let Some(rejected) = self.rejected_remote_session(inner) {
-            bail!("remote session `{}` was not saved: {}", rejected.session_id, rejected.error);
+            bail!(
+                "remote session `{}` was not saved: {}",
+                rejected.session_id,
+                rejected.error
+            );
         }
         Ok(())
     }
@@ -105,13 +123,13 @@ impl PersistDispatchOutcome {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_AFTER_TEXT_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_BEFORE_STATE_SERIALIZE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_AFTER_TEXT_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_BEFORE_STATE_SERIALIZE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 // Shared by production host retirement and fixture hosts. No StateInner or
 // persistent store is needed to own these process-local workers.
-fn retire_capture_observation_workers(
+pub(crate) fn retire_capture_observation_workers(
     captures: &Arc<CaptureLifetime>,
     observations: &Arc<EngramRuntimeObservationLifetime>,
     federation: &FederationExecutorWakeSignal,
@@ -136,7 +154,7 @@ impl AppState {
     /// remove, reorder). For narrow per-field updates, prefer
     /// [`Self::commit_delta_locked`] to avoid re-serializing the
     /// whole state.
-    fn commit_locked(&self, inner: &mut StateInner) -> Result<u64> {
+    pub(crate) fn commit_locked(&self, inner: &mut StateInner) -> Result<u64> {
         let (revision, _) = self.commit_locked_with_persist_dispatch(inner)?;
         Ok(revision)
     }
@@ -144,14 +162,18 @@ impl AppState {
     /// A row-bound commit keeps the ordinary queueing contract, but a
     /// synchronous fallback must have saved this session before reporting
     /// success. A rejected sibling does not invalidate this row or metadata.
-    fn commit_session_locked(&self, inner: &mut StateInner, session_id: &str) -> Result<u64> {
+    pub(crate) fn commit_session_locked(
+        &self,
+        inner: &mut StateInner,
+        session_id: &str,
+    ) -> Result<u64> {
         let (revision, outcome) = self.commit_persisted_delta_locked_with_outcome(inner)?;
         outcome.require_session_saved(session_id)?;
         self.publish_state_locked(inner);
         Ok(revision)
     }
 
-    fn commit_persisted_session_delta_locked(
+    pub(crate) fn commit_persisted_session_delta_locked(
         &self,
         inner: &mut StateInner,
         session_id: &str,
@@ -168,7 +190,7 @@ impl AppState {
     /// background worker or synchronously persisted after a disconnected
     /// channel, because destructive cleanup in `coordination.sqlite` is safe
     /// only after `termal.sqlite` is durable.
-    fn commit_locked_with_persist_dispatch(
+    pub(crate) fn commit_locked_with_persist_dispatch(
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
@@ -176,7 +198,7 @@ impl AppState {
         Ok((revision, outcome.dispatch))
     }
 
-    fn commit_locked_with_persist_outcome(
+    pub(crate) fn commit_locked_with_persist_outcome(
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatchOutcome)> {
@@ -189,7 +211,7 @@ impl AppState {
     /// without building a global snapshot. Publication stays with the caller
     /// under this same lock. A failed persistence attempt still consumes its
     /// revision, which a narrow caller can use to expose that factual failure.
-    fn commit_persisted_delta_locked_with_dispatch(
+    pub(crate) fn commit_persisted_delta_locked_with_dispatch(
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
@@ -197,7 +219,7 @@ impl AppState {
         Ok((revision, outcome.dispatch))
     }
 
-    fn commit_persisted_delta_locked_with_outcome(
+    pub(crate) fn commit_persisted_delta_locked_with_outcome(
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatchOutcome)> {
@@ -210,7 +232,7 @@ impl AppState {
     /// A child refresh finishes only its affected body certificates. It shares
     /// the existing revision/persistence owner while global retention and
     /// snapshot publication remain with their ordinary maintenance callers.
-    fn commit_delegation_refresh_locked(
+    pub(crate) fn commit_delegation_refresh_locked(
         &self,
         inner: &mut StateInner,
         affected_sessions: &BTreeSet<String>,
@@ -228,7 +250,11 @@ impl AppState {
         Ok(revision)
     }
 
-    fn finish_persist_dispatch_locked(&self, inner: &mut StateInner, outcome: &PersistDispatchOutcome) {
+    fn finish_persist_dispatch_locked(
+        &self,
+        inner: &mut StateInner,
+        outcome: &PersistDispatchOutcome,
+    ) {
         // Dirty settings markers arise only when the disconnected-channel
         // synchronous fallback failed. If any later commit reaches the same
         // synchronous persistence path successfully, the full preferences
@@ -276,15 +302,16 @@ impl AppState {
     /// `persist_created_session` path. That fallback writes a full
     /// snapshot so any sibling mutations from the create flow land
     /// with the created session.
-    fn commit_session_created_locked(
+    pub(crate) fn commit_session_created_locked(
         &self,
         inner: &mut StateInner,
         record: &SessionRecord,
     ) -> Result<u64> {
-        self.commit_session_created_locked_with_outcome(inner, record).map(|(revision, _)| revision)
+        self.commit_session_created_locked_with_outcome(inner, record)
+            .map(|(revision, _)| revision)
     }
 
-    fn commit_session_created_locked_with_outcome(
+    pub(crate) fn commit_session_created_locked_with_outcome(
         &self,
         inner: &mut StateInner,
         record: &SessionRecord,
@@ -302,13 +329,23 @@ impl AppState {
         // symmetric with the sibling means the two paths share one
         // durability posture.
         inner.finish_body_sequence_commits();
-        inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
+        inner.revision = inner
+            .revision
+            .checked_add(1)
+            .context("state revision space exhausted")?;
         let outcome = if self.persist_tx.send(PersistRequest::Delta).is_err() {
             let rejected_sessions = persist_created_session(&self.persistence_path, inner, record)?;
-            self.persist_observer.record_session_rejections(&rejected_sessions);
-            PersistDispatchOutcome { dispatch: PersistDispatch::Synchronous, rejected_sessions }
+            self.persist_observer
+                .record_session_rejections(&rejected_sessions);
+            PersistDispatchOutcome {
+                dispatch: PersistDispatch::Synchronous,
+                rejected_sessions,
+            }
         } else {
-            PersistDispatchOutcome { dispatch: PersistDispatch::BackgroundQueued, rejected_sessions: Vec::new() }
+            PersistDispatchOutcome {
+                dispatch: PersistDispatch::BackgroundQueued,
+                rejected_sessions: Vec::new(),
+            }
         };
         outcome.require_session_saved(&record.session.id)?;
         Ok((inner.revision, outcome))
@@ -331,7 +368,7 @@ impl AppState {
     /// manually with a disconnected persist channel; the send fails
     /// and we fall back to the old synchronous JSON persist so
     /// existing test infrastructure keeps working.
-    fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
+    pub(crate) fn persist_internal_locked(&self, inner: &StateInner) -> Result<()> {
         self.persist_internal_locked_with_dispatch(inner)
             .map(|_| ())
     }
@@ -339,23 +376,43 @@ impl AppState {
     /// Session-bound bookkeeping and synchronous fence fallbacks must not
     /// mistake a partial full-state write for acknowledgement of their row.
     /// A live worker still acknowledges exact content through its fence.
-    fn persist_session_internal_locked(&self, inner: &StateInner, session_id: &str) -> Result<()> {
-        self.persist_internal_locked_with_outcome(inner)?.require_session_saved(session_id)
+    pub(crate) fn persist_session_internal_locked(
+        &self,
+        inner: &StateInner,
+        session_id: &str,
+    ) -> Result<()> {
+        self.persist_internal_locked_with_outcome(inner)?
+            .require_session_saved(session_id)
     }
 
-    fn persist_internal_locked_with_dispatch(&self, inner: &StateInner) -> Result<PersistDispatch> {
+    pub(crate) fn persist_internal_locked_with_dispatch(
+        &self,
+        inner: &StateInner,
+    ) -> Result<PersistDispatch> {
         // Metadata/delegation consumers retain their existing disposition.
         // Session-row retry owners use the detailed outcome below instead.
-        self.persist_internal_locked_with_outcome(inner).map(|outcome| outcome.dispatch)
+        self.persist_internal_locked_with_outcome(inner)
+            .map(|outcome| outcome.dispatch)
     }
 
-    fn persist_synchronous_locked(&self, inner: &StateInner) -> Result<PersistDispatchOutcome> {
-        let (_, rejected_sessions) = persist_locked_state_to_sqlite_report(&self.persistence_path, inner)?;
-        self.persist_observer.record_session_rejections(&rejected_sessions);
-        Ok(PersistDispatchOutcome { dispatch: PersistDispatch::Synchronous, rejected_sessions })
+    pub(crate) fn persist_synchronous_locked(
+        &self,
+        inner: &StateInner,
+    ) -> Result<PersistDispatchOutcome> {
+        let (_, rejected_sessions) =
+            persist_locked_state_to_sqlite_report(&self.persistence_path, inner)?;
+        self.persist_observer
+            .record_session_rejections(&rejected_sessions);
+        Ok(PersistDispatchOutcome {
+            dispatch: PersistDispatch::Synchronous,
+            rejected_sessions,
+        })
     }
 
-    fn persist_internal_locked_with_outcome(&self, inner: &StateInner) -> Result<PersistDispatchOutcome> {
+    pub(crate) fn persist_internal_locked_with_outcome(
+        &self,
+        inner: &StateInner,
+    ) -> Result<PersistDispatchOutcome> {
         if self.persist_tx.send(PersistRequest::Delta).is_err() {
             // Channel disconnected — synchronous fallback for tests
             // and any shutdown path where the persist thread has
@@ -363,7 +420,10 @@ impl AppState {
             // because we have no background worker to do it.
             return self.persist_synchronous_locked(inner);
         }
-        Ok(PersistDispatchOutcome { dispatch: PersistDispatch::BackgroundQueued, rejected_sessions: Vec::new() })
+        Ok(PersistDispatchOutcome {
+            dispatch: PersistDispatch::BackgroundQueued,
+            rejected_sessions: Vec::new(),
+        })
     }
 
     /// Drains any pending persist work and joins the background persist
@@ -405,17 +465,19 @@ impl AppState {
     /// so callers that need strict durability for those variants should
     /// quiesce their producers before invoking this method.
     #[cfg(test)]
-    fn shutdown_persist_blocking(&self) {
+    pub(crate) fn shutdown_persist_blocking(&self) {
         // Fixture constructors intentionally own no worker. Preserve their
         // no-op teardown while production always checks the final full cut.
         if let Err(err) = self.shutdown_persist_result(false) {
-            eprintln!("[termal] final synchronous persist failed during graceful shutdown: {err:#}");
+            eprintln!(
+                "[termal] final synchronous persist failed during graceful shutdown: {err:#}"
+            );
         }
     }
 
     /// Retire the worker and prove the final full cut, including any session
     /// the normal writer isolated. A partial save cannot prove graceful exit.
-    fn shutdown_persist_checked(&self) -> Result<()> {
+    pub(crate) fn shutdown_persist_checked(&self) -> Result<()> {
         self.shutdown_persist_result(true)
     }
 
@@ -433,7 +495,8 @@ impl AppState {
         let handle = guard.take();
         let _shutdown_guard = guard;
         if handle.is_none() && !require_final_cut {
-            self.persist_worker_alive.store(false, std::sync::atomic::Ordering::Release);
+            self.persist_worker_alive
+                .store(false, std::sync::atomic::Ordering::Release);
             return Ok(());
         }
         // Best-effort signal: if the channel is already disconnected
@@ -451,7 +514,9 @@ impl AppState {
         // mode this ordering closes.
         let join_result = if let Some(handle) = handle {
             let _ = self.persist_tx.send(PersistRequest::Shutdown);
-            handle.join().map_err(|err| anyhow!("persist worker join failed during shutdown: {err:?}"))
+            handle
+                .join()
+                .map_err(|err| anyhow!("persist worker join failed during shutdown: {err:?}"))
         } else {
             // A repeated caller must prove its current cut as well: a prior
             // call may have failed, and handle absence proves no durability.
@@ -466,17 +531,23 @@ impl AppState {
         // fallback in `commit_delta_locked`.
         let final_persist_result = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let result = self.persist_synchronous_locked(&inner)
-                .and_then(|outcome| {
-                    let rejected = outcome.rejected_sessions;
-                    if rejected.is_empty() {
-                        Ok(())
-                    } else {
-                        bail!("final persistence retained last-good rows for {} rejected session(s): {}",
-                            rejected.len(), rejected.iter().take(8)
-                                .map(|row| format!("{}: {}", row.session_id, row.error)).collect::<Vec<_>>().join(", "))
-                    }
-                });
+            let result = self.persist_synchronous_locked(&inner).and_then(|outcome| {
+                let rejected = outcome.rejected_sessions;
+                if rejected.is_empty() {
+                    Ok(())
+                } else {
+                    bail!(
+                        "final persistence retained last-good rows for {} rejected session(s): {}",
+                        rejected.len(),
+                        rejected
+                            .iter()
+                            .take(8)
+                            .map(|row| format!("{}: {}", row.session_id, row.error))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+            });
             self.persist_worker_alive
                 .store(false, std::sync::atomic::Ordering::Release);
             result
@@ -501,9 +572,12 @@ impl AppState {
     /// therefore follow one commit order. Used from
     /// the per-session mutation helpers in `session_messages.rs` and
     /// `turn_lifecycle.rs` where full snapshots would be overkill.
-    fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
+    pub(crate) fn commit_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         inner.finish_body_sequence_commits();
-        inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
+        inner.revision = inner
+            .revision
+            .checked_add(1)
+            .context("state revision space exhausted")?;
         // Post-shutdown durability: this commit shape doesn't send its own
         // `PersistRequest::Delta`. Normally the next persist-triggering
         // commit (via `commit_locked` / `commit_persisted_delta_locked`)
@@ -544,7 +618,7 @@ impl AppState {
     /// Like [`Self::commit_delta_locked`] but used by paths where
     /// the mutation has already been persisted (or will be persisted
     /// out-of-band) — skips the wake-persist-thread step.
-    fn commit_persisted_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
+    pub(crate) fn commit_persisted_delta_locked(&self, inner: &mut StateInner) -> Result<u64> {
         self.bump_revision_and_persist_locked(inner)
     }
 
@@ -552,12 +626,12 @@ impl AppState {
     /// background persist thread to pick up whatever sessions got
     /// stamped by this commit. Does not broadcast — the caller
     /// (`commit_locked` or the delta variants) publishes separately.
-    fn bump_revision_and_persist_locked(&self, inner: &mut StateInner) -> Result<u64> {
+    pub(crate) fn bump_revision_and_persist_locked(&self, inner: &mut StateInner) -> Result<u64> {
         let (revision, _) = self.bump_revision_and_persist_locked_with_dispatch(inner)?;
         Ok(revision)
     }
 
-    fn bump_revision_and_persist_locked_with_dispatch(
+    pub(crate) fn bump_revision_and_persist_locked_with_dispatch(
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatch)> {
@@ -565,7 +639,7 @@ impl AppState {
         Ok((revision, outcome.dispatch))
     }
 
-    fn bump_revision_and_persist_locked_with_outcome(
+    pub(crate) fn bump_revision_and_persist_locked_with_outcome(
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatchOutcome)> {
@@ -579,7 +653,10 @@ impl AppState {
         &self,
         inner: &mut StateInner,
     ) -> Result<(u64, PersistDispatchOutcome)> {
-        inner.revision = inner.revision.checked_add(1).context("state revision space exhausted")?;
+        inner.revision = inner
+            .revision
+            .checked_add(1)
+            .context("state revision space exhausted")?;
         let outcome = self.persist_internal_locked_with_outcome(inner)?;
         Ok((inner.revision, outcome))
     }
@@ -588,7 +665,7 @@ impl AppState {
     /// (JSON-serialized metadata-first `StateResponse` snapshots), for tests
     /// that observe snapshots alone; `/api/events` reads `stream_events`.
     #[cfg(test)]
-    fn subscribe_events(&self) -> broadcast::Receiver<String> {
+    pub(crate) fn subscribe_events(&self) -> broadcast::Receiver<String> {
         self.state_broadcast_senders.state_events.subscribe()
     }
 
@@ -596,14 +673,14 @@ impl AppState {
     /// (JSON-serialized `DeltaEvent` payloads), for tests that observe deltas
     /// alone; `/api/events` reads `stream_events`.
     #[cfg(test)]
-    fn subscribe_delta_events(&self) -> broadcast::Receiver<String> {
+    pub(crate) fn subscribe_delta_events(&self) -> broadcast::Receiver<String> {
         self.state_broadcast_senders.delta_events.subscribe()
     }
 
     /// Returns a receiver on the `stream_events` broadcast channel: state
     /// snapshots and deltas together, in the order they were published. The
     /// `/api/events` stream reads this one, never the per-kind channels.
-    fn subscribe_stream_events(&self) -> broadcast::Receiver<SseStreamEvent> {
+    pub(crate) fn subscribe_stream_events(&self) -> broadcast::Receiver<SseStreamEvent> {
         self.state_broadcast_senders.stream_events.subscribe()
     }
 
@@ -611,7 +688,7 @@ impl AppState {
     /// (JSON-serialized `WorkspaceFileChangeEvent` batches). Fires
     /// independently of the revision counter — driven by the
     /// workspace file watcher in `workspace_watch.rs`.
-    fn subscribe_file_events(&self) -> broadcast::Receiver<String> {
+    pub(crate) fn subscribe_file_events(&self) -> broadcast::Receiver<String> {
         self.file_events.subscribe()
     }
 
@@ -622,7 +699,7 @@ impl AppState {
     /// graceful-shutdown completion observe the signal regardless of
     /// timing. Used by `api_sse.rs::state_events` and the production
     /// graceful-shutdown plumbing in `main.rs::run_server`.
-    fn subscribe_shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
+    pub(crate) fn subscribe_shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
         self.shutdown_signal_tx.subscribe()
     }
 
@@ -640,7 +717,7 @@ impl AppState {
     /// regardless of receiver count, which is the documented "sticky
     /// single-producer broadcast" pattern. See bugs.md "One-shot SSE
     /// shutdown notification can be missed before waiter registration".
-    fn trigger_shutdown_signal(&self) {
+    pub(crate) fn trigger_shutdown_signal(&self) {
         retire_capture_observation_workers(
             &self.capture_lifetime,
             &self.runtime_observation_lifetime,
@@ -649,7 +726,7 @@ impl AppState {
         );
     }
 
-    fn host_is_shutting_down(&self) -> bool {
+    pub(crate) fn host_is_shutting_down(&self) -> bool {
         *self.shutdown_signal_tx.borrow()
     }
 
@@ -658,7 +735,7 @@ impl AppState {
     /// An incomplete body-sequence pair is normalized first, so the mailbox
     /// and the synchronous fallback carry the same event. The synchronous
     /// fallback exists for test states without a worker.
-    fn publish_delta_locked(&self, inner: &StateInner, mut event: DeltaEvent) {
+    pub(crate) fn publish_delta_locked(&self, inner: &StateInner, mut event: DeltaEvent) {
         debug_assert_eq!(inner.revision, event.revision());
         #[cfg(test)]
         assert!(
@@ -666,7 +743,10 @@ impl AppState {
             "delta enqueue requires the commit lock"
         );
         event.normalize_body_sequence_pair();
-        if matches!(&event, DeltaEvent::TestRunChanged { .. } | DeltaEvent::TestRunRemoved { .. }) {
+        if matches!(
+            &event,
+            DeltaEvent::TestRunChanged { .. } | DeltaEvent::TestRunRemoved { .. }
+        ) {
             if inner.test_runs.transport_batch_pending {
                 // The original lifecycle callback is still observable for
                 // custody tests. It is not a public transport snapshot.
@@ -696,17 +776,26 @@ impl AppState {
         source: Arc<TestRunHistoryProjection>,
         original: Option<DeltaEvent>,
     ) {
-        inner.test_runs.transport_version.store(source.version, Ordering::Relaxed);
+        inner
+            .test_runs
+            .transport_version
+            .store(source.version, Ordering::Relaxed);
         #[cfg(not(test))]
         drop(original);
-        self.publish_delta_locked(inner, DeltaEvent::TestRunsInvalidated {
-            revision: inner.revision,
-            server_instance_id: self.server_instance_id.clone(),
-            overview: TestRunOverviewSnapshot::captured(source.clone()),
-            activity: TestRunActivitiesSnapshot { source: Some(source), wire: BTreeMap::new() },
-            #[cfg(test)]
-            internal: original.map(Box::new),
-        });
+        self.publish_delta_locked(
+            inner,
+            DeltaEvent::TestRunsInvalidated {
+                revision: inner.revision,
+                server_instance_id: self.server_instance_id.clone(),
+                overview: TestRunOverviewSnapshot::captured(source.clone()),
+                activity: TestRunActivitiesSnapshot {
+                    source: Some(source),
+                    wire: BTreeMap::new(),
+                },
+                #[cfg(test)]
+                internal: original.map(Box::new),
+            },
+        );
     }
 
     /// Publishes a `SessionCreated` delta for the remote-proxy
@@ -743,7 +832,7 @@ impl AppState {
     /// was already in sync) and break chained-remote topologies
     /// where downstream clients have not yet seen the delta via
     /// any other path. Different semantic layer, different gate.
-    fn announce_remote_session_created_if_changed(
+    pub(crate) fn announce_remote_session_created_if_changed(
         &self,
         inner: &StateInner,
         changed: bool,
@@ -771,7 +860,7 @@ impl AppState {
     /// turn (if any) via [`Self::record_active_turn_file_changes`].
     /// Called from the workspace file watcher thread.
     #[cfg_attr(test, allow(dead_code))]
-    fn publish_workspace_files_changed(&self, changes: Vec<WorkspaceFileChangeEvent>) {
+    pub(crate) fn publish_workspace_files_changed(&self, changes: Vec<WorkspaceFileChangeEvent>) {
         if changes.is_empty() {
             return;
         }
@@ -783,14 +872,26 @@ impl AppState {
             summary,
         };
         match encode_sse_json("workspaceFilesChanged", &event) {
-            Ok(payload) => { let _ = self.file_events.send(payload); }
+            Ok(payload) => {
+                let _ = self.file_events.send(payload);
+            }
             Err(error) => {
                 observe_output_limit("sse_workspace", &error, Some(event.revision));
                 // Exact paths were lost. Preserve the existing covering
                 // invalidation instead of pretending the workspace is quiet.
-                match encode_sse_json("workspaceFilesChanged", &workspace_files_covering_invalidation(event.revision)) {
-                    Ok(payload) => { let _ = self.file_events.send(payload); }
-                    Err(_) => { let _ = self.state_broadcast_senders.stream_events.send(SseStreamEvent::Lagged); }
+                match encode_sse_json(
+                    "workspaceFilesChanged",
+                    &workspace_files_covering_invalidation(event.revision),
+                ) {
+                    Ok(payload) => {
+                        let _ = self.file_events.send(payload);
+                    }
+                    Err(_) => {
+                        let _ = self
+                            .state_broadcast_senders
+                            .stream_events
+                            .send(SseStreamEvent::Lagged);
+                    }
                 }
             }
         }
@@ -801,13 +902,13 @@ impl AppState {
     /// This is how the "files changed during this turn" UI widget
     /// gets its data — the events are stored on the active
     /// `TurnRecord` and replayed as part of the final turn summary.
-    fn record_active_turn_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
+    pub(crate) fn record_active_turn_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
         self.record_file_change_captures(changes);
     }
 
     /// Captures an immutable metadata cut at this commit's actual revision.
     /// Unchanged session projections are shared; DTO cloning is worker-owned.
-    fn publish_state_locked(&self, inner: &StateInner) {
+    pub(crate) fn publish_state_locked(&self, inner: &StateInner) {
         if let Some(mailbox) = &self.state_broadcast_mailbox {
             if !mailbox.is_stopped() {
                 mailbox.publish_snapshot_work(StateBroadcastWork::ImmutableSnapshot(
@@ -843,6 +944,9 @@ impl AppState {
             }
         }
 
-        forward_state_broadcast_work(StateBroadcastWork::Snapshot(snapshot), &self.state_broadcast_senders);
+        forward_state_broadcast_work(
+            StateBroadcastWork::Snapshot(snapshot),
+            &self.state_broadcast_senders,
+        );
     }
 }

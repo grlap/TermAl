@@ -2,22 +2,24 @@
 // Does not own transport, credentials, onboarding probes or scheduling policy.
 // New foundation; durable writes reuse the existing state persist worker.
 
+use super::*;
+
 // The federation data/behavior contract is independent of local SQLite layout
 // and of the mailbox subprotocol's separately versioned message schema.
-const FEDERATION_PROFILE_SCHEMA_VERSION: &str = "2";
+pub(crate) const FEDERATION_PROFILE_SCHEMA_VERSION: &str = "2";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationExecutionProfile {
-    protocol_version: u32,
-    schema_version: String,
-    binary_sha256: String,
-    toolchain_identity: String,
+pub(crate) struct FederationExecutionProfile {
+    pub(crate) protocol_version: u32,
+    pub(crate) schema_version: String,
+    pub(crate) binary_sha256: String,
+    pub(crate) toolchain_identity: String,
 }
 
 impl FederationExecutionProfile {
     // A different image/toolchain is evidence, not a different wire contract.
-    fn compatible_with(&self, other: &Self) -> bool {
+    pub(crate) fn compatible_with(&self, other: &Self) -> bool {
         self.protocol_version == other.protocol_version
             && self.schema_version == other.schema_version
     }
@@ -25,28 +27,28 @@ impl FederationExecutionProfile {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationCapacity {
-    max_sessions: u32,
-    build_slots: u32,
-    gate_slots: u32,
+pub(crate) struct FederationCapacity {
+    pub(crate) max_sessions: u32,
+    pub(crate) build_slots: u32,
+    pub(crate) gate_slots: u32,
 }
 
 /// O1 supplies these results only after its real verification checklist.
 /// Registry membership itself never produces a successful probe result.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationVerificationChecks {
-    host_key: bool,
-    capability: bool,
-    protocol: bool,
-    bidirectional_rpc: bool,
-    isolated_wake: bool,
-    platform_supervisor: bool,
+pub(crate) struct FederationVerificationChecks {
+    pub(crate) host_key: bool,
+    pub(crate) capability: bool,
+    pub(crate) protocol: bool,
+    pub(crate) bidirectional_rpc: bool,
+    pub(crate) isolated_wake: bool,
+    pub(crate) platform_supervisor: bool,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationVerificationChecks {
-    fn complete(&self) -> bool {
+    pub(crate) fn complete(&self) -> bool {
         self.host_key
             && self.capability
             && self.protocol
@@ -58,46 +60,46 @@ impl FederationVerificationChecks {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationVerification {
-    basis: String,
-    link_incarnation: String,
-    checks: FederationVerificationChecks,
+pub(crate) struct FederationVerification {
+    pub(crate) basis: String,
+    pub(crate) link_incarnation: String,
+    pub(crate) checks: FederationVerificationChecks,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationLiveness {
-    link_incarnation: String,
-    last_successful_rpc: Option<String>,
-    last_successful_wake: Option<String>,
+pub(crate) struct FederationLiveness {
+    pub(crate) link_incarnation: String,
+    pub(crate) last_successful_rpc: Option<String>,
+    pub(crate) last_successful_wake: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationPeerRecord {
-    identity: FederationHostIdentity,
-    enrollment_generation: u64,
-    record_generation: u64,
+pub(crate) struct FederationPeerRecord {
+    pub(crate) identity: FederationHostIdentity,
+    pub(crate) enrollment_generation: u64,
+    pub(crate) record_generation: u64,
     /// Membership bookkeeping does not recycle a verified channel. This fence
     /// advances on every transport/configuration invalidation, including ABA.
-    transport_generation: u64,
-    display_name: String,
-    platform: String,
-    arch: String,
-    endpoint: FederationSshEndpoint,
-    pair_capability_ref: String,
-    profile: FederationExecutionProfile,
-    capacity: FederationCapacity,
-    membership: FederationMembershipState,
-    verification: Option<FederationVerification>,
+    pub(crate) transport_generation: u64,
+    pub(crate) display_name: String,
+    pub(crate) platform: String,
+    pub(crate) arch: String,
+    pub(crate) endpoint: FederationSshEndpoint,
+    pub(crate) pair_capability_ref: String,
+    pub(crate) profile: FederationExecutionProfile,
+    pub(crate) capacity: FederationCapacity,
+    pub(crate) membership: FederationMembershipState,
+    pub(crate) verification: Option<FederationVerification>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    requalification: Option<FederationRequalification>,
+    pub(crate) requalification: Option<FederationRequalification>,
     #[serde(default)]
-    last_observed: Option<FederationLiveness>,
+    pub(crate) last_observed: Option<FederationLiveness>,
 }
 
 impl FederationPeerRecord {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.identity.validate()?;
         self.endpoint.validate()?;
         validate_federation_reference(&self.pair_capability_ref)?;
@@ -134,7 +136,7 @@ impl FederationPeerRecord {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn verification_basis(&self) -> String {
+    pub(crate) fn verification_basis(&self) -> String {
         sha256_hex(
             serde_json::to_vec(&json!({
                 "identity": self.identity, "enrollmentGeneration": self.enrollment_generation,
@@ -151,7 +153,7 @@ impl FederationPeerRecord {
 
     // Read-only migration witness for a pre-upgrade verification. Never used
     // to admit traffic: fresh authenticated qualification is still required.
-    fn legacy_verification_basis(&self) -> String {
+    pub(crate) fn legacy_verification_basis(&self) -> String {
         sha256_hex(
             &serde_json::to_vec(&json!({
                 "identity": self.identity, "enrollmentGeneration": self.enrollment_generation,
@@ -164,7 +166,7 @@ impl FederationPeerRecord {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn verified_on(&self, link: Option<&String>) -> bool {
+    pub(crate) fn verified_on(&self, link: Option<&String>) -> bool {
         self.verification.as_ref().is_some_and(|proof| {
             proof.checks.complete()
                 && proof.basis == self.verification_basis()
@@ -175,58 +177,60 @@ impl FederationPeerRecord {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationState {
+pub(crate) struct FederationState {
     // Permission values belong to this existing durable federation owner.
     // An absent policy admits no direct prompts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    prompt_permissions: Option<FederationPromptPermissions>,
+    pub(crate) prompt_permissions: Option<FederationPromptPermissions>,
     /// Central immutable binding-install intents share the reservation's state
     /// transaction. Satellites retain only the installed per-session binding.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    binding_install_intents: BTreeMap<String, FederationBindingInstallIntent>,
+    pub(crate) binding_install_intents: BTreeMap<String, FederationBindingInstallIntent>,
     /// Mailbox-only locators, never native actors or executor routes.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    mailbox_references: BTreeMap<String, FederationMailboxReference>,
+    pub(crate) mailbox_references: BTreeMap<String, FederationMailboxReference>,
     /// C's participant directory is authority metadata, never mailbox history.
     /// Satellites keep this empty; their per-session binding has routing only.
     #[serde(default)]
-    mailbox_directory: BTreeMap<String, FederationMailboxParticipant>,
+    pub(crate) mailbox_directory: BTreeMap<String, FederationMailboxParticipant>,
     #[serde(default)]
-    local: Option<FederationHostIdentity>,
+    pub(crate) local: Option<FederationHostIdentity>,
     #[serde(default)]
-    version: u64,
+    pub(crate) version: u64,
     #[serde(default)]
-    admission_quarantine: Option<FederationQuarantineReason>,
+    pub(crate) admission_quarantine: Option<FederationQuarantineReason>,
     #[serde(default)]
-    store_binding: String,
+    pub(crate) store_binding: String,
     #[serde(default)]
-    peers: BTreeMap<String, FederationPeerRecord>,
+    pub(crate) peers: BTreeMap<String, FederationPeerRecord>,
     #[serde(default)]
-    placements: BTreeMap<String, FederationPlacement>,
+    pub(crate) placements: BTreeMap<String, FederationPlacement>,
     #[serde(default)]
-    onboarding: FederationOnboardingData,
+    pub(crate) onboarding: FederationOnboardingData,
     /// A reboot never reloads a live connection from persisted liveness.
     #[serde(skip)]
-    links: BTreeMap<String, String>,
+    pub(crate) links: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum FederationQuarantineReason {
+pub(crate) enum FederationQuarantineReason {
     StoreBindingChanged,
     DeclaredRestore,
 }
 
-fn federation_next_generation(generation: u64) -> Result<u64, ApiError> {
+pub(crate) fn federation_next_generation(generation: u64) -> Result<u64, ApiError> {
     generation
         .checked_add(1)
         .ok_or_else(|| ApiError::conflict("federation generation exhausted"))
 }
 
 impl FederationState {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if let Some(permissions) = &self.prompt_permissions {
-            permissions.validate().map_err(|_| anyhow!("invalid persisted prompt permission policy"))?;
+            permissions
+                .validate()
+                .map_err(|_| anyhow!("invalid persisted prompt permission policy"))?;
         }
         for (key, intent) in &self.binding_install_intents {
             intent
@@ -248,13 +252,17 @@ impl FederationState {
             }
         }
         for (id, reference) in &self.mailbox_references {
-            reference.validate().map_err(|_| anyhow!("invalid persisted mailbox reference"))?;
+            reference
+                .validate()
+                .map_err(|_| anyhow!("invalid persisted mailbox reference"))?;
             if id != &reference.id {
                 return Err(anyhow!("invalid persisted mailbox reference key"));
             }
         }
         for (key, participant) in &self.mailbox_directory {
-            participant.validate().map_err(|_| anyhow!("invalid persisted mailbox participant"))?;
+            participant
+                .validate()
+                .map_err(|_| anyhow!("invalid persisted mailbox participant"))?;
             if key != &participant.session_id {
                 return Err(anyhow!("invalid persisted mailbox directory key"));
             }
@@ -291,7 +299,8 @@ impl FederationState {
                 .map_err(|_| anyhow!("invalid persisted placement key"))?;
             if key != &placement.admission_key
                 || placement.placement_generation == 0
-                || placement.mailbox_only && (placement.build_slots != 0 || placement.gate_slots != 0)
+                || placement.mailbox_only
+                    && (placement.build_slots != 0 || placement.gate_slots != 0)
                 || !creation_ids.insert(&placement.identity.creation_id)
                 || placement.execution_basis.len() != 64
                 || !placement

@@ -2,9 +2,11 @@
 // Does not launch/stop runtimes, pick hosts, or grant test/gate permission.
 // New foundation invoked under the registry's serialized state mutation.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum FederationPlacementState {
+pub(crate) enum FederationPlacementState {
     Reserved,
     Uncertain,
     Completed,
@@ -12,52 +14,63 @@ enum FederationPlacementState {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationPlacement {
-    admission_key: String,
-    identity: FederationSessionIdentity,
-    placement_generation: u64,
-    peer: FederationPeerSnapshot,
-    link_incarnation: String,
-    execution_basis: String,
+pub(crate) struct FederationPlacement {
+    pub(crate) admission_key: String,
+    pub(crate) identity: FederationSessionIdentity,
+    pub(crate) placement_generation: u64,
+    pub(crate) peer: FederationPeerSnapshot,
+    pub(crate) link_incarnation: String,
+    pub(crate) execution_basis: String,
     /// Routing authority only; never a runtime or capacity reservation.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    mailbox_only: bool,
-    build_slots: u32,
-    gate_slots: u32,
-    state: FederationPlacementState,
+    pub(crate) mailbox_only: bool,
+    pub(crate) build_slots: u32,
+    pub(crate) gate_slots: u32,
+    pub(crate) state: FederationPlacementState,
 }
 
 // Permanent retirement is shared by admission accounting and wake reservations.
 // Transport, verification and settings changes only hold a current reservation.
-fn federation_placement_reserves_capacity(
+pub(crate) fn federation_placement_reserves_capacity(
     domain: &FederationState,
     placement: &FederationPlacement,
 ) -> bool {
-    !placement.mailbox_only && placement.state != FederationPlacementState::Completed
+    !placement.mailbox_only
+        && placement.state != FederationPlacementState::Completed
         && domain.local.as_ref() == Some(&placement.peer.local)
-        && domain.peers.get(&placement.identity.host_id).is_some_and(|peer| {
-            peer.identity == placement.peer.peer
-                && peer.enrollment_generation == placement.peer.enrollment_generation
-                && peer.membership != FederationMembershipState::Revoked
-        })
+        && domain
+            .peers
+            .get(&placement.identity.host_id)
+            .is_some_and(|peer| {
+                peer.identity == placement.peer.peer
+                    && peer.enrollment_generation == placement.peer.enrollment_generation
+                    && peer.membership != FederationMembershipState::Revoked
+            })
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_placement_authority(
+pub(crate) fn federation_placement_authority(
     domain: &FederationState,
     settings: &FederationSettings,
     placement: &FederationPlacement,
 ) -> bool {
-    !placement.mailbox_only && federation_mailbox_placement_authority(domain, settings, placement)
-        && domain.peers.get(&placement.identity.host_id).is_some_and(|peer|
-            matches!(peer.membership, FederationMembershipState::Active | FederationMembershipState::Draining)
-                && peer.transport_generation == placement.peer.transport_generation
-                && peer.verification_basis() == placement.execution_basis
-                && peer.verified_on(domain.links.get(&peer.identity.host_id))
-                && domain.links.get(&peer.identity.host_id) == Some(&placement.link_incarnation))
+    !placement.mailbox_only
+        && federation_mailbox_placement_authority(domain, settings, placement)
+        && domain
+            .peers
+            .get(&placement.identity.host_id)
+            .is_some_and(|peer| {
+                matches!(
+                    peer.membership,
+                    FederationMembershipState::Active | FederationMembershipState::Draining
+                ) && peer.transport_generation == placement.peer.transport_generation
+                    && peer.verification_basis() == placement.execution_basis
+                    && peer.verified_on(domain.links.get(&peer.identity.host_id))
+                    && domain.links.get(&peer.identity.host_id) == Some(&placement.link_incarnation)
+            })
 }
 
-fn federation_mailbox_placement_authority(
+pub(crate) fn federation_mailbox_placement_authority(
     domain: &FederationState,
     settings: &FederationSettings,
     placement: &FederationPlacement,
@@ -80,7 +93,7 @@ fn federation_mailbox_placement_authority(
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
-    fn reserve_federation_placement(
+    pub(crate) fn reserve_federation_placement(
         &self,
         expected: &FederationPeerSnapshot,
         admission_key: String,
@@ -101,7 +114,7 @@ impl AppState {
 
     // The callback changes only the cloned candidate. A mailbox install intent
     // and its reservation therefore enter the same content-fenced transaction.
-    fn reserve_federation_placement_with<T>(
+    pub(crate) fn reserve_federation_placement_with<T>(
         &self,
         expected: &FederationPeerSnapshot,
         admission_key: String,
@@ -115,11 +128,19 @@ impl AppState {
             &FederationPlacement,
         ) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
-        self.reserve_federation_placement_kind(expected, admission_key, session_id,
-            build_slots, gate_slots, lease, false, retain)
+        self.reserve_federation_placement_kind(
+            expected,
+            admission_key,
+            session_id,
+            build_slots,
+            gate_slots,
+            lease,
+            false,
+            retain,
+        )
     }
 
-    fn reserve_federation_placement_kind<T>(
+    pub(crate) fn reserve_federation_placement_kind<T>(
         &self,
         expected: &FederationPeerSnapshot,
         admission_key: String,
@@ -128,7 +149,11 @@ impl AppState {
         gate_slots: u32,
         lease: Option<&FederationLinkLease>,
         mailbox_only: bool,
-        retain: impl FnOnce(&mut FederationState, &FederationSettings, &FederationPlacement) -> Result<T, ApiError>,
+        retain: impl FnOnce(
+            &mut FederationState,
+            &FederationSettings,
+            &FederationPlacement,
+        ) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
         if mailbox_only && (build_slots != 0 || gate_slots != 0) {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
@@ -164,17 +189,28 @@ impl AppState {
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
                 let admitted = if mailbox_only {
                     peer.membership != FederationMembershipState::Draining
-                        && domain.links.get(&peer.identity.host_id).is_some_and(|incarnation|
-                            federation_participation_qualified(domain, settings, expected, incarnation).is_ok())
+                        && domain
+                            .links
+                            .get(&peer.identity.host_id)
+                            .is_some_and(|incarnation| {
+                                federation_participation_qualified(
+                                    domain,
+                                    settings,
+                                    expected,
+                                    incarnation,
+                                )
+                                .is_ok()
+                            })
                 } else {
                     peer.membership == FederationMembershipState::Active
                         && peer.verified_on(domain.links.get(&peer.identity.host_id))
                 };
                 if peer.record_generation != expected.record_generation || !admitted {
-                    return Err(ApiError::conflict(
-                        if mailbox_only { "satellite authenticated mailbox link is not current" }
-                        else { "satellite is not active with current verification" },
-                    ));
+                    return Err(ApiError::conflict(if mailbox_only {
+                        "satellite authenticated mailbox link is not current"
+                    } else {
+                        "satellite is not active with current verification"
+                    }));
                 }
                 let mut sessions = 0_u64;
                 let mut builds = 0_u64;
@@ -189,16 +225,22 @@ impl AppState {
                     if old.identity.session_id == session_id {
                         generation = generation.max(old.placement_generation);
                     }
-                    if old.identity.session_id == session_id && old.state != FederationPlacementState::Completed
+                    if old.identity.session_id == session_id
+                        && old.state != FederationPlacementState::Completed
                         && old.peer.peer == peer.identity
-                        && old.peer.enrollment_generation == peer.enrollment_generation {
-                        if !mailbox_only && old.mailbox_only
+                        && old.peer.enrollment_generation == peer.enrollment_generation
+                    {
+                        if !mailbox_only
+                            && old.mailbox_only
                             && federation_mailbox_placement_authority(domain, settings, old)
-                            && upgrade.is_none() {
+                            && upgrade.is_none()
+                        {
                             upgrade = Some(old.clone());
                             continue;
                         }
-                        return Err(ApiError::conflict("session already has an unresolved placement"));
+                        return Err(ApiError::conflict(
+                            "session already has an unresolved placement",
+                        ));
                     }
                     if !federation_placement_reserves_capacity(domain, old) {
                         continue;
@@ -212,26 +254,28 @@ impl AppState {
                     builds += u64::from(old.build_slots);
                     gates += u64::from(old.gate_slots);
                 }
-                if !mailbox_only && (sessions >= u64::from(peer.capacity.max_sessions)
-                    || builds + u64::from(build_slots) > u64::from(peer.capacity.build_slots)
-                    || gates + u64::from(gate_slots) > u64::from(peer.capacity.gate_slots))
+                if !mailbox_only
+                    && (sessions >= u64::from(peer.capacity.max_sessions)
+                        || builds + u64::from(build_slots) > u64::from(peer.capacity.build_slots)
+                        || gates + u64::from(gate_slots) > u64::from(peer.capacity.gate_slots))
                 {
                     return Err(ApiError::conflict(
                         "satellite declared capacity is fully reserved",
                     ));
                 }
-                let identity = upgrade.as_ref().map(|old| old.identity.clone()).unwrap_or_else(|| FederationSessionIdentity {
-                    host_id: peer.identity.host_id.clone(),
-                    session_id,
-                    creation_id: Uuid::new_v4().to_string(),
-                });
+                let identity = upgrade
+                    .as_ref()
+                    .map(|old| old.identity.clone())
+                    .unwrap_or_else(|| FederationSessionIdentity {
+                        host_id: peer.identity.host_id.clone(),
+                        session_id,
+                        creation_id: Uuid::new_v4().to_string(),
+                    });
                 identity.validate()?;
-                if domain
-                    .placements
-                    .values()
-                    .any(|old| old.identity.creation_id == identity.creation_id
-                        && upgrade.as_ref() != Some(old))
-                {
+                if domain.placements.values().any(|old| {
+                    old.identity.creation_id == identity.creation_id
+                        && upgrade.as_ref() != Some(old)
+                }) {
                     return Err(ApiError::conflict(
                         "session creation identity collision; retry admission",
                     ));
@@ -267,7 +311,7 @@ impl AppState {
         )
     }
 
-    fn ensure_federation_placement_current(
+    pub(crate) fn ensure_federation_placement_current(
         &self,
         expected: &FederationPlacement,
     ) -> Result<(), ApiError> {
@@ -291,7 +335,7 @@ impl AppState {
 
     /// Only a current exact runtime owner may reconcile its reservation.
     /// Retirement changes accounting only; it never authorizes reconciliation.
-    fn reconcile_federation_placement(
+    pub(crate) fn reconcile_federation_placement(
         &self,
         expected: &FederationPlacement,
         completed: bool,
@@ -317,7 +361,7 @@ impl AppState {
         })
     }
 
-    fn validate_federation_session_assertion(
+    pub(crate) fn validate_federation_session_assertion(
         &self,
         authenticated_peer: &FederationPeerSnapshot,
         asserted: &FederationSessionIdentity,

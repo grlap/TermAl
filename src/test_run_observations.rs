@@ -3,76 +3,78 @@
 // artifact validation, verification credit and tracker lifecycle stay with
 // their existing adapters. A native exit never constitutes verification.
 
+use super::*;
+
 include!("test_run_projection.rs");
 include!("test_run_declared_settlement.rs");
 include!("test_run_untraced_declared.rs");
 
 #[cfg(test)]
 thread_local! {
-    static TEST_TEST_RUN_ASSOCIATION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_ASSOCIATION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Full-history summary projections built on this thread.
-    static TEST_TEST_RUN_FULL_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_FULL_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Rows, entries and retained records a single-identity lookup examines,
     // counted before any predicate filters them.
-    static TEST_TEST_RUN_IDENTITY_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_IDENTITY_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Candidate rows the lifecycle, receipt and check-association scans take
     // from the maintained history indexes, before their predicates filter.
-    static TEST_TEST_RUN_INDEXED_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_INDEXED_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Fresh projection builds, entry rows, observation rows.
-    static TEST_TEST_RUN_PROJECTION_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+    pub(crate) static TEST_TEST_RUN_PROJECTION_WORK: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
     // Linear `TestRunIndex::find` lookups made on this thread.
-    static TEST_TEST_RUN_INDEX_FINDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_INDEX_FINDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     // Run wait records read by compaction eligibility on this thread.
-    static TEST_TEST_RUN_WAIT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_WAIT_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCommandObservation {
-    execution_id: String,
-    runtime_identity: Option<String>,
-    tool_identity: String,
-    grant_identity: Option<String>,
-    command_fingerprint: String,
-    turn_generation: u64,
-    observed_at: String,
-    summary: TestRunSummary,
-    work_binding: Option<EngramControlWorkBinding>,
-    source_root: Option<EngramWorkSourceRoot>,
-    validated_unbound: bool,
+pub(crate) struct TestRunCommandObservation {
+    pub(crate) execution_id: String,
+    pub(crate) runtime_identity: Option<String>,
+    pub(crate) tool_identity: String,
+    pub(crate) grant_identity: Option<String>,
+    pub(crate) command_fingerprint: String,
+    pub(crate) turn_generation: u64,
+    pub(crate) observed_at: String,
+    pub(crate) summary: TestRunSummary,
+    pub(crate) work_binding: Option<EngramControlWorkBinding>,
+    pub(crate) source_root: Option<EngramWorkSourceRoot>,
+    pub(crate) validated_unbound: bool,
     #[serde(default)]
-    monitoring_interrupted_at: Option<String>,
+    pub(crate) monitoring_interrupted_at: Option<String>,
     #[serde(default)]
-    evidence: Vec<TestRunEvidenceAssociation>,
+    pub(crate) evidence: Vec<TestRunEvidenceAssociation>,
     #[serde(default)]
-    artifact: Option<TestRunObservedArtifact>,
+    pub(crate) artifact: Option<TestRunObservedArtifact>,
     // Kept separately from start-placement diagnostics. Only the original
     // provider event's later artifact correlation may update this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
+    pub(crate) native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
     #[serde(default)]
-    declared_artifact: Option<String>,
+    pub(crate) declared_artifact: Option<String>,
     // Original declaration and artifact start image, retained for the task's
     // ordinary END even when no native verification reservation was admitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    declared_binding: Option<EngramDeclaredBinding>,
+    pub(crate) declared_binding: Option<EngramDeclaredBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    declared_native: Option<DeclaredRunReservation>,
+    pub(crate) declared_native: Option<DeclaredRunReservation>,
     /// A successful command result acknowledged only a detached/background launch.
     #[serde(default)]
-    launch_only: bool,
+    pub(crate) launch_only: bool,
     // Minted only at the original execution's terminal provider boundary,
     // after positive host checks of both binding and reporting absence.
     #[serde(default)]
-    final_unbound_proof: Option<TestRunFinalUnboundProof>,
+    pub(crate) final_unbound_proof: Option<TestRunFinalUnboundProof>,
     // The provider ended, but its declared artifact verdict is still being
     // applied by the producer. This is a settlement phase, not credit.
     #[serde(default)]
-    declared_verdict_pending: bool,
+    pub(crate) declared_verdict_pending: bool,
 }
 
 impl TestRunCommandObservation {
-    fn awaiting_runtime_report(&self) -> bool {
+    pub(crate) fn awaiting_runtime_report(&self) -> bool {
         !self.summary.interrupted
             && (self.declared_verdict_pending
                 || (self.summary.ended_at.is_none()
@@ -80,7 +82,7 @@ impl TestRunCommandObservation {
                         || (self.launch_only && self.summary.state == TestRunState::Unknown))))
     }
 
-    fn has_unconfirmed_launch(&self) -> bool {
+    pub(crate) fn has_unconfirmed_launch(&self) -> bool {
         self.launch_only
             && self.summary.ended_at.is_none()
             && self.summary.state == TestRunState::Running
@@ -89,12 +91,12 @@ impl TestRunCommandObservation {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunFinalUnboundProof {
-    version: u8,
-    terminal_identity: String,
+pub(crate) struct TestRunFinalUnboundProof {
+    pub(crate) version: u8,
+    pub(crate) terminal_identity: String,
 }
 
-fn test_run_final_unbound_identity(row: &TestRunCommandObservation) -> Option<String> {
+pub(crate) fn test_run_final_unbound_identity(row: &TestRunCommandObservation) -> Option<String> {
     if !row.validated_unbound
         || row.work_binding.is_some()
         || row.source_root.is_some()
@@ -130,7 +132,7 @@ fn test_run_final_unbound_identity(row: &TestRunCommandObservation) -> Option<St
     .map(|bytes| sha256_hex(&bytes))
 }
 
-fn test_run_final_unbound_valid(row: &TestRunCommandObservation) -> bool {
+pub(crate) fn test_run_final_unbound_valid(row: &TestRunCommandObservation) -> bool {
     row.final_unbound_proof.as_ref().is_some_and(|proof| {
         proof.version == 1
             && test_run_final_unbound_identity(row).as_ref() == Some(&proof.terminal_identity)
@@ -161,7 +163,7 @@ fn test_run_can_finalize_unbound(
         && engram.carried_unmatched_launches.is_empty()
 }
 
-fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
+pub(crate) fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
     // A known terminal execution is a durable fact. An ended provider row
     // whose declared verdict was not yet applied is still outstanding.
     if row.summary.ended_at.is_none() || row.declared_verdict_pending {
@@ -169,7 +171,11 @@ fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
             .get_or_insert_with(test_run_timestamp);
         row.summary.state = TestRunState::Unknown;
         row.summary.interrupted = true;
-    } else if row.evidence.iter().any(|association| association.verification_record_id.is_none()) {
+    } else if row
+        .evidence
+        .iter()
+        .any(|association| association.verification_record_id.is_none())
+    {
         row.monitoring_interrupted_at
             .get_or_insert_with(test_run_timestamp);
     }
@@ -177,24 +183,24 @@ fn test_run_observation_boot(row: &mut TestRunCommandObservation) {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunObservedArtifact {
-    run_id: String,
-    run_directory: String,
-    request_identity: Option<String>,
-    terminal_digest: Option<String>,
+pub(crate) struct TestRunObservedArtifact {
+    pub(crate) run_id: String,
+    pub(crate) run_directory: String,
+    pub(crate) request_identity: Option<String>,
+    pub(crate) terminal_digest: Option<String>,
 }
 
 // Borrowed candidate selection over a live model or owned cut, never cached proof.
 // Every selected row still passes the exact owner/path/request-or-digest and
 // current durability/lifecycle predicates. Rebuilding at each cut also sees
 // unstamped in-memory changes; run-id equality alone never grants authority.
-struct TestRunProjection<'a> {
-    entries: HashMap<&'a str, &'a TestRunEntry>,
-    observations: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
+pub(crate) struct TestRunProjection<'a> {
+    pub(crate) entries: HashMap<&'a str, &'a TestRunEntry>,
+    pub(crate) observations: HashMap<&'a str, Vec<&'a TestRunCommandObservation>>,
 }
 
 impl<'a> TestRunProjection<'a> {
-    fn new(inner: &'a impl TestRunProjectionSource) -> Self {
+    pub(crate) fn new(inner: &'a impl TestRunProjectionSource) -> Self {
         #[cfg(test)]
         if let Some(started) = TEST_RUN_PROJECTION_STARTED.with(|slot| slot.borrow_mut().take()) {
             started();
@@ -211,7 +217,9 @@ impl<'a> TestRunProjection<'a> {
                 let (builds, entries, observations) = count.get();
                 count.set((builds, entries + 1, observations));
             });
-            entries.entry(entry.summary.run_id.as_str()).or_insert(entry);
+            entries
+                .entry(entry.summary.run_id.as_str())
+                .or_insert(entry);
         }
         let mut observations: HashMap<&str, Vec<_>> = HashMap::new();
         for row in inner.projection_observations().values() {
@@ -221,31 +229,40 @@ impl<'a> TestRunProjection<'a> {
                 count.set((builds, entries, observations + 1));
             });
             if let Some(artifact) = &row.artifact {
-                observations.entry(artifact.run_id.as_str()).or_default().push(row);
+                observations
+                    .entry(artifact.run_id.as_str())
+                    .or_default()
+                    .push(row);
             }
         }
-        Self { entries, observations }
+        Self {
+            entries,
+            observations,
+        }
     }
 
-    fn observations(&self, run_id: &str) -> &[&'a TestRunCommandObservation] {
-        self.observations.get(run_id).map(Vec::as_slice).unwrap_or(&[])
+    pub(crate) fn observations(&self, run_id: &str) -> &[&'a TestRunCommandObservation] {
+        self.observations
+            .get(run_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 }
 
 // Waiters are process-local and never part of the persisted authority image.
 #[derive(Clone, Default)]
-struct TestRunObservationPersistence(
-    Arc<Mutex<BTreeMap<String, (TestRunCommandObservation, PersistFenceWaiter)>>>,
+pub(crate) struct TestRunObservationPersistence(
+    pub(crate) Arc<Mutex<BTreeMap<String, (TestRunCommandObservation, PersistFenceWaiter)>>>,
 );
 
 const TEST_RUN_OBSERVATION_PAGE_SIZE: usize = 32;
 
 #[derive(Clone, Debug, Default)]
-struct TestRunObservationCursors {
-    unclassified: Option<String>,
-    native: Option<String>,
-    monitored: Option<String>,
-    fences: Option<String>,
+pub(crate) struct TestRunObservationCursors {
+    pub(crate) unclassified: Option<String>,
+    pub(crate) native: Option<String>,
+    pub(crate) monitored: Option<String>,
+    pub(crate) fences: Option<String>,
 }
 
 fn test_run_observation_page_end(keys: &[String]) -> Option<String> {
@@ -293,33 +310,33 @@ fn test_run_observation_runtime_matches(
 }
 
 #[derive(Clone, Debug)]
-struct TestRunCommandOrigin {
-    session_id: String,
-    project_id: Option<String>,
-    runtime_identity: Option<String>,
-    tool_identity: String,
-    turn_generation: u64,
-    grant_identity: Option<String>,
-    work_binding: Option<EngramControlWorkBinding>,
-    source_root: Option<EngramWorkSourceRoot>,
-    validated_unbound: bool,
+pub(crate) struct TestRunCommandOrigin {
+    pub(crate) session_id: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) runtime_identity: Option<String>,
+    pub(crate) tool_identity: String,
+    pub(crate) turn_generation: u64,
+    pub(crate) grant_identity: Option<String>,
+    pub(crate) work_binding: Option<EngramControlWorkBinding>,
+    pub(crate) source_root: Option<EngramWorkSourceRoot>,
+    pub(crate) validated_unbound: bool,
 }
 
 // Only provider starts whose command text is not available yet. Process-local
 // attribution, cleared at description/end/runtime loss; never credit authority.
 #[derive(Clone, Debug)]
-struct TestRunUnclassifiedCommand {
-    origin: TestRunCommandOrigin,
-    workdir: String,
-    started_at: String,
-    directories: Option<Vec<Option<String>>>,
-    project_environment_present: BTreeSet<String>,
+pub(crate) struct TestRunUnclassifiedCommand {
+    pub(crate) origin: TestRunCommandOrigin,
+    pub(crate) workdir: String,
+    pub(crate) started_at: String,
+    pub(crate) directories: Option<Vec<Option<String>>>,
+    pub(crate) project_environment_present: BTreeSet<String>,
 }
 
 /// What a command's start or description found of its invocation's original
 /// start in the test-run registry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TestCommandOriginalStart {
+pub(crate) enum TestCommandOriginalStart {
     /// None: this frame may be the invocation's own start.
     None,
     /// An original start of the turn the frame names, or, for an Ambient
@@ -332,7 +349,7 @@ enum TestCommandOriginalStart {
 }
 
 impl TestRunCommandOrigin {
-    fn execution_id(&self) -> String {
+    pub(crate) fn execution_id(&self) -> String {
         format!(
             "observed-{}",
             sha256_hex(
@@ -347,7 +364,7 @@ impl TestRunCommandOrigin {
             )
         )
     }
-    fn capture(
+    pub(crate) fn capture(
         inner: &StateInner,
         index: usize,
         provenance: &EngramObservationProvenance,
@@ -366,7 +383,9 @@ impl TestRunCommandOrigin {
             runtime_identity: test_run_runtime_identity(record, provenance),
             tool_identity: sha256_hex(key.as_bytes()),
             turn_generation: match provenance {
-                EngramObservationProvenance::Runtime { turn_generation, .. } => *turn_generation,
+                EngramObservationProvenance::Runtime {
+                    turn_generation, ..
+                } => *turn_generation,
                 EngramObservationProvenance::Claude(origin) => match &origin.origin {
                     ClaudeWorkOrigin::Attempt { turn_generation } => *turn_generation,
                     ClaudeWorkOrigin::Adopted { turn_generation } => *turn_generation,
@@ -376,8 +395,14 @@ impl TestRunCommandOrigin {
             },
             // The stored field is only a correlation bucket. It carries the
             // observed host-turn identity and grants no verification credit.
-            grant_identity: owns_current.then(|| record.engram.observed_turn_ref()
-                .map(|owner| sha256_hex(owner.as_bytes()))).flatten(),
+            grant_identity: owns_current
+                .then(|| {
+                    record
+                        .engram
+                        .observed_turn_ref()
+                        .map(|owner| sha256_hex(owner.as_bytes()))
+                })
+                .flatten(),
             work_binding: work_binding.clone(),
             source_root: project
                 .and_then(|project| project.engram.as_ref())
@@ -410,7 +435,7 @@ impl std::fmt::Debug for TestRunObservationPersistence {
     }
 }
 
-fn test_run_runtime_identity(
+pub(crate) fn test_run_runtime_identity(
     record: &SessionRecord,
     provenance: &EngramObservationProvenance,
 ) -> Option<String> {
@@ -425,54 +450,73 @@ fn test_run_runtime_identity(
 }
 
 impl AppState {
-    fn interrupt_test_run_monitoring(
+    pub(crate) fn interrupt_test_run_monitoring(
         &self,
         run_id: &str,
         request: InterruptTestRunMonitoringRequest,
     ) -> Result<TestRunSummary, ApiError> {
         let reason = request.reason.trim();
         if reason.is_empty() || reason.len() > 1024 {
-            return Err(ApiError::bad_request("monitoring interruption requires a reason of 1–1024 bytes"));
+            return Err(ApiError::bad_request(
+                "monitoring interruption requires a reason of 1–1024 bytes",
+            ));
         }
-        let detail = format!("Operator stopped monitoring this execution: {reason}. This action establishes neither workload completion nor a test verdict.");
+        let detail = format!(
+            "Operator stopped monitoring this execution: {reason}. This action establishes neither workload completion nor a test verdict."
+        );
         let (expected, waiter) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let row = inner.test_run_observations.get(run_id)
-                .ok_or_else(|| ApiError::not_found("no exact host-observed execution with this id"))?;
+            let row = inner.test_run_observations.get(run_id).ok_or_else(|| {
+                ApiError::not_found("no exact host-observed execution with this id")
+            })?;
             if row.summary.owner_session_id.as_deref() != Some(request.owner_session_id.as_str())
                 || row.summary.started_at.as_deref() != Some(request.started_at.as_str())
             {
-                return Err(ApiError::conflict("observed execution owner or start no longer matches"));
+                return Err(ApiError::conflict(
+                    "observed execution owner or start no longer matches",
+                ));
             }
             // A correlated launcher owns its own disposition. Never alter it
             // indirectly through an observed alias, even when it is still live.
-            if row.artifact.is_some() || inner.test_runs.registered.contains(run_id)
+            if row.artifact.is_some()
+                || inner.test_runs.registered.contains(run_id)
                 || inner.test_run_registrations.contains_key(run_id)
                 || inner.test_runs.find(run_id).is_some()
             {
-                return Err(ApiError::conflict("launcher runs cannot be interrupted through host monitoring"));
+                return Err(ApiError::conflict(
+                    "launcher runs cannot be interrupted through host monitoring",
+                ));
             }
             let duplicate = row.summary.state == TestRunState::Unknown
                 && row.summary.interrupted
                 && row.monitoring_interrupted_at.is_some()
                 && row.summary.error.as_deref() == Some(detail.as_str());
             if row.summary.ended_at.is_some()
-                || (!duplicate && (row.summary.interrupted
-                    || !matches!(row.summary.state, TestRunState::Running | TestRunState::Unknown)))
+                || (!duplicate
+                    && (row.summary.interrupted
+                        || !matches!(
+                            row.summary.state,
+                            TestRunState::Running | TestRunState::Unknown
+                        )))
             {
-                return Err(ApiError::conflict("execution already has a terminal or monitoring disposition"));
+                return Err(ApiError::conflict(
+                    "execution already has a terminal or monitoring disposition",
+                ));
             }
             let expected = if duplicate {
                 row.clone()
             } else {
-                let row = inner.test_run_observations.update(run_id, |row| {
-                    row.summary.state = TestRunState::Unknown;
-                    row.summary.interrupted = true;
-                    row.monitoring_interrupted_at = Some(test_run_timestamp());
-                    row.summary.error = Some(detail.clone());
-                    // ended_at/exit_code/evidence and the runtime remain untouched.
-                    row.clone()
-                }).expect("observation checked under the same state lock");
+                let row = inner
+                    .test_run_observations
+                    .update(run_id, |row| {
+                        row.summary.state = TestRunState::Unknown;
+                        row.summary.interrupted = true;
+                        row.monitoring_interrupted_at = Some(test_run_timestamp());
+                        row.summary.error = Some(detail.clone());
+                        // ended_at/exit_code/evidence and the runtime remain untouched.
+                        row.clone()
+                    })
+                    .expect("observation checked under the same state lock");
                 self.persist_test_command_observation_locked(&mut inner, row.clone());
                 row
             };
@@ -480,7 +524,9 @@ impl AppState {
                 return Ok(test_run_observation_summary(&inner, &expected));
             }
             if inner.test_runs.observations_failed.contains(run_id) {
-                return Err(ApiError::internal("monitoring disposition changed in memory but persistence failed; inspect the row before retrying"));
+                return Err(ApiError::internal(
+                    "monitoring disposition changed in memory but persistence failed; inspect the row before retrying",
+                ));
             }
             // Keep the observation owner's own persistence waiter intact. This
             // request waits off-lock on an exact durable read-back, not a scan.
@@ -497,7 +543,9 @@ impl AppState {
         )))?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if inner.test_run_observations.get(run_id) != Some(&expected) {
-            return Err(ApiError::conflict("observed execution changed while confirming persistence; inspect its current disposition"));
+            return Err(ApiError::conflict(
+                "observed execution changed while confirming persistence; inspect its current disposition",
+            ));
         }
         // Finish only this exact observation. An operator request must not
         // sweep unrelated executions whose provider runtime may have changed.
@@ -510,7 +558,10 @@ impl AppState {
         inner.test_runs.observations_failed.remove(run_id);
         // Neither a fence nor a failure holds the run back from compaction now.
         inner.test_runs.compaction_examined_revision = None;
-        if inner.test_runs.observations_durable.insert(run_id.to_owned())
+        if inner
+            .test_runs
+            .observations_durable
+            .insert(run_id.to_owned())
             && let Ok(revision) = self.commit_delta_locked(&mut inner)
         {
             let run = test_run_observation_summary(&inner, &expected);
@@ -519,7 +570,7 @@ impl AppState {
         Ok(test_run_observation_summary(&inner, &expected))
     }
 
-    fn remember_unclassified_test_command(
+    pub(crate) fn remember_unclassified_test_command(
         &self,
         origin: TestRunCommandOrigin,
         workdir: String,
@@ -530,10 +581,17 @@ impl AppState {
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let present = inner.find_session_index(&origin.session_id)
-            .map(|index| inner.sessions[index].project_environment.values.present_names())
+        let present = inner
+            .find_session_index(&origin.session_id)
+            .map(|index| {
+                inner.sessions[index]
+                    .project_environment
+                    .values
+                    .present_names()
+            })
             .unwrap_or_default();
-        inner.test_runs
+        inner
+            .test_runs
             .unclassified_commands
             .entry(origin.execution_id())
             .or_insert(TestRunUnclassifiedCommand {
@@ -545,7 +603,7 @@ impl AppState {
             });
     }
 
-    fn observe_test_command_description(
+    pub(crate) fn observe_test_command_description(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -573,14 +631,15 @@ impl AppState {
                         && pending.origin.runtime_identity.is_some()
                         && pending.origin.tool_identity == tool
                         && match provenance {
-                            EngramObservationProvenance::Runtime { turn_generation, .. } => {
-                                pending.origin.turn_generation == *turn_generation
-                            }
+                            EngramObservationProvenance::Runtime {
+                                turn_generation, ..
+                            } => pending.origin.turn_generation == *turn_generation,
                             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                                 ClaudeWorkOrigin::Attempt { turn_generation } => {
                                     pending.origin.turn_generation == *turn_generation
                                 }
-                                ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => false,
+                                ClaudeWorkOrigin::Adopted { .. }
+                                | ClaudeWorkOrigin::Unattributed => false,
                             },
                             EngramObservationProvenance::Ambient => true,
                         }
@@ -600,14 +659,15 @@ impl AppState {
                         && row.tool_identity == tool
                         && row.summary.ended_at.is_none()
                         && match provenance {
-                            EngramObservationProvenance::Runtime { turn_generation, .. } => {
-                                row.turn_generation == *turn_generation
-                            }
+                            EngramObservationProvenance::Runtime {
+                                turn_generation, ..
+                            } => row.turn_generation == *turn_generation,
                             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                                 ClaudeWorkOrigin::Attempt { turn_generation } => {
                                     row.turn_generation == *turn_generation
                                 }
-                                ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => false,
+                                ClaudeWorkOrigin::Adopted { .. }
+                                | ClaudeWorkOrigin::Unattributed => false,
                             },
                             EngramObservationProvenance::Ambient => true,
                         }
@@ -645,7 +705,10 @@ impl AppState {
             })
             .flatten();
         if let Some((_, _, binding)) = &mut declared {
-            AppliedProjectEnvironment::bind_present_names(&pending.project_environment_present, binding);
+            AppliedProjectEnvironment::bind_present_names(
+                &pending.project_environment_present,
+                binding,
+            );
         }
         let Some(command) = recognised
             .as_ref()
@@ -681,7 +744,7 @@ impl AppState {
         TestCommandOriginalStart::ThisTurn
     }
 
-    fn observe_test_command_start(
+    pub(crate) fn observe_test_command_start(
         &self,
         origin: TestRunCommandOrigin,
         command: &EngramCheckCommand,
@@ -689,12 +752,18 @@ impl AppState {
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
     ) {
-        self.observe_test_command_start_with_native(origin, command, worktree, started_at, declared, None);
+        self.observe_test_command_start_with_native(
+            origin, command, worktree, started_at, declared, None,
+        );
     }
 
-    fn observe_test_command_start_with_native(
-        &self, origin: TestRunCommandOrigin, command: &EngramCheckCommand,
-        worktree: &str, started_at: &str, declared: Option<&EngramDeclaredBinding>,
+    pub(crate) fn observe_test_command_start_with_native(
+        &self,
+        origin: TestRunCommandOrigin,
+        command: &EngramCheckCommand,
+        worktree: &str,
+        started_at: &str,
+        declared: Option<&EngramDeclaredBinding>,
         native: Option<DeclaredRunReservation>,
     ) {
         if command.kind != EngramVerificationKind::Test {
@@ -720,11 +789,17 @@ impl AppState {
             )
         );
         if inner.test_run_observations.contains_key(&execution_id)
-            || inner.test_run_compacted.index().execution(&execution_id).next().is_some()
+            || inner
+                .test_run_compacted
+                .index()
+                .execution(&execution_id)
+                .next()
+                .is_some()
         {
             return;
         }
-        let launch_only = native.is_none() && EngramHost::is_launch_only(command, EngramCommandExit::Code(0));
+        let launch_only =
+            native.is_none() && EngramHost::is_launch_only(command, EngramCommandExit::Code(0));
         let observation = TestRunCommandObservation {
             execution_id: execution_id.clone(),
             runtime_identity,
@@ -742,8 +817,10 @@ impl AppState {
             evidence: Vec::new(),
             native_completion_refusal: None,
             artifact: native.as_ref().map(|start| TestRunObservedArtifact {
-                run_id: start.run_id.clone(), run_directory: start.run_directory.clone(),
-                request_identity: Some(start.request_identity.clone()), terminal_digest: None,
+                run_id: start.run_id.clone(),
+                run_directory: start.run_directory.clone(),
+                request_identity: Some(start.request_identity.clone()),
+                terminal_digest: None,
             }),
             declared_native: native,
             declared_binding: declared.cloned(),
@@ -791,7 +868,7 @@ impl AppState {
     /// returns the execution ids this call actually ended: rows still open
     /// when selected that it marked ended, never a background launch or a
     /// launch-only row it only noted, nor a row an earlier end already closed.
-    fn observe_test_command_end(
+    pub(crate) fn observe_test_command_end(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -804,7 +881,7 @@ impl AppState {
 
     // Reused by terminal Claude task notifications while their current-runtime
     // fence and outstanding-work retirement still hold the same state lock.
-    fn observe_test_command_end_locked(
+    pub(crate) fn observe_test_command_end_locked(
         &self,
         inner: &mut StateInner,
         session_id: &str,
@@ -814,7 +891,14 @@ impl AppState {
         unknown_detail: Option<&str>,
     ) -> Vec<String> {
         self.observe_test_command_end_locked_with_declared_phase(
-            inner, session_id, provenance, key, exit, unknown_detail, false)
+            inner,
+            session_id,
+            provenance,
+            key,
+            exit,
+            unknown_detail,
+            false,
+        )
     }
 
     fn observe_test_command_end_locked_with_declared_phase(
@@ -840,7 +924,9 @@ impl AppState {
             });
         }
         let turn = match provenance {
-            EngramObservationProvenance::Runtime { turn_generation, .. } => Some(*turn_generation),
+            EngramObservationProvenance::Runtime {
+                turn_generation, ..
+            } => Some(*turn_generation),
             EngramObservationProvenance::Claude(origin) => match &origin.origin {
                 ClaudeWorkOrigin::Attempt { turn_generation } => Some(*turn_generation),
                 ClaudeWorkOrigin::Adopted { .. } | ClaudeWorkOrigin::Unattributed => None,
@@ -930,7 +1016,7 @@ impl AppState {
         ended
     }
 
-    fn persist_test_command_observation_locked(
+    pub(crate) fn persist_test_command_observation_locked(
         &self,
         inner: &mut StateInner,
         observation: TestRunCommandObservation,
@@ -1005,26 +1091,36 @@ impl AppState {
     // once. Persist their final images together and look up only the changed
     // rows' runs, never projecting unrelated history. Other single-row
     // observation writers retain their existing commit path.
-    fn persist_test_run_evidence_batch_locked(
+    pub(crate) fn persist_test_run_evidence_batch_locked(
         &self,
         inner: &mut StateInner,
         observations: Vec<TestRunCommandObservation>,
         compacted: Vec<TestRunCompacted>,
     ) {
-        self.persist_test_run_evidence_batch_with_compaction_locked(inner, observations, compacted, true);
+        self.persist_test_run_evidence_batch_with_compaction_locked(
+            inner,
+            observations,
+            compacted,
+            true,
+        );
     }
 
     // A lifecycle revalidation leaves compaction selection to the idle
     // compaction step, which selects again at the revision this batch commits
     // (test_runs.rs ticks it every 2 s), so the revalidating hold never builds
     // the full history projection that selection needs.
-    fn persist_test_run_evidence_batch_deferring_compaction_locked(
+    pub(crate) fn persist_test_run_evidence_batch_deferring_compaction_locked(
         &self,
         inner: &mut StateInner,
         observations: Vec<TestRunCommandObservation>,
         compacted: Vec<TestRunCompacted>,
     ) {
-        self.persist_test_run_evidence_batch_with_compaction_locked(inner, observations, compacted, false);
+        self.persist_test_run_evidence_batch_with_compaction_locked(
+            inner,
+            observations,
+            compacted,
+            false,
+        );
     }
 
     fn persist_test_run_evidence_batch_with_compaction_locked(
@@ -1046,8 +1142,14 @@ impl AppState {
                 .expect("test observation mutex poisoned");
             for row in &observations {
                 pending.remove(&row.execution_id);
-                inner.test_runs.observations_durable.remove(&row.execution_id);
-                inner.test_runs.observations_failed.remove(&row.execution_id);
+                inner
+                    .test_runs
+                    .observations_durable
+                    .remove(&row.execution_id);
+                inner
+                    .test_runs
+                    .observations_failed
+                    .remove(&row.execution_id);
             }
         }
         for row in &compacted {
@@ -1162,14 +1264,14 @@ impl AppState {
         }
     }
 
-    fn step_test_command_observation_persistence(&self) {
+    pub(crate) fn step_test_command_observation_persistence(&self) {
         self.step_test_command_observation_persistence_with_probe(
             #[cfg(test)]
             || {},
         );
     }
 
-    fn step_test_command_observation_persistence_with_probe(
+    pub(crate) fn step_test_command_observation_persistence_with_probe(
         &self,
         #[cfg(test)] after_probe: impl FnOnce(),
     ) {
@@ -1393,7 +1495,7 @@ fn test_run_changed_observation_summaries(
         .collect()
 }
 
-fn test_run_public_observation(
+pub(crate) fn test_run_public_observation(
     inner: &StateInner,
     row: &TestRunCommandObservation,
 ) -> TestRunSummary {
@@ -1413,7 +1515,7 @@ fn test_run_public_observation(
         .unwrap_or_else(|| test_run_observation_summary(inner, row))
 }
 
-fn test_run_observation_risk(
+pub(crate) fn test_run_observation_risk(
     inner: &impl TestRunProjectionSource,
     row: &TestRunCommandObservation,
     durable: bool,
@@ -1437,7 +1539,7 @@ fn test_run_observation_risk(
     }
 }
 
-fn test_run_observation_summary(
+pub(crate) fn test_run_observation_summary(
     inner: &impl TestRunProjectionSource,
     row: &TestRunCommandObservation,
 ) -> TestRunSummary {
@@ -1467,12 +1569,14 @@ fn test_run_observation_summary(
         .into_iter()
         .collect();
     summary.registration.tracking_durability = Some(
-        if inner.projection_index()
+        if inner
+            .projection_index()
             .observations_failed
             .contains(&row.execution_id)
         {
             "failed"
-        } else if inner.projection_index()
+        } else if inner
+            .projection_index()
             .observations_durable
             .contains(&row.execution_id)
         {
@@ -1485,7 +1589,8 @@ fn test_run_observation_summary(
     summary.registration.restart_would_void_evidence = test_run_observation_risk(
         inner,
         row,
-        inner.projection_index()
+        inner
+            .projection_index()
             .observations_durable
             .contains(&row.execution_id),
     );
@@ -1521,7 +1626,7 @@ fn test_run_observation_summary(
 // `run`: same owner and worktree, an artifact naming this run and its
 // directory, and a positive terminal-digest or immutable-request match. Also
 // used by the handoff ledger to find a run's credited observations.
-fn test_run_observation_matches_run(
+pub(crate) fn test_run_observation_matches_run(
     inner: &impl TestRunProjectionSource,
     run: &TestRunSummary,
     disk: Option<&TestRunDisk>,
@@ -1551,17 +1656,20 @@ fn test_run_observation_matches_run(
 // Shared by the scanner's SSE summary and fresh API/snapshot projection.
 // Only positive immutable-request or terminal-digest matches suppress an
 // observation row. All inputs here are already read; no filesystem I/O.
-fn test_run_enrich_artifact_summary(
+pub(crate) fn test_run_enrich_artifact_summary(
     inner: &StateInner,
     run: &mut TestRunSummary,
     disk: Option<&TestRunDisk>,
 ) -> HashSet<String> {
     test_run_enrich_artifact_summary_from_observations(
-        inner, run, disk, inner.test_run_observations.values(),
+        inner,
+        run,
+        disk,
+        inner.test_run_observations.values(),
     )
 }
 
-fn test_run_enrich_artifact_summary_from_observations<'a>(
+pub(crate) fn test_run_enrich_artifact_summary_from_observations<'a>(
     inner: &impl TestRunProjectionSource,
     run: &mut TestRunSummary,
     disk: Option<&TestRunDisk>,
@@ -1578,7 +1686,8 @@ fn test_run_enrich_artifact_summary_from_observations<'a>(
     // A discovery-only artifact is superseded by exact report proof. A
     // registered launch additionally requires coverage of its captured
     // binding; another lifecycle cannot discharge that association.
-    let base_covered = inner.projection_registrations()
+    let base_covered = inner
+        .projection_registrations()
         .get(&run.run_id)
         .is_none_or(|registration| {
             registration.validated_unbound
@@ -1665,7 +1774,10 @@ fn test_run_enrich_artifact_summary_from_observations<'a>(
     merged
 }
 
-fn test_run_artifact_fallback(inner: &StateInner, run_id: &str) -> Option<TestRunSummary> {
+pub(crate) fn test_run_artifact_fallback(
+    inner: &StateInner,
+    run_id: &str,
+) -> Option<TestRunSummary> {
     test_run_artifact_fallback_from_observations(
         inner,
         run_id,
@@ -1703,30 +1815,46 @@ fn test_run_artifact_fallback_from_observations<'a>(
 // The same selection as the full history projection for one compaction
 // identity. Completing one fence must not rebuild every unrelated summary.
 // Candidate filtering is not proof: exact matching and risk are still fresh.
-fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestRunSummary> {
+pub(crate) fn test_run_compaction_summary(
+    inner: &StateInner,
+    run_id: &str,
+) -> Option<TestRunSummary> {
     // Artifact-run index candidates, in map key order; the predicate stays.
-    let observations = || inner.test_run_observations.index().artifact_run(run_id)
-        .map(|key| &inner.test_run_observations[key])
-        .filter(|row| row.artifact.as_ref().is_some_and(|artifact| artifact.run_id == run_id));
+    let observations = || {
+        inner
+            .test_run_observations
+            .index()
+            .artifact_run(run_id)
+            .map(|key| &inner.test_run_observations[key])
+            .filter(|row| {
+                row.artifact
+                    .as_ref()
+                    .is_some_and(|artifact| artifact.run_id == run_id)
+            })
+    };
     let artifact = if let Some(entry) = inner.test_runs.find(run_id) {
         let mut run = entry.summary.clone();
-        run.registration = test_run_registration_view_from_observations(
-            inner, &entry.disk, observations(),
-        );
+        run.registration =
+            test_run_registration_view_from_observations(inner, &entry.disk, observations());
         run.project_id = test_run_effective_project_id(inner, entry);
         test_run_enrich_artifact_summary_from_observations(
-            inner, &mut run, Some(&entry.disk), observations(),
+            inner,
+            &mut run,
+            Some(&entry.disk),
+            observations(),
         );
         Some(run)
     } else {
-        test_run_artifact_fallback_from_observations(
-            inner,
-            run_id,
-            observations(),
-            |id| inner.test_runs.find(id).is_some(),
-        )
+        test_run_artifact_fallback_from_observations(inner, run_id, observations(), |id| {
+            inner.test_runs.find(id).is_some()
+        })
         .map(|mut run| {
-            test_run_enrich_artifact_summary_from_observations(inner, &mut run, None, observations());
+            test_run_enrich_artifact_summary_from_observations(
+                inner,
+                &mut run,
+                None,
+                observations(),
+            );
             run
         })
     };
@@ -1739,11 +1867,16 @@ fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestR
         // Artifact ids are distinct from execution ids; do not recurse through
         // an arbitrary user-supplied/corrupt observation association chain.
         let indexed = inner.test_runs.find(&artifact.run_id);
-        let target = indexed.map(|entry| entry.summary.clone()).or_else(|| {
-            test_run_artifact_fallback(inner, &artifact.run_id)
-        });
+        let target = indexed
+            .map(|entry| entry.summary.clone())
+            .or_else(|| test_run_artifact_fallback(inner, &artifact.run_id));
         if target.as_ref().is_some_and(|run| {
-            test_run_observation_matches_run(inner, run, indexed.map(|entry| entry.disk.as_ref()), row)
+            test_run_observation_matches_run(
+                inner,
+                run,
+                indexed.map(|entry| entry.disk.as_ref()),
+                row,
+            )
         }) {
             return None;
         }
@@ -1751,14 +1884,17 @@ fn test_run_compaction_summary(inner: &StateInner, run_id: &str) -> Option<TestR
     Some(test_run_observation_summary(inner, row))
 }
 
-fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
+pub(crate) fn test_run_full_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     test_run_project_history(inner, false)
 }
 
 // Shared canonical merge for internal consumers and complete on-demand
 // history. The complete view includes installed minimal retained identities
 // before association merging, so their execution aliases cannot reappear.
-fn test_run_project_history(inner: &impl TestRunProjectionSource, complete: bool) -> Vec<TestRunSummary> {
+pub(crate) fn test_run_project_history(
+    inner: &impl TestRunProjectionSource,
+    complete: bool,
+) -> Vec<TestRunSummary> {
     #[cfg(test)]
     TEST_TEST_RUN_FULL_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let projection = TestRunProjection::new(inner);
@@ -1767,7 +1903,9 @@ fn test_run_project_history(inner: &impl TestRunProjectionSource, complete: bool
     for run in &mut runs {
         if let Some(entry) = projection.entries.get(run.run_id.as_str()) {
             run.registration = test_run_registration_view_from_observations(
-                inner, &entry.disk, projection.observations(&run.run_id).iter().copied(),
+                inner,
+                &entry.disk,
+                projection.observations(&run.run_id).iter().copied(),
             );
             run.project_id = test_run_effective_project_id(inner, entry);
         }
@@ -1780,10 +1918,11 @@ fn test_run_project_history(inner: &impl TestRunProjectionSource, complete: bool
     runs.extend(retained.into_iter().filter_map(|id| {
         if !projection.entries.contains_key(id.as_str()) {
             if complete {
-                if let Some(row) = inner.projection_compacted().get(id)
-                    .filter(|row| test_run_compact_is_installed_with(inner, row, |id| {
+                if let Some(row) = inner.projection_compacted().get(id).filter(|row| {
+                    test_run_compact_is_installed_with(inner, row, |id| {
                         projection.entries.contains_key(id)
-                    })) {
+                    })
+                }) {
                     return Some(test_run_compacted_summary(inner, row));
                 }
             }
@@ -1799,12 +1938,16 @@ fn test_run_project_history(inner: &impl TestRunProjectionSource, complete: bool
     }));
     let mut merged = HashSet::new();
     for run in &mut runs {
-        let disk = projection.entries
+        let disk = projection
+            .entries
             .get(run.run_id.as_str())
             .map(|entry| entry.disk.as_ref());
         let observations = projection.observations(&run.run_id);
         merged.extend(test_run_enrich_artifact_summary_from_observations(
-            inner, run, disk, observations.iter().copied(),
+            inner,
+            run,
+            disk,
+            observations.iter().copied(),
         ));
     }
     runs.extend(
@@ -1836,7 +1979,10 @@ struct TestRunIdentityIndex<'a> {
 
 impl<'a> TestRunIdentityIndex<'a> {
     fn new(inner: &'a StateInner) -> Self {
-        Self { inner, artifact_runs: HashMap::new() }
+        Self {
+            inner,
+            artifact_runs: HashMap::new(),
+        }
     }
 
     fn counted<T>(candidates: Vec<T>) -> Vec<T> {
@@ -1851,19 +1997,34 @@ impl<'a> TestRunIdentityIndex<'a> {
     }
 
     fn has_entry(&self, run_id: &str) -> bool {
-        self.inner.test_runs.entries.with_run_id(run_id).next().is_some()
+        self.inner
+            .test_runs
+            .entries
+            .with_run_id(run_id)
+            .next()
+            .is_some()
     }
 
     /// Live rows whose artifact carries this run id, in key order.
     fn artifact_rows(&self, run_id: &str) -> Vec<&'a TestRunCommandObservation> {
         let rows = &self.inner.test_run_observations;
-        Self::counted(rows.index().artifact_run(run_id).filter_map(|key| rows.get(key)).collect())
+        Self::counted(
+            rows.index()
+                .artifact_run(run_id)
+                .filter_map(|key| rows.get(key))
+                .collect(),
+        )
     }
 
     /// Live rows whose summary carries this run id, in key order.
     fn summary_rows(&self, run_id: &str) -> Vec<&'a TestRunCommandObservation> {
         let rows = &self.inner.test_run_observations;
-        Self::counted(rows.index().summary_run(run_id).filter_map(|key| rows.get(key)).collect())
+        Self::counted(
+            rows.index()
+                .summary_run(run_id)
+                .filter_map(|key| rows.get(key))
+                .collect(),
+        )
     }
 
     /// Retained fallback keys whose fallback carries this run id, in key
@@ -1873,9 +2034,15 @@ impl<'a> TestRunIdentityIndex<'a> {
     fn retained_keys(&self, run_id: &str) -> std::collections::BTreeSet<&'a String> {
         let registrations = &self.inner.test_run_registrations;
         let compacted = &self.inner.test_run_compacted;
-        let keys: Vec<_> = registrations.index().run(run_id)
-            .chain(compacted.index().summary_run(run_id)
-                .filter(|key| !registrations.contains_key(key.as_str())))
+        let keys: Vec<_> = registrations
+            .index()
+            .run(run_id)
+            .chain(
+                compacted
+                    .index()
+                    .summary_run(run_id)
+                    .filter(|key| !registrations.contains_key(key.as_str())),
+            )
             .collect();
         Self::counted(keys).into_iter().collect()
     }
@@ -1883,7 +2050,13 @@ impl<'a> TestRunIdentityIndex<'a> {
     /// Compacted proofs whose summary carries this run id, in key order.
     fn compacted(&self, run_id: &str) -> Vec<&'a TestRunCompacted> {
         let compacted = &self.inner.test_run_compacted;
-        Self::counted(compacted.index().summary_run(run_id).filter_map(|key| compacted.get(key)).collect())
+        Self::counted(
+            compacted
+                .index()
+                .summary_run(run_id)
+                .filter_map(|key| compacted.get(key))
+                .collect(),
+        )
     }
 
     // The artifact runs that test_run_full_summaries_locked builds for one run
@@ -1903,26 +2076,38 @@ impl<'a> TestRunIdentityIndex<'a> {
         let observations = self.artifact_rows(run_id);
         let indexed = self.entries(run_id);
         let first = indexed.first().copied();
-        let mut runs: Vec<_> = first.into_iter().flat_map(|first| {
-            indexed.iter().map(|entry| {
-                let mut run = entry.summary.clone();
-                run.registration = test_run_registration_view_from_observations(
-                    inner, &first.disk, observations.iter().copied(),
-                );
-                run.project_id = test_run_effective_project_id(inner, first);
-                run
-            }).collect::<Vec<_>>()
-        }).collect();
+        let mut runs: Vec<_> = first
+            .into_iter()
+            .flat_map(|first| {
+                indexed
+                    .iter()
+                    .map(|entry| {
+                        let mut run = entry.summary.clone();
+                        run.registration = test_run_registration_view_from_observations(
+                            inner,
+                            &first.disk,
+                            observations.iter().copied(),
+                        );
+                        run.project_id = test_run_effective_project_id(inner, first);
+                        run
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
         for key in self.retained_keys(run_id) {
             if self.has_entry(key) {
                 continue;
             }
-            let rows = if key.as_str() == run_id { observations.clone() } else {
+            let rows = if key.as_str() == run_id {
+                observations.clone()
+            } else {
                 self.artifact_rows(key)
             };
-            if let Some(run) = test_run_artifact_fallback_from_observations(inner, key, rows, |id| {
-                self.has_entry(id)
-            }) {
+            if let Some(run) =
+                test_run_artifact_fallback_from_observations(inner, key, rows, |id| {
+                    self.has_entry(id)
+                })
+            {
                 if run.run_id == run_id {
                     runs.push(run);
                 }
@@ -1931,7 +2116,10 @@ impl<'a> TestRunIdentityIndex<'a> {
         let mut merged = HashSet::new();
         for run in &mut runs {
             merged.extend(test_run_enrich_artifact_summary_from_observations(
-                inner, run, first.map(|entry| entry.disk.as_ref()), observations.iter().copied(),
+                inner,
+                run,
+                first.map(|entry| entry.disk.as_ref()),
+                observations.iter().copied(),
             ));
         }
         (runs, merged)
@@ -1945,7 +2133,9 @@ impl<'a> TestRunIdentityIndex<'a> {
         let mut runs = self.artifact_runs(run_id).0.clone();
         for row in self.summary_rows(run_id) {
             let merged = row.artifact.as_ref().is_some_and(|artifact| {
-                self.artifact_runs(&artifact.run_id).1.contains(&row.execution_id)
+                self.artifact_runs(&artifact.run_id)
+                    .1
+                    .contains(&row.execution_id)
             });
             if !merged {
                 runs.push(test_run_observation_summary(inner, row));
@@ -1954,10 +2144,13 @@ impl<'a> TestRunIdentityIndex<'a> {
         test_run_sort_by_start(&mut runs);
         // Compacted summaries appear only for identities the full list lacks.
         if runs.is_empty() {
-            runs.extend(self.compacted(run_id).into_iter()
-                .filter(|row| test_run_compact_is_installed(inner, row))
-                .map(|row| test_run_compacted_summary(inner, row))
-                .filter(|run| run.registration.restart_would_void_evidence != Some(false)));
+            runs.extend(
+                self.compacted(run_id)
+                    .into_iter()
+                    .filter(|row| test_run_compact_is_installed(inner, row))
+                    .map(|row| test_run_compacted_summary(inner, row))
+                    .filter(|run| run.registration.restart_would_void_evidence != Some(false)),
+            );
             test_run_sort_by_start(&mut runs);
         }
         runs
@@ -1993,12 +2186,15 @@ fn test_run_sort_by_start(runs: &mut [TestRunSummary]) {
 }
 
 #[cfg(test)]
-fn test_run_identity_summaries_locked(inner: &StateInner, run_id: &str) -> Vec<TestRunSummary> {
+pub(crate) fn test_run_identity_summaries_locked(
+    inner: &StateInner,
+    run_id: &str,
+) -> Vec<TestRunSummary> {
     TestRunIdentityIndex::new(inner).identity(run_id)
 }
 
 #[cfg(test)]
-fn test_run_changed_row_summary_locked(
+pub(crate) fn test_run_changed_row_summary_locked(
     inner: &StateInner,
     id: &str,
     row: &TestRunCommandObservation,
@@ -2006,7 +2202,7 @@ fn test_run_changed_row_summary_locked(
     TestRunIdentityIndex::new(inner).changed_row(id, row)
 }
 
-fn test_run_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
+pub(crate) fn test_run_summaries_locked(inner: &StateInner) -> Vec<TestRunSummary> {
     let mut runs = test_run_full_summaries_locked(inner);
     let known: HashSet<_> = runs.iter().map(|run| run.run_id.clone()).collect();
     let indexed = test_run_indexed_ids(&inner.test_runs);

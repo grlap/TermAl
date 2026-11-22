@@ -2,12 +2,14 @@
 // Does not mount the production route or deliver prompts. Recovered from the policy component.
 // Authenticated permission/native observations inside the existing executor
 // service. This endpoint cannot create a session, binding or queued prompt.
-const FEDERATION_PROMPT_POLICY_ROUTE: &str = "/federation/v1/executor/prompt-policy";
-const FEDERATION_PROMPT_POLICY_REQUEST_BYTES: usize = 32_768;
-const FEDERATION_PROMPT_OBSERVATION_LIFETIME: Duration = Duration::from_secs(30);
+
+use super::*;
+pub(crate) const FEDERATION_PROMPT_POLICY_ROUTE: &str = "/federation/v1/executor/prompt-policy";
+pub(crate) const FEDERATION_PROMPT_POLICY_REQUEST_BYTES: usize = 32_768;
+pub(crate) const FEDERATION_PROMPT_OBSERVATION_LIFETIME: Duration = Duration::from_secs(30);
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_policy_unknown_outcome() -> ApiError {
+pub(crate) fn federation_prompt_policy_unknown_outcome() -> ApiError {
     ApiError::from_status(
         StatusCode::SERVICE_UNAVAILABLE,
         "prompt policy outcome is unknown; retry the original operation with the same creationKey or permission identity",
@@ -17,18 +19,18 @@ fn federation_prompt_policy_unknown_outcome() -> ApiError {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct FederationPromptCapabilities {
-    protocol_version: u16,
+pub(crate) struct FederationPromptCapabilities {
+    pub(crate) protocol_version: u16,
     enqueue_text_prompt: u16,
-    text_bytes: u64,
-    request_bytes: u64,
-    metadata_bytes: u64,
-    response_bytes: u64,
+    pub(crate) text_bytes: u64,
+    pub(crate) request_bytes: u64,
+    pub(crate) metadata_bytes: u64,
+    pub(crate) response_bytes: u64,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationPromptCapabilities {
-    fn local() -> Self {
+    pub(crate) fn local() -> Self {
         Self {
             protocol_version: 1,
             enqueue_text_prompt: 1,
@@ -38,7 +40,7 @@ impl FederationPromptCapabilities {
             response_bytes: 16_384,
         }
     }
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if self != &Self::local() {
             return Err(ApiError::conflict(
                 "enqueueTextPrompt capability or bounds are unsupported",
@@ -51,16 +53,16 @@ impl FederationPromptCapabilities {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct FederationPromptPolicyRequest {
-    protocol_version: u16,
-    request_id: String,
-    operation: FederationPromptPolicyOperation,
+pub(crate) struct FederationPromptPolicyRequest {
+    pub(crate) protocol_version: u16,
+    pub(crate) request_id: String,
+    pub(crate) operation: FederationPromptPolicyOperation,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-enum FederationPromptPolicyOperation {
+pub(crate) enum FederationPromptPolicyOperation {
     DestinationProof {
         scope: FederationPromptScope,
         consent: FederationPromptPermissionIdentity,
@@ -77,21 +79,21 @@ enum FederationPromptPolicyOperation {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct FederationPromptPolicyReply {
-    protocol_version: u16,
-    request_id: String,
-    link_incarnation: String,
-    nonce: String,
-    expires_at: u64,
-    capabilities: FederationPromptCapabilities,
-    permission: FederationPromptPermission,
+pub(crate) struct FederationPromptPolicyReply {
+    pub(crate) protocol_version: u16,
+    pub(crate) request_id: String,
+    pub(crate) link_incarnation: String,
+    pub(crate) nonce: String,
+    pub(crate) expires_at: u64,
+    pub(crate) capabilities: FederationPromptCapabilities,
+    pub(crate) permission: FederationPromptPermission,
     // Requester-local timing only; never accepted from or serialized onto wire.
     #[serde(skip)]
-    observed_until: Option<std::time::Instant>,
+    pub(crate) observed_until: Option<std::time::Instant>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_now() -> Result<u64, ApiError> {
+pub(crate) fn federation_prompt_now() -> Result<u64, ApiError> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -100,7 +102,7 @@ fn federation_prompt_now() -> Result<u64, ApiError> {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationPromptPolicyRequest {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if self.protocol_version != 1 {
             return Err(ApiError::bad_request("unsupported prompt policy protocol"));
         }
@@ -128,7 +130,7 @@ impl FederationPromptPolicyRequest {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_policy_routes() -> Router<FederationListenerState> {
+pub(crate) fn federation_prompt_policy_routes() -> Router<FederationListenerState> {
     // Foundation only: production listener registration waits for the complete
     // delivery vertical. Isolated policy fixtures mount this router directly.
     Router::new()
@@ -245,7 +247,7 @@ async fn serve_federation_prompt_policy(
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
-    fn observe_federation_prompt_revocation(
+    pub(crate) fn observe_federation_prompt_revocation(
         &self,
         lease: &FederationLinkLease,
         mut record: FederationPromptPermission,
@@ -302,7 +304,7 @@ impl AppState {
         )
     }
 
-    async fn read_federation_prompt_policy(
+    pub(crate) async fn read_federation_prompt_policy(
         &self,
         rpc: &FederationRpcClient,
         lease: &FederationLinkLease,
@@ -380,7 +382,7 @@ impl AppState {
         Ok(reply)
     }
 
-    async fn issue_federation_prompt_grant(
+    pub(crate) async fn issue_federation_prompt_grant(
         &self,
         expected_version: u64,
         creation_key: String,
@@ -390,9 +392,10 @@ impl AppState {
         scope.validate()?;
         consent.validate()?;
         validate_federation_reference(&creation_key)?;
-        if let Some(retained) = self.read_federation_prompt_grant_replay(
-            &creation_key, &scope, &consent,
-        ).await? {
+        if let Some(retained) = self
+            .read_federation_prompt_grant_replay(&creation_key, &scope, &consent)
+            .await?
+        {
             return Ok(retained);
         }
         let handle = self
@@ -410,7 +413,7 @@ impl AppState {
         .await
     }
 
-    async fn issue_federation_prompt_grant_on_link(
+    pub(crate) async fn issue_federation_prompt_grant_on_link(
         &self,
         expected_version: u64,
         creation_key: String,
@@ -422,9 +425,10 @@ impl AppState {
         scope.validate()?;
         consent.validate()?;
         validate_federation_reference(&creation_key)?;
-        if let Some(retained) = self.read_federation_prompt_grant_replay(
-            &creation_key, &scope, &consent,
-        ).await? {
+        if let Some(retained) = self
+            .read_federation_prompt_grant_replay(&creation_key, &scope, &consent)
+            .await?
+        {
             return Ok(retained);
         }
         federation_prompt_link_scope(lease, &scope, FederationRole::Central)?;
@@ -446,49 +450,50 @@ impl AppState {
         let app = self.clone();
         let lease = lease.clone();
         run_blocking_api(move || {
-            app.mutate_federation_permission(
-                Some(&lease),
-                |domain, settings, context| {
-                    if let Some(retained) = federation_prompt_creation_replay(
-                        domain, settings, FederationPromptPermissionKind::CallerGrant,
-                        &creation_key, &scope, Some(&consent),
-                    )? {
-                        return Ok(retained);
-                    }
-                    if domain.version != expected_version {
-                        return Err(ApiError::conflict("federation policy version changed"));
-                    }
-                    federation_prompt_scope_current_locked(
-                        context.native_state,
-                        &scope,
-                        FederationRole::Central,
-                    )?;
-                    if settings.role != FederationRole::Central {
-                        return Err(federation_stale_link());
-                    }
-                    proof.ensure_fresh_at(federation_prompt_observation_now(
-                        &lease,
-                        "promptPolicyGrantMutation",
-                    ))?;
-                    let policy = domain
-                        .prompt_permissions
-                        .get_or_insert_with(FederationPromptPermissions::default);
-                    policy.retain(proof.permission.clone())?;
-                    policy.retain(FederationPromptPermission {
-                        kind: FederationPromptPermissionKind::CallerGrant,
-                        identity: FederationPromptPermissionIdentity {
-                            id: Uuid::new_v4().to_string(),
-                            generation: 1,
-                        },
-                        issuer: scope.source_host.clone(),
-                        scope: scope.clone(),
-                        creation_key: creation_key.clone(),
-                        consent: Some(consent.clone()),
-                        revoked: false,
-                        receiver_observed_generation: None,
-                    })
-                },
-            )
+            app.mutate_federation_permission(Some(&lease), |domain, settings, context| {
+                if let Some(retained) = federation_prompt_creation_replay(
+                    domain,
+                    settings,
+                    FederationPromptPermissionKind::CallerGrant,
+                    &creation_key,
+                    &scope,
+                    Some(&consent),
+                )? {
+                    return Ok(retained);
+                }
+                if domain.version != expected_version {
+                    return Err(ApiError::conflict("federation policy version changed"));
+                }
+                federation_prompt_scope_current_locked(
+                    context.native_state,
+                    &scope,
+                    FederationRole::Central,
+                )?;
+                if settings.role != FederationRole::Central {
+                    return Err(federation_stale_link());
+                }
+                proof.ensure_fresh_at(federation_prompt_observation_now(
+                    &lease,
+                    "promptPolicyGrantMutation",
+                ))?;
+                let policy = domain
+                    .prompt_permissions
+                    .get_or_insert_with(FederationPromptPermissions::default);
+                policy.retain(proof.permission.clone())?;
+                policy.retain(FederationPromptPermission {
+                    kind: FederationPromptPermissionKind::CallerGrant,
+                    identity: FederationPromptPermissionIdentity {
+                        id: Uuid::new_v4().to_string(),
+                        generation: 1,
+                    },
+                    issuer: scope.source_host.clone(),
+                    scope: scope.clone(),
+                    creation_key: creation_key.clone(),
+                    consent: Some(consent.clone()),
+                    revoked: false,
+                    receiver_observed_generation: None,
+                })
+            })
         })
         .await
     }

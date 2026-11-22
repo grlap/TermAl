@@ -12,8 +12,10 @@ The HTTP handler (`search_instructions`) and the request/response structs
 across the flat `include!()`-assembled module.
 */
 
+use super::*;
+
 /// Searches instruction phrase.
-fn search_instruction_phrase(
+pub(crate) fn search_instruction_phrase(
     workdir: &FsPath,
     query: &str,
 ) -> Result<InstructionSearchResponse, ApiError> {
@@ -347,7 +349,7 @@ fn is_instruction_seed_path(path: &FsPath, workdir: &FsPath) -> bool {
 }
 
 /// Reads instruction document.
-fn read_instruction_document(
+pub(crate) fn read_instruction_document(
     path: &FsPath,
     workdir: &FsPath,
 ) -> Result<InstructionDocumentInternal, ApiError> {

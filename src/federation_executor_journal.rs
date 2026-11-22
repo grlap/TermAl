@@ -5,162 +5,229 @@
 // All journal rows count towards capacity, including processed dedup rows.
 // There is deliberately no eviction or pruning API. Lifecycle evidence APIs
 // remain reserved for a later caller, with item-scoped dead-code allowances.
+
+use super::*;
 #[cfg_attr(not(test), allow(dead_code))]
-const FEDERATION_EXECUTOR_MAX_COUNT: u64 = 65_536;
+pub(crate) const FEDERATION_EXECUTOR_MAX_COUNT: u64 = 65_536;
 #[cfg_attr(not(test), allow(dead_code))]
-const FEDERATION_EXECUTOR_MAX_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const FEDERATION_EXECUTOR_MAX_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg_attr(not(test), allow(dead_code))]
-const FEDERATION_EXECUTOR_MAX_PAYLOAD: usize = 256 * 1024;
+pub(crate) const FEDERATION_EXECUTOR_MAX_PAYLOAD: usize = 256 * 1024;
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationExecutorOperation {
-    central_host_id: String,
-    central_epoch: u64,
-    operation_key: String,
-    target_host_id: String,
-    enrollment_generation: u64,
-    session_id: String,
-    creation_id: String,
-    placement_generation: u64,
-    command_kind: String,
-    payload: String,
+pub(crate) struct FederationExecutorOperation {
+    pub(crate) central_host_id: String,
+    pub(crate) central_epoch: u64,
+    pub(crate) operation_key: String,
+    pub(crate) target_host_id: String,
+    pub(crate) enrollment_generation: u64,
+    pub(crate) session_id: String,
+    pub(crate) creation_id: String,
+    pub(crate) placement_generation: u64,
+    pub(crate) command_kind: String,
+    pub(crate) payload: String,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationExecutorOperation {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         for (value, bound) in [
-            (&self.central_host_id, 256), (&self.operation_key, 1024),
-            (&self.target_host_id, 256), (&self.session_id, 256), (&self.creation_id, 256),
+            (&self.central_host_id, 256),
+            (&self.operation_key, 1024),
+            (&self.target_host_id, 256),
+            (&self.session_id, 256),
+            (&self.creation_id, 256),
         ] {
             if value.trim().is_empty() || value.len() > bound || value.contains('\0') {
-                return Err(mailbox_store_error(MailboxStoreErrorKind::Validation,
-                    "executor operation identity is empty, oversized or invalid"));
+                return Err(mailbox_store_error(
+                    MailboxStoreErrorKind::Validation,
+                    "executor operation identity is empty, oversized or invalid",
+                ));
             }
         }
-        if [self.central_epoch, self.enrollment_generation, self.placement_generation]
-            .iter().any(|value| *value == 0 || *value > i64::MAX as u64)
+        if [
+            self.central_epoch,
+            self.enrollment_generation,
+            self.placement_generation,
+        ]
+        .iter()
+        .any(|value| *value == 0 || *value > i64::MAX as u64)
             || !matches!(self.command_kind.as_str(), "wake" | "start" | "stop")
             || self.payload.len() > FEDERATION_EXECUTOR_MAX_PAYLOAD
         {
-            return Err(mailbox_store_error(MailboxStoreErrorKind::Validation,
-                "executor operation authority, command or payload is invalid"));
+            return Err(mailbox_store_error(
+                MailboxStoreErrorKind::Validation,
+                "executor operation authority, command or payload is invalid",
+            ));
         }
         Ok(())
     }
 
-    fn digest(&self) -> String {
+    pub(crate) fn digest(&self) -> String {
         sha256_hex(self.payload.as_bytes())
     }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct FederationExecutorRecord {
-    operation: FederationExecutorOperation,
-    stage: String,
-    effect_state: String,
-    queue_entry_id: Option<String>,
-    delivery_attempt_id: Option<String>,
-    runtime_ack: Option<String>,
-    processed_evidence_kind: Option<String>,
-    processed_evidence: Option<String>,
+pub(crate) struct FederationExecutorRecord {
+    pub(crate) operation: FederationExecutorOperation,
+    pub(crate) stage: String,
+    pub(crate) effect_state: String,
+    pub(crate) queue_entry_id: Option<String>,
+    pub(crate) delivery_attempt_id: Option<String>,
+    pub(crate) runtime_ack: Option<String>,
+    pub(crate) processed_evidence_kind: Option<String>,
+    pub(crate) processed_evidence: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-enum FederationExecutorEvidence {
-    Queued { queue_entry_id: String, delivery_attempt_id: String },
+pub(crate) enum FederationExecutorEvidence {
+    Queued {
+        queue_entry_id: String,
+        delivery_attempt_id: String,
+    },
     // The write-ahead attempt is unknown until independent positive evidence.
-    EffectAttempt { delivery_attempt_id: String },
-    RuntimeAccepted { delivery_attempt_id: String, acknowledgement: String },
+    EffectAttempt {
+        delivery_attempt_id: String,
+    },
+    RuntimeAccepted {
+        delivery_attempt_id: String,
+        acknowledgement: String,
+    },
     // Callers must supply already-validated central ACK evidence or a matching
     // command terminal outcome. This storage layer cannot validate either.
-    Processed { kind: FederationExecutorProcessedKind, evidence: String },
+    Processed {
+        kind: FederationExecutorProcessedKind,
+        evidence: String,
+    },
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-enum FederationExecutorProcessedKind {
+pub(crate) enum FederationExecutorProcessedKind {
     MailboxAck,
     CommandOutcome,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_executor_conflict() -> anyhow::Error {
-    mailbox_store_error(MailboxStoreErrorKind::Conflict,
-        "executor operation key, captured authority or retained evidence conflicts")
+pub(crate) fn federation_executor_conflict() -> anyhow::Error {
+    mailbox_store_error(
+        MailboxStoreErrorKind::Conflict,
+        "executor operation key, captured authority or retained evidence conflicts",
+    )
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 fn federation_executor_evidence_text(value: &str) -> Result<()> {
     if value.trim().is_empty() || value.len() > 4096 || value.contains('\0') {
-        return Err(mailbox_store_error(MailboxStoreErrorKind::Validation,
-            "executor evidence is empty, oversized or invalid"));
+        return Err(mailbox_store_error(
+            MailboxStoreErrorKind::Validation,
+            "executor evidence is empty, oversized or invalid",
+        ));
     }
     Ok(())
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_executor_read(
+pub(crate) fn federation_executor_read(
     connection: &rusqlite::Connection,
     central: &str,
     key: &str,
 ) -> Result<Option<FederationExecutorRecord>> {
-    let raw = connection.query_row(
-        "SELECT central_host_id,central_epoch,operation_key,target_host_id,
+    let raw = connection
+        .query_row(
+            "SELECT central_host_id,central_epoch,operation_key,target_host_id,
          enrollment_generation,session_id,creation_id,placement_generation,command_kind,
          payload,payload_digest,stage,effect_state,queue_entry_id,delivery_attempt_id,
          runtime_ack,processed_evidence_kind,processed_evidence
          FROM federation_executor_operations WHERE central_host_id=?1 AND operation_key=?2",
-        rusqlite::params![central, key],
-        |row| Ok((FederationExecutorRecord {
-            operation: FederationExecutorOperation {
-                central_host_id: row.get(0)?, central_epoch: row.get(1)?,
-                operation_key: row.get(2)?, target_host_id: row.get(3)?,
-                enrollment_generation: row.get(4)?, session_id: row.get(5)?,
-                creation_id: row.get(6)?, placement_generation: row.get(7)?,
-                command_kind: row.get(8)?, payload: row.get(9)?,
+            rusqlite::params![central, key],
+            |row| {
+                Ok((
+                    FederationExecutorRecord {
+                        operation: FederationExecutorOperation {
+                            central_host_id: row.get(0)?,
+                            central_epoch: row.get(1)?,
+                            operation_key: row.get(2)?,
+                            target_host_id: row.get(3)?,
+                            enrollment_generation: row.get(4)?,
+                            session_id: row.get(5)?,
+                            creation_id: row.get(6)?,
+                            placement_generation: row.get(7)?,
+                            command_kind: row.get(8)?,
+                            payload: row.get(9)?,
+                        },
+                        stage: row.get(11)?,
+                        effect_state: row.get(12)?,
+                        queue_entry_id: row.get(13)?,
+                        delivery_attempt_id: row.get(14)?,
+                        runtime_ack: row.get(15)?,
+                        processed_evidence_kind: row.get(16)?,
+                        processed_evidence: row.get(17)?,
+                    },
+                    row.get::<_, String>(10)?,
+                ))
             },
-            stage: row.get(11)?, effect_state: row.get(12)?,
-            queue_entry_id: row.get(13)?, delivery_attempt_id: row.get(14)?,
-            runtime_ack: row.get(15)?, processed_evidence_kind: row.get(16)?,
-            processed_evidence: row.get(17)?,
-        }, row.get::<_, String>(10)?)),
-    ).optional()?;
+        )
+        .optional()?;
     raw.map(|(record, digest)| {
         record.operation.validate()?;
         if record.operation.digest() != digest {
             bail!("executor journal payload does not match its retained digest");
         }
         Ok(record)
-    }).transpose()
+    })
+    .transpose()
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationExecutorRecord {
-    fn apply(&mut self, evidence: FederationExecutorEvidence) -> Result<()> {
+    pub(crate) fn apply(&mut self, evidence: FederationExecutorEvidence) -> Result<()> {
         match evidence {
-            FederationExecutorEvidence::Queued { queue_entry_id, delivery_attempt_id } => {
+            FederationExecutorEvidence::Queued {
+                queue_entry_id,
+                delivery_attempt_id,
+            } => {
                 federation_executor_evidence_text(&queue_entry_id)?;
                 federation_executor_evidence_text(&delivery_attempt_id)?;
-                if self.queue_entry_id.as_ref().is_some_and(|old| old != &queue_entry_id)
-                    || self.delivery_attempt_id.as_ref().is_some_and(|old| old != &delivery_attempt_id)
+                if self
+                    .queue_entry_id
+                    .as_ref()
+                    .is_some_and(|old| old != &queue_entry_id)
+                    || self
+                        .delivery_attempt_id
+                        .as_ref()
+                        .is_some_and(|old| old != &delivery_attempt_id)
                 {
                     return Err(federation_executor_conflict());
                 }
                 self.queue_entry_id = Some(queue_entry_id);
                 self.delivery_attempt_id = Some(delivery_attempt_id);
-                if self.stage == "received" { self.stage = "queued".to_owned(); }
+                if self.stage == "received" {
+                    self.stage = "queued".to_owned();
+                }
             }
-            FederationExecutorEvidence::EffectAttempt { delivery_attempt_id } => {
+            FederationExecutorEvidence::EffectAttempt {
+                delivery_attempt_id,
+            } => {
                 self.require_attempt(&delivery_attempt_id)?;
-                if self.effect_state != "confirmed" { self.effect_state = "unknown".to_owned(); }
+                if self.effect_state != "confirmed" {
+                    self.effect_state = "unknown".to_owned();
+                }
             }
-            FederationExecutorEvidence::RuntimeAccepted { delivery_attempt_id, acknowledgement } => {
+            FederationExecutorEvidence::RuntimeAccepted {
+                delivery_attempt_id,
+                acknowledgement,
+            } => {
                 self.require_attempt(&delivery_attempt_id)?;
                 federation_executor_evidence_text(&acknowledgement)?;
-                if self.runtime_ack.as_ref().is_some_and(|old| old != &acknowledgement) {
+                if self
+                    .runtime_ack
+                    .as_ref()
+                    .is_some_and(|old| old != &acknowledgement)
+                {
                     return Err(federation_executor_conflict());
                 }
                 if self.effect_state == "not_started" {
@@ -168,17 +235,27 @@ impl FederationExecutorRecord {
                 }
                 self.runtime_ack = Some(acknowledgement);
                 self.effect_state = "confirmed".to_owned();
-                if self.stage != "processed" { self.stage = "runtime_accepted".to_owned(); }
+                if self.stage != "processed" {
+                    self.stage = "runtime_accepted".to_owned();
+                }
             }
             FederationExecutorEvidence::Processed { kind, evidence } => {
                 federation_executor_evidence_text(&evidence)?;
                 let kind = match (self.operation.command_kind.as_str(), kind) {
                     ("wake", FederationExecutorProcessedKind::MailboxAck) => "mailbox_ack",
-                    ("start" | "stop", FederationExecutorProcessedKind::CommandOutcome) => "command_outcome",
+                    ("start" | "stop", FederationExecutorProcessedKind::CommandOutcome) => {
+                        "command_outcome"
+                    }
                     _ => return Err(federation_executor_conflict()),
                 };
-                if self.processed_evidence_kind.as_deref().is_some_and(|old| old != kind)
-                    || self.processed_evidence.as_ref().is_some_and(|old| old != &evidence)
+                if self
+                    .processed_evidence_kind
+                    .as_deref()
+                    .is_some_and(|old| old != kind)
+                    || self
+                        .processed_evidence
+                        .as_ref()
+                        .is_some_and(|old| old != &evidence)
                 {
                     return Err(federation_executor_conflict());
                 }
@@ -202,70 +279,107 @@ impl FederationExecutorRecord {
 }
 
 // Shared by receiver admission and the atomic central ownership mirror.
-fn federation_executor_admit(connection: &rusqlite::Connection, operation: &FederationExecutorOperation,
-    check_capacity: bool, reservations: &mut FederationExecutorReservationCache)
-    -> Result<FederationExecutorRecord>
-{
-        if let Some(existing) = federation_executor_read(connection,
-            &operation.central_host_id, &operation.operation_key)?
-        {
-            if existing.operation != *operation { return Err(federation_executor_conflict()); }
-            return Ok(existing);
+pub(crate) fn federation_executor_admit(
+    connection: &rusqlite::Connection,
+    operation: &FederationExecutorOperation,
+    check_capacity: bool,
+    reservations: &mut FederationExecutorReservationCache,
+) -> Result<FederationExecutorRecord> {
+    if let Some(existing) = federation_executor_read(
+        connection,
+        &operation.central_host_id,
+        &operation.operation_key,
+    )? {
+        if existing.operation != *operation {
+            return Err(federation_executor_conflict());
         }
-        let (mut count, mut bytes): (u64, u64) = connection.query_row(
-            "SELECT COUNT(*),COALESCE(SUM(payload_bytes),0) FROM federation_executor_operations",
-            [], |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if check_capacity {
-            // A host that changes role must not spend slots already reserved
-            // for its earlier central obligations. Same-key duplicates above
-            // remain free, and a mirror settlement below swaps its own slot.
-            let reserved = reservations.refresh(connection)?;
-            count = count.saturating_add(reserved.len() as u64);
-            for (_, request) in reserved {
-                let payload = request.operation(1).map_err(|_| federation_executor_conflict())?.payload;
-                bytes = bytes.saturating_add(payload.len() as u64);
-            }
+        return Ok(existing);
+    }
+    let (mut count, mut bytes): (u64, u64) = connection.query_row(
+        "SELECT COUNT(*),COALESCE(SUM(payload_bytes),0) FROM federation_executor_operations",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if check_capacity {
+        // A host that changes role must not spend slots already reserved
+        // for its earlier central obligations. Same-key duplicates above
+        // remain free, and a mirror settlement below swaps its own slot.
+        let reserved = reservations.refresh(connection)?;
+        count = count.saturating_add(reserved.len() as u64);
+        for (_, request) in reserved {
+            let payload = request
+                .operation(1)
+                .map_err(|_| federation_executor_conflict())?
+                .payload;
+            bytes = bytes.saturating_add(payload.len() as u64);
         }
-        if check_capacity && (count >= FEDERATION_EXECUTOR_MAX_COUNT
+    }
+    if check_capacity
+        && (count >= FEDERATION_EXECUTOR_MAX_COUNT
             || bytes.saturating_add(operation.payload.len() as u64) > FEDERATION_EXECUTOR_MAX_BYTES)
-        {
-            return Err(mailbox_store_error(MailboxStoreErrorKind::Capacity,
-                "executor journal is full; retained operations are not evicted"));
-        }
-        connection.execute(
-            "INSERT INTO federation_executor_operations(central_host_id,operation_key,central_epoch,
+    {
+        return Err(mailbox_store_error(
+            MailboxStoreErrorKind::Capacity,
+            "executor journal is full; retained operations are not evicted",
+        ));
+    }
+    connection.execute(
+        "INSERT INTO federation_executor_operations(central_host_id,operation_key,central_epoch,
              target_host_id,enrollment_generation,session_id,creation_id,placement_generation,
              command_kind,payload_digest,payload,payload_bytes,stage,effect_state)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,'received','not_started')",
-            rusqlite::params![operation.central_host_id,operation.operation_key,operation.central_epoch,
-                operation.target_host_id,operation.enrollment_generation,operation.session_id,
-                operation.creation_id,operation.placement_generation,operation.command_kind,
-                operation.digest(),operation.payload,operation.payload.len() as u64],
-        )?;
-        let record = federation_executor_read(connection,
-            &operation.central_host_id, &operation.operation_key)?
-            .ok_or_else(|| anyhow!("persisted executor operation disappeared"))?;
-        Ok(record)
+        rusqlite::params![
+            operation.central_host_id,
+            operation.operation_key,
+            operation.central_epoch,
+            operation.target_host_id,
+            operation.enrollment_generation,
+            operation.session_id,
+            operation.creation_id,
+            operation.placement_generation,
+            operation.command_kind,
+            operation.digest(),
+            operation.payload,
+            operation.payload.len() as u64
+        ],
+    )?;
+    let record = federation_executor_read(
+        connection,
+        &operation.central_host_id,
+        &operation.operation_key,
+    )?
+    .ok_or_else(|| anyhow!("persisted executor operation disappeared"))?;
+    Ok(record)
 }
 
 impl MailboxStore {
-    fn local_federation_executor_recovery(
-        &self, central: &str, local_host: &str, after: &str,
+    pub(crate) fn local_federation_executor_recovery(
+        &self,
+        central: &str,
+        local_host: &str,
+        after: &str,
     ) -> Result<Vec<FederationExecutorRecord>> {
         let connection = self.connection()?;
-        let keys = connection.prepare(
-            "SELECT operation_key FROM federation_executor_operations
+        let keys = connection
+            .prepare(
+                "SELECT operation_key FROM federation_executor_operations
              WHERE central_host_id=?1 AND target_host_id=?2 AND operation_key>?3
              AND command_kind='wake' ORDER BY operation_key LIMIT 100",
-        )?.query_map(rusqlite::params![central,local_host,after], |row| row.get::<_, String>(0))?
+            )?
+            .query_map(rusqlite::params![central, local_host, after], |row| {
+                row.get::<_, String>(0)
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        keys.into_iter().map(|key| federation_executor_read(&connection, central, &key)?
-            .ok_or_else(|| anyhow!("executor recovery row disappeared"))).collect()
+        keys.into_iter()
+            .map(|key| {
+                federation_executor_read(&connection, central, &key)?
+                    .ok_or_else(|| anyhow!("executor recovery row disappeared"))
+            })
+            .collect()
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn admit_federation_executor_operation<G>(
+    pub(crate) fn admit_federation_executor_operation<G>(
         &self,
         operation: &FederationExecutorOperation,
         authorize: impl FnOnce() -> Result<G>,
@@ -273,16 +387,23 @@ impl MailboxStore {
         self.admit_federation_executor_operation_after_commit(operation, authorize, |_, _| {})
     }
 
-    fn admit_federation_executor_operation_after_commit<G>(
-        &self, operation: &FederationExecutorOperation,
+    pub(crate) fn admit_federation_executor_operation_after_commit<G>(
+        &self,
+        operation: &FederationExecutorOperation,
         authorize: impl FnOnce() -> Result<G>,
         committed: impl FnOnce(&mut G, &FederationExecutorRecord),
     ) -> Result<FederationExecutorRecord> {
-        self.admit_federation_executor_operation_while_running(operation, || Ok(()), authorize, committed)
+        self.admit_federation_executor_operation_while_running(
+            operation,
+            || Ok(()),
+            authorize,
+            committed,
+        )
     }
 
-    fn admit_federation_executor_operation_while_running<G>(
-        &self, operation: &FederationExecutorOperation,
+    pub(crate) fn admit_federation_executor_operation_while_running<G>(
+        &self,
+        operation: &FederationExecutorOperation,
         before_writer: impl Fn() -> Result<()>,
         authorize: impl FnOnce() -> Result<G>,
         committed: impl FnOnce(&mut G, &FederationExecutorRecord),
@@ -295,7 +416,15 @@ impl MailboxStore {
         before_writer()?;
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "receiving executor operation")?;
-        let record = federation_executor_admit(&transaction, operation, true, &mut self.executor_reservations.lock().expect("executor reservation mutex poisoned"))?;
+        let record = federation_executor_admit(
+            &transaction,
+            operation,
+            true,
+            &mut self
+                .executor_reservations
+                .lock()
+                .expect("executor reservation mutex poisoned"),
+        )?;
         let mut authority = authorize()?;
         #[cfg(test)]
         federation_executor_test_cut("beforeReceiveCommit")?;
@@ -309,7 +438,7 @@ impl MailboxStore {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn record_federation_executor_evidence<G>(
+    pub(crate) fn record_federation_executor_evidence<G>(
         &self,
         executor_host_id: &str,
         operation: &FederationExecutorOperation,
@@ -325,11 +454,20 @@ impl MailboxStore {
         let _writer = self.lock_writer("retaining executor evidence")?;
         let mut connection = self.connection()?;
         let transaction = begin_mailbox_write(&mut connection, "retaining executor evidence")?;
-        let mut record = federation_executor_read(&transaction,
-            &operation.central_host_id, &operation.operation_key)?
-            .ok_or_else(|| mailbox_store_error(MailboxStoreErrorKind::NotFound,
-                "executor operation has not been durably received"))?;
-        if record.operation != *operation { return Err(federation_executor_conflict()); }
+        let mut record = federation_executor_read(
+            &transaction,
+            &operation.central_host_id,
+            &operation.operation_key,
+        )?
+        .ok_or_else(|| {
+            mailbox_store_error(
+                MailboxStoreErrorKind::NotFound,
+                "executor operation has not been durably received",
+            )
+        })?;
+        if record.operation != *operation {
+            return Err(federation_executor_conflict());
+        }
         let previous = record.clone();
         record.apply(evidence)?;
         if record != previous {
@@ -354,33 +492,43 @@ impl MailboxStore {
     // A bounded recovery read, not a replay instruction. Processed rows with
     // unknown effects remain visible. The caller decides reconciliation.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn pending_federation_executor_operations(
-        &self, central_host_id: &str, after_key: &str, limit: usize,
+    pub(crate) fn pending_federation_executor_operations(
+        &self,
+        central_host_id: &str,
+        after_key: &str,
+        limit: usize,
     ) -> Result<Vec<FederationExecutorRecord>> {
         let connection = self.connection()?;
-        let keys = connection.prepare(
-            "SELECT operation_key FROM federation_executor_operations
+        let keys = connection
+            .prepare(
+                "SELECT operation_key FROM federation_executor_operations
              WHERE central_host_id=?1 AND operation_key>?2
              AND (stage<>'processed' OR effect_state='unknown') ORDER BY operation_key LIMIT ?3",
-        )?.query_map(rusqlite::params![central_host_id,after_key,limit.clamp(1,100) as u64],
-            |row| row.get::<_, String>(0))?
+            )?
+            .query_map(
+                rusqlite::params![central_host_id, after_key, limit.clamp(1, 100) as u64],
+                |row| row.get::<_, String>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        keys.into_iter().map(|key| federation_executor_read(&connection, central_host_id, &key)?
-            .ok_or_else(|| anyhow!("executor operation disappeared during bounded read")))
+        keys.into_iter()
+            .map(|key| {
+                federation_executor_read(&connection, central_host_id, &key)?
+                    .ok_or_else(|| anyhow!("executor operation disappeared during bounded read"))
+            })
             .collect()
     }
 }
 
 #[cfg(test)]
 thread_local! {
-    static FEDERATION_EXECUTOR_TEST_CUT: std::cell::RefCell<Option<&'static str>> =
+    pub(crate) static FEDERATION_EXECUTOR_TEST_CUT: std::cell::RefCell<Option<&'static str>> =
         const { std::cell::RefCell::new(None) };
-    static FEDERATION_EXECUTOR_TEST_CRASH: std::cell::Cell<bool> =
+    pub(crate) static FEDERATION_EXECUTOR_TEST_CRASH: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
-fn federation_executor_test_cut(phase: &str) -> Result<()> {
+pub(crate) fn federation_executor_test_cut(phase: &str) -> Result<()> {
     FEDERATION_EXECUTOR_TEST_CUT.with(|slot| {
         let mut cut = slot.borrow_mut();
         if *cut == Some(phase) {

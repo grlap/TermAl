@@ -2,18 +2,20 @@
 // Does not implement Engram checks or interpret task-sync authority. New O1
 // boundary; commands are configured only by the local operator, never over L1.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationEngramProbeCommand {
-    binary: PathBuf,
-    args: Vec<String>,
-    project_root: PathBuf,
+pub(crate) struct FederationEngramProbeCommand {
+    pub(crate) binary: PathBuf,
+    pub(crate) args: Vec<String>,
+    pub(crate) project_root: PathBuf,
     #[serde(default)]
-    json_summary: bool,
+    pub(crate) json_summary: bool,
 }
 
 impl FederationEngramProbeCommand {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if !self.binary.is_absolute()
             || !self.project_root.is_absolute()
             || self.args.len() > 32
@@ -30,7 +32,7 @@ impl FederationEngramProbeCommand {
     }
 }
 
-fn run_federation_engram_probe(
+pub(crate) fn run_federation_engram_probe(
     config: &FederationEngramProbeCommand,
 ) -> FederationEngramOnboardingOutcome {
     if config.validate().is_err() {

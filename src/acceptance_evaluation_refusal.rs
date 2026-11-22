@@ -1,29 +1,31 @@
 // Terminal attempt ownership. A later refusal cannot resolve an unknown send.
 // Local retirement ends retries while retaining the original unknown write;
 // it cannot manufacture a producer refusal or a submitted judgment.
+
+use super::*;
 const MAX_ACCEPTANCE_REFUSED_SUBMISSIONS: usize = MAX_ACCEPTANCE_EVALUATOR_ATTEMPTS as usize * 2;
 
 /// A bounded requester view, not an Engram evaluation or an admission receipt.
 /// Contains only the evaluator's submitted judgment and its host-owned cuts.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceEvaluationRefusedSubmission {
-    attempt_key: String,
-    ordinal: u8,
-    acceptance_basis: i64,
-    evidence_basis: i64,
-    code: String,
-    message: String,
+pub(crate) struct AcceptanceEvaluationRefusedSubmission {
+    pub(crate) attempt_key: String,
+    pub(crate) ordinal: u8,
+    pub(crate) acceptance_basis: i64,
+    pub(crate) evidence_basis: i64,
+    pub(crate) code: String,
+    pub(crate) message: String,
     /// Always false, including when loading an older snapshot.
     #[serde(skip_deserializing)]
-    recorded: bool,
+    pub(crate) recorded: bool,
     #[serde(flatten)]
-    judgment: AcceptanceEvaluationRefusedJudgment,
+    pub(crate) judgment: AcceptanceEvaluationRefusedJudgment,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-enum AcceptanceEvaluationRefusedJudgment {
+pub(crate) enum AcceptanceEvaluationRefusedJudgment {
     Refused {
         verdicts: Vec<SubmitAcceptanceEvaluationVerdict>,
     },
@@ -32,7 +34,7 @@ enum AcceptanceEvaluationRefusedJudgment {
     Unavailable,
 }
 
-fn deserialize_acceptance_refused_submissions<'de, D>(
+pub(crate) fn deserialize_acceptance_refused_submissions<'de, D>(
     deserializer: D,
 ) -> std::result::Result<Vec<AcceptanceEvaluationRefusedSubmission>, D::Error>
 where
@@ -59,7 +61,11 @@ where
 }
 
 impl AcceptanceEvaluationRefusedSubmission {
-    fn new(target: &DelegationAcceptanceEvaluation, code: Option<&str>, message: &str) -> Self {
+    pub(crate) fn new(
+        target: &DelegationAcceptanceEvaluation,
+        code: Option<&str>,
+        message: &str,
+    ) -> Self {
         Self {
             attempt_key: target.attempt_key.clone(),
             ordinal: target
@@ -79,7 +85,10 @@ impl AcceptanceEvaluationRefusedSubmission {
 impl AcceptanceEvaluationAttemptHistory {
     /// Only client copies receive unavailable placeholders for pre-change
     /// refusals. No backfill or private command interpretation is performed.
-    fn expose_unavailable_refused_submissions(&mut self, target: &DelegationAcceptanceEvaluation) {
+    pub(crate) fn expose_unavailable_refused_submissions(
+        &mut self,
+        target: &DelegationAcceptanceEvaluation,
+    ) {
         let mut missing = Vec::new();
         let mut keep =
             |key: &str, ordinal, acceptance_basis, evidence_basis, code: &str, message: &str| {
@@ -145,7 +154,7 @@ impl AcceptanceEvaluationAttemptHistory {
 impl AppState {
     /// All send paths retire stored revision declarations through this owner.
     /// The history retains the exact unknown write, never a producer refusal.
-    fn retire_legacy_acceptance_submission(
+    pub(crate) fn retire_legacy_acceptance_submission(
         &self,
         authority: &AcceptanceEvaluationSubmitAuthority,
     ) -> Result<(), ApiError> {
@@ -154,9 +163,11 @@ impl AppState {
             | AcceptanceEvaluationSubmission::Unconfirmed { original, .. } => original,
             _ => return Ok(()),
         };
-        if !original.args.iter().any(|arg| {
-            arg == "--source-fingerprint" || arg.starts_with("--source-fingerprint=")
-        }) {
+        if !original
+            .args
+            .iter()
+            .any(|arg| arg == "--source-fingerprint" || arg.starts_with("--source-fingerprint="))
+        {
             return Ok(());
         }
         const RETIRED: &str = "The retained source-fingerprint submission is retired locally and will not be sent again. Any earlier tracker outcome remains unknown; finish and report this attempt, and read the tracker before requesting a new evaluation.";
@@ -175,7 +186,7 @@ impl AppState {
     /// alternatives, on an attempt that has not used its re-submission, is
     /// kept as that retry instead of as definitive, and `true` says so
     /// (acceptance_evaluation_citation_retry.rs).
-    fn record_acceptance_evaluation_refusal(
+    pub(crate) fn record_acceptance_evaluation_refusal(
         &self,
         authority: &AcceptanceEvaluationSubmitAuthority,
         request: &SubmitAcceptanceEvaluationRequest,

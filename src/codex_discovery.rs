@@ -13,30 +13,35 @@
 // Extracted from state.rs into its own `include!()` fragment so state.rs
 // stays focused on the core state model.
 
+use super::*;
+
 /// Represents discovered Codex thread.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct DiscoveredCodexThread {
-    approval_policy: Option<CodexApprovalPolicy>,
-    archived: bool,
-    cwd: String,
-    id: String,
-    model: Option<String>,
-    reasoning_effort: Option<CodexReasoningEffort>,
-    sandbox_mode: Option<CodexSandboxMode>,
-    title: String,
+pub(crate) struct DiscoveredCodexThread {
+    pub(crate) approval_policy: Option<CodexApprovalPolicy>,
+    pub(crate) archived: bool,
+    pub(crate) cwd: String,
+    pub(crate) id: String,
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<CodexReasoningEffort>,
+    pub(crate) sandbox_mode: Option<CodexSandboxMode>,
+    pub(crate) title: String,
 }
 
 #[derive(Default)]
-struct DiscoveredCodexThreads {
-    delegation_thread_ids: BTreeSet<String>,
-    threads: Vec<DiscoveredCodexThread>,
-    subagent_thread_ids: BTreeSet<String>,
+pub(crate) struct DiscoveredCodexThreads {
+    pub(crate) delegation_thread_ids: BTreeSet<String>,
+    pub(crate) threads: Vec<DiscoveredCodexThread>,
+    pub(crate) subagent_thread_ids: BTreeSet<String>,
 }
 
-const MAX_DISCOVERED_CODEX_THREADS_PER_HOME: usize = 500;
+pub(crate) const MAX_DISCOVERED_CODEX_THREADS_PER_HOME: usize = 500;
 
 /// Collects Codex discovery scopes.
-fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -> Vec<PathBuf> {
+pub(crate) fn collect_codex_discovery_scopes(
+    default_workdir: &str,
+    projects: &[Project],
+) -> Vec<PathBuf> {
     let mut scopes = Vec::new();
     let mut seen = HashSet::new();
     push_codex_home_candidate(
@@ -56,7 +61,7 @@ fn collect_codex_discovery_scopes(default_workdir: &str, projects: &[Project]) -
     scopes
 }
 
-fn discover_codex_threads(
+pub(crate) fn discover_codex_threads(
     default_workdir: &str,
     discovery_scopes: &[PathBuf],
 ) -> Result<DiscoveredCodexThreads> {
@@ -78,7 +83,7 @@ fn discover_codex_threads(
 }
 
 #[cfg(test)]
-fn discover_codex_threads_from_sources(
+pub(crate) fn discover_codex_threads_from_sources(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
     discovery_scopes: &[PathBuf],
@@ -91,7 +96,7 @@ fn discover_codex_threads_from_sources(
     .threads)
 }
 
-fn discover_codex_threads_with_subagents_from_sources(
+pub(crate) fn discover_codex_threads_with_subagents_from_sources(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
     discovery_scopes: &[PathBuf],
@@ -100,7 +105,7 @@ fn discover_codex_threads_with_subagents_from_sources(
     discover_codex_threads_from_homes(&codex_homes, discovery_scopes)
 }
 
-fn discover_codex_home_candidates(
+pub(crate) fn discover_codex_home_candidates(
     source_codex_home: Option<&FsPath>,
     termal_codex_root: &FsPath,
 ) -> Vec<PathBuf> {
@@ -147,7 +152,8 @@ fn codex_home_scope_is_importable(path: &FsPath) -> bool {
     path.file_name()
         .and_then(|value| value.to_str())
         .map_or(true, |scope| {
-            scope != "repl" && scope != SharedCodexProfile::ReadOnlySandbox.codex_home_scope()
+            scope != "repl"
+                && scope != SharedCodexProfile::ReadOnlySandbox.codex_home_scope()
                 && scope != SharedCodexProfile::WorkspaceWriteSandbox.codex_home_scope()
         })
 }
@@ -170,7 +176,7 @@ fn resolve_termal_codex_discovery_root(default_workdir: &str) -> PathBuf {
         .join("codex-home")
 }
 
-fn discover_codex_threads_from_homes(
+pub(crate) fn discover_codex_threads_from_homes(
     codex_homes: &[PathBuf],
     discovery_scopes: &[PathBuf],
 ) -> Result<DiscoveredCodexThreads> {
@@ -205,14 +211,14 @@ fn discover_codex_threads_from_homes(
 }
 
 #[cfg(test)]
-fn discover_codex_threads_from_home(
+pub(crate) fn discover_codex_threads_from_home(
     codex_home: &FsPath,
     discovery_scopes: &[PathBuf],
 ) -> Result<Vec<DiscoveredCodexThread>> {
     Ok(discover_codex_threads_with_subagents_from_home(codex_home, discovery_scopes)?.threads)
 }
 
-fn discover_codex_threads_with_subagents_from_home(
+pub(crate) fn discover_codex_threads_with_subagents_from_home(
     codex_home: &FsPath,
     discovery_scopes: &[PathBuf],
 ) -> Result<DiscoveredCodexThreads> {
@@ -423,7 +429,7 @@ fn collect_codex_discovery_query_scope_strings(discovery_scopes: &[PathBuf]) -> 
 }
 
 /// Handles Codex discovery scope query patterns.
-fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
+pub(crate) fn codex_discovery_scope_query_patterns(scope: &str) -> Vec<(String, String)> {
     let mut patterns = Vec::new();
     let mut seen = HashSet::new();
     let mut candidates = vec![scope.to_owned()];
@@ -455,7 +461,7 @@ fn codex_discovery_like_pattern(scope: &str) -> String {
     codex_discovery_like_prefix_pattern(&prefix)
 }
 
-fn codex_discovery_like_prefix_pattern(prefix: &str) -> String {
+pub(crate) fn codex_discovery_like_prefix_pattern(prefix: &str) -> String {
     format!("{}%", codex_discovery_escape_like_literal(prefix))
 }
 
@@ -468,7 +474,7 @@ fn codex_discovery_escape_like_literal(value: &str) -> String {
 
 /// Selects the supported Codex 0.153.4 state database, never a guessed version.
 /// The filename is pinned by codex-rs/state/src/sqlite.rs at that release.
-fn resolve_codex_threads_database_path(codex_home: &FsPath) -> Option<PathBuf> {
+pub(crate) fn resolve_codex_threads_database_path(codex_home: &FsPath) -> Option<PathBuf> {
     let path = codex_home.join("state_5.sqlite");
     path.metadata()
         .ok()
@@ -515,7 +521,7 @@ fn parse_discovered_codex_reasoning_effort(value: &str) -> Option<CodexReasoning
 }
 
 /// Handles Codex discovery scope contains.
-fn codex_discovery_scope_contains(root_path: &str, candidate_path: &FsPath) -> bool {
+pub(crate) fn codex_discovery_scope_contains(root_path: &str, candidate_path: &FsPath) -> bool {
     let root = normalize_codex_discovery_path(FsPath::new(root_path));
     let candidate = normalize_codex_discovery_path(candidate_path);
     candidate == root || candidate.starts_with(root)
@@ -535,7 +541,7 @@ fn normalize_codex_discovery_path(path: &FsPath) -> PathBuf {
 
 // The existing-session path preserves prompt settings. Select an actual
 // metadata refresh before its caller obtains stamped mutable access.
-fn discovered_codex_thread_refresh_needed(
+pub(crate) fn discovered_codex_thread_refresh_needed(
     record: &SessionRecord,
     thread: &DiscoveredCodexThread,
     project_id: &str,
@@ -567,7 +573,7 @@ fn discovered_codex_thread_preview(thread: &DiscoveredCodexThread) -> &'static s
 }
 
 /// Applies discovered Codex thread.
-fn apply_discovered_codex_thread(
+pub(crate) fn apply_discovered_codex_thread(
     record: &mut SessionRecord,
     thread: &DiscoveredCodexThread,
     overwrite_prompt_settings: bool,

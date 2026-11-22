@@ -16,6 +16,8 @@
 // Extracted from state.rs into its own `include!()` fragment so state.rs
 // stays focused on the runtime model rather than the serde schema.
 
+use super::*;
+
 fn clone_persist_metadata_field<T: Clone>(field: &'static str, value: &T) -> T {
     #[cfg(test)]
     persist_observe(|observer| {
@@ -29,85 +31,90 @@ fn clone_persist_metadata_field<T: Clone>(field: &'static str, value: &T) -> T {
 /// Tracks persisted state.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistedState {
+pub(crate) struct PersistedState {
     #[serde(skip)]
-    metadata_capture: PersistMetadataCapture,
+    pub(crate) metadata_capture: PersistMetadataCapture,
     #[serde(default)]
-    federation: FederationState,
+    pub(crate) federation: FederationState,
     #[serde(default, skip_serializing_if = "CodexState::is_empty")]
-    codex: CodexState,
+    pub(crate) codex: CodexState,
     #[serde(default)]
-    preferences: AppPreferences,
+    pub(crate) preferences: AppPreferences,
     #[serde(default)]
-    revision: u64,
-    next_session_number: usize,
-    next_message_number: u64,
-    projects: PersistTracked<Vec<Project>>,
+    pub(crate) revision: u64,
+    pub(crate) next_session_number: usize,
+    pub(crate) next_message_number: u64,
+    pub(crate) projects: PersistTracked<Vec<Project>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_retired_work_authority_grants: PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
+    pub(crate) engram_retired_work_authority_grants:
+        PersistTracked<Vec<EngramRetiredWorkAuthorityGrant>>,
     // Mandatory at the joint reader floor; absent is not an empty ledger.
-    engram_session_obligations: EngramSessionObligationLedger,
+    pub(crate) engram_session_obligations: EngramSessionObligationLedger,
     // Present exactly at the import-reconciliation successor floor (the
     // per-floor inventory enforces it) and decoded strictly; absent means
     // NotActivated. Projected by project_metadata_units, never by serde.
-    #[serde(default, skip_serializing, deserialize_with = "deserialize_engram_import_reconciliation")]
-    engram_import_reconciliation: PersistTracked<EngramImportReconciliationState>,
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "deserialize_engram_import_reconciliation"
+    )]
+    pub(crate) engram_import_reconciliation: PersistTracked<EngramImportReconciliationState>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
+    pub(crate) engram_work_source_roots: PersistTracked<Vec<EngramWorkSourceRoot>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_named_root_journal: PersistTracked<Vec<EngramNamedRootJournal>>,
+    pub(crate) engram_named_root_journal: PersistTracked<Vec<EngramNamedRootJournal>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_work_naming_history: PersistTracked<Vec<EngramWorkNamingHistory>>,
+    pub(crate) engram_work_naming_history: PersistTracked<Vec<EngramWorkNamingHistory>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_named_root_release_audit: PersistTracked<Vec<EngramNamedRootReleaseAudit>>,
+    pub(crate) engram_named_root_release_audit: PersistTracked<Vec<EngramNamedRootReleaseAudit>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_source_sightings: PersistTracked<Vec<EngramSourceSightingOwner>>,
+    pub(crate) engram_source_sightings: PersistTracked<Vec<EngramSourceSightingOwner>>,
     #[serde(
         default,
         skip_serializing_if = "engram_source_root_generation_is_unset"
     )]
-    engram_source_root_generation: u64,
+    pub(crate) engram_source_root_generation: u64,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pending_coordination_scope_deletions: PersistTracked<BTreeSet<String>>,
+    pub(crate) pending_coordination_scope_deletions: PersistTracked<BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pending_response_board_project_detachments: PersistTracked<BTreeMap<String, String>>,
+    pub(crate) pending_response_board_project_detachments: PersistTracked<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    ignored_discovered_codex_thread_ids: PersistTracked<BTreeSet<String>>,
+    pub(crate) ignored_discovered_codex_thread_ids: PersistTracked<BTreeSet<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    orchestrator_instances: PersistTracked<Vec<OrchestratorInstance>>,
+    pub(crate) orchestrator_instances: PersistTracked<Vec<OrchestratorInstance>>,
     /// Snapshot-only carrier for the normalized `delegations` table.
     /// Delegations are never read from or written into `app_state` metadata.
     #[serde(skip)]
-    delegations: Vec<DelegationRecord>,
+    pub(crate) delegations: Vec<DelegationRecord>,
     #[serde(skip)]
-    delegation_inventory: DelegationInventoryState,
+    pub(crate) delegation_inventory: DelegationInventoryState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
+    pub(crate) delegation_waits: PersistTracked<Vec<DelegationWaitRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    test_run_cards_epoch: Option<String>,
+    pub(crate) test_run_cards_epoch: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    test_run_cards: PersistTracked<BTreeMap<String, TestRunCardRef>>,
+    pub(crate) test_run_cards: PersistTracked<BTreeMap<String, TestRunCardRef>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    test_run_registrations: PersistTracked<BTreeMap<String, TestRunRegistration>>,
+    pub(crate) test_run_registrations: PersistTracked<BTreeMap<String, TestRunRegistration>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    test_run_observations: PersistTracked<BTreeMap<String, TestRunCommandObservation>>,
+    pub(crate) test_run_observations: PersistTracked<BTreeMap<String, TestRunCommandObservation>>,
     #[serde(default)]
-    test_run_compacted: PersistTracked<BTreeMap<String, TestRunCompacted>>,
+    pub(crate) test_run_compacted: PersistTracked<BTreeMap<String, TestRunCompacted>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    test_run_waits: PersistTracked<Vec<TestRunWaitRecord>>,
+    pub(crate) test_run_waits: PersistTracked<Vec<TestRunWaitRecord>>,
     #[serde(default)]
-    remote_test_run_facts: PersistTracked<BTreeMap<String, RemoteTestRunFacts>>,
+    pub(crate) remote_test_run_facts: PersistTracked<BTreeMap<String, RemoteTestRunFacts>>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    workspace_layouts: PersistTracked<BTreeMap<String, WorkspaceLayoutDocument>>,
-    sessions: Vec<PersistedSessionRecord>,
+    pub(crate) workspace_layouts: PersistTracked<BTreeMap<String, WorkspaceLayoutDocument>>,
+    pub(crate) sessions: Vec<PersistedSessionRecord>,
     /// Runtime-only ids whose normalized SQLite rows failed startup
     /// validation. They are intentionally excluded from the healthy in-memory
     /// model, but synchronous full-snapshot persistence must preserve the
     /// original rows instead of interpreting their absence as deletion.
     #[serde(skip)]
-    quarantined_persisted_session_ids: BTreeSet<String>,
+    pub(crate) quarantined_persisted_session_ids: BTreeSet<String>,
     #[serde(skip)]
-    quarantined_persisted_delegation_ids: BTreeSet<String>,
+    pub(crate) quarantined_persisted_delegation_ids: BTreeSet<String>,
 }
 
 impl Clone for PersistedState {
@@ -120,7 +127,7 @@ impl Clone for PersistedState {
 }
 
 impl PersistedState {
-    fn metadata_collection_is_omitted(&self, field: &str) -> bool {
+    pub(crate) fn metadata_collection_is_omitted(&self, field: &str) -> bool {
         if !self.metadata_capture.omits(field) {
             return false;
         }
@@ -134,7 +141,7 @@ impl PersistedState {
             .is_some_and(|capture| capture.image_stamps.get(field) == current.as_ref())
     }
 
-    fn metadata_collection_stamp(&self, field: &str) -> Option<PersistMetadataStamp> {
+    pub(crate) fn metadata_collection_stamp(&self, field: &str) -> Option<PersistMetadataStamp> {
         Some(match field {
             "projects" => self.projects.stamp(),
             "engramRetiredWorkAuthorityGrants" => self.engram_retired_work_authority_grants.stamp(),
@@ -172,11 +179,11 @@ impl PersistedState {
     /// missing one would silently drop the field from either the
     /// snapshot-from-inner path or the synchronous persist fallback
     /// path.
-    fn metadata_from_inner(inner: &StateInner) -> Self {
+    pub(crate) fn metadata_from_inner(inner: &StateInner) -> Self {
         Self::capture_metadata(inner, false)
     }
 
-    fn metadata_delta_from_inner(inner: &StateInner) -> Self {
+    pub(crate) fn metadata_delta_from_inner(inner: &StateInner) -> Self {
         Self::capture_metadata(inner, true)
     }
 
@@ -247,7 +254,8 @@ impl PersistedState {
             ),
             // Safety custody stays eager in full and sparse captures.
             engram_session_obligations: clone_persist_metadata_field(
-                "engramSessionObligations", &inner.engram_session_obligations,
+                "engramSessionObligations",
+                &inner.engram_session_obligations,
             ),
             // A reference count, never a journal copy, under the state lock;
             // an unchanged journal is omitted from a delta capture.
@@ -337,7 +345,7 @@ impl PersistedState {
     /// source types (a `StateInner` vs. a sibling `PersistedState`).
     /// Adding a new top-level field to `PersistedState` requires
     /// updating both.
-    fn metadata_only(&self) -> Self {
+    pub(crate) fn metadata_only(&self) -> Self {
         Self {
             metadata_capture: self.metadata_capture.clone(),
             federation: self.federation.clone(),
@@ -386,7 +394,7 @@ impl PersistedState {
     }
 
     /// Builds the value from inner.
-    fn from_inner(inner: &StateInner) -> Self {
+    pub(crate) fn from_inner(inner: &StateInner) -> Self {
         let mut persisted = Self::metadata_from_inner(inner);
         // A pending/failed inventory cannot supply an authoritative row value
         // or absence. Even a conflicting in-memory writer must not replace
@@ -413,36 +421,51 @@ impl PersistedState {
 
     /// Converts the value into inner.
     #[cfg(test)]
-    fn into_inner(self) -> Result<StateInner> {
+    pub(crate) fn into_inner(self) -> Result<StateInner> {
         self.into_inner_with_boot_timings(&mut BootStateLoadTimings::new(false))
     }
 
-    fn into_inner_with_boot_timings(self, timings: &mut BootStateLoadTimings) -> Result<StateInner> {
+    pub(crate) fn into_inner_with_boot_timings(
+        self,
+        timings: &mut BootStateLoadTimings,
+    ) -> Result<StateInner> {
         // Includes obligation and checkpoint-mirror validation before conversion.
         let session_timing = timings.scoped(BootStateLoadPhase::SessionRebuild);
         self.engram_session_obligations.validate()?;
         // Historical mirrors are validated before any row is converted. They
         // remain passive JSON and cannot reconstruct dispatch ownership.
         let mut consumed_carried_launch_indices = Vec::new();
-        let sessions = self.sessions.into_iter().enumerate().map(|(index, persisted)| {
-            if let Some(raw) = persisted.historical_control.get("engramCheckpointOperation")
-                .filter(|value| !value.is_null())
-            {
-                let mirror: EngramCheckpointOperation = serde_json::from_value(raw.clone())?;
-                if mirror.protection.local_session_id != persisted.session.id
-                    || !self.engram_session_obligations.checkpoint_operations.iter().any(|operation|
-                        serde_json::to_value(operation).ok().as_ref() == Some(raw))
+        let sessions = self
+            .sessions
+            .into_iter()
+            .enumerate()
+            .map(|(index, persisted)| {
+                if let Some(raw) = persisted
+                    .historical_control
+                    .get("engramCheckpointOperation")
+                    .filter(|value| !value.is_null())
                 {
-                    bail!("Checkpoint mirror lacks its canonical original during restore");
+                    let mirror: EngramCheckpointOperation = serde_json::from_value(raw.clone())?;
+                    if mirror.protection.local_session_id != persisted.session.id
+                        || !self
+                            .engram_session_obligations
+                            .checkpoint_operations
+                            .iter()
+                            .any(|operation| {
+                                serde_json::to_value(operation).ok().as_ref() == Some(raw)
+                            })
+                    {
+                        bail!("Checkpoint mirror lacks its canonical original during restore");
+                    }
                 }
-            }
-            let consumed_carried_launches = !persisted.engram_carried_launches.is_empty();
-            let record = persisted.into_record()?;
-            if consumed_carried_launches && record.is_local_session() {
-                consumed_carried_launch_indices.push(index);
-            }
-            Ok(record)
-        }).collect::<Result<Vec<_>>>()?;
+                let consumed_carried_launches = !persisted.engram_carried_launches.is_empty();
+                let record = persisted.into_record()?;
+                if consumed_carried_launches && record.is_local_session() {
+                    consumed_carried_launch_indices.push(index);
+                }
+                Ok(record)
+            })
+            .collect::<Result<Vec<_>>>()?;
         drop(session_timing);
         let _derived_timing = timings.scoped(BootStateLoadPhase::DerivedRebuild);
         let terminal_unbound_registrations: HashSet<_> = self
@@ -505,7 +528,8 @@ impl PersistedState {
                 })
             })
             .collect();
-        let delegation_catalog_children = FederationCatalogChildren::from_records(&self.delegations);
+        let delegation_catalog_children =
+            FederationCatalogChildren::from_records(&self.delegations);
         let mut inner = StateInner {
             metadata_predecessor: self.metadata_capture.known.clone(),
             metadata_watermarks: Arc::default(),
@@ -513,7 +537,10 @@ impl PersistedState {
             state_lock_epoch: next_state_lock_epoch(),
             federation: self.federation,
             federation_durable: true,
-            federation_durability_diagnostics: FederationDurabilityDiagnostics::new(true, "state_restored"),
+            federation_durability_diagnostics: FederationDurabilityDiagnostics::new(
+                true,
+                "state_restored",
+            ),
             federation_continuity_lost: false,
             federation_attestation: HashMap::new(),
             codex: self.codex,
@@ -665,7 +692,8 @@ impl PersistedState {
         // restart notice. Persist their removal even for an otherwise Idle
         // session; untouched rows remain outside the first persist delta.
         for index in consumed_carried_launch_indices {
-            inner.stamp_session_at_index(index)
+            inner
+                .stamp_session_at_index(index)
                 .expect("restored session index should be valid");
         }
         let persisted_non_running_session_ids = inner
@@ -738,11 +766,15 @@ impl PersistedState {
         for root in &inner.engram_work_source_roots {
             // A retired run's journal was settled with it and stays settled
             // (engram_retained_run_settlement.rs); no cleanup reopens it.
-            let retired = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-                .and_then(|journal| journal.read_binding.as_ref())
-                .is_some_and(|binding| {
-                    engram_run_retired(&inner.engram_work_naming_history, &root.store, binding)
-                });
+            let retired = engram_root_journal(
+                &inner.engram_named_root_journal,
+                &root.store,
+                &root.claim_id,
+            )
+            .and_then(|journal| journal.read_binding.as_ref())
+            .is_some_and(|binding| {
+                engram_run_retired(&inner.engram_work_naming_history, &root.store, binding)
+            });
             if !session_ids.contains(&root.named_by_session) && !retired {
                 engram_queue_root_cleanup(
                     &mut inner.engram_named_root_journal,
@@ -775,7 +807,7 @@ fn engram_source_root_generation_is_unset(value: &u64) -> bool {
     *value == 0
 }
 
-fn session_flag_is_false(value: &bool) -> bool {
+pub(crate) fn session_flag_is_false(value: &bool) -> bool {
     !*value
 }
 
@@ -784,13 +816,15 @@ fn session_flag_is_false(value: &bool) -> bool {
 fn stored_queue_has_control_history(queued: &QueuedPromptRecord) -> Result<bool> {
     let raw = serde_json::to_value(queued)?;
     Ok(raw.get("engram_bind").is_some_and(|value| !value.is_null())
-        || raw.get("engram_evaluate").is_some_and(|value| !value.is_null())
+        || raw
+            .get("engram_evaluate")
+            .is_some_and(|value| !value.is_null())
         || raw["engram_waiting"] == true
         || raw["engram_interrupted"] == true)
 }
 
 /// Returns whether the same Codex notice identity applies.
-fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
+pub(crate) fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
     left.kind == right.kind
         && left.level == right.level
         && left.title == right.title
@@ -801,96 +835,96 @@ fn same_codex_notice_identity(left: &CodexNotice, right: &CodexNotice) -> bool {
 /// Represents a persisted session record.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistedSessionRecord {
+pub(crate) struct PersistedSessionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    restart_recovery: Option<SessionRestartRecovery>,
+    pub(crate) restart_recovery: Option<SessionRestartRecovery>,
     // Only the writer that committed this captured row may acknowledge it.
     // The stamp and its incarnation are never stored or restored as proof.
     #[serde(skip)]
-    source_stamp: Option<PersistSessionWriteStamp>,
+    pub(crate) source_stamp: Option<PersistSessionWriteStamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    federation_mailbox_binding: Option<FederationMailboxBinding>,
+    pub(crate) federation_mailbox_binding: Option<FederationMailboxBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    federation_automatic_mailbox_binding: Option<FederationMailboxBinding>,
+    pub(crate) federation_automatic_mailbox_binding: Option<FederationMailboxBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    federation_retired_automatic_mailbox_bindings: Vec<FederationMailboxBinding>,
+    pub(crate) federation_retired_automatic_mailbox_bindings: Vec<FederationMailboxBinding>,
     #[serde(default = "new_federation_native_creation_id")]
-    federation_native_creation_id: String,
-    active_codex_approval_policy: Option<CodexApprovalPolicy>,
+    pub(crate) federation_native_creation_id: String,
+    pub(crate) active_codex_approval_policy: Option<CodexApprovalPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    active_codex_reasoning_effort: Option<CodexReasoningEffort>,
-    active_codex_sandbox_mode: Option<CodexSandboxMode>,
-    codex_approval_policy: CodexApprovalPolicy,
-    codex_reasoning_effort: CodexReasoningEffort,
-    codex_sandbox_mode: CodexSandboxMode,
+    pub(crate) active_codex_reasoning_effort: Option<CodexReasoningEffort>,
+    pub(crate) active_codex_sandbox_mode: Option<CodexSandboxMode>,
+    pub(crate) codex_approval_policy: CodexApprovalPolicy,
+    pub(crate) codex_reasoning_effort: CodexReasoningEffort,
+    pub(crate) codex_sandbox_mode: CodexSandboxMode,
     /// Absent from records written before app-server profiles existed; such
     /// a thread lives in the default Codex home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    codex_thread_profile: Option<SharedCodexProfile>,
-    external_session_id: Option<String>,
+    pub(crate) codex_thread_profile: Option<SharedCodexProfile>,
+    pub(crate) external_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    codex_terminal_archive: Option<CodexTerminalArchive>,
+    pub(crate) codex_terminal_archive: Option<CodexTerminalArchive>,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
-    queued_prompts: VecDeque<QueuedPromptRecord>,
+    pub(crate) queued_prompts: VecDeque<QueuedPromptRecord>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
+    pub(crate) queued_peer_messages: HashMap<String, Vec<PendingPrompt>>,
     /// Written so a content fence can prove the exact held entry is durable.
     /// Read back, an entry's content is durable, so loading clears them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
+    pub(crate) queued_prompt_durability_holds: BTreeMap<String, QueuedPromptDurabilityHold>,
     /// Delivery receipts. Written so a write-ahead fence can prove a hand-off
     /// record durable; loading settles a hand-off without acceptance as
     /// ambiguous (`prompt_delivery.rs`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    prompt_deliveries: BTreeMap<String, PromptDelivery>,
+    pub(crate) prompt_deliveries: BTreeMap<String, PromptDelivery>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    human_queue_choices: BTreeMap<String, Value>,
+    pub(crate) human_queue_choices: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    remote_id: Option<String>,
+    pub(crate) remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    remote_session_id: Option<String>,
+    pub(crate) remote_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    orchestrator_auto_dispatch_blocked: bool,
+    pub(crate) orchestrator_auto_dispatch_blocked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    provider_capacity_retry: Option<ProviderCapacityRetry>,
+    pub(crate) provider_capacity_retry: Option<ProviderCapacityRetry>,
     /// Original keys of removed control-only fields, retained without live
     /// tokens, grants, retry schedules or recovery owners.
     #[serde(flatten)]
-    historical_control: BTreeMap<String, Value>,
+    pub(crate) historical_control: BTreeMap<String, Value>,
     /// One marker per background full gate carried when the record was
     /// written (`engram_carried_checks.rs`). A host restart loses the carried
     /// checks themselves; loading tells each holder its run lost its credit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_carried_launches: Vec<EngramCarriedLaunchMarker>,
+    pub(crate) engram_carried_launches: Vec<EngramCarriedLaunchMarker>,
     /// An operator queue pause (`EngramSessionState::operator_paused`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     engram_operator_paused: bool,
     /// Ordinary captured-observation deletion custody, independent of control history.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    engram_observation_delete_requested: bool,
+    pub(crate) engram_observation_delete_requested: bool,
     /// Immutable observation history survives a host restart; no grant is restored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
+    pub(crate) engram_runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
     /// Optional comparison data; older readers may omit it conservatively.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_evaluation_checkpoint: Option<EngramEvaluationCheckpoint>,
+    pub(crate) engram_evaluation_checkpoint: Option<EngramEvaluationCheckpoint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
+    pub(crate) engram_unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
+    pub(crate) engram_unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    engram_unadmitted_reports: Vec<EngramRuntimeObservationReport>,
+    pub(crate) engram_unadmitted_reports: Vec<EngramRuntimeObservationReport>,
     /// The queue head a user Stop held (`EngramSessionState::stopped_prompt_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     engram_stopped_prompt_id: Option<String>,
     #[serde(skip)]
-    message_start_index: usize,
+    pub(crate) message_start_index: usize,
     /// Runtime-only instruction for the SQLite serializer. Full snapshots set
     /// it; delta snapshots clear it unless the independent history stamp moved.
     #[serde(skip)]
-    persist_prompt_history: bool,
+    pub(crate) persist_prompt_history: bool,
     #[serde(serialize_with = "serialize_persisted_session_view")]
-    session: Session,
+    pub(crate) session: Session,
 }
 
 // Legacy/full JSON exports retain the same persisted projection. Normalized
@@ -917,7 +951,7 @@ fn serialize_persisted_session_view<S: serde::Serializer>(
     projected.serialize(serializer)
 }
 
-fn validate_remote_proxy_identity<'a>(
+pub(crate) fn validate_remote_proxy_identity<'a>(
     remote_id: Option<&'a str>,
     remote_session_id: Option<&'a str>,
 ) -> Result<Option<(&'a str, &'a str)>> {
@@ -937,22 +971,26 @@ fn validate_remote_proxy_identity<'a>(
 
 /// Enforces the same bounded prompt-history input policy used by live sessions.
 /// Optional settings retain their stored value; their consumers own defaults.
-fn normalize_persisted_session_prompt_history(session: &mut Session) {
+pub(crate) fn normalize_persisted_session_prompt_history(session: &mut Session) {
     session.prompt_history = normalize_prompt_history(std::mem::take(&mut session.prompt_history));
 }
 
 impl PersistedSessionRecord {
-    fn mailbox_binding(&self) -> Option<&FederationMailboxBinding> {
-        self.federation_mailbox_binding.as_ref().or(self.federation_automatic_mailbox_binding.as_ref())
+    pub(crate) fn mailbox_binding(&self) -> Option<&FederationMailboxBinding> {
+        self.federation_mailbox_binding
+            .as_ref()
+            .or(self.federation_automatic_mailbox_binding.as_ref())
     }
 
-    fn clone_without_messages(&self) -> Self {
+    pub(crate) fn clone_without_messages(&self) -> Self {
         Self {
             source_stamp: self.source_stamp.clone(),
             restart_recovery: self.restart_recovery.clone(),
             federation_mailbox_binding: self.federation_mailbox_binding.clone(),
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding.clone(),
-            federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings.clone(),
+            federation_retired_automatic_mailbox_bindings: self
+                .federation_retired_automatic_mailbox_bindings
+                .clone(),
             federation_native_creation_id: self.federation_native_creation_id.clone(),
             active_codex_approval_policy: self.active_codex_approval_policy.clone(),
             active_codex_reasoning_effort: self.active_codex_reasoning_effort.clone(),
@@ -989,7 +1027,7 @@ impl PersistedSessionRecord {
     }
 
     /// Builds the value from record.
-    fn from_record(record: &SessionRecord) -> Self {
+    pub(crate) fn from_record(record: &SessionRecord) -> Self {
         let mut session = record.session.clone();
         if record.is_local_session() {
             session.pending_prompts.clear();
@@ -1002,8 +1040,12 @@ impl PersistedSessionRecord {
             restart_recovery: record.restart_recovery.clone(),
             active_codex_approval_policy: record.active_codex_approval_policy,
             federation_mailbox_binding: record.federation_mailbox_binding.clone(),
-            federation_automatic_mailbox_binding: record.federation_automatic_mailbox_binding.clone(),
-            federation_retired_automatic_mailbox_bindings: record.federation_retired_automatic_mailbox_bindings.clone(),
+            federation_automatic_mailbox_binding: record
+                .federation_automatic_mailbox_binding
+                .clone(),
+            federation_retired_automatic_mailbox_bindings: record
+                .federation_retired_automatic_mailbox_bindings
+                .clone(),
             federation_native_creation_id: record.federation_native_creation_id.clone(),
             active_codex_reasoning_effort: record.active_codex_reasoning_effort,
             active_codex_sandbox_mode: record.active_codex_sandbox_mode,
@@ -1044,21 +1086,33 @@ impl PersistedSessionRecord {
     }
 
     /// Converts the value into record.
-    fn into_record(self) -> Result<SessionRecord> {
-        if self.federation_mailbox_binding.is_some() && self.federation_automatic_mailbox_binding.is_some() {
-            return Err(anyhow!("persisted session has both explicit and automatic mailbox authority"));
+    pub(crate) fn into_record(self) -> Result<SessionRecord> {
+        if self.federation_mailbox_binding.is_some()
+            && self.federation_automatic_mailbox_binding.is_some()
+        {
+            return Err(anyhow!(
+                "persisted session has both explicit and automatic mailbox authority"
+            ));
         }
         if let Some(binding) = self.mailbox_binding() {
-            binding.validate().map_err(|_| anyhow!("invalid persisted mailbox binding"))?;
+            binding
+                .validate()
+                .map_err(|_| anyhow!("invalid persisted mailbox binding"))?;
             if binding.identity.session_id != self.session.id {
-                return Err(anyhow!("persisted mailbox binding has another native session"));
+                return Err(anyhow!(
+                    "persisted mailbox binding has another native session"
+                ));
             }
         }
         let mut retired = HashSet::new();
         for binding in &self.federation_retired_automatic_mailbox_bindings {
-            binding.validate().map_err(|_| anyhow!("invalid retired automatic mailbox route"))?;
-            if binding.identity.session_id != self.session.id || self.mailbox_binding() == Some(binding)
-                || !retired.insert(binding.participant_key()) {
+            binding
+                .validate()
+                .map_err(|_| anyhow!("invalid retired automatic mailbox route"))?;
+            if binding.identity.session_id != self.session.id
+                || self.mailbox_binding() == Some(binding)
+                || !retired.insert(binding.participant_key())
+            {
                 return Err(anyhow!("invalid retired automatic mailbox route ownership"));
             }
         }
@@ -1081,7 +1135,10 @@ impl PersistedSessionRecord {
         session.external_session_id = self.external_session_id.clone();
         session.live_activity = None;
         // A saved settings-change preview carries no live reset fence.
-        if session.preview.starts_with("Waiting: Engram project settings are changing") {
+        if session
+            .preview
+            .starts_with("Waiting: Engram project settings are changing")
+        {
             session.preview = "Ready for a prompt.".to_owned();
         }
         if session.agent.acp_runtime().is_none() {
@@ -1096,10 +1153,18 @@ impl PersistedSessionRecord {
         }
 
         let mut historical_control_hold = [
-            "engramAbortRetry", "engramBindRetry", "engramAdmissionRetry",
-            "engramBeginPreparationLineage", "engramSourceObservationGate",
-        ].iter().any(|key| self.historical_control.get(*key)
-            .is_some_and(|value| !value.is_null()));
+            "engramAbortRetry",
+            "engramBindRetry",
+            "engramAdmissionRetry",
+            "engramBeginPreparationLineage",
+            "engramSourceObservationGate",
+        ]
+        .iter()
+        .any(|key| {
+            self.historical_control
+                .get(*key)
+                .is_some_and(|value| !value.is_null())
+        });
         for queued in &self.queued_prompts {
             historical_control_hold |= stored_queue_has_control_history(queued)?;
         }
@@ -1113,14 +1178,18 @@ impl PersistedSessionRecord {
             && !self.engram_operator_paused
             && self.engram_stopped_prompt_id.is_none()
             && self.provider_capacity_retry.is_none()
-            && !self.prompt_deliveries.values().any(|delivery| matches!(
-                delivery.disposition,
-                PromptDeliveryDisposition::HandingOff | PromptDeliveryDisposition::Ambiguous
-            ))
-            && matches!(session.preview.as_str(),
+            && !self.prompt_deliveries.values().any(|delivery| {
+                matches!(
+                    delivery.disposition,
+                    PromptDeliveryDisposition::HandingOff | PromptDeliveryDisposition::Ambiguous
+                )
+            })
+            && matches!(
+                session.preview.as_str(),
                 "Engram recovered authorization retained. Resume to recover the exact queued prompt."
-                | "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing."
-                | "Engram settings changed. Authorization retained; cancel or reconcile before continuing.");
+                    | "Engram control is off; recovered authorization retained. Cancel the queued prompt before continuing."
+                    | "Engram settings changed. Authorization retained; cancel or reconcile before continuing."
+            );
         let ordinary_paused = self.orchestrator_auto_dispatch_blocked && !retired_pause_owned;
 
         // Read back from the durable row, every held entry's content is
@@ -1144,7 +1213,8 @@ impl PersistedSessionRecord {
             restart_recovery: self.restart_recovery,
             federation_mailbox_binding: self.federation_mailbox_binding,
             federation_automatic_mailbox_binding: self.federation_automatic_mailbox_binding,
-            federation_retired_automatic_mailbox_bindings: self.federation_retired_automatic_mailbox_bindings,
+            federation_retired_automatic_mailbox_bindings: self
+                .federation_retired_automatic_mailbox_bindings,
             federation_native_creation_id: self.federation_native_creation_id,
             codex_delegation_release: None,
             codex_terminal_archive: self.codex_terminal_archive,
@@ -1241,7 +1311,8 @@ impl PersistedSessionRecord {
             if queued.promoted_message_index.is_some() {
                 queued.promotion_disposition_known = true;
             } else if !queued.promotion_disposition_known {
-                queued.promoted_message_index = record.message_positions
+                queued.promoted_message_index = record
+                    .message_positions
                     .get(&queued.pending_prompt.id)
                     .map(|index| record.message_start_index + index);
                 if queued.promoted_message_index.is_some() || record.message_start_index == 0 {
@@ -1287,7 +1358,7 @@ impl PersistedSessionRecord {
 }
 
 /// Validates persisted session fields.
-fn validate_persisted_session_fields(
+pub(crate) fn validate_persisted_session_fields(
     session: &Session,
     external_session_id: Option<&str>,
 ) -> Result<()> {

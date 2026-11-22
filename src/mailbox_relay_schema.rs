@@ -1,7 +1,9 @@
 // Additive coordination storage for native relay ownership, not message replicas.
 // Historical coordination schemas remain frozen; only this schema owns relay rows.
 
-const MAILBOX_RELAY_SCHEMA_SQL: &str = "
+use super::*;
+
+pub(crate) const MAILBOX_RELAY_SCHEMA_SQL: &str = "
     CREATE TABLE mailbox_relay_store (
       singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
       record_version INTEGER NOT NULL CHECK (record_version = 1),
@@ -55,7 +57,7 @@ const MAILBOX_RELAY_SCHEMA_SQL: &str = "
     );
 ";
 
-fn initialize_mailbox_relay_schema(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn initialize_mailbox_relay_schema(connection: &rusqlite::Connection) -> Result<()> {
     connection.execute_batch(MAILBOX_RELAY_SCHEMA_SQL)?;
     connection.execute(
         "INSERT INTO mailbox_relay_store(singleton,record_version,store_id) VALUES(1,1,?1)",
@@ -64,7 +66,7 @@ fn initialize_mailbox_relay_schema(connection: &rusqlite::Connection) -> Result<
     Ok(())
 }
 
-fn mailbox_relay_store_id(connection: &rusqlite::Connection) -> Result<String> {
+pub(crate) fn mailbox_relay_store_id(connection: &rusqlite::Connection) -> Result<String> {
     let (version, id): (i64, String) = connection
         .query_row(
             "SELECT record_version,store_id FROM mailbox_relay_store WHERE singleton=1",
@@ -78,7 +80,7 @@ fn mailbox_relay_store_id(connection: &rusqlite::Connection) -> Result<String> {
     Ok(id)
 }
 
-fn validate_mailbox_relay_records(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn validate_mailbox_relay_records(connection: &rusqlite::Connection) -> Result<()> {
     mailbox_relay_store_id(connection)?;
     let mut associations = connection.prepare(
         "SELECT record_version,pair_key,mailbox_id,conversation_json,names_json,acknowledged_through FROM mailbox_relay_associations",

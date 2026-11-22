@@ -16,18 +16,20 @@
 // marked snapshot. A full snapshot of the same cut accompanies a diff only
 // while legacy connections exist; it carries no mark.
 
+use super::*;
+
 /// The last cut the broadcaster emitted. Holding the session Arcs keeps their
 /// identity comparable with later cuts: the projection cache mints a new Arc
 /// for any captured difference and never mutates one in place.
-struct EmittedStateCut {
-    revision: u64,
-    server_instance_id: String,
-    sessions: Vec<Arc<StateSessionSummary>>,
-    delegations: Vec<DelegationStateSummary>,
+pub(crate) struct EmittedStateCut {
+    pub(crate) revision: u64,
+    pub(crate) server_instance_id: String,
+    pub(crate) sessions: Vec<Arc<StateSessionSummary>>,
+    pub(crate) delegations: Vec<DelegationStateSummary>,
 }
 
 impl EmittedStateCut {
-    fn capture(snapshot: &ImmutableStateSnapshot) -> Self {
+    pub(crate) fn capture(snapshot: &ImmutableStateSnapshot) -> Self {
         Self {
             revision: snapshot.header.revision,
             server_instance_id: snapshot.header.server_instance_id.clone(),
@@ -41,13 +43,13 @@ impl EmittedStateCut {
 /// out absolutely even when equal to the base, because a client's copy may
 /// still hold the delta's intermediate value.
 #[derive(Default)]
-struct StateDiffTouchedKeys {
-    sessions: BTreeSet<String>,
-    delegations: BTreeSet<String>,
+pub(crate) struct StateDiffTouchedKeys {
+    pub(crate) sessions: BTreeSet<String>,
+    pub(crate) delegations: BTreeSet<String>,
 }
 
 impl StateDiffTouchedKeys {
-    fn record(&mut self, event: &DeltaEvent) {
+    pub(crate) fn record(&mut self, event: &DeltaEvent) {
         // Exhaustive on purpose: a new delta variant must declare its keys.
         match event {
             DeltaEvent::SessionCreated { session_id, .. }
@@ -96,7 +98,8 @@ impl StateDiffTouchedKeys {
             | DeltaEvent::DelegationCanceled { delegation_id, .. } => {
                 self.delegations.insert(delegation_id.clone());
             }
-            DeltaEvent::TestRunChanged { .. } | DeltaEvent::TestRunRemoved { .. }
+            DeltaEvent::TestRunChanged { .. }
+            | DeltaEvent::TestRunRemoved { .. }
             | DeltaEvent::TestRunsInvalidated { .. } => {}
         }
     }
@@ -107,30 +110,30 @@ impl StateDiffTouchedKeys {
 /// and removed keys.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateDiffPayload<'a> {
-    base_revision: u64,
-    revision: u64,
-    server_instance_id: &'a str,
-    header: StateDiffHeader<'a>,
-    sessions: StateDiffSessions<'a>,
-    delegations: StateDiffRows<'a, DelegationStateSummary>,
+pub(crate) struct StateDiffPayload<'a> {
+    pub(crate) base_revision: u64,
+    pub(crate) revision: u64,
+    pub(crate) server_instance_id: &'a str,
+    pub(crate) header: StateDiffHeader<'a>,
+    pub(crate) sessions: StateDiffSessions<'a>,
+    pub(crate) delegations: StateDiffRows<'a, DelegationStateSummary>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateDiffHeader<'a> {
-    remote_transport_statuses: &'a [RemoteTransportStatus],
-    codex: &'a CodexState,
-    agent_readiness: &'a [AgentReadiness],
-    preferences: &'a AppPreferences,
+pub(crate) struct StateDiffHeader<'a> {
+    pub(crate) remote_transport_statuses: &'a [RemoteTransportStatus],
+    pub(crate) codex: &'a CodexState,
+    pub(crate) agent_readiness: &'a [AgentReadiness],
+    pub(crate) preferences: &'a AppPreferences,
     #[serde(serialize_with = "serialize_state_diff_projects")]
-    projects: &'a [Project],
-    orchestrators: &'a [OrchestratorInstance],
-    workspaces: &'a [WorkspaceLayoutSummary],
-    delegation_waits: &'a [DelegationWaitRecord],
-    test_run_waits: &'a [TestRunWaitRecord],
-    test_run_overview: &'a TestRunOverviewSnapshot,
-    pending_engram_mcp_revocation_session_ids: &'a [String],
+    pub(crate) projects: &'a [Project],
+    pub(crate) orchestrators: &'a [OrchestratorInstance],
+    pub(crate) workspaces: &'a [WorkspaceLayoutSummary],
+    pub(crate) delegation_waits: &'a [DelegationWaitRecord],
+    pub(crate) test_run_waits: &'a [TestRunWaitRecord],
+    pub(crate) test_run_overview: &'a TestRunOverviewSnapshot,
+    pub(crate) pending_engram_mcp_revocation_session_ids: &'a [String],
 }
 
 /// Projects use the same client projection as `StateResponse::projects`.
@@ -142,18 +145,18 @@ where
 }
 
 #[derive(Serialize)]
-struct StateDiffSessions<'a> {
-    changed: Vec<&'a StateSessionSummary>,
-    removed: Vec<&'a str>,
+pub(crate) struct StateDiffSessions<'a> {
+    pub(crate) changed: Vec<&'a StateSessionSummary>,
+    pub(crate) removed: Vec<&'a str>,
     /// The full id sequence, present only when membership or order changed.
     #[serde(skip_serializing_if = "Option::is_none")]
-    order: Option<Vec<&'a str>>,
+    pub(crate) order: Option<Vec<&'a str>>,
 }
 
 #[derive(Serialize)]
-struct StateDiffRows<'a, T> {
-    changed: Vec<&'a T>,
-    removed: Vec<&'a str>,
+pub(crate) struct StateDiffRows<'a, T> {
+    pub(crate) changed: Vec<&'a T>,
+    pub(crate) removed: Vec<&'a str>,
 }
 
 fn delegation_row_key(row: &DelegationStateSummary) -> &str {
@@ -200,7 +203,7 @@ fn state_diff_rows<'a, T: PartialEq>(
     }
 }
 
-fn state_diff_payload<'a>(
+pub(crate) fn state_diff_payload<'a>(
     base: &'a EmittedStateCut,
     cut: &'a ImmutableStateSnapshot,
     touched: &'a StateDiffTouchedKeys,
@@ -295,11 +298,11 @@ fn state_diff_payload<'a>(
 /// A full state the broadcaster sends as a diff base: today's bytes plus a
 /// trailing `"stateDiffBase":true`. Clients that do not diff ignore the field.
 #[derive(Serialize)]
-struct MarkedStateResponse<'a> {
+pub(crate) struct MarkedStateResponse<'a> {
     #[serde(flatten)]
-    state: &'a StateResponse,
+    pub(crate) state: &'a StateResponse,
     #[serde(rename = "stateDiffBase")]
-    state_diff_base: bool,
+    pub(crate) state_diff_base: bool,
 }
 
 /// Serializes a cut exactly as the full `state` event has always carried it,
@@ -308,10 +311,13 @@ fn serialize_full_state_cut(snapshot: ImmutableStateSnapshot, marked: bool) -> O
     let revision = snapshot.header.revision;
     let state = snapshot.materialize();
     let payload = if marked {
-        encode_sse_json("state", &MarkedStateResponse {
-            state: &state,
-            state_diff_base: true,
-        })
+        encode_sse_json(
+            "state",
+            &MarkedStateResponse {
+                state: &state,
+                state_diff_base: true,
+            },
+        )
     } else {
         encode_sse_json("state", &state)
     };
@@ -326,7 +332,7 @@ fn serialize_full_state_cut(snapshot: ImmutableStateSnapshot, marked: bool) -> O
 
 /// Why the broadcaster sent a marked full state instead of a diff.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StateDiffRebase {
+pub(crate) enum StateDiffRebase {
     /// Worker start, or a pre-built snapshot left no comparable base.
     NoBase,
     Lag,
@@ -341,8 +347,8 @@ enum StateDiffRebase {
 
 /// Host-wide broadcaster counters, read by the persistence diagnostics route.
 #[derive(Default)]
-struct StateDiffCounters {
-    diffs_emitted: AtomicU64,
+pub(crate) struct StateDiffCounters {
+    pub(crate) diffs_emitted: AtomicU64,
     marked_no_base: AtomicU64,
     marked_lag: AtomicU64,
     marked_failure: AtomicU64,
@@ -351,26 +357,26 @@ struct StateDiffCounters {
     marked_new_instance: AtomicU64,
     legacy_paired_full_states: AtomicU64,
     /// `POST /api/events/full-state` calls with `mode: "cut"`.
-    cut_requests: AtomicU64,
+    pub(crate) cut_requests: AtomicU64,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateDiffCountersSnapshot {
-    diffs_emitted: u64,
-    marked_full_states: StateDiffMarkedCounts,
+pub(crate) struct StateDiffCountersSnapshot {
+    pub(crate) diffs_emitted: u64,
+    pub(crate) marked_full_states: StateDiffMarkedCounts,
     legacy_paired_full_states: u64,
-    cut_requests: u64,
+    pub(crate) cut_requests: u64,
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateDiffMarkedCounts {
+pub(crate) struct StateDiffMarkedCounts {
     no_base: u64,
-    lag: u64,
-    failure: u64,
+    pub(crate) lag: u64,
+    pub(crate) failure: u64,
     no_receivers: u64,
-    alignment_request: u64,
+    pub(crate) alignment_request: u64,
     new_instance: u64,
 }
 
@@ -387,7 +393,7 @@ impl StateDiffCounters {
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn snapshot(&self) -> StateDiffCountersSnapshot {
+    pub(crate) fn snapshot(&self) -> StateDiffCountersSnapshot {
         let read = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
         StateDiffCountersSnapshot {
             diffs_emitted: read(&self.diffs_emitted),
@@ -408,15 +414,15 @@ impl StateDiffCounters {
 /// Worker-local diff state. Created when the broadcaster thread starts and
 /// dropped only after its final drain, so closing never discards a base that
 /// late work still diffs from.
-struct StateDiffProducer {
-    base: Option<EmittedStateCut>,
-    touched: StateDiffTouchedKeys,
+pub(crate) struct StateDiffProducer {
+    pub(crate) base: Option<EmittedStateCut>,
+    pub(crate) touched: StateDiffTouchedKeys,
     /// Why there is no base; the next marked full state is counted under it.
-    rebase: StateDiffRebase,
+    pub(crate) rebase: StateDiffRebase,
     /// The newest full-state request generation a delivered marked full
     /// state has answered. A cut captured at a newer generation goes out
     /// marked; an older cut cannot answer a later request.
-    satisfied_generation: u64,
+    pub(crate) satisfied_generation: u64,
 }
 
 impl Default for StateDiffProducer {
@@ -431,7 +437,7 @@ impl Default for StateDiffProducer {
 }
 
 impl StateDiffProducer {
-    fn forward(&mut self, work: StateBroadcastWork, senders: &StateBroadcastSenders) {
+    pub(crate) fn forward(&mut self, work: StateBroadcastWork, senders: &StateBroadcastSenders) {
         match work {
             StateBroadcastWork::ImmutableSnapshot(snapshot) => self.forward_cut(snapshot, senders),
             StateBroadcastWork::Delta(event) => {
@@ -458,7 +464,7 @@ impl StateDiffProducer {
         }
     }
 
-    fn reset(&mut self, reason: StateDiffRebase) {
+    pub(crate) fn reset(&mut self, reason: StateDiffRebase) {
         self.base = None;
         self.touched = StateDiffTouchedKeys::default();
         self.rebase = reason;
@@ -510,7 +516,11 @@ impl StateDiffProducer {
         Ok(())
     }
 
-    fn forward_cut(&mut self, mut snapshot: ImmutableStateSnapshot, senders: &StateBroadcastSenders) {
+    pub(crate) fn forward_cut(
+        &mut self,
+        mut snapshot: ImmutableStateSnapshot,
+        senders: &StateBroadcastSenders,
+    ) {
         snapshot.prepare_test_run_activity();
         // The same consumer hooks as the full-state path, which a diff skips.
         #[cfg(test)]
@@ -578,7 +588,10 @@ impl StateDiffProducer {
         };
         let next_base = EmittedStateCut::capture(&snapshot);
         let mut outcome = if senders.send_state_diff(diff) {
-            senders.diff_counters.diffs_emitted.fetch_add(1, Ordering::Relaxed);
+            senders
+                .diff_counters
+                .diffs_emitted
+                .fetch_add(1, Ordering::Relaxed);
             Ok(())
         } else {
             Err(StateDiffRebase::NoReceivers)

@@ -12,18 +12,20 @@
 // enqueued without a hold behave exactly as before. New module beside
 // session_interaction.rs and turn_dispatch.rs.
 
+use super::*;
+
 /// How long the writer has to prove a held entry durable. A fence that runs
 /// out leaves the entry held with that reason; nothing retries it by itself.
 /// The producers of held prompts come in a later change; until then only
 /// tests reach the request path.
 #[cfg_attr(not(test), allow(dead_code))]
-const QUEUED_PROMPT_DURABILITY_BUDGET: Duration = Duration::from_secs(30);
+pub(crate) const QUEUED_PROMPT_DURABILITY_BUDGET: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 thread_local! {
     // Installed by one test request and transferred to its settlement thread.
     // Observing the content ACK alone does not join its later release attempt.
-    static TEST_QUEUED_PROMPT_SETTLEMENT: std::cell::RefCell<Option<Arc<dyn Fn(&str) + Send + Sync>>> =
+    pub(crate) static TEST_QUEUED_PROMPT_SETTLEMENT: std::cell::RefCell<Option<Arc<dyn Fn(&str) + Send + Sync>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -39,23 +41,23 @@ fn test_queued_prompt_settlement_boundary(phase: &str) {
 /// acknowledgement of exactly this content.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct QueuedPromptDurabilityHold {
+pub(crate) struct QueuedPromptDurabilityHold {
     /// Fresh for every hold, so an acknowledgement of an earlier hold or of a
     /// replaced entry with the same prompt id never matches this one.
-    nonce: String,
+    pub(crate) nonce: String,
     /// The queued entry exactly as it was held.
-    content: Value,
+    pub(crate) content: Value,
     /// Why the last acknowledgement did not arrive, when it did not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    failure: Option<String>,
+    pub(crate) failure: Option<String>,
     /// The exact entry was proven durable, here or by reading it back after
     /// a restart. The entry may now be promoted; the hold stays, as a marker
     /// that keeps the entry standalone, until the entry leaves the queue.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    acknowledged: bool,
+    pub(crate) acknowledged: bool,
 }
 
-fn queued_prompt_durability_content(queued: &QueuedPromptRecord) -> Value {
+pub(crate) fn queued_prompt_durability_content(queued: &QueuedPromptRecord) -> Value {
     serde_json::to_value(queued).unwrap_or(Value::Null)
 }
 
@@ -67,7 +69,7 @@ fn queued_prompt_durability_content(queued: &QueuedPromptRecord) -> Value {
 /// merged into an earlier peer message batch, and while it is queued no later
 /// peer prompt is appended to it (`queued_prompt_kept_standalone`).
 #[cfg_attr(not(test), allow(dead_code))]
-fn queue_durable_orchestrator_prompt_on_record(
+pub(crate) fn queue_durable_orchestrator_prompt_on_record(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
     attachments: Vec<PromptImageAttachment>,
@@ -104,7 +106,10 @@ fn queue_durable_orchestrator_prompt_on_record(
 /// promotion path consults this; a held head also blocks the entries behind
 /// it, since the queue is first in, first out, and like an Engram-retained
 /// head it is never overtaken by reordering or front insertion.
-fn queued_prompt_held_for_durability(record: &SessionRecord, queued: &QueuedPromptRecord) -> bool {
+pub(crate) fn queued_prompt_held_for_durability(
+    record: &SessionRecord,
+    queued: &QueuedPromptRecord,
+) -> bool {
     record
         .queued_prompt_durability_holds
         .get(&queued.pending_prompt.id)
@@ -114,7 +119,10 @@ fn queued_prompt_held_for_durability(record: &SessionRecord, queued: &QueuedProm
 /// Whether `queued` was enqueued with a durability prerequisite, held or
 /// already acknowledged: its content stays exactly what was proven, so no
 /// peer prompt is ever batched into it while it is queued.
-fn queued_prompt_kept_standalone(record: &SessionRecord, queued: &QueuedPromptRecord) -> bool {
+pub(crate) fn queued_prompt_kept_standalone(
+    record: &SessionRecord,
+    queued: &QueuedPromptRecord,
+) -> bool {
     record
         .queued_prompt_durability_holds
         .contains_key(&queued.pending_prompt.id)
@@ -123,7 +131,7 @@ fn queued_prompt_kept_standalone(record: &SessionRecord, queued: &QueuedPromptRe
 /// Drops the holds whose entries left the queue (promoted, Stop, Cancel,
 /// removal), whatever state their fences are in; a late outcome then finds no
 /// hold and settles nothing. Called wherever the queue is synchronized.
-fn prune_queued_prompt_durability_holds(record: &mut SessionRecord) {
+pub(crate) fn prune_queued_prompt_durability_holds(record: &mut SessionRecord) {
     if record.queued_prompt_durability_holds.is_empty() {
         return;
     }
@@ -140,7 +148,7 @@ fn prune_queued_prompt_durability_holds(record: &mut SessionRecord) {
 /// What a durability fence of `prompt_id` compares, read from a persisted
 /// session row: the row's hold nonce and its queued entry. None when the row
 /// has no such hold or no such entry, which no acknowledgement can match.
-fn queued_prompt_durability_persisted_content(
+pub(crate) fn queued_prompt_durability_persisted_content(
     record: &PersistedSessionRecord,
     prompt_id: &str,
 ) -> Option<Value> {
@@ -157,13 +165,13 @@ fn queued_prompt_durability_persisted_content(
 
 /// The persisted content a durability fence compares: the hold's nonce and
 /// the exact entry, as one value.
-fn queued_prompt_durability_fence_content(nonce: &str, content: &Value) -> Value {
+pub(crate) fn queued_prompt_durability_fence_content(nonce: &str, content: &Value) -> Value {
     json!({ "nonce": nonce, "entry": content })
 }
 
 /// Whether the session's queue head waits for its durability
 /// acknowledgement. A direct send behind such a head stays queued.
-fn queued_head_held_for_durability(record: &SessionRecord) -> bool {
+pub(crate) fn queued_head_held_for_durability(record: &SessionRecord) -> bool {
     record
         .queued_prompts
         .front()
@@ -175,12 +183,12 @@ fn queued_head_held_for_durability(record: &SessionRecord) -> bool {
 /// reason and the pause stays; nothing keeps the Resume, and an
 /// acknowledgement never dispatches past a pause, so the user resumes again
 /// once the head is saved. None when the head is not held.
-fn queued_head_durability_resume_refusal(record: &SessionRecord) -> Option<String> {
+pub(crate) fn queued_head_durability_resume_refusal(record: &SessionRecord) -> Option<String> {
     let head = record.queued_prompts.front()?;
     queued_prompt_durability_resume_refusal(record, head)
 }
 
-fn queued_prompt_durability_resume_refusal(
+pub(crate) fn queued_prompt_durability_resume_refusal(
     record: &SessionRecord,
     head: &QueuedPromptRecord,
 ) -> Option<String> {
@@ -200,7 +208,7 @@ fn queued_prompt_durability_resume_refusal(
 
 /// The refusal of a Resume whose retried drain also started nothing, the
 /// head being no longer held: the queue changed while it was resuming.
-const RESUME_QUEUE_CHANGED_REFUSAL: &str =
+pub(crate) const RESUME_QUEUE_CHANGED_REFUSAL: &str =
     "nothing was started because the queue changed during Resume; Resume again";
 
 /// What a Resume of a paused queue does next when its drain started nothing.
@@ -237,7 +245,11 @@ impl AppState {
     /// a failed one leaves it held with the reason. Returns false when there
     /// is no such hold or the writer cannot be reached (the hold then stays,
     /// fail-closed). Never waits; call with the state lock released.
-    fn request_queued_prompt_durability(&self, session_id: &str, prompt_id: &str) -> bool {
+    pub(crate) fn request_queued_prompt_durability(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+    ) -> bool {
         let (target, nonce) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -298,7 +310,7 @@ impl AppState {
     /// An entry whose content changed in place stays held: it is held again
     /// for its current content and a new acknowledgement is requested. A
     /// failure records its reason and leaves the entry held.
-    fn settle_queued_prompt_durability(
+    pub(crate) fn settle_queued_prompt_durability(
         &self,
         session_id: &str,
         prompt_id: &str,
@@ -417,7 +429,7 @@ impl AppState {
     ///
     /// Any other drain that started nothing keeps its outcome. Nothing is
     /// kept for later, and the pause is never passed without this Resume.
-    fn finish_resume_drain(
+    pub(crate) fn finish_resume_drain(
         &self,
         session_id: &str,
         owner: Option<QueuedTurnOwner>,

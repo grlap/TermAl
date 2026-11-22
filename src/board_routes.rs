@@ -21,24 +21,26 @@ Wire notes:
 - Read responses never contain tombstones; `value` is always present there.
 */
 
+use super::*;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BoardSetRequest {
-    key: String,
+pub(crate) struct BoardSetRequest {
+    pub(crate) key: String,
     /// Present (any JSON, `null` included) = set. Absent = requires
     /// `delete: true`. The custom deserializer preserves explicit `null`
     /// as `Some(Value::Null)` instead of collapsing it into "absent".
     #[serde(default, deserialize_with = "deserialize_present_json_value")]
-    value: Option<Value>,
+    pub(crate) value: Option<Value>,
     #[serde(default)]
-    delete: bool,
+    pub(crate) delete: bool,
     /// 0 = create-only (key must never have existed); otherwise the exact
     /// current revision — including a tombstone's revision for the
     /// deliberate-restore path (design v1.1).
-    expected_revision: u64,
-    idempotency_key: String,
+    pub(crate) expected_revision: u64,
+    pub(crate) idempotency_key: String,
     #[serde(default)]
-    state_stamp: Option<String>,
+    pub(crate) state_stamp: Option<String>,
 }
 
 fn deserialize_present_json_value<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
@@ -50,15 +52,15 @@ where
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BoardListQuery {
+pub(crate) struct BoardListQuery {
     #[serde(default)]
-    after_key: Option<String>,
+    pub(crate) after_key: Option<String>,
     #[serde(default)]
-    limit: Option<usize>,
+    pub(crate) limit: Option<usize>,
     #[serde(default)]
-    snapshot_generation: Option<u64>,
+    pub(crate) snapshot_generation: Option<u64>,
     #[serde(default)]
-    known_generation: Option<u64>,
+    pub(crate) known_generation: Option<u64>,
 }
 
 /// Resolves the caller session to its coordination-board scope: the session
@@ -70,7 +72,7 @@ struct BoardListQuery {
 /// `mailbox_peer_names` exactly: the two delegation-child sources are
 /// INDEPENDENT — rejection fires on parent marker OR durable-index
 /// membership, so root standing requires marker null AND index absence.
-fn resolve_board_scope_for_session(
+pub(crate) fn resolve_board_scope_for_session(
     state: &AppState,
     session_id: &str,
 ) -> Result<(String, String), ApiError> {
@@ -138,7 +140,7 @@ fn coordination_board_author_name(session_name: &str) -> String {
     }
 }
 
-async fn list_coordination_board(
+pub(crate) async fn list_coordination_board(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     query: Result<Query<BoardListQuery>, QueryRejection>,
@@ -162,7 +164,7 @@ async fn list_coordination_board(
     Ok(Json(page))
 }
 
-async fn get_coordination_board_key(
+pub(crate) async fn get_coordination_board_key(
     AxumPath((session_id, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<CoordinationBoardGetResponse>, ApiError> {
@@ -177,7 +179,7 @@ async fn get_coordination_board_key(
     Ok(Json(head))
 }
 
-async fn set_coordination_board_key(
+pub(crate) async fn set_coordination_board_key(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<BoardSetRequest>, JsonRejection>,

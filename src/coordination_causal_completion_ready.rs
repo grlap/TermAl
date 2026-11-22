@@ -1,12 +1,14 @@
 // Exact original-key reads for completion-ready scheduling. Reuses the pending
 // decoder from test_run_causal_completion_scan.rs; owns no new custody or rows.
-enum CausalReadyPlan {
+
+use super::*;
+pub(crate) enum CausalReadyPlan {
     Ready(CausalTestCompletionPlan),
     Ignored(&'static str),
 }
 
 impl MailboxStore {
-    fn causal_test_completion_plan_for_key(
+    pub(crate) fn causal_test_completion_plan_for_key(
         &self,
         requester: &MailboxRelayPrincipal,
         key: &TestRunCausalKey,

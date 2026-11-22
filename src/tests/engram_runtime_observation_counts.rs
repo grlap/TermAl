@@ -403,17 +403,34 @@ fn real_builder_quiet_changed_turns_and_spillover_checks_preserve_custody() {
         if !is_owner {
             for (index, path, revision) in [
                 (1, "/occurrence/source_basis", "content-v1:private-revision"),
-                (3, "/occurrence/source_change/baseline", "content-v1:private-revision"),
-                (3, "/occurrence/source_change/sighting/source_basis", "content-v1:changed-revision"),
+                (
+                    3,
+                    "/occurrence/source_change/baseline",
+                    "content-v1:private-revision",
+                ),
+                (
+                    3,
+                    "/occurrence/source_change/sighting/source_basis",
+                    "content-v1:changed-revision",
+                ),
             ] {
-                let basis = envelopes[index].request.pointer_mut(path).unwrap().as_object_mut().unwrap();
+                let basis = envelopes[index]
+                    .request
+                    .pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap();
                 basis.remove("source_id");
                 basis.insert("source_revision".into(), json!(revision));
             }
             for envelope in &envelopes {
-                let decoded: EngramControlRequest = serde_json::from_value(envelope.request.clone()).unwrap();
-                assert_eq!(serde_json::to_value(decoded).unwrap(), envelope.request,
-                    "historical revision-form requests remain readable without changing their stored wire");
+                let decoded: EngramControlRequest =
+                    serde_json::from_value(envelope.request.clone()).unwrap();
+                assert_eq!(
+                    serde_json::to_value(decoded).unwrap(),
+                    envelope.request,
+                    "historical revision-form requests remain readable without changing their stored wire"
+                );
             }
         }
         for reversed in [false, true] {

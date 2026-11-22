@@ -3,6 +3,8 @@
 // turn-result lock. A focus switch preserves an exact still-held opening;
 // its prospective successor refresh follows installation of the old report.
 
+use super::*;
+
 include!("engram_unadmitted_focus.rs");
 include!("engram_adopted_predecessor.rs");
 
@@ -12,7 +14,7 @@ include!("engram_adopted_predecessor.rs");
 /// capture got, so it is printed only for an attempt that failed to measure or
 /// took longer than its budget, and not for every capture in every test.
 #[cfg(test)]
-fn unadmitted_capture_diagnostic(
+pub(crate) fn unadmitted_capture_diagnostic(
     session_id: &str,
     attempt: u32,
     budget: Duration,
@@ -30,13 +32,17 @@ fn unadmitted_capture_diagnostic(
 }
 
 impl AppState {
-    fn capture_runtime_observation_report(
+    pub(crate) fn capture_runtime_observation_report(
         &self,
         session_id: &str,
         job: &EngramRuntimeClosingJob,
     ) -> Result<EngramRuntimeClosingOutcome, EngramTransportError> {
         if job.trace.source_attribution_uncertain
-            && job.scope.historical_fields.get("adopted_successor_reason").and_then(Value::as_str)
+            && job
+                .scope
+                .historical_fields
+                .get("adopted_successor_reason")
+                .and_then(Value::as_str)
                 == Some(ENGRAM_ADOPTED_PREDECESSOR_REASON)
         {
             return self.capture_adopted_predecessor_unadmitted(session_id, job);
@@ -90,9 +96,12 @@ impl AppState {
             // ownership of this closed turn. Recover only an association
             // already retained at its opening; an unclaimed trace cannot
             // acquire a later claim, even without a successor turn.
-            if job.trace.opening_root.as_ref().is_none_or(|opening| {
-                opening.store != store || opening.binding != binding
-            }) {
+            if job
+                .trace
+                .opening_root
+                .as_ref()
+                .is_none_or(|opening| opening.store != store || opening.binding != binding)
+            {
                 return Err(runtime_observation_scope_changed(
                     &job.scope,
                     "the closed turn retained no matching claim association",
@@ -426,7 +435,7 @@ impl AppState {
     }
 }
 
-fn runtime_observation_scope_changed(
+pub(crate) fn runtime_observation_scope_changed(
     scope: &EngramRuntimeClosingScope,
     current: &str,
 ) -> EngramTransportError {

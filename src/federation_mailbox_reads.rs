@@ -1,18 +1,20 @@
 // Owns bounded process-local frozen pages and exact-boundary receipt issuance.
 // A pending page grants no acknowledgement authority and survives no restart.
-const FEDERATION_MAILBOX_FROZEN_KEYS: usize = 16;
-const FEDERATION_MAILBOX_PAGE_BYTES: usize = 2 * 1024 * 1024;
-const FEDERATION_MAILBOX_READ_TTL_MS: u64 = 10 * 60 * 1000;
+
+use super::*;
+pub(crate) const FEDERATION_MAILBOX_FROZEN_KEYS: usize = 16;
+pub(crate) const FEDERATION_MAILBOX_PAGE_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const FEDERATION_MAILBOX_READ_TTL_MS: u64 = 10 * 60 * 1000;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_MAILBOX_PAGE_SNAPSHOT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_MAILBOX_PAGE_SNAPSHOT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
-struct FederationMailboxReadCache {
-    incarnation: String,
-    offered: HashMap<String, std::time::Instant>,
-    entries: HashMap<String, Arc<FederationMailboxFrozenRead>>,
+pub(crate) struct FederationMailboxReadCache {
+    pub(crate) incarnation: String,
+    pub(crate) offered: HashMap<String, std::time::Instant>,
+    pub(crate) entries: HashMap<String, Arc<FederationMailboxFrozenRead>>,
 }
 
 impl Default for FederationMailboxReadCache {
@@ -26,7 +28,7 @@ impl Default for FederationMailboxReadCache {
 }
 
 impl FederationMailboxReadCache {
-    fn prune(&mut self) {
+    pub(crate) fn prune(&mut self) {
         let ttl = Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS);
         self.offered.retain(|_, accepted| accepted.elapsed() < ttl);
         self.entries
@@ -35,7 +37,7 @@ impl FederationMailboxReadCache {
 
     // An unconsumed offer grants only admission, never read or ACK authority.
     // Offers and pages share the same bounded ring; no tombstone journal grows.
-    fn offer_key(&mut self) -> Option<String> {
+    pub(crate) fn offer_key(&mut self) -> Option<String> {
         self.prune();
         if self.entries.len() + self.offered.len() >= FEDERATION_MAILBOX_FROZEN_KEYS {
             let reclaim = self
@@ -73,30 +75,30 @@ impl FederationMailboxReadCache {
     }
 }
 
-struct FederationMailboxFrozenRead {
-    accepted: std::time::Instant,
-    scope: String,
-    input: String,
-    page: MailboxReadResponse,
+pub(crate) struct FederationMailboxFrozenRead {
+    pub(crate) accepted: std::time::Instant,
+    pub(crate) scope: String,
+    pub(crate) input: String,
+    pub(crate) page: MailboxReadResponse,
     issuing: AtomicBool,
-    receipt: Mutex<Option<String>>,
+    pub(crate) receipt: Mutex<Option<String>>,
 }
 
 // The native API bridge keeps only its unresolved key and exact inputs, never
 // a satellite copy of canonical messages. CLI processes share this host state.
-struct FederationMailboxClientRead {
-    binding: FederationMailboxBinding,
-    input: String,
-    key: Option<String>,
-    accepted: std::time::Instant,
-    in_flight: bool,
-    owner: Uuid,
+pub(crate) struct FederationMailboxClientRead {
+    pub(crate) binding: FederationMailboxBinding,
+    pub(crate) input: String,
+    pub(crate) key: Option<String>,
+    pub(crate) accepted: std::time::Instant,
+    pub(crate) in_flight: bool,
+    pub(crate) owner: Uuid,
 }
 
-struct FederationMailboxReadFlight<'a> {
-    intents: &'a Mutex<HashMap<String, FederationMailboxClientRead>>,
-    slot: String,
-    owner: Uuid,
+pub(crate) struct FederationMailboxReadFlight<'a> {
+    pub(crate) intents: &'a Mutex<HashMap<String, FederationMailboxClientRead>>,
+    pub(crate) slot: String,
+    pub(crate) owner: Uuid,
 }
 
 impl Drop for FederationMailboxReadFlight<'_> {
@@ -114,7 +116,7 @@ impl Drop for FederationMailboxReadFlight<'_> {
     }
 }
 
-fn federation_mailbox_read_now_ms() -> u64 {
+pub(crate) fn federation_mailbox_read_now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -122,23 +124,23 @@ fn federation_mailbox_read_now_ms() -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
-fn federation_mailbox_new_read_key(incarnation: &str, epoch: u64) -> String {
+pub(crate) fn federation_mailbox_new_read_key(incarnation: &str, epoch: u64) -> String {
     format!("mr2:{incarnation}:{epoch}:{}", Uuid::new_v4())
 }
 
-fn federation_mailbox_read_expired() -> ApiError {
+pub(crate) fn federation_mailbox_read_expired() -> ApiError {
     ApiError::from_status(StatusCode::GONE,
         "readKeyExpired; the admission offer or frozen page expired, was reclaimed, or belongs to an earlier central process; repeat the mailbox read without readKey to start a fresh logical read")
         .with_kind(ApiErrorKind::FederationMailboxReadExpired)
 }
 
-fn federation_mailbox_read_not_found() -> ApiError {
+pub(crate) fn federation_mailbox_read_not_found() -> ApiError {
     ApiError::not_found("mailbox not found for this participant; no page was selected; verify mailboxId against the mailbox listing before a fresh read")
         .with_kind(ApiErrorKind::FederationMailboxReadNotFound)
 }
 
 impl AppState {
-    fn federation_mailbox_read_page(
+    pub(crate) fn federation_mailbox_read_page(
         &self,
         authority: &FederationMailboxAuthority,
         mailbox: &str,
@@ -231,24 +233,29 @@ impl AppState {
                     entry
                 } else {
                     // Consuming the offer reserved this slot before capture.
-                    let mut page = self.capture_federation_mailbox_page(
-                        authority,
-                        mailbox,
-                        after,
-                        limit,
-                        Some((&key, &scope)),
-                    ).map_err(|error| {
-                        // No frozen page or receipt exists at this boundary.
-                        // Preserve this fact across the authenticated reply so
-                        // the bridge does not try to resolve a consumed offer.
-                        if matches!(error.kind, Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { .. })) {
-                            mailbox_participant_retired_during_read(true)
-                        } else if error.status == StatusCode::NOT_FOUND {
-                            federation_mailbox_read_not_found()
-                        } else {
-                            error
-                        }
-                    })?;
+                    let mut page = self
+                        .capture_federation_mailbox_page(
+                            authority,
+                            mailbox,
+                            after,
+                            limit,
+                            Some((&key, &scope)),
+                        )
+                        .map_err(|error| {
+                            // No frozen page or receipt exists at this boundary.
+                            // Preserve this fact across the authenticated reply so
+                            // the bridge does not try to resolve a consumed offer.
+                            if matches!(
+                                error.kind,
+                                Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { .. })
+                            ) {
+                                mailbox_participant_retired_during_read(true)
+                            } else if error.status == StatusCode::NOT_FOUND {
+                                federation_mailbox_read_not_found()
+                            } else {
+                                error
+                            }
+                        })?;
                     page.read_key = Some(key.clone());
                     page.receipt_state = Some(
                         if issue && page.next_after_sequence.is_some() {
@@ -324,7 +331,11 @@ impl AppState {
             let mut connection = open_sqlite_state_read_connection(&self.mailbox_store.path)?;
             connection.busy_timeout(Duration::ZERO)?;
             let transaction = connection.transaction()?;
-            require_mailbox_read_participant(&transaction, mailbox, &authority.actor.participant_key())?;
+            require_mailbox_read_participant(
+                &transaction,
+                mailbox,
+                &authority.actor.participant_key(),
+            )?;
             let _current = authority.lock()?;
             transaction.commit()?;
             Ok(())
@@ -338,7 +349,7 @@ impl AppState {
         Ok(page)
     }
 
-    fn capture_federation_mailbox_page(
+    pub(crate) fn capture_federation_mailbox_page(
         &self,
         authority: &FederationMailboxAuthority,
         mailbox: &str,
@@ -581,7 +592,8 @@ impl AppState {
                     .is_some_and(|error| {
                         matches!(
                             error.kind,
-                            MailboxStoreErrorKind::Conflict | MailboxStoreErrorKind::NotFound
+                            MailboxStoreErrorKind::Conflict
+                                | MailboxStoreErrorKind::NotFound
                                 | MailboxStoreErrorKind::ParticipantRetiredDuringRead
                         )
                     }) =>

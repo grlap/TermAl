@@ -1,6 +1,8 @@
 // Local operator diagnostics. Reads share one SQLite snapshot per page and
 // never initialize storage, refresh reservations or dispatch work.
-async fn get_federation_journal(
+
+use super::*;
+pub(crate) async fn get_federation_journal(
     State(state): State<AppState>,
     query: std::result::Result<Query<FederationJournalQuery>, QueryRejection>,
 ) -> FederationJournalResult<Json<Value>> {

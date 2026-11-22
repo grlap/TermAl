@@ -2,14 +2,16 @@
 // Does not own verdict execution, durable acknowledgement or card rendering.
 // Projects receipt truth alongside acceptance_settings.rs; never interprets child verdicts.
 
+use super::*;
+
 const ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY: &str = "Evaluator finished with an unconfirmed submission outcome. Reconcile the retained tracker write; no evaluator verdict is confirmed.";
-const ACCEPTANCE_UNCONFIRMED_RESULT_FINDING: &str =
+pub(crate) const ACCEPTANCE_UNCONFIRMED_RESULT_FINDING: &str =
     "The tracker write outcome remains unknown; the retained write was preserved.";
 
 // Only replace the host's unavailable projection. Real child/transport failures
 // and the separately retained diagnostic output remain unchanged. Running this
 // on terminal reads also repairs the projection after a restart.
-fn refresh_recorded_acceptance_result_locked(
+pub(crate) fn refresh_recorded_acceptance_result_locked(
     inner: &mut StateInner,
     index: usize,
 ) -> Option<DelegationLifecycleDelta> {
@@ -59,7 +61,7 @@ fn refresh_recorded_acceptance_result_locked(
     })
 }
 
-fn acceptance_evaluator_unavailable_result(
+pub(crate) fn acceptance_evaluator_unavailable_result(
     delegation: &DelegationRecord,
 ) -> Option<(&'static str, &'static str)> {
     if delegation.mode != DelegationMode::Evaluator || delegation_submission_recorded(delegation) {
@@ -84,7 +86,7 @@ fn acceptance_evaluator_unavailable_result(
     )
 }
 
-fn acceptance_evaluator_terminal_outcome(
+pub(crate) fn acceptance_evaluator_terminal_outcome(
     inner: &mut StateInner,
     delegation: &DelegationRecord,
     outcome: DelegationChildOutcome,
@@ -141,7 +143,7 @@ fn acceptance_evaluator_terminal_outcome(
 
 // Cards take raw run detail, while the public evaluator result independently
 // names its receipt. Do not decorate that receipt line a second time.
-fn delegation_result_card_detail(
+pub(crate) fn delegation_result_card_detail(
     delegation: &DelegationRecord,
     result: &DelegationResult,
 ) -> String {
@@ -153,7 +155,7 @@ fn delegation_result_card_detail(
     }
 }
 
-fn acceptance_card_detail(
+pub(crate) fn acceptance_card_detail(
     inner: &StateInner,
     delegation: &DelegationRecord,
     detail: &str,
@@ -203,7 +205,7 @@ fn acceptance_card_detail(
 impl AppState {
     // Presentation is best-effort; a card persistence failure cannot undo or
     // reclassify the tracker's acknowledged submission outcome.
-    fn refresh_acceptance_evaluation_card(&self, child: &str) {
+    pub(crate) fn refresh_acceptance_evaluation_card(&self, child: &str) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(delegation) = inner
             .delegations

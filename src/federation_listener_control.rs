@@ -1,7 +1,9 @@
 // Owns bounded control/HTTP preface discrimination on the dedicated listener.
 // Does not mount local APIs or authenticate RPCs. Split from federation_listener_io.rs.
 
-async fn federation_classify_preface(
+use super::*;
+
+pub(crate) async fn federation_classify_preface(
     stream: &mut tokio::net::TcpStream,
 ) -> Result<Vec<u8>, ApiError> {
     use tokio::io::AsyncReadExt;
@@ -20,7 +22,7 @@ async fn federation_classify_preface(
     Ok(prefix)
 }
 
-async fn serve_federation_control_listener(
+pub(crate) async fn serve_federation_control_listener(
     listener: TcpListener,
     router: Router,
     mut stop: tokio::sync::watch::Receiver<bool>,

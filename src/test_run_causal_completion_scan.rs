@@ -1,6 +1,8 @@
 // Original-row decoding extracted from the former history sweep. Pending
 // membership schedules a lookup; these guards alone decide original authority.
-enum CausalPendingRead {
+
+use super::*;
+pub(crate) enum CausalPendingRead {
     Ready(CausalTestCompletionPlan),
     Waiting(CausalPendingReason),
     Retired,
@@ -9,7 +11,7 @@ enum CausalPendingRead {
 
 // SQL iteration and the rowid read remain page errors. Once row identity is
 // known, malformed custody must not discard healthy plans or pin this page.
-fn causal_test_completion_plan_from_row(
+pub(crate) fn causal_test_completion_plan_from_row(
     row: &rusqlite::Row<'_>,
     intents: bool,
     local_store: &str,

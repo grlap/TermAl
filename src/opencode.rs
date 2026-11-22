@@ -9,12 +9,14 @@
 // `authenticate` method does not prove that a usable provider credential
 // exists.
 
-const OPENCODE_CONFIG_AUTO: &str = "auto";
-const MAX_OPENCODE_EFFORT_CHARS: usize = 128;
-const MAX_OPENCODE_MODE_CHARS: usize = 128;
-const MAX_OPENCODE_MODEL_CHARS: usize = 200;
+use super::*;
 
-fn normalize_opencode_model(value: &str) -> Result<String> {
+pub(crate) const OPENCODE_CONFIG_AUTO: &str = "auto";
+pub(crate) const MAX_OPENCODE_EFFORT_CHARS: usize = 128;
+pub(crate) const MAX_OPENCODE_MODE_CHARS: usize = 128;
+pub(crate) const MAX_OPENCODE_MODEL_CHARS: usize = 200;
+
+pub(crate) fn normalize_opencode_model(value: &str) -> Result<String> {
     let model = value.trim();
     if model.is_empty() {
         bail!("OpenCode model cannot be empty");
@@ -32,7 +34,7 @@ fn normalize_opencode_model(value: &str) -> Result<String> {
 /// config option. Values are model/provider-defined (including custom
 /// variants), so TermAl keeps them dynamic while bounding the persisted and
 /// wire representation.
-fn normalize_opencode_effort(value: &str) -> Result<String> {
+pub(crate) fn normalize_opencode_effort(value: &str) -> Result<String> {
     let effort = value.trim();
     if effort.is_empty() {
         bail!("OpenCode reasoning variant cannot be empty");
@@ -49,7 +51,7 @@ fn normalize_opencode_effort(value: &str) -> Result<String> {
 /// Normalizes a persisted/user-supplied OpenCode mode. Dynamic primary-agent
 /// ids are intentionally strings, but remain bounded and single-line because
 /// they cross persistence, API, and UI boundaries.
-fn normalize_opencode_mode(value: &str) -> Result<String> {
+pub(crate) fn normalize_opencode_mode(value: &str) -> Result<String> {
     let mode = value.trim();
     if mode.is_empty() {
         bail!("OpenCode mode cannot be empty");
@@ -64,12 +66,12 @@ fn normalize_opencode_mode(value: &str) -> Result<String> {
 }
 
 /// Resolves the OpenCode CLI from PATH.
-fn resolve_opencode_executable() -> Option<PathBuf> {
+pub(crate) fn resolve_opencode_executable() -> Option<PathBuf> {
     find_command_on_path("opencode")
 }
 
 /// Builds an OpenCode CLI command with npm shim handling on Windows.
-fn opencode_command(executable: &FsPath) -> Command {
+pub(crate) fn opencode_command(executable: &FsPath) -> Command {
     #[cfg(windows)]
     {
         if let Some(extension) = executable.extension().and_then(|value| value.to_str()) {
@@ -88,7 +90,7 @@ fn opencode_command(executable: &FsPath) -> Command {
 /// remains an ordinary Ready detail because the only reliable proof is a real
 /// ACP session/prompt; an always-on warning badge would falsely label healthy
 /// installations.
-fn opencode_agent_readiness() -> AgentReadiness {
+pub(crate) fn opencode_agent_readiness() -> AgentReadiness {
     let Some(command_path) = resolve_opencode_executable() else {
         return AgentReadiness {
             agent: Agent::OpenCode,

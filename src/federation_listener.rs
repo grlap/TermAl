@@ -1,23 +1,25 @@
 // Owns the per-pair loopback router and authenticated caller context.
 // Does not mount local APIs or grant mailbox/session authority. New, not a split.
 
-type FederationAuthorityCheck = Arc<dyn Fn() -> Result<(), ApiError> + Send + Sync>;
+use super::*;
+
+pub(crate) type FederationAuthorityCheck = Arc<dyn Fn() -> Result<(), ApiError> + Send + Sync>;
 
 #[derive(Clone)]
-struct FederationListenerState {
-    channel: FederationChannel,
-    ensure_current: FederationAuthorityCheck,
+pub(crate) struct FederationListenerState {
+    pub(crate) channel: FederationChannel,
+    pub(crate) ensure_current: FederationAuthorityCheck,
 }
 
 #[derive(Clone)]
-struct FederationAuthenticatedPeer {
+pub(crate) struct FederationAuthenticatedPeer {
     // Selected exclusively by the dedicated listener, never by a request id.
-    lease: Option<FederationLinkLease>,
+    pub(crate) lease: Option<FederationLinkLease>,
     // A canceled mailbox handler retains its slot on the owned blocking job.
-    mailbox_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    pub(crate) mailbox_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
-fn federation_router(
+pub(crate) fn federation_router(
     channel: FederationChannel,
     ensure_current: FederationAuthorityCheck,
 ) -> Router {
@@ -27,10 +29,22 @@ fn federation_router(
     };
     Router::new()
         .route("/federation/v1/health", get(federation_health))
-        .route("/federation/v1/host-utilization", get(host_utilization::serve_pair))
-        .route("/federation/v1/mailbox/native-binding", post(serve_federation_native_binding))
-        .route("/federation/v1/mailbox/binding", post(serve_federation_binding_command))
-        .route("/federation/v1/mailbox/participation", post(serve_federation_participation))
+        .route(
+            "/federation/v1/host-utilization",
+            get(host_utilization::serve_pair),
+        )
+        .route(
+            "/federation/v1/mailbox/native-binding",
+            post(serve_federation_native_binding),
+        )
+        .route(
+            "/federation/v1/mailbox/binding",
+            post(serve_federation_binding_command),
+        )
+        .route(
+            "/federation/v1/mailbox/participation",
+            post(serve_federation_participation),
+        )
         .merge(federation_onboarding_routes())
         .layer(DefaultBodyLimit::max(4096))
         .merge(federation_mailbox_routes())
@@ -46,7 +60,7 @@ fn federation_router(
         .layer(axum::middleware::from_fn(output_size_http_observer))
 }
 
-async fn federation_authenticate(
+pub(crate) async fn federation_authenticate(
     State(state): State<FederationListenerState>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -56,7 +70,7 @@ async fn federation_authenticate(
     }
     federation_authenticate_message(state, request, next).await
 }
-async fn federation_health(
+pub(crate) async fn federation_health(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
 ) -> Result<Json<FederationHealth>, ApiError> {
     let lease = peer.lease.ok_or_else(federation_stale_link)?;

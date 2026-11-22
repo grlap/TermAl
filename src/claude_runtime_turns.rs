@@ -20,36 +20,38 @@
 //
 // New file; nothing was split out of another.
 
+use super::*;
+
 /// At most this many unassigned observations are kept per session, newest
 /// last.
 const UNASSIGNED_CLAUDE_OBSERVATION_LIMIT: usize = 64;
 
 /// A Claude turn no prompt of TermAl's owns, open on its session.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct UnmediatedClaudeTurn {
+pub(crate) struct UnmediatedClaudeTurn {
     /// The session turn generation it was adopted under; `None` when it was
     /// not adopted (the session was busy with another turn, or the turn is
     /// unassigned).
-    adopted_generation: Option<u64>,
+    pub(crate) adopted_generation: Option<u64>,
     /// The transcript notice that announced it, which its unassigned
     /// observations name.
-    notice_message_id: String,
+    pub(crate) notice_message_id: String,
 }
 
 /// Something the recorder saw in a turn no prompt owns, kept on the session
 /// as unassigned. This bounded local diagnostic ring is never sent itself;
 /// the independent adopted trace may be reported as uncredited history.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct UnassignedClaudeObservation {
-    notice_message_id: String,
-    observed_at: String,
-    what: String,
+pub(crate) struct UnassignedClaudeObservation {
+    pub(crate) notice_message_id: String,
+    pub(crate) observed_at: String,
+    pub(crate) what: String,
 }
 
 /// Whether what the recorder sees in this session must stay away from every
 /// Engram grant: a turn no prompt owns is open on it, adopted as the current
 /// turn or running beside another turn that it may not report into.
-fn unmediated_claude_turn_hides_observations(record: &SessionRecord) -> bool {
+pub(crate) fn unmediated_claude_turn_hides_observations(record: &SessionRecord) -> bool {
     unmediated_claude_turn_is_current(record)
         || record.unmediated_claude_turn.as_ref().is_some_and(|turn| {
             match turn.adopted_generation {
@@ -66,11 +68,15 @@ fn unmediated_claude_turn_hides_observations(record: &SessionRecord) -> bool {
 /// segment: it holds through deferred Stop callbacks, failed or successful
 /// Stops, runtime exits and replays of the same generation, and goes inert
 /// only when a successor generation begins.
-fn unmediated_claude_turn_is_current(record: &SessionRecord) -> bool {
+pub(crate) fn unmediated_claude_turn_is_current(record: &SessionRecord) -> bool {
     record.adopted_claude_turn_generation == Some(record.active_turn_generation)
 }
 
-fn unmediated_claude_turn_notice(cause: ClaudeUnownedCause, adopted: bool, reporting: bool) -> String {
+fn unmediated_claude_turn_notice(
+    cause: ClaudeUnownedCause,
+    adopted: bool,
+    reporting: bool,
+) -> String {
     let unrecorded = if adopted && reporting {
         "TermAl did not prompt it. When it ends, the host attempts to report its observations to Engram \
          with unknown causality. These observations do not earn verification credit."
@@ -101,7 +107,7 @@ fn unmediated_claude_turn_notice(cause: ClaudeUnownedCause, adopted: bool, repor
 
 /// Keeps `what` on `record` as unassigned, under the notice of the unowned
 /// turn open there (or the one that just ended), bounded and newest last.
-fn push_unassigned_claude_observation(record: &mut SessionRecord, what: String) {
+pub(crate) fn push_unassigned_claude_observation(record: &mut SessionRecord, what: String) {
     let notice_message_id = record
         .unmediated_claude_turn
         .as_ref()
@@ -119,7 +125,9 @@ fn push_unassigned_claude_observation(record: &mut SessionRecord, what: String) 
 }
 
 /// A short account of a recorder observation, for the unassigned record.
-fn unassigned_claude_observation_text(observation: &EngramRecorderObservation<'_>) -> String {
+pub(crate) fn unassigned_claude_observation_text(
+    observation: &EngramRecorderObservation<'_>,
+) -> String {
     match observation {
         EngramRecorderObservation::CommandStarted { key, ran, cwd } => format!(
             "command {key} started: {} in {}",
@@ -146,7 +154,7 @@ impl AppState {
     /// applies it to the session, as the reader does with a frame router's
     /// plan.
     #[cfg(test)]
-    fn observe_claude_frame_ownership(
+    pub(crate) fn observe_claude_frame_ownership(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -161,7 +169,7 @@ impl AppState {
     /// Applies to the session what one frame did to the runtime's turns
     /// (`ClaudeFramePlan::ownership`): opens there a turn no prompt owns, and
     /// marks a grant whose turn such a turn overlapped.
-    fn apply_claude_frame_ownership(
+    pub(crate) fn apply_claude_frame_ownership(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -247,7 +255,7 @@ impl AppState {
     /// result finishes it. On a busy session, or when the turn is unassigned,
     /// it is marked but not adopted. Either way the transcript says at once
     /// that TermAl did not mediate it. Returns the adopted generation.
-    fn open_unmediated_claude_turn(
+    pub(crate) fn open_unmediated_claude_turn(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -268,13 +276,20 @@ impl AppState {
         let adopting = cause != ClaudeUnownedCause::Unassigned
             && record.runtime_projection_allowed()
             && !record.runtime_stop_in_progress
-            && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error);
+            && matches!(
+                record.session.status,
+                SessionStatus::Idle | SessionStatus::Error
+            );
         if adopting {
             let generation = record.active_turn_generation.wrapping_add(1).max(1);
             apply_engram_named_root_selection_locked(&mut inner, index, generation, true);
         }
-        let opening_root = observations_enabled.then(|| runtime_observation_opening_root(&inner, session_id)).flatten();
-        let opening_scope = observations_enabled.then(|| EngramRuntimeClosingScope::capture(&inner, session_id).ok()).flatten();
+        let opening_root = observations_enabled
+            .then(|| runtime_observation_opening_root(&inner, session_id))
+            .flatten();
+        let opening_scope = observations_enabled
+            .then(|| EngramRuntimeClosingScope::capture(&inner, session_id).ok())
+            .flatten();
         let message_id = inner.next_message_id();
         let (
             adopted_generation,
@@ -321,8 +336,12 @@ impl AppState {
                 record.adopted_claude_turn_generation = Some(generation);
                 if observations_enabled {
                     adopt_runtime_observation(record, &message_id, generation, opening_root);
-                    if let Some(trace) = record.engram.unadmitted_active_turn.as_mut()
-                        .filter(|trace| trace.generation == generation) {
+                    if let Some(trace) = record
+                        .engram
+                        .unadmitted_active_turn
+                        .as_mut()
+                        .filter(|trace| trace.generation == generation)
+                    {
                         trace.opening_scope = opening_scope;
                     }
                 }
@@ -336,9 +355,17 @@ impl AppState {
                 id: message_id,
                 timestamp: stamp_now(),
                 author: Author::System,
-                text: unmediated_claude_turn_notice(cause, adopted_generation.is_some(),
-                    adopted_generation.is_some_and(|generation| record.engram.unadmitted_active_turn
-                        .as_ref().is_some_and(|trace| trace.generation == generation))),
+                text: unmediated_claude_turn_notice(
+                    cause,
+                    adopted_generation.is_some(),
+                    adopted_generation.is_some_and(|generation| {
+                        record
+                            .engram
+                            .unadmitted_active_turn
+                            .as_ref()
+                            .is_some_and(|trace| trace.generation == generation)
+                    }),
+                ),
                 expanded_text: None,
                 source: None,
             };
@@ -426,7 +453,9 @@ impl AppState {
     /// from its exact current runtime may make source attribution uncertain.
     fn mark_engram_turn_attribution_mixed(&self, session_id: &str, token: &RuntimeToken) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
         let record = &mut inner.sessions[index];
         if !record.runtime.matches_runtime_token(token) {
             return;
@@ -454,7 +483,7 @@ impl AppState {
 
     /// Finalizes the turn a Claude `result` ended, and only that turn.
     /// `error_detail` is set for an error result.
-    fn finish_claude_result(
+    pub(crate) fn finish_claude_result(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -491,7 +520,10 @@ impl AppState {
             },
             ClaudeResultOwner::Runtime(owner) => {
                 self.close_runtime_observation_logged(
-                    session_id, token, owner.adopted_generation, observed_outcome,
+                    session_id,
+                    token,
+                    owner.adopted_generation,
+                    observed_outcome,
                 );
                 let turn = self.open_unmediated_claude_turn_of(session_id, token);
                 // The adopted turn is finished first, while it is still
@@ -587,7 +619,10 @@ impl AppState {
                     })
                 {
                     self.close_runtime_observation_logged(
-                        session_id, token, Some(generation), observed_outcome,
+                        session_id,
+                        token,
+                        Some(generation),
+                        observed_outcome,
                     );
                     let turn = self.open_unmediated_claude_turn_of(session_id, token);
                     let result = match error_detail {
@@ -635,7 +670,7 @@ impl AppState {
 
     /// A transcript notice, only while the runtime `token` names is the
     /// session's: a replaced runtime's late result says nothing.
-    fn push_claude_system_notice(
+    pub(crate) fn push_claude_system_notice(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -675,7 +710,7 @@ impl AppState {
     /// Whether the runtime `token` names is still the session's, its current
     /// turn is still `generation`, and that generation is still the one the
     /// host adopted for a turn Claude Code started by itself.
-    fn claude_adopted_generation_is_current(
+    pub(crate) fn claude_adopted_generation_is_current(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -690,7 +725,7 @@ impl AppState {
         })
     }
 
-    fn claude_runtime_is_current(&self, session_id: &str, token: &RuntimeToken) -> bool {
+    pub(crate) fn claude_runtime_is_current(&self, session_id: &str, token: &RuntimeToken) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
             .find_session_index(session_id)

@@ -12,7 +12,9 @@
 // Extracted from codex.rs so the event-handler block can stay separate
 // from the transport layer.
 
-const CODEX_MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+use super::*;
+
+pub(crate) const CODEX_MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The `initialize` params every Codex app-server handshake sends — shared by
 /// the persistent app-server writer (`src/codex.rs`) and the REPL path
@@ -24,7 +26,7 @@ const CODEX_MODEL_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 /// experimental-API opt-in. Without the flag the server rejects every resume
 /// with "excludeTurns requires experimentalApi capability" — which bricked
 /// all Codex sessions on 2026-07-23 when excludeTurns shipped without it.
-fn codex_initialize_params() -> Value {
+pub(crate) fn codex_initialize_params() -> Value {
     json!({
         "clientInfo": {
             "name": "termal",
@@ -37,7 +39,7 @@ fn codex_initialize_params() -> Value {
 }
 
 /// Handles send Codex JSON RPC request.
-fn send_codex_json_rpc_request(
+pub(crate) fn send_codex_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     method: &str,
@@ -49,7 +51,7 @@ fn send_codex_json_rpc_request(
 
 /// Sends a Codex JSON-RPC request without a local timeout.
 #[cfg(test)]
-fn send_codex_json_rpc_request_without_timeout(
+pub(crate) fn send_codex_json_rpc_request_without_timeout(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     method: &str,
@@ -59,7 +61,7 @@ fn send_codex_json_rpc_request_without_timeout(
 }
 
 /// Starts a Codex JSON-RPC request without waiting for the response.
-fn start_codex_json_rpc_request(
+pub(crate) fn start_codex_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     method: &str,
@@ -75,7 +77,7 @@ fn start_codex_json_rpc_request(
 }
 
 /// Starts a Codex JSON-RPC request with a preallocated request id.
-fn start_codex_json_rpc_request_with_id(
+pub(crate) fn start_codex_json_rpc_request_with_id(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     request_id: String,
@@ -106,7 +108,7 @@ fn start_codex_json_rpc_request_with_id(
 }
 
 /// Waits for a pending Codex JSON-RPC response.
-fn wait_for_codex_json_rpc_response(
+pub(crate) fn wait_for_codex_json_rpc_response(
     pending_requests: &CodexPendingRequestMap,
     pending_request: PendingCodexJsonRpcRequest,
     method: &str,
@@ -170,10 +172,10 @@ fn send_codex_json_rpc_request_inner(
 /// waiter thread. On success, the waiter either sends the accumulated results
 /// to `response_tx` (last page) or feeds a `RefreshModelListPage` command back
 /// through `input_tx` to fetch the next page.
-const SHARED_CODEX_MODEL_LIST_MAX_PAGES: usize = 50;
+pub(crate) const SHARED_CODEX_MODEL_LIST_MAX_PAGES: usize = 50;
 
 /// Walks the same current model/list contract for the blocking REPL transport.
-fn read_codex_model_options(
+pub(crate) fn read_codex_model_options(
     mut request_page: impl FnMut(Value) -> Result<Value>,
 ) -> Result<Vec<SessionModelOption>> {
     let mut cursor = None::<String>;
@@ -196,7 +198,7 @@ fn read_codex_model_options(
     bail!("Codex model list pagination exceeded {SHARED_CODEX_MODEL_LIST_MAX_PAGES} pages")
 }
 
-fn fire_codex_model_list_page(
+pub(crate) fn fire_codex_model_list_page(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     input_tx: &Sender<CodexRuntimeCommand>,
@@ -280,7 +282,7 @@ fn fire_codex_model_list_page(
 /// `result`/`error`) that cannot be delivered to any session. Sends an error
 /// response through the writer so the app-server does not hang waiting for an
 /// answer that will never come. Notifications (no `id`) are silently ignored.
-fn reject_undeliverable_codex_server_request(
+pub(crate) fn reject_undeliverable_codex_server_request(
     message: &Value,
     input_tx: &Sender<CodexRuntimeCommand>,
 ) {
@@ -303,7 +305,7 @@ fn reject_undeliverable_codex_server_request(
 }
 
 /// Marks pending Codex requests as failed.
-fn fail_pending_codex_requests(pending_requests: &CodexPendingRequestMap, detail: &str) {
+pub(crate) fn fail_pending_codex_requests(pending_requests: &CodexPendingRequestMap, detail: &str) {
     let senders = pending_requests
         .lock()
         .expect("Codex pending requests mutex poisoned")
@@ -317,7 +319,7 @@ fn fail_pending_codex_requests(pending_requests: &CodexPendingRequestMap, detail
 }
 
 /// Formats a shared Codex runtime command failure.
-fn shared_codex_runtime_command_error_detail(err: &anyhow::Error) -> String {
+pub(crate) fn shared_codex_runtime_command_error_detail(err: &anyhow::Error) -> String {
     if let Some(detail) = err
         .downcast_ref::<CodexResponseError>()
         .and_then(CodexResponseError::as_transport)

@@ -1,30 +1,32 @@
 // Bounded publication records owned by the existing review-result mailbox.
 // A candidate MAC proves authorship; only the publication proof grants custody.
-const REVIEW_CUSTODY_SLOT_KIND: &str = "delegation-review-terminal-slot/v1";
+
+use super::*;
+pub(crate) const REVIEW_CUSTODY_SLOT_KIND: &str = "delegation-review-terminal-slot/v1";
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewPublicationProof {
-    result_id: String,
-    predecessor_result_id: Option<String>,
-    ordinal: u32,
+pub(crate) struct ReviewPublicationProof {
+    pub(crate) result_id: String,
+    pub(crate) predecessor_result_id: Option<String>,
+    pub(crate) ordinal: u32,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewCustodySlot {
-    schema_version: u32,
-    kind: String,
-    parent_session_id: String,
-    delegation_id: String,
-    child_session_id: String,
-    slot: u32,
-    submission_attempt: u32,
-    candidate: Option<SignedReviewAttempt>,
-    publication: Option<ReviewPublicationProof>,
+pub(crate) struct ReviewCustodySlot {
+    pub(crate) schema_version: u32,
+    pub(crate) kind: String,
+    pub(crate) parent_session_id: String,
+    pub(crate) delegation_id: String,
+    pub(crate) child_session_id: String,
+    pub(crate) slot: u32,
+    pub(crate) submission_attempt: u32,
+    pub(crate) candidate: Option<SignedReviewAttempt>,
+    pub(crate) publication: Option<ReviewPublicationProof>,
 }
 
-fn encode_review_value<T: Serialize>(value: &T, key: &str) -> Result<String, ApiError> {
+pub(crate) fn encode_review_value<T: Serialize>(value: &T, key: &str) -> Result<String, ApiError> {
     let payload = serde_json::to_string(value).map_err(|_| review_attempt_corrupt())?;
     let tag = review_attempt_mac(key, &payload)?
         .iter()
@@ -37,7 +39,7 @@ fn encode_review_value<T: Serialize>(value: &T, key: &str) -> Result<String, Api
     .map_err(|_| review_attempt_corrupt())
 }
 
-fn decode_review_value<T: serde::de::DeserializeOwned>(
+pub(crate) fn decode_review_value<T: serde::de::DeserializeOwned>(
     body: &str,
     key: &str,
 ) -> Result<T, ApiError> {
@@ -70,26 +72,26 @@ fn decode_review_value<T: serde::de::DeserializeOwned>(
     serde_json::from_str(&signed.payload).map_err(|_| review_attempt_corrupt())
 }
 
-fn review_candidate_id(candidate: &SignedReviewAttempt) -> Result<String, ApiError> {
+pub(crate) fn review_candidate_id(candidate: &SignedReviewAttempt) -> Result<String, ApiError> {
     let bytes = serde_json::to_vec(candidate).map_err(|_| review_attempt_corrupt())?;
     Ok(format!("review-result-{:x}", Sha256::digest(bytes)))
 }
 
-fn review_slot_prefix(delegation: &str) -> String {
+pub(crate) fn review_slot_prefix(delegation: &str) -> String {
     format!("{REVIEW_ATTEMPT_KEY_PREFIX}-{delegation}-")
 }
 
-const REVIEW_CUSTODY_KEYS_BY_CHILD_SQL: &str =
+pub(crate) const REVIEW_CUSTODY_KEYS_BY_CHILD_SQL: &str =
     "SELECT sender_session_id, idempotency_key FROM mailbox_messages
      WHERE sender_session_id=?1 AND idempotency_key>=?2 AND idempotency_key<?3
        AND topic=?4 ORDER BY idempotency_key LIMIT 65";
 
-const REVIEW_CUSTODY_KEYS_WITHOUT_CHILD_SQL: &str =
+pub(crate) const REVIEW_CUSTODY_KEYS_WITHOUT_CHILD_SQL: &str =
     "SELECT sender_session_id, idempotency_key FROM mailbox_messages
      WHERE ?1 IS NULL AND topic=?4 AND idempotency_key>=?2 AND idempotency_key<?3
      ORDER BY idempotency_key, sender_session_id LIMIT 65";
 
-fn review_slot_rows_on(
+pub(crate) fn review_slot_rows_on(
     connection: &rusqlite::Connection,
     child: Option<&str>,
     delegation: &str,
@@ -123,7 +125,7 @@ fn review_slot_rows_on(
         .collect()
 }
 
-fn decode_review_slots(
+pub(crate) fn decode_review_slots(
     records: &[MailboxIdempotencyRecord],
     parent: &str,
     delegation: &str,
@@ -134,7 +136,7 @@ fn decode_review_slots(
     decode_review_slots_with_chain(records, parent, delegation, child, policy, key, true)
 }
 
-fn decode_review_slots_with_chain(
+pub(crate) fn decode_review_slots_with_chain(
     records: &[MailboxIdempotencyRecord],
     parent: &str,
     delegation: &str,
@@ -217,14 +219,16 @@ fn decode_review_slots_with_chain(
     Ok(slots)
 }
 
-fn review_publication_head(slots: &[ReviewCustodySlot]) -> Option<&ReviewPublicationProof> {
+pub(crate) fn review_publication_head(
+    slots: &[ReviewCustodySlot],
+) -> Option<&ReviewPublicationProof> {
     slots
         .iter()
         .filter_map(|slot| slot.publication.as_ref())
         .max_by_key(|proof| proof.ordinal)
 }
 
-fn review_capacity_error() -> ApiError {
+pub(crate) fn review_capacity_error() -> ApiError {
     ApiError::conflict(
         "review retention capacity is exhausted; preserve the current result and use a new delegation",
     )
@@ -233,7 +237,7 @@ fn review_capacity_error() -> ApiError {
 impl MailboxStore {
     // Caller owns delegation_review_recovery_guard, acquired before StateInner.
     // The same writer transaction checks the slot budget after inserting a row.
-    fn append_review_custody_slot(
+    pub(crate) fn append_review_custody_slot(
         &self,
         input: &MailboxAppendInput,
         delegation: &str,
@@ -247,7 +251,11 @@ impl MailboxStore {
                 None,
                 || Ok(()),
                 |transaction, _| {
-                    let _ = review_slot_rows_on(transaction, Some(&input.sender_session_id), delegation)?;
+                    let _ = review_slot_rows_on(
+                        transaction,
+                        Some(&input.sender_session_id),
+                        delegation,
+                    )?;
                     Ok(())
                 },
                 true,
@@ -275,7 +283,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn replace_review_custody_slot(
+    pub(crate) fn replace_review_custody_slot(
         &self,
         saved: &MailboxIdempotencyRecord,
         old: &ReviewCustodySlot,
@@ -307,8 +315,12 @@ impl MailboxStore {
         let mut connection = self.connection().map_err(mailbox_api_error)?;
         let transaction = begin_mailbox_write(&mut connection, "publishing review custody")
             .map_err(mailbox_api_error)?;
-        let records = review_slot_rows_on(&transaction, Some(&old.child_session_id), &old.delegation_id)
-            .map_err(mailbox_api_error)?;
+        let records = review_slot_rows_on(
+            &transaction,
+            Some(&old.child_session_id),
+            &old.delegation_id,
+        )
+        .map_err(mailbox_api_error)?;
         let slots = decode_review_slots(
             &records,
             &old.parent_session_id,
@@ -334,8 +346,12 @@ impl MailboxStore {
                 "review pending candidate changed; stale publication was refused",
             ));
         }
-        let after = review_slot_rows_on(&transaction, Some(&new.child_session_id), &new.delegation_id)
-            .map_err(mailbox_api_error)?;
+        let after = review_slot_rows_on(
+            &transaction,
+            Some(&new.child_session_id),
+            &new.delegation_id,
+        )
+        .map_err(mailbox_api_error)?;
         decode_review_slots(
             &after,
             &new.parent_session_id,
@@ -361,9 +377,7 @@ impl MailboxStore {
         };
         #[cfg(test)]
         let commit_error = if lost_reply {
-            Some(anyhow!(
-                "injected lost reply after the real custody commit"
-            ))
+            Some(anyhow!("injected lost reply after the real custody commit"))
         } else {
             commit_error
         };

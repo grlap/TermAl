@@ -1,8 +1,10 @@
 // Monotonic time for Engram authority/admission operations. Production uses
 // real time; positive fixtures explicitly install one shared scripted clock.
 // SQLite, transport results and ownership checks remain independent of time.
+
+use super::*;
 #[derive(Clone, Default)]
-enum EngramBudgetClock {
+pub(crate) enum EngramBudgetClock {
     #[default]
     Real,
     #[cfg(test)]
@@ -10,19 +12,19 @@ enum EngramBudgetClock {
 }
 
 #[cfg(test)]
-struct ScriptedEngramBudgetClock {
-    now: Mutex<std::time::Instant>,
-    event: Mutex<u64>,
-    changed: Condvar,
-    waiters: std::sync::atomic::AtomicUsize,
+pub(crate) struct ScriptedEngramBudgetClock {
+    pub(crate) now: Mutex<std::time::Instant>,
+    pub(crate) event: Mutex<u64>,
+    pub(crate) changed: Condvar,
+    pub(crate) waiters: std::sync::atomic::AtomicUsize,
     /// A pinned wall reading and the scripted instant it was pinned at: from
     /// then on the wall time this clock reads moves only with the scripted
     /// clock (`EngramBudgetClock::wall_now`).
-    wall: Mutex<Option<(chrono::DateTime<chrono::Utc>, std::time::Instant)>>,
+    pub(crate) wall: Mutex<Option<(chrono::DateTime<chrono::Utc>, std::time::Instant)>>,
     /// How long, in real time, a scripted driver waits before it treats its
     /// fixture as broken and fails the test (`wait_scripted`,
     /// `wait_for_scripted_waiter`).
-    watchdog: Duration,
+    pub(crate) watchdog: Duration,
 }
 
 /// The real-time bound on a scripted driver whose fixture never advances it.
@@ -30,7 +32,7 @@ struct ScriptedEngramBudgetClock {
 const SCRIPTED_ENGRAM_DRIVER_WATCHDOG: Duration = Duration::from_secs(30);
 
 impl EngramBudgetClock {
-    fn now(&self) -> std::time::Instant {
+    pub(crate) fn now(&self) -> std::time::Instant {
         match self {
             Self::Real => std::time::Instant::now(),
             #[cfg(test)]
@@ -42,7 +44,7 @@ impl EngramBudgetClock {
     /// real wall time, or, on a scripted clock whose wall reading a fixture
     /// pinned, that reading moved on by the scripted time since.
     #[cfg(test)]
-    fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
+    pub(crate) fn wall_now(&self) -> chrono::DateTime<chrono::Utc> {
         match self {
             Self::Real => chrono::Utc::now(),
             #[cfg(test)]
@@ -62,7 +64,7 @@ impl EngramBudgetClock {
     /// Pins this scripted clock's wall reading at the real wall time now, so
     /// a wall-clock deadline is measured on the scripted clock alone.
     #[cfg(test)]
-    fn pin_wall(&self) {
+    pub(crate) fn pin_wall(&self) {
         let Self::Scripted(clock) = self else {
             panic!("only a scripted clock can pin its wall reading");
         };
@@ -70,11 +72,11 @@ impl EngramBudgetClock {
         *clock.wall.lock().expect("budget wall mutex poisoned") = Some((chrono::Utc::now(), at));
     }
 
-    fn elapsed_since(&self, started: std::time::Instant) -> Duration {
+    pub(crate) fn elapsed_since(&self, started: std::time::Instant) -> Duration {
         self.now().saturating_duration_since(started)
     }
 
-    fn notify(&self) {
+    pub(crate) fn notify(&self) {
         #[cfg(test)]
         if let Self::Scripted(clock) = self {
             // A driver's watchdog panics while it holds this lock, which
@@ -92,14 +94,14 @@ impl EngramBudgetClock {
     }
 
     #[cfg(test)]
-    fn scripted() -> Self {
+    pub(crate) fn scripted() -> Self {
         Self::scripted_with_watchdog(SCRIPTED_ENGRAM_DRIVER_WATCHDOG)
     }
 
     /// A scripted clock whose drivers give up after `watchdog` of real time,
     /// for a test of the watchdog itself.
     #[cfg(test)]
-    fn scripted_with_watchdog(watchdog: Duration) -> Self {
+    pub(crate) fn scripted_with_watchdog(watchdog: Duration) -> Self {
         Self::Scripted(Arc::new(ScriptedEngramBudgetClock {
             now: Mutex::new(std::time::Instant::now()),
             event: Mutex::new(0),
@@ -111,7 +113,7 @@ impl EngramBudgetClock {
     }
 
     #[cfg(test)]
-    fn advance(&self, duration: Duration) {
+    pub(crate) fn advance(&self, duration: Duration) {
         let Self::Scripted(clock) = self else {
             panic!("only a scripted clock can be advanced");
         };
@@ -128,7 +130,7 @@ impl EngramBudgetClock {
     /// not block or notify the clock. Producers notify AFTER releasing their
     /// result mutex, so completion cannot invert the waiter lock order.
     #[cfg(test)]
-    fn wait_scripted<T>(
+    pub(crate) fn wait_scripted<T>(
         &self,
         until: std::time::Instant,
         mut poll: impl FnMut(std::time::Instant) -> Option<T>,
@@ -168,7 +170,7 @@ impl EngramBudgetClock {
     }
 
     #[cfg(test)]
-    fn wait_for_scripted_waiter(&self) {
+    pub(crate) fn wait_for_scripted_waiter(&self) {
         let Self::Scripted(clock) = self else {
             panic!("scripted clock required")
         };
@@ -188,7 +190,7 @@ impl EngramBudgetClock {
     }
 
     #[cfg(test)]
-    fn recv_until<T>(
+    pub(crate) fn recv_until<T>(
         &self,
         receiver: &mpsc::Receiver<T>,
         until: std::time::Instant,
@@ -215,7 +217,7 @@ impl StateInner {
     /// here, so one operation never mixes two clocks. A transient read of
     /// `now()` counts too: a fixture must choose its clock before any Engram
     /// path has read one.
-    fn engram_budget_clock_snapshot(&self) -> EngramBudgetClock {
+    pub(crate) fn engram_budget_clock_snapshot(&self) -> EngramBudgetClock {
         #[cfg(test)]
         self.engram_budget_clock_snapshots
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -226,7 +228,7 @@ impl StateInner {
     /// snapshot: a target or worker holding the old clock would run one
     /// operation on two clocks. A later choice keeps the first one.
     #[cfg(test)]
-    fn select_test_engram_budget_clock(
+    pub(crate) fn select_test_engram_budget_clock(
         &mut self,
         clock: EngramBudgetClock,
     ) -> std::result::Result<EngramBudgetClock, &'static str> {
@@ -249,7 +251,7 @@ impl StateInner {
 }
 
 impl AppState {
-    fn engram_budget_clock(&self) -> EngramBudgetClock {
+    pub(crate) fn engram_budget_clock(&self) -> EngramBudgetClock {
         // Real time is the sole production clock. Acquiring the fixture's
         // dependency must not add a new production lock before budget start.
         #[cfg(not(test))]
@@ -269,14 +271,17 @@ impl AppState {
     /// unless a clock was already chosen, and returns the clock in force: a
     /// fixture that enables Engram again keeps its clock.
     #[cfg(test)]
-    fn select_test_scripted_engram_budget_clock(&self) -> EngramBudgetClock {
+    pub(crate) fn select_test_scripted_engram_budget_clock(&self) -> EngramBudgetClock {
         self.select_test_engram_budget_clock(EngramBudgetClock::scripted())
     }
 
     /// The choice is made under the state lock; a refused choice panics only
     /// after the lock is released, so the fixture's failure does not poison it.
     #[cfg(test)]
-    fn select_test_engram_budget_clock(&self, clock: EngramBudgetClock) -> EngramBudgetClock {
+    pub(crate) fn select_test_engram_budget_clock(
+        &self,
+        clock: EngramBudgetClock,
+    ) -> EngramBudgetClock {
         let chosen = self
             .inner
             .lock()
@@ -289,12 +294,12 @@ impl AppState {
     /// purpose, as a budget-expiry test needs, unless a clock was already
     /// chosen.
     #[cfg(test)]
-    fn declare_test_real_engram_budget_clock(&self) -> EngramBudgetClock {
+    pub(crate) fn declare_test_real_engram_budget_clock(&self) -> EngramBudgetClock {
         self.select_test_engram_budget_clock(EngramBudgetClock::Real)
     }
 
     #[cfg(test)]
-    fn test_engram_authority_ack_boundary(&self, boundary: &str) {
+    pub(crate) fn test_engram_authority_ack_boundary(&self, boundary: &str) {
         let hook = self
             .inner
             .lock()

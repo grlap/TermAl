@@ -1,6 +1,8 @@
 // Owns exact request/response representations and strict MAC-header parsing.
 // Does not dispatch handlers or mutate replay windows. New A1 HTTP primitive leaf.
 
+use super::*;
+
 const FEDERATION_REQUEST_FIELDS: &[&str] = &[
     "content-encoding",
     "content-type",
@@ -35,7 +37,9 @@ fn federation_header_representation(
     Ok(federation_encode(b"termal-headers-v1", &values))
 }
 
-fn federation_check_request_headers(headers: &axum::http::HeaderMap) -> Result<(), ApiError> {
+pub(crate) fn federation_check_request_headers(
+    headers: &axum::http::HeaderMap,
+) -> Result<(), ApiError> {
     for name in headers.keys() {
         let name = name.as_str();
         if !FEDERATION_REQUEST_FIELDS.contains(&name)
@@ -59,7 +63,7 @@ fn federation_check_request_headers(headers: &axum::http::HeaderMap) -> Result<(
     Ok(())
 }
 
-fn federation_http_representation(
+pub(crate) fn federation_http_representation(
     context: &FederationSecurityContext,
     counter: u64,
     direction: &str,
@@ -88,7 +92,7 @@ fn federation_http_representation(
     ))
 }
 
-fn federation_response_representation(
+pub(crate) fn federation_response_representation(
     context: &FederationSecurityContext,
     counter: u64,
     direction: &str,
@@ -114,7 +118,7 @@ fn federation_response_representation(
     ))
 }
 
-fn federation_parse_mac(
+pub(crate) fn federation_parse_mac(
     headers: &axum::http::HeaderMap,
     context: &FederationSecurityContext,
     direction: &str,
@@ -153,7 +157,7 @@ fn federation_parse_mac(
     Ok((counter, tag))
 }
 
-fn federation_mac_header(
+pub(crate) fn federation_mac_header(
     context: &FederationSecurityContext,
     direction: &str,
     counter: u64,

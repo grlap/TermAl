@@ -2,8 +2,10 @@
 // Does not provision hosts or activate membership. New O1 orchestration uses
 // L1's typed authenticated RPC and M1's exact captured completion snapshot.
 
+use super::*;
+
 impl FederationOnboardingReport {
-    fn observe(&mut self, check: FederationOnboardingCheck, passed: bool, reason: &str) {
+    pub(crate) fn observe(&mut self, check: FederationOnboardingCheck, passed: bool, reason: &str) {
         if let Some(outcome) = self
             .outcomes
             .iter_mut()
@@ -15,14 +17,14 @@ impl FederationOnboardingReport {
     }
 }
 
-async fn verify_federation_satellite(
+pub(crate) async fn verify_federation_satellite(
     app: AppState,
     id: String,
 ) -> Result<FederationOnboardingReport, ApiError> {
     verify_federation_satellite_mode(app, id, false).await
 }
 
-async fn verify_federation_satellite_mode(
+pub(crate) async fn verify_federation_satellite_mode(
     app: AppState,
     id: String,
     automatic: bool,
@@ -172,7 +174,7 @@ async fn verify_federation_satellite_mode(
     Ok(report)
 }
 
-async fn run_federation_onboarding_checks(
+pub(crate) async fn run_federation_onboarding_checks(
     rpc: &FederationRpcClient,
     lease: &FederationLinkLease,
     record: &FederationPeerRecord,

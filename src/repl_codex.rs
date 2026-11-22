@@ -17,25 +17,27 @@
 // Extracted from turns.rs into its own `include!()` fragment so turns.rs
 // stays focused on the TurnRecorder abstraction + Claude turn handling.
 
+use super::*;
+
 /// Tracks REPL Codex session state.
 #[derive(Default)]
-struct ReplCodexSessionState {
-    resolved_session_id: Option<String>,
-    current_turn_id: Option<String>,
-    completed_turn_id: Option<String>,
-    turn_state: CodexTurnState,
-    turn_completed: bool,
-    turn_failed: Option<String>,
+pub(crate) struct ReplCodexSessionState {
+    pub(crate) resolved_session_id: Option<String>,
+    pub(crate) current_turn_id: Option<String>,
+    pub(crate) completed_turn_id: Option<String>,
+    pub(crate) turn_state: CodexTurnState,
+    pub(crate) turn_completed: bool,
+    pub(crate) turn_failed: Option<String>,
 }
 
 /// Represents dyn turn recorder ref.
-struct DynTurnRecorderRef<'a> {
-    inner: &'a mut dyn TurnRecorder,
+pub(crate) struct DynTurnRecorderRef<'a> {
+    pub(crate) inner: &'a mut dyn TurnRecorder,
 }
 
 impl<'a> DynTurnRecorderRef<'a> {
     /// Creates a new instance.
-    fn new(inner: &'a mut dyn TurnRecorder) -> Self {
+    pub(crate) fn new(inner: &'a mut dyn TurnRecorder) -> Self {
         Self { inner }
     }
 }
@@ -44,7 +46,12 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
     fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
         self.inner.native_tool_activity(key, is_command)
     }
-    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, frame: &Value) -> Result<()> {
+    fn native_tool_start(
+        &mut self,
+        key: Option<&str>,
+        is_command: bool,
+        frame: &Value,
+    ) -> Result<()> {
         self.inner.native_tool_start(key, is_command, frame)
     }
     /// Records external session.
@@ -160,7 +167,13 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         runtime_interrupted: bool,
     ) -> Result<()> {
         self.inner.command_completed_with_capture(
-            key, command, output, status, exit, runtime_output_cut, runtime_interrupted,
+            key,
+            command,
+            output,
+            status,
+            exit,
+            runtime_output_cut,
+            runtime_interrupted,
         )
     }
 
@@ -187,7 +200,7 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
 }
 
 /// Spawns REPL Codex stdout reader.
-fn spawn_repl_codex_stdout_reader(
+pub(crate) fn spawn_repl_codex_stdout_reader(
     stdout: impl io::Read + Send + 'static,
 ) -> mpsc::Receiver<std::result::Result<Value, String>> {
     let (tx, rx) = mpsc::channel();
@@ -230,7 +243,7 @@ fn spawn_repl_codex_stdout_reader(
 }
 
 /// Handles send REPL Codex JSON RPC request.
-fn send_repl_codex_json_rpc_request(
+pub(crate) fn send_repl_codex_json_rpc_request(
     writer: &mut impl Write,
     stdout_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
     repl_state: &mut ReplCodexSessionState,
@@ -289,7 +302,7 @@ fn recv_repl_codex_stdout(
 }
 
 /// Handles pump REPL Codex turn.
-fn pump_repl_codex_turn(
+pub(crate) fn pump_repl_codex_turn(
     stdout_rx: &mpsc::Receiver<std::result::Result<Value, String>>,
     writer: &mut impl Write,
     repl_state: &mut ReplCodexSessionState,
@@ -375,7 +388,7 @@ fn handle_repl_codex_global_notice(
 }
 
 /// Handles REPL Codex app server request.
-fn handle_repl_codex_app_server_request(
+pub(crate) fn handle_repl_codex_app_server_request(
     method: &str,
     message: &Value,
     writer: &mut impl Write,
@@ -676,7 +689,7 @@ fn prompt_repl_json_block(prompt: &str, empty_default: Option<Value>) -> Result<
 }
 
 /// Remembers REPL Codex thread ID.
-fn remember_repl_codex_thread_id(
+pub(crate) fn remember_repl_codex_thread_id(
     repl_state: &mut ReplCodexSessionState,
     recorder: &mut dyn TurnRecorder,
     thread_id: &str,
@@ -689,7 +702,7 @@ fn remember_repl_codex_thread_id(
 }
 
 /// Handles REPL Codex app server notification.
-fn handle_repl_codex_app_server_notification(
+pub(crate) fn handle_repl_codex_app_server_notification(
     method: &str,
     message: &Value,
     repl_state: &mut ReplCodexSessionState,
@@ -1137,7 +1150,7 @@ fn record_repl_codex_agent_message_delta(
 }
 
 /// Shuts down REPL Codex process.
-fn shutdown_repl_codex_process(
+pub(crate) fn shutdown_repl_codex_process(
     process: &Arc<SharedChild>,
 ) -> Result<(std::process::ExitStatus, bool)> {
     if let Some(status) =

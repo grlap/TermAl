@@ -8,42 +8,44 @@
 // marking and turn report (`engram_turn_checks.rs`), or the toolchain label
 // (`engram_check_toolchain.rs`). Split out of `engram_turn_checks.rs`.
 
+use super::*;
+
 /// A command TermAl recognises as a test run.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramCheckCommand {
+pub(crate) struct EngramCheckCommand {
     /// One command has one verification kind; output cannot relabel it.
-    kind: EngramVerificationKind,
+    pub(crate) kind: EngramVerificationKind,
     /// The command line with one shell wrapper removed and whitespace runs
     /// collapsed, except qualified pipe text keeps its Bash escapes intact;
     /// its SHA-256 is the check fingerprint.
-    normalized: String,
+    pub(crate) normalized: String,
     /// Whether the exit status is the check's own: one simple command with
     /// no unquoted pipe, list, redirection or substitution that could mask it.
-    simple: bool,
+    pub(crate) simple: bool,
     /// The program, lower-cased and without an extension, which names the
     /// toolchain.
-    program: String,
+    pub(crate) program: String,
     /// The argument vector recognition used. Verification consumers must use
     /// this same reading instead of choosing another shell's decoder.
-    argv: Vec<String>,
+    pub(crate) argv: Vec<String>,
     /// A literal pipe qualified by known runtime Bash on an unwrapped line.
     /// Retained for end/description association; a wrapper never grants it.
-    literal_pipe: bool,
+    pub(crate) literal_pipe: bool,
     /// The wrapper dialect, or known runtime Bash for a qualified pipe.
-    dialect: EngramShellDialect,
+    pub(crate) dialect: EngramShellDialect,
     /// The absolute directory a one-call line changes to before its test
     /// (`pushd "DIR" && TEST`, `engram_one_call_prefix`): the test runs
     /// there, wherever the shell was, so no presumption about a shell that
     /// keeps a `cd` between calls is needed. `normalized` holds only the
     /// test, so the check fingerprint is the one an author binds for it.
-    directory: Option<String>,
+    pub(crate) directory: Option<String>,
 }
 
 /// The shell a recognised line runs under, as its wrapper names it: bash
 /// takes a backslash as an escape, PowerShell and cmd keep it (a Windows
 /// path). A line with no wrapper may run under either.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-enum EngramShellDialect {
+pub(crate) enum EngramShellDialect {
     Bash,
     PowerShell,
     Cmd,
@@ -57,13 +59,13 @@ enum EngramShellDialect {
 /// whose test is what follows the `&&`. Any other test inside a longer line
 /// (`cd x && cargo test`) is not recognised; a recognised one with a pipe or
 /// a list is recorded, but only as unknown.
-fn engram_check_command(command: &str) -> Option<EngramCheckCommand> {
+pub(crate) fn engram_check_command(command: &str) -> Option<EngramCheckCommand> {
     engram_check_command_in(command, EngramShellDialect::Unknown)
 }
 
 /// The reader's runtime dialect, independent of any wrapper in the text.
 /// Only Claude's Bash-tool ingress currently supplies known Bash.
-fn engram_check_command_in(
+pub(crate) fn engram_check_command_in(
     command: &str,
     runtime: EngramShellDialect,
 ) -> Option<EngramCheckCommand> {
@@ -86,24 +88,27 @@ fn engram_check_command_in(
 
 /// Re-read a later description/end using the qualification fixed at start.
 /// Equality also compares argv, so normalization cannot hide a changed token.
-fn engram_check_command_like(
+pub(crate) fn engram_check_command_like(
     command: &str,
     started: &EngramCheckCommand,
 ) -> Option<EngramCheckCommand> {
-    engram_check_command_in(command, if started.literal_pipe {
-        EngramShellDialect::Bash
-    } else {
-        EngramShellDialect::Unknown
-    })
+    engram_check_command_in(
+        command,
+        if started.literal_pipe {
+            EngramShellDialect::Bash
+        } else {
+            EngramShellDialect::Unknown
+        },
+    )
 }
 
 /// `engram_check_command` for a line read as it stands, without the
 /// one-call form: the test it runs, with one shell wrapper removed.
-fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
+pub(crate) fn engram_plain_check_command(command: &str) -> Option<EngramCheckCommand> {
     engram_plain_check_command_in(command, EngramShellDialect::Unknown)
 }
 
-fn engram_plain_check_command_in(
+pub(crate) fn engram_plain_check_command_in(
     command: &str,
     runtime: EngramShellDialect,
 ) -> Option<EngramCheckCommand> {
@@ -123,12 +128,16 @@ fn engram_plain_check_command_in(
         // Variables, ANSI-C and locale quotes are outside this bounded
         // grammar; path admission already refuses these expansion values.
         && !line.contains('$'))
-        .then(|| engram_scan_shell_words(&line, EngramShellDialect::Bash))
-        .flatten()
-        .filter(|scan| !scan.unquoted_pipe && !scan.ambiguous_quote_escape
-            && !scan.unquoted_expression)
-        .map(|scan| scan.words.into_iter().map(|(_, word)| word).collect::<Vec<_>>())
-        .filter(|words| engram_pipe_argv_keeps_native_boundary(words));
+    .then(|| engram_scan_shell_words(&line, EngramShellDialect::Bash))
+    .flatten()
+    .filter(|scan| !scan.unquoted_pipe && !scan.ambiguous_quote_escape && !scan.unquoted_expression)
+    .map(|scan| {
+        scan.words
+            .into_iter()
+            .map(|(_, word)| word)
+            .collect::<Vec<_>>()
+    })
+    .filter(|words| engram_pipe_argv_keeps_native_boundary(words));
     let simple = (!has_pipe || pipe_words.is_some())
         && !(line.contains(['&', ';', '<', '>', '`', '\n', '\r']) || line.contains("$("));
     let literal_pipe = has_pipe && simple;
@@ -141,7 +150,9 @@ fn engram_plain_check_command_in(
     };
     // The first command of the line decides what runs as the test; what
     // follows it can only mask its exit status, which `simple` records.
-    let words = if literal_pipe { pipe_words? } else {
+    let words = if literal_pipe {
+        pipe_words?
+    } else {
         // An explicit Bash wrapper may still be observed as a compound Test;
         // decoding its tokens supplies no eligible exit or pipe exemption.
         let prefix = engram_check_line(&normalized, simple);
@@ -169,7 +180,11 @@ fn engram_plain_check_command_in(
         program,
         argv: words,
         literal_pipe,
-        dialect: if literal_pipe { EngramShellDialect::Bash } else { dialect },
+        dialect: if literal_pipe {
+            EngramShellDialect::Bash
+        } else {
+            dialect
+        },
         directory: None,
     })
 }
@@ -192,9 +207,10 @@ fn engram_pipe_argv_keeps_native_boundary(words: &[String]) -> bool {
     match engram_program_name(executable).as_str() {
         "npm" | "pnpm" | "yarn" | "npx" => false,
         "node"
-            if words.get(1).is_some_and(|script| {
-                script.replace('\\', "/").ends_with("test-launcher.mjs")
-            }) && words.get(2).is_some_and(|mode| mode == "focused") =>
+            if words
+                .get(1)
+                .is_some_and(|script| script.replace('\\', "/").ends_with("test-launcher.mjs"))
+                && words.get(2).is_some_and(|mode| mode == "focused") =>
         {
             engram_focused_launcher_words("node", &words[1..])
                 .and_then(Result::ok)
@@ -205,7 +221,7 @@ fn engram_pipe_argv_keeps_native_boundary(words: &[String]) -> bool {
 }
 
 /// Whether `line` breaks onto another line outside quotes.
-fn engram_has_unquoted_line_break(line: &str) -> bool {
+pub(crate) fn engram_has_unquoted_line_break(line: &str) -> bool {
     let mut quote = None;
     line.chars().any(|character| {
         match (quote, character) {
@@ -220,7 +236,7 @@ fn engram_has_unquoted_line_break(line: &str) -> bool {
 
 /// The part of `line` before its first unquoted pipe, list or redirection
 /// operator: the command a shell would start first.
-fn engram_first_command(line: &str) -> &str {
+pub(crate) fn engram_first_command(line: &str) -> &str {
     let mut quote = None;
     for (index, character) in line.char_indices() {
         match (quote, character) {
@@ -237,7 +253,7 @@ fn engram_first_command(line: &str) -> &str {
 /// reader reinterpret an escaped quote and cut a literal pipe out of it.
 /// Recognition, placement, toolchain and stage checks share this same view;
 /// a compound line keeps the existing first-command observation only.
-fn engram_check_line(line: &str, simple: bool) -> &str {
+pub(crate) fn engram_check_line(line: &str, simple: bool) -> &str {
     if simple {
         line
     } else {
@@ -248,7 +264,7 @@ fn engram_check_line(line: &str, simple: bool) -> &str {
 /// `line` with its ends trimmed and each run of whitespace outside quotes
 /// collapsed to one space. Quoted text is kept as written: the shell reads
 /// it as one word (`engram_shell_words`), spaces and all.
-fn engram_collapse_whitespace(line: &str) -> String {
+pub(crate) fn engram_collapse_whitespace(line: &str) -> String {
     let mut collapsed = String::with_capacity(line.len());
     let mut quote = None;
     let mut space = false;
@@ -282,13 +298,13 @@ fn engram_collapse_whitespace(line: &str) -> String {
 
 /// The check fingerprint an author pins with `--bind N=test:FINGERPRINT`:
 /// the lowercase hex SHA-256 of the normalised command line's UTF-8 bytes.
-fn engram_check_fingerprint(check: &EngramCheckCommand) -> String {
+pub(crate) fn engram_check_fingerprint(check: &EngramCheckCommand) -> String {
     engram_normalized_check_fingerprint(&check.normalized)
 }
 
 /// The same command identity for an explicit registered check whose kind is
 /// outside ordinary command recognition (for example, the full gate's lint).
-fn engram_normalized_check_fingerprint(normalized: &str) -> String {
+pub(crate) fn engram_normalized_check_fingerprint(normalized: &str) -> String {
     sha256_hex(normalized.as_bytes())
 }
 
@@ -299,14 +315,14 @@ fn engram_normalized_check_fingerprint(normalized: &str) -> String {
 /// program splits its command line, `2n` of them before a closing quote are
 /// `n`, and `2n + 1` are `n` and a literal quote. `None` for an unbalanced
 /// quote or an empty line.
-fn engram_shell_words(line: &str) -> Option<Vec<String>> {
+pub(crate) fn engram_shell_words(line: &str) -> Option<Vec<String>> {
     engram_shell_words_as(line, false)
 }
 
 /// `engram_shell_words`, or with `bash` the words bash passes on: outside
 /// quotes a backslash escapes the character after it (`lin\ked` is
 /// `linked`), and inside double quotes it escapes `$`, `` ` ``, `"` and `\`.
-fn engram_shell_words_as(line: &str, bash: bool) -> Option<Vec<String>> {
+pub(crate) fn engram_shell_words_as(line: &str, bash: bool) -> Option<Vec<String>> {
     Some(
         engram_shell_word_spans_as(line, bash)?
             .into_iter()
@@ -350,7 +366,9 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
     // PowerShell also recognizes typographic quotes, which this decoder does
     // not model. Without explicit Bash context they cannot prove containment.
     let mut ambiguous_quote_escape = dialect != EngramShellDialect::Bash
-        && line.chars().any(|character| matches!(character, '\u{2018}'..='\u{201f}'));
+        && line
+            .chars()
+            .any(|character| matches!(character, '\u{2018}'..='\u{201f}'));
     let mut current = String::new();
     let mut start = None;
     let mut chars = line.char_indices().peekable();
@@ -360,8 +378,10 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
                 // cmd treats apostrophes as ordinary characters, including
                 // double quotes inside them. Unknown must also be safe under
                 // cmd; only known Bash/PowerShell can use this quote proof.
-                ambiguous_quote_escape |= matches!(dialect,
-                    EngramShellDialect::Cmd | EngramShellDialect::Unknown);
+                ambiguous_quote_escape |= matches!(
+                    dialect,
+                    EngramShellDialect::Cmd | EngramShellDialect::Unknown
+                );
                 start.get_or_insert(index);
                 loop {
                     match chars.next()?.1 {
@@ -430,9 +450,10 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
                 let word_start = start.is_none();
                 start.get_or_insert(index);
                 unquoted_pipe |= other == '|';
-                unquoted_expression |= matches!(other,
-                    '(' | ')' | '{' | '}' | '`' | '^' | '*' | '?' | '[' | ']')
-                    || (word_start && matches!(other, '@' | '~'));
+                unquoted_expression |= matches!(
+                    other,
+                    '(' | ')' | '{' | '}' | '`' | '^' | '*' | '?' | '[' | ']'
+                ) || (word_start && matches!(other, '@' | '~'));
                 if other == '\\'
                     && dialect == EngramShellDialect::Unknown
                     && matches!(chars.peek(), Some((_, '\'' | '"')))
@@ -457,7 +478,7 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
 
 /// A program's name as recognition compares it: the last path component,
 /// lower-cased, without a Windows executable extension.
-fn engram_program_name(word: &str) -> String {
+pub(crate) fn engram_program_name(word: &str) -> String {
     let name = word
         .rsplit(['/', '\\'])
         .next()
@@ -474,7 +495,7 @@ fn engram_program_name(word: &str) -> String {
 /// one word (quoted whole) is that word; `pwsh -Command` and `cmd /c` also
 /// take the rest of the line as written, its quoting kept, so each argument
 /// stays the one the runner saw.
-fn engram_unwrap_shell_command(command: &str) -> (String, EngramShellDialect) {
+pub(crate) fn engram_unwrap_shell_command(command: &str) -> (String, EngramShellDialect) {
     let unwrapped = || (command.to_owned(), EngramShellDialect::Unknown);
     let Some(words) = engram_shell_word_spans(command) else {
         return unwrapped();
@@ -545,7 +566,7 @@ fn engram_powershell_sets_directory(words: &[(usize, String)]) -> bool {
 /// Whether `line` is a PowerShell wrapper that sets the directory its script
 /// starts in (`engram_powershell_sets_directory`): where it runs, and may
 /// write, is then not where its runtime says.
-fn engram_wrapper_sets_directory(line: &str) -> bool {
+pub(crate) fn engram_wrapper_sets_directory(line: &str) -> bool {
     let Some(words) = engram_shell_word_spans(line) else {
         return false;
     };
@@ -562,7 +583,7 @@ fn engram_wrapper_sets_directory(line: &str) -> bool {
 /// Options come from the TermAl and Engram launchers; metadata never selects an
 /// evidence owner. Return the inner argv unchanged, or name the refused option.
 /// Artifact validation and the lifecycle's source/grant guards still own credit.
-fn engram_focused_launcher_words<'a>(
+pub(crate) fn engram_focused_launcher_words<'a>(
     program: &str,
     args: &'a [String],
 ) -> Option<Result<&'a [String], String>> {
@@ -591,7 +612,13 @@ fn engram_focused_launcher_words<'a>(
             }
             if !matches!(
                 flag.as_str(),
-                "--input" | "--notify" | "--item" | "--next-owner" | "--next-action" | "--require-binary-env" | "--request-message-id"
+                "--input"
+                    | "--notify"
+                    | "--item"
+                    | "--next-owner"
+                    | "--next-action"
+                    | "--require-binary-env"
+                    | "--request-message-id"
             ) {
                 return Err(format!("unsupported focused launcher option {flag:?}"));
             }
@@ -607,7 +634,9 @@ fn engram_focused_launcher_words<'a>(
                     })
                     || binary_envs.contains(&value.as_str())
                 {
-                    return Err(format!("{flag} requires a distinct uppercase variable name"));
+                    return Err(format!(
+                        "{flag} requires a distinct uppercase variable name"
+                    ));
                 }
                 binary_envs.push(value.as_str());
             } else {
@@ -657,7 +686,7 @@ fn engram_focused_launcher_words<'a>(
 /// disqualify it: such a run exits 0 having tested nothing. The test launcher counts only in
 /// full or live mode, or focused on a command that is itself a test, since a
 /// focused run executes whatever follows `--`.
-fn engram_is_test_command(program: &str, args: &[String]) -> bool {
+pub(crate) fn engram_is_test_command(program: &str, args: &[String]) -> bool {
     let arg = |index: usize| args.get(index).map(String::as_str);
     if args.iter().any(|word| {
         matches!(
@@ -713,7 +742,10 @@ fn engram_is_test_command(program: &str, args: &[String]) -> bool {
                     .and_then(Result::ok)
                     .is_some_and(|focused| {
                         engram_focused_node_words(program, args).is_some()
-                            || engram_is_test_command(&engram_program_name(&focused[0]), &focused[1..])
+                            || engram_is_test_command(
+                                &engram_program_name(&focused[0]),
+                                &focused[1..],
+                            )
                     }),
                 _ => false,
             }
@@ -724,7 +756,7 @@ fn engram_is_test_command(program: &str, args: &[String]) -> bool {
 
 /// What a runtime said about how a finished command ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramCommandExit {
+pub(crate) enum EngramCommandExit {
     /// The process's own exit status.
     Code(i64),
     /// No exit status, but the runtime reported success (Claude's Bash
@@ -741,7 +773,7 @@ enum EngramCommandExit {
 /// `is_error` and starts the result text with `Exit code N`; `is_error`
 /// without it may mean a denial or a timeout, and an interrupted command may
 /// never have finished.
-fn engram_claude_command_exit(
+pub(crate) fn engram_claude_command_exit(
     is_error: bool,
     interrupted: bool,
     background: bool,
@@ -771,7 +803,7 @@ fn engram_claude_command_exit(
 /// Codex's `commandExecution` item carries the process's exit status. A
 /// command declined, or ended without one, gives nothing to rely on; an item
 /// still in progress has not ended.
-fn engram_codex_command_exit(item: &Value) -> EngramCommandExit {
+pub(crate) fn engram_codex_command_exit(item: &Value) -> EngramCommandExit {
     let code = item.get("exitCode").and_then(Value::as_i64);
     match (item.get("status").and_then(Value::as_str), code) {
         (Some("completed" | "failed"), Some(code)) => EngramCommandExit::Code(code),
@@ -784,8 +816,11 @@ fn engram_codex_command_exit(item: &Value) -> EngramCommandExit {
 /// only for tools that report one. Kimi never sends one: its `rawOutput` is
 /// the output text as a bare string, so the exit is read from the update's
 /// own signals instead (`engram_kimi_acp_command_exit`).
-fn engram_acp_command_exit(agent: AcpAgent, update: &Value) -> EngramCommandExit {
-    if let Some(code) = update.pointer("/rawOutput/exitCode").and_then(Value::as_i64) {
+pub(crate) fn engram_acp_command_exit(agent: AcpAgent, update: &Value) -> EngramCommandExit {
+    if let Some(code) = update
+        .pointer("/rawOutput/exitCode")
+        .and_then(Value::as_i64)
+    {
         return EngramCommandExit::Code(code);
     }
     if agent == AcpAgent::Kimi {
@@ -805,11 +840,12 @@ fn engram_kimi_acp_command_exit(update: &Value) -> EngramCommandExit {
     match update.get("status").and_then(Value::as_str) {
         // The tool answers a background start only `completed`; a failed
         // call's text never is one, whatever the command printed.
-        Some("completed") if engram_kimi_output_is_background_start(&output) => EngramCommandExit::NotFinished,
-        Some("completed") => EngramCommandExit::Code(0),
-        Some("failed" | "error") => {
-            engram_kimi_failed_exit_code(&output).map_or(EngramCommandExit::Unknown, EngramCommandExit::Code)
+        Some("completed") if engram_kimi_output_is_background_start(&output) => {
+            EngramCommandExit::NotFinished
         }
+        Some("completed") => EngramCommandExit::Code(0),
+        Some("failed" | "error") => engram_kimi_failed_exit_code(&output)
+            .map_or(EngramCommandExit::Unknown, EngramCommandExit::Code),
         _ => EngramCommandExit::Unknown,
     }
 }
@@ -868,7 +904,9 @@ fn engram_kimi_failed_exit_code(output: &str) -> Option<i64> {
 fn engram_kimi_output_is_background_start(output: &str) -> bool {
     let mut lines = output.lines().map(str::trim_end);
     let first = if output.starts_with("Tool output exceeded ") {
-        lines.by_ref().find(|line| line.starts_with("[preview: chars [0, "));
+        lines
+            .by_ref()
+            .find(|line| line.starts_with("[preview: chars [0, "));
         lines.next()
     } else {
         lines.next()
@@ -879,7 +917,10 @@ fn engram_kimi_output_is_background_start(output: &str) -> bool {
 /// The outcome a finished check may claim, or `None` for a result that does
 /// not mark the check's end. Only a simple command's own exit status can
 /// say it succeeded or failed; a pipe or list may have masked it.
-fn engram_check_outcome(exit: EngramCommandExit, simple: bool) -> Option<EngramExecutionOutcome> {
+pub(crate) fn engram_check_outcome(
+    exit: EngramCommandExit,
+    simple: bool,
+) -> Option<EngramExecutionOutcome> {
     match exit {
         EngramCommandExit::NotFinished => None,
         _ if !simple => Some(EngramExecutionOutcome::Unknown),
@@ -893,7 +934,7 @@ fn engram_check_outcome(exit: EngramCommandExit, simple: bool) -> Option<EngramE
 
 /// The longest prefix of `text` within `max` bytes, cut at a character
 /// boundary.
-fn engram_truncate_utf8(text: &str, max: usize) -> &str {
+pub(crate) fn engram_truncate_utf8(text: &str, max: usize) -> &str {
     if text.len() <= max {
         return text;
     }
@@ -908,7 +949,7 @@ fn engram_truncate_utf8(text: &str, max: usize) -> &str {
 /// to an ellipsis (`ENGRAM_KEEP_END_ELLIPSIS`), cut at a character boundary;
 /// with no room for the ellipsis, nothing is kept.
 #[cfg(test)]
-fn engram_keep_end_utf8(text: &str, max: usize) -> String {
+pub(crate) fn engram_keep_end_utf8(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_owned();
     }
@@ -973,7 +1014,7 @@ fn engram_strip_terminal_codes(text: &str) -> String {
 /// terminal codes stripped. Only these reach the summary: raw test output can
 /// carry secrets and paths, and a summary Engram's redactor refuses drops the
 /// whole turn's report.
-fn engram_check_result_lines(program: &str, output: &str) -> Vec<String> {
+pub(crate) fn engram_check_result_lines(program: &str, output: &str) -> Vec<String> {
     let clean = engram_strip_terminal_codes(output);
     let mut lines = Vec::new();
     let mut results = 0;
@@ -1022,7 +1063,7 @@ fn engram_is_inventory_line(line: &str) -> bool {
 /// libtest's `test result:` and nextest's `Summary`, pytest's closing
 /// banner or quiet summary, the vitest and jest totals, go's package lines,
 /// and the test launcher's verdict and stage lines.
-fn engram_is_result_line(program: &str, line: &str) -> bool {
+pub(crate) fn engram_is_result_line(program: &str, line: &str) -> bool {
     match program {
         "cargo" => line.starts_with("test result:") || line.starts_with("Summary ["),
         "pytest" | "python" | "python3" | "py" => {
@@ -1054,7 +1095,7 @@ fn engram_is_result_line(program: &str, line: &str) -> bool {
 
 /// A test-launcher stage line, `NAME: passed|failed …`, cut after the
 /// status: the rest names a log path, which the summary leaves out.
-fn engram_launcher_stage_line(line: &str) -> Option<String> {
+pub(crate) fn engram_launcher_stage_line(line: &str) -> Option<String> {
     let (name, rest) = line.split_once(": ")?;
     let status = rest.split_whitespace().next()?;
     (!name.is_empty()
@@ -1085,7 +1126,7 @@ fn engram_passed_count(line: &str) -> Option<u64> {
 /// command ran, so its `focused` stage counts only when it is among
 /// `launcher_test_stages`, which holds it only when the run's own results
 /// record backs the pass with at least one passed test and none failed.
-fn engram_check_showed_passing_tests(
+pub(crate) fn engram_check_showed_passing_tests(
     check: &EngramCheckCommand,
     result_lines: &[String],
     launcher_test_stages: &[String],
@@ -1108,20 +1149,14 @@ fn engram_check_showed_passing_tests(
         }),
         "node" => {
             let live = ["engram-live".to_owned()];
-            let test_stages: &[String] =
-                match check.argv.get(2).map(String::as_str)
-                {
-                    // Never a focused run's stage under a full gate's command.
-                    Some("full") if launcher_test_stages != ["focused"] => {
-                        launcher_test_stages
-                    }
-                    // Only a backed `focused` stage, never a full gate's stages.
-                    Some("focused") if launcher_test_stages == ["focused"] => {
-                        launcher_test_stages
-                    }
-                    Some("live") => &live,
-                    _ => &[],
-                };
+            let test_stages: &[String] = match check.argv.get(2).map(String::as_str) {
+                // Never a focused run's stage under a full gate's command.
+                Some("full") if launcher_test_stages != ["focused"] => launcher_test_stages,
+                // Only a backed `focused` stage, never a full gate's stages.
+                Some("focused") if launcher_test_stages == ["focused"] => launcher_test_stages,
+                Some("live") => &live,
+                _ => &[],
+            };
             result_lines.iter().any(|line| {
                 test_stages
                     .iter()
@@ -1145,7 +1180,7 @@ fn engram_check_showed_passing_tests(
 /// shell's reading of the line, may have failed first
 /// (`engram_check_exit_is_the_tests`).
 #[cfg(test)]
-fn engram_check_summary(
+pub(crate) fn engram_check_summary(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
     result_lines: &[String],
@@ -1171,7 +1206,8 @@ fn engram_check_summary(
         {
             format!(
                 "`{command}` exited {code}, which does not say whether its `pushd` or its {} \
-                 failed", check.kind.label()
+                 failed",
+                check.kind.label()
             )
         }
         EngramCommandExit::Code(code) => format!("`{command}` exited {code}"),
@@ -1224,7 +1260,7 @@ fn engram_check_summary(
 /// to be its test's own (`engram_check_exit_is_the_tests`, from the runner's
 /// `result_lines`) is left out.
 #[cfg(test)]
-fn engram_check_refs(
+pub(crate) fn engram_check_refs(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
     result_lines: &[String],

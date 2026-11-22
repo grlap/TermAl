@@ -3,40 +3,51 @@
 // Does not mint verification, infer credit from process exits or artifacts,
 // poll tracker work, or authorize restarting TermAl.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunEvidenceAssociation {
-    store: EngramAuthorityStoreKey,
-    binding: EngramControlWorkBinding,
-    source_basis: EngramExecutionSourceBasis,
-    producer_observation_id: String,
-    action_fingerprint: String,
-    reported_outcome: EngramExecutionOutcome,
+pub(crate) struct TestRunEvidenceAssociation {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) source_basis: EngramExecutionSourceBasis,
+    pub(crate) producer_observation_id: String,
+    pub(crate) action_fingerprint: String,
+    pub(crate) reported_outcome: EngramExecutionOutcome,
     #[serde(default)]
-    verification_record_id: Option<String>,
+    pub(crate) verification_record_id: Option<String>,
     // Historical checkpoint provenance survives as data. Registered native
     // verification uses its own checked receipt and has no checkpoint.
     #[serde(default)]
-    checkpoint_id: Option<String>,
+    pub(crate) checkpoint_id: Option<String>,
     #[serde(default)]
-    confirmed_cursor: Option<i64>,
+    pub(crate) confirmed_cursor: Option<i64>,
     #[serde(default, with = "test_run_shared_lifecycle_read")]
-    lifecycle_read: Option<Arc<EngramNamedRootReadResponse>>,
+    pub(crate) lifecycle_read: Option<Arc<EngramNamedRootReadResponse>>,
 }
 
 // Presentation only: equality and settlement use the complete source_basis
 // above. Never serialize the owner's identity into automatic run summaries.
-fn test_run_source_summary(basis: &EngramExecutionSourceBasis) -> String {
+pub(crate) fn test_run_source_summary(basis: &EngramExecutionSourceBasis) -> String {
     match &basis.source_id {
         Some(source) => {
-            let changes = source.git_delta_description().unwrap_or_else(|| format!(
-                "{} changes, {} submodules, {} submodule changes",
-                source.changes.len(), source.submodules.len(),
-                source.submodules.iter().map(|child| child.changes.len()).sum::<usize>(),
-            ));
-            format!("source_id: commit {}, tree {}, {changes}",
+            let changes = source.git_delta_description().unwrap_or_else(|| {
+                format!(
+                    "{} changes, {} submodules, {} submodule changes",
+                    source.changes.len(),
+                    source.submodules.len(),
+                    source
+                        .submodules
+                        .iter()
+                        .map(|child| child.changes.len())
+                        .sum::<usize>(),
+                )
+            });
+            format!(
+                "source_id: commit {}, tree {}, {changes}",
                 source.commit.chars().take(12).collect::<String>(),
-                source.tree.chars().take(12).collect::<String>())
+                source.tree.chars().take(12).collect::<String>()
+            )
         }
         None => basis.source_revision.clone(),
     }
@@ -62,7 +73,7 @@ mod test_run_shared_lifecycle_read {
     }
 }
 
-fn test_run_lifecycle_binding_matches(
+pub(crate) fn test_run_lifecycle_binding_matches(
     association: &TestRunEvidenceAssociation,
     store: &EngramAuthorityStoreKey,
     binding: &EngramControlWorkBinding,
@@ -75,7 +86,7 @@ fn test_run_lifecycle_binding_matches(
 }
 
 impl AppState {
-    fn settle_test_run_producer_records_locked(
+    pub(crate) fn settle_test_run_producer_records_locked(
         inner: &mut StateInner,
         settlements: HashMap<&str, Vec<(&EngramExecutionObservationInput, &String)>>,
         store: &EngramAuthorityStoreKey,
@@ -97,47 +108,49 @@ impl AppState {
         let mut changed = Vec::new();
         for key in &rows {
             // Settlement fills only association results: no indexed field.
-            let settled = inner.test_run_observations.update_unindexed_fields(key, |row| {
-                let first = row.evidence.iter().position(|association| {
-                    &association.store == store && &association.binding == binding
-                })?;
-                let mut updated = false;
-                for association in &mut row.evidence[first..] {
-                    if &association.store != store || &association.binding != binding {
-                        continue;
+            let settled = inner
+                .test_run_observations
+                .update_unindexed_fields(key, |row| {
+                    let first = row.evidence.iter().position(|association| {
+                        &association.store == store && &association.binding == binding
+                    })?;
+                    let mut updated = false;
+                    for association in &mut row.evidence[first..] {
+                        if &association.store != store || &association.binding != binding {
+                            continue;
+                        }
+                        let Some(candidates) =
+                            settlements.get(association.producer_observation_id.as_str())
+                        else {
+                            continue;
+                        };
+                        for (producer, record_id) in candidates {
+                            if association.action_fingerprint != producer.action_fingerprint
+                                || association.reported_outcome != producer.outcome
+                            {
+                                continue;
+                            }
+                            // A missing source is not a match, even when other
+                            // fields happen to agree with a previous report.
+                            if producer.source_basis.as_ref() != Some(&association.source_basis) {
+                                continue;
+                            }
+                            if association
+                                .verification_record_id
+                                .as_ref()
+                                .is_some_and(|earlier| earlier != *record_id)
+                            {
+                                continue;
+                            }
+                            association.verification_record_id = Some((*record_id).clone());
+                            // Native registration writes the record; historical checkpoint
+                            // provenance is read-only and cannot be manufactured here.
+                            updated = true;
+                            break;
+                        }
                     }
-                    let Some(candidates) =
-                        settlements.get(association.producer_observation_id.as_str())
-                    else {
-                        continue;
-                    };
-                    for (producer, record_id) in candidates {
-                        if association.action_fingerprint != producer.action_fingerprint
-                            || association.reported_outcome != producer.outcome
-                        {
-                            continue;
-                        }
-                        // A missing source is not a match, even when other
-                        // fields happen to agree with a previous report.
-                        if producer.source_basis.as_ref() != Some(&association.source_basis) {
-                            continue;
-                        }
-                        if association
-                            .verification_record_id
-                            .as_ref()
-                            .is_some_and(|earlier| earlier != *record_id)
-                        {
-                            continue;
-                        }
-                        association.verification_record_id = Some((*record_id).clone());
-                        // Native registration writes the record; historical checkpoint
-                        // provenance is read-only and cannot be manufactured here.
-                        updated = true;
-                        break;
-                    }
-                }
-                updated.then(|| row.clone())
-            });
+                    updated.then(|| row.clone())
+                });
             if let Some(Some(row)) = settled {
                 changed.push(row);
             }
@@ -145,7 +158,7 @@ impl AppState {
         changed
     }
 
-    fn revalidate_test_run_lifecycle(
+    pub(crate) fn revalidate_test_run_lifecycle(
         &self,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
@@ -160,46 +173,63 @@ impl AppState {
         // The exact lifecycle's bucket, in key order, replaces the full scan;
         // the original binding and generation predicates still decide.
         let key = TestRunLifecycleKey::new(
-            store, &binding.root_execution_id, &binding.work_id, &binding.run_id, &binding.claim_id,
+            store,
+            &binding.root_execution_id,
+            &binding.work_id,
+            &binding.run_id,
+            &binding.claim_id,
         );
-        let rows: Vec<String> = inner.test_run_observations.index().lifecycle(&key).cloned().collect();
+        let rows: Vec<String> = inner
+            .test_run_observations
+            .index()
+            .lifecycle(&key)
+            .cloned()
+            .collect();
         #[cfg(test)]
         TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
         let mut changed = Vec::new();
         let mut validated = Vec::new();
         for row_key in &rows {
             // Revalidation fills only lifecycle reads: no indexed field.
-            let revalidated = inner.test_run_observations.update_unindexed_fields(row_key, |row| {
-                let first = row.evidence.iter().position(|association| {
-                    test_run_lifecycle_binding_matches(association, store, binding)
-                })?;
-                let mut updated = false;
-                for association in &mut row.evidence[first..] {
-                    if !test_run_lifecycle_binding_matches(association, store, binding)
-                        || generation != association.source_basis.source_root_generation
-                    {
-                        continue;
+            let revalidated = inner
+                .test_run_observations
+                .update_unindexed_fields(row_key, |row| {
+                    let first = row.evidence.iter().position(|association| {
+                        test_run_lifecycle_binding_matches(association, store, binding)
+                    })?;
+                    let mut updated = false;
+                    for association in &mut row.evidence[first..] {
+                        if !test_run_lifecycle_binding_matches(association, store, binding)
+                            || generation != association.source_basis.source_root_generation
+                        {
+                            continue;
+                        }
+                        association.lifecycle_read = Some(Arc::clone(&read));
+                        validated.push((
+                            row.execution_id.clone(),
+                            association.producer_observation_id.clone(),
+                        ));
+                        updated = true;
                     }
-                    association.lifecycle_read = Some(Arc::clone(&read));
-                    validated.push((
-                        row.execution_id.clone(),
-                        association.producer_observation_id.clone(),
-                    ));
-                    updated = true;
-                }
-                updated.then(|| row.clone())
-            });
+                    updated.then(|| row.clone())
+                });
             if let Some(Some(row)) = revalidated {
                 changed.push(row);
             }
         }
         inner.test_runs.lifecycle_revalidated.extend(validated);
-        let compacted = self.revalidate_test_run_compacted_locked(&mut inner, store, binding, &read);
-        self.persist_test_run_evidence_batch_deferring_compaction_locked(&mut inner, changed, compacted);
+        let compacted =
+            self.revalidate_test_run_compacted_locked(&mut inner, store, binding, &read);
+        self.persist_test_run_evidence_batch_deferring_compaction_locked(
+            &mut inner, changed, compacted,
+        );
     }
 }
 
-fn test_run_evidence_impact(inner: &impl TestRunProjectionSource, row: &TestRunCommandObservation) -> Option<bool> {
+pub(crate) fn test_run_evidence_impact(
+    inner: &impl TestRunProjectionSource,
+    row: &TestRunCommandObservation,
+) -> Option<bool> {
     if row.evidence.is_empty() {
         return None;
     }

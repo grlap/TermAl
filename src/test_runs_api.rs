@@ -6,29 +6,36 @@
 // index itself (`test_runs.rs`) or run waits (`test_run_waits.rs`), and never
 // starts, cancels or reruns a run.
 
+use super::*;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct InterruptTestRunMonitoringRequest {
-    owner_session_id: String,
-    started_at: String,
-    reason: String,
+pub(crate) struct InterruptTestRunMonitoringRequest {
+    pub(crate) owner_session_id: String,
+    pub(crate) started_at: String,
+    pub(crate) reason: String,
 }
 
 /// Stops host observation only. This is not process cancellation or a test
 /// verdict; the exact public origin must still match the selected observation.
-async fn interrupt_test_run_monitoring(
+pub(crate) async fn interrupt_test_run_monitoring(
     State(state): State<AppState>,
     AxumPath(run_id): AxumPath<String>,
     request: Result<Json<InterruptTestRunMonitoringRequest>, JsonRejection>,
 ) -> Result<Json<TestRunSummary>, ApiError> {
-    let Json(request) = request
-        .map_err(|error| api_json_rejection("test monitoring interruption", error))?;
-    run_blocking_api(move || state.interrupt_test_run_monitoring(&run_id, request).map(Json)).await
+    let Json(request) =
+        request.map_err(|error| api_json_rejection("test monitoring interruption", error))?;
+    run_blocking_api(move || {
+        state
+            .interrupt_test_run_monitoring(&run_id, request)
+            .map(Json)
+    })
+    .await
 }
 
 /// Registers a wait for the session in the path on one or more test runs;
 /// the session is resumed with one bounded prompt when they settle.
-async fn create_test_run_wait(
+pub(crate) async fn create_test_run_wait(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<CreateTestRunWaitRequest>, JsonRejection>,
@@ -42,18 +49,18 @@ async fn create_test_run_wait(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunListQuery {
-    project_id: Option<String>,
-    session_id: Option<String>,
-    state: Option<TestRunState>,
-    view: Option<TestRunListView>,
-    limit: Option<usize>,
-    after: Option<String>,
+pub(crate) struct TestRunListQuery {
+    pub(crate) project_id: Option<String>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) state: Option<TestRunState>,
+    pub(crate) view: Option<TestRunListView>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) after: Option<String>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunListView {
+pub(crate) enum TestRunListView {
     #[default]
     History,
     Active,
@@ -80,11 +87,11 @@ struct TestRunListCursor {
 }
 
 #[derive(Deserialize)]
-struct TestRunLogQuery {
-    tail: Option<u64>,
+pub(crate) struct TestRunLogQuery {
+    pub(crate) tail: Option<u64>,
 }
 
-async fn get_test_runs(
+pub(crate) async fn get_test_runs(
     State(state): State<AppState>,
     query: Result<Query<TestRunListQuery>, QueryRejection>,
 ) -> Result<Json<TestRunListResponse>, ApiError> {
@@ -113,7 +120,8 @@ async fn get_test_runs(
                 || cursor.session_id != query.session_id
                 || cursor.state != query.state
                 || cursor.view != query.view.unwrap_or_default()
-                || cursor.run_id.is_empty() {
+                || cursor.run_id.is_empty()
+            {
                 return Err(invalid());
             }
             Ok(cursor)
@@ -130,7 +138,10 @@ fn test_run_list_page(
 ) -> Result<Json<TestRunListResponse>, ApiError> {
     let (revision, cut) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        (inner.revision, state.test_run_history_projection_locked(&inner))
+        (
+            inner.revision,
+            state.test_run_history_projection_locked(&inner),
+        )
     };
     let project = query.project_id.as_deref();
     // The capture is immutable. Projection, canonical association merging,
@@ -151,7 +162,9 @@ fn test_run_list_page(
             }
     };
     let total = history_runs.iter().filter(matches).count();
-    let mut runs: Vec<_> = history_runs.iter().filter(matches)
+    let mut runs: Vec<_> = history_runs
+        .iter()
+        .filter(matches)
         .filter(|run| {
             cursor.as_ref().is_none_or(|cursor| {
                 run.started_at < cursor.started_at
@@ -191,7 +204,7 @@ fn test_run_list_page(
     }))
 }
 
-async fn get_test_run(
+pub(crate) async fn get_test_run(
     State(state): State<AppState>,
     AxumPath(run_id): AxumPath<String>,
     headers: axum::http::HeaderMap,
@@ -210,10 +223,12 @@ async fn get_test_run(
     // both on the blocking pool; neither operation holds StateInner.
     run_blocking_api(move || {
         let result = get_test_run_observed(state, &run_id, &mut diagnostics, !registration)
-            .and_then(|response| if registration {
-                test_run_registration_confirmation(response.0)
-            } else {
-                Ok(response.into_response())
+            .and_then(|response| {
+                if registration {
+                    test_run_registration_confirmation(response.0)
+                } else {
+                    Ok(response.into_response())
+                }
             });
         match result {
             Err(mut error) => {
@@ -225,7 +240,10 @@ async fn get_test_run(
             Ok(response) => {
                 if diagnostics.enabled {
                     diagnostics.enter("get_response_ready");
-                    eprintln!("[termal] test run query completed: {}", diagnostics.fields(&run_id, "query_complete", 200));
+                    eprintln!(
+                        "[termal] test run query completed: {}",
+                        diagnostics.fields(&run_id, "query_complete", 200)
+                    );
                 }
                 Ok(response)
             }
@@ -236,7 +254,7 @@ async fn get_test_run(
 
 include!("test_run_registration_query.rs");
 
-fn get_test_run_observed(
+pub(crate) fn get_test_run_observed(
     state: AppState,
     run_id: &str,
     diagnostics: &mut TestRunRegistrationDiagnostics,
@@ -256,7 +274,7 @@ fn get_test_run_observed(
     Ok(response)
 }
 
-fn get_test_run_observed_without_native_diagnostics(
+pub(crate) fn get_test_run_observed_without_native_diagnostics(
     state: AppState,
     run_id: &str,
     diagnostics: &mut TestRunRegistrationDiagnostics,
@@ -265,22 +283,33 @@ fn get_test_run_observed_without_native_diagnostics(
     diagnostics.enter("get_retained_lookup");
     {
         let inner = diagnostics.lock(&state.inner);
-        let known_exact = inner.test_runs.find(run_id).is_some()
-            || inner.test_runs.registered.contains(run_id);
+        let known_exact =
+            inner.test_runs.find(run_id).is_some() || inner.test_runs.registered.contains(run_id);
         let eligible = |row: &&TestRunCompacted| {
-            test_run_compact_is_installed(&inner, row)
-                && (row.compacted || !known_exact)
+            test_run_compact_is_installed(&inner, row) && (row.compacted || !known_exact)
         };
-        let retained = inner.test_run_compacted.get(run_id).filter(eligible)
-            .or_else(|| if known_exact { None } else {
-                inner.test_run_compacted.values().filter(eligible)
-                    .find(|row| test_run_summary_ids(&row.summary).any(|id| id == run_id))
+        let retained = inner
+            .test_run_compacted
+            .get(run_id)
+            .filter(eligible)
+            .or_else(|| {
+                if known_exact {
+                    None
+                } else {
+                    inner
+                        .test_run_compacted
+                        .values()
+                        .filter(eligible)
+                        .find(|row| test_run_summary_ids(&row.summary).any(|id| id == run_id))
+                }
             });
         if let Some(row) = retained {
             diagnostics.request_digest = row.request_identity.clone();
             let mut run = test_run_compacted_summary(&inner, row);
             test_run_enrich_artifact_summary(&inner, &mut run, None);
-            let registration_bound = row.registration.as_ref()
+            let registration_bound = row
+                .registration
+                .as_ref()
                 .is_some_and(|registration| registration.work_binding.is_some());
             return Ok(Json(TestRunDetailResponse {
                 source: "retained",
@@ -309,7 +338,9 @@ fn get_test_run_observed_without_native_diagnostics(
         return if let Some(directory) = exact.directory {
             if !include_detail {
                 return Ok(Json(TestRunDetailResponse {
-                    source: "index", run: exact.run, detail: TestRunDetail::default(),
+                    source: "index",
+                    run: exact.run,
+                    detail: TestRunDetail::default(),
                     registration_bound,
                 }));
             }
@@ -317,19 +348,36 @@ fn get_test_run_observed_without_native_diagnostics(
             let started = std::time::Instant::now();
             let detail = test_run_detail(&directory);
             if diagnostics.enabled {
-                eprintln!("[termal] test run query detail: runId={}; operationId={}; attemptId={}; serverInstance={}; phase=get_detail_read; phaseElapsedMs={}; category={}",
-                    test_run_diagnostic_id(run_id), diagnostics.operation_id,
-                    diagnostics.attempt_id, diagnostics.server_instance, started.elapsed().as_millis(),
-                    if detail.is_ok() { "read_complete" } else { "read_failed" });
+                eprintln!(
+                    "[termal] test run query detail: runId={}; operationId={}; attemptId={}; serverInstance={}; phase=get_detail_read; phaseElapsedMs={}; category={}",
+                    test_run_diagnostic_id(run_id),
+                    diagnostics.operation_id,
+                    diagnostics.attempt_id,
+                    diagnostics.server_instance,
+                    started.elapsed().as_millis(),
+                    if detail.is_ok() {
+                        "read_complete"
+                    } else {
+                        "read_failed"
+                    }
+                );
             }
             Ok(Json(TestRunDetailResponse {
-                source: "index", run: exact.run, detail: detail?, registration_bound,
+                source: "index",
+                run: exact.run,
+                detail: detail?,
+                registration_bound,
             }))
         } else {
             Ok(Json(TestRunDetailResponse {
-                source: "registration", run: exact.run, registration_bound,
+                source: "registration",
+                run: exact.run,
+                registration_bound,
                 detail: TestRunDetail {
-                    limitations: Some("Durable registration; the background artifact index has not caught up.".to_owned()),
+                    limitations: Some(
+                        "Durable registration; the background artifact index has not caught up."
+                            .to_owned(),
+                    ),
                     ..TestRunDetail::default()
                 },
             }))
@@ -340,21 +388,33 @@ fn get_test_run_observed_without_native_diagnostics(
         let inner = diagnostics.lock(&state.inner);
         // A registration/index arriving after the captured absence must go
         // through the fenced exact lookup on a fresh request, never this tail.
-        if inner.test_run_registrations.contains_key(run_id) || inner.test_runs.find(run_id).is_some() {
-            return Err(ApiError::conflict("test run identity changed during query; retry"));
+        if inner.test_run_registrations.contains_key(run_id)
+            || inner.test_runs.find(run_id).is_some()
+        {
+            return Err(ApiError::conflict(
+                "test run identity changed during query; retry",
+            ));
         }
         // The retained row the first lookup looks for, found here without its
         // installed filter: one under revalidation, or one compacted after
         // that lookup, is served below, and its durable registration still
         // says whether it bound the run.
-        let retained_bound = inner.test_run_compacted.get(run_id)
-            .or_else(|| inner.test_run_compacted.values()
-                .find(|row| test_run_summary_ids(&row.summary).any(|id| id == run_id)))
+        let retained_bound = inner
+            .test_run_compacted
+            .get(run_id)
+            .or_else(|| {
+                inner
+                    .test_run_compacted
+                    .values()
+                    .find(|row| test_run_summary_ids(&row.summary).any(|id| id == run_id))
+            })
             .and_then(|row| row.registration.as_ref())
             .is_some_and(|registration| registration.work_binding.is_some());
         (test_run_summaries_locked(&inner), retained_bound)
     };
-    let run = summaries.into_iter().find(|run| run.run_id == run_id)
+    let run = summaries
+        .into_iter()
+        .find(|run| run.run_id == run_id)
         .ok_or_else(|| ApiError::not_found("unknown test run"))?;
     if run.run_dir.is_empty() {
         return Ok(Json(TestRunDetailResponse { source: "observation", run, registration_bound: false, detail: TestRunDetail {
@@ -362,10 +422,18 @@ fn get_test_run_observed_without_native_diagnostics(
             ..TestRunDetail::default()
         } }));
     }
-    Ok(Json(TestRunDetailResponse { source: "retained", run, registration_bound: retained_bound, detail: TestRunDetail {
-        limitations: Some("The durable registration is retained; current launcher artifacts are unavailable.".to_owned()),
-        ..TestRunDetail::default()
-    } }))
+    Ok(Json(TestRunDetailResponse {
+        source: "retained",
+        run,
+        registration_bound: retained_bound,
+        detail: TestRunDetail {
+            limitations: Some(
+                "The durable registration is retained; current launcher artifacts are unavailable."
+                    .to_owned(),
+            ),
+            ..TestRunDetail::default()
+        },
+    }))
 }
 
 /// The largest results.json the raw results route serves.
@@ -386,14 +454,17 @@ fn test_run_raw_results_refusal(status: StatusCode, code: &str, message: &str) -
 /// 1 MiB is `test_run_results_too_large` (413, as the route's acceptance
 /// criterion names it); a file that changes while it is read is
 /// `test_run_results_changed` (409).
-async fn get_test_run_results(
+pub(crate) async fn get_test_run_results(
     State(state): State<AppState>,
     AxumPath(run_id): AxumPath<String>,
 ) -> Response {
     // Only the indexed run's directory: no summary projection under the lock.
     let run_dir = {
         let inner = state.inner.lock().expect("state mutex poisoned");
-        inner.test_runs.find(&run_id).map(|entry| entry.disk.run_dir.clone())
+        inner
+            .test_runs
+            .find(&run_id)
+            .map(|entry| entry.disk.run_dir.clone())
     };
     let Some(run_dir) = run_dir else {
         return test_run_raw_results_refusal(
@@ -422,7 +493,10 @@ async fn get_test_run_results(
             (
                 StatusCode::OK,
                 [
-                    (axum::http::header::CONTENT_TYPE, "application/json".to_owned()),
+                    (
+                        axum::http::header::CONTENT_TYPE,
+                        "application/json".to_owned(),
+                    ),
                     (axum::http::header::CONTENT_ENCODING, "identity".to_owned()),
                     (axum::http::header::CONTENT_LENGTH, bytes.len().to_string()),
                     (
@@ -539,7 +613,7 @@ fn test_run_raw_results(path: &FsPath) -> Result<Vec<u8>, Response> {
         })
 }
 
-async fn get_test_run_stage_log(
+pub(crate) async fn get_test_run_stage_log(
     State(state): State<AppState>,
     AxumPath((run_id, stage)): AxumPath<(String, String)>,
     query: Result<Query<TestRunLogQuery>, QueryRejection>,

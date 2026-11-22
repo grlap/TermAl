@@ -12,12 +12,14 @@
 // Extracted from runtime.rs into its own `include!()` fragment so runtime.rs
 // stays focused on actual runtime processes.
 
+use super::*;
+
 /// Collects agent readiness.
-fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
+pub(crate) fn collect_agent_readiness(default_workdir: &str) -> Vec<AgentReadiness> {
     collect_agent_readiness_with(default_workdir, agent_readiness_for)
 }
 
-fn collect_agent_readiness_with(
+pub(crate) fn collect_agent_readiness_with(
     workdir: &str,
     probe: impl Fn(Agent, &str) -> AgentReadiness,
 ) -> Vec<AgentReadiness> {
@@ -35,11 +37,14 @@ fn collect_agent_readiness_with(
 }
 
 /// Validates agent session setup.
-fn validate_agent_session_setup(agent: Agent, workdir: &str) -> std::result::Result<(), String> {
+pub(crate) fn validate_agent_session_setup(
+    agent: Agent,
+    workdir: &str,
+) -> std::result::Result<(), String> {
     validate_agent_session_setup_with(agent, workdir, agent_readiness_for)
 }
 
-fn validate_agent_session_setup_with(
+pub(crate) fn validate_agent_session_setup_with(
     agent: Agent,
     workdir: &str,
     readiness_for: impl FnOnce(Agent, &str) -> AgentReadiness,
@@ -52,7 +57,7 @@ fn validate_agent_session_setup_with(
 }
 
 impl AppState {
-    fn validate_agent_session_setup_for_state(
+    pub(crate) fn validate_agent_session_setup_for_state(
         &self,
         agent: Agent,
         workdir: &str,
@@ -94,7 +99,9 @@ fn agent_readiness_for(agent: Agent, workdir: &str) -> AgentReadiness {
     }
 }
 
-fn claude_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> AgentReadiness {
+pub(crate) fn claude_agent_readiness_with(
+    resolve: impl FnOnce() -> Option<PathBuf>,
+) -> AgentReadiness {
     let path = resolve().map(|path| display_path_for_user(&normalize_user_facing_path(&path)));
     AgentReadiness {
         agent: Agent::Claude,
@@ -124,7 +131,7 @@ fn claude_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> Age
 }
 
 /// Handles Codex agent readiness.
-fn codex_agent_readiness() -> AgentReadiness {
+pub(crate) fn codex_agent_readiness() -> AgentReadiness {
     let command_path = resolve_codex_executable()
         .ok()
         .map(|path| path.display().to_string());
@@ -179,7 +186,9 @@ fn gemini_agent_readiness(_workdir: &str) -> AgentReadiness {
     gemini_agent_readiness_with(resolve_gemini_executable)
 }
 
-fn gemini_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> AgentReadiness {
+pub(crate) fn gemini_agent_readiness_with(
+    resolve: impl FnOnce() -> Option<PathBuf>,
+) -> AgentReadiness {
     let path = resolve().map(|path| display_path_for_user(&normalize_user_facing_path(&path)));
     AgentReadiness {
         agent: Agent::Gemini,
@@ -194,7 +203,7 @@ fn gemini_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> Age
 }
 
 /// Returns a Windows warning for Codex shell limitations.
-fn codex_windows_shell_warning() -> Option<String> {
+pub(crate) fn codex_windows_shell_warning() -> Option<String> {
     if !cfg!(windows) {
         return None;
     }

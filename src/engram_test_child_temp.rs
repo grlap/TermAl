@@ -19,6 +19,8 @@
 //
 // New file, not split from another; included from main.rs under cfg(test).
 
+use super::*;
+
 /// The user temp the test process uses, as test_temp_dir() derives it: the
 /// launcher's TERMAL_TEST_USER_TEMP, else the platform temp directory.
 fn engram_test_user_temp() -> std::ffi::OsString {
@@ -29,7 +31,7 @@ fn engram_test_user_temp() -> std::ffi::OsString {
 /// The environment a test's Engram fixture child gets so that its temporary
 /// files stay inside its Engram home. Empty for a home that does not exist or
 /// lies outside the test temp root, so nothing is created there.
-fn engram_test_child_temp_env(home: &FsPath) -> Vec<(&'static str, std::ffi::OsString)> {
+pub(crate) fn engram_test_child_temp_env(home: &FsPath) -> Vec<(&'static str, std::ffi::OsString)> {
     let Some(temp) = engram_test_child_temp(home) else {
         return Vec::new();
     };
@@ -44,7 +46,7 @@ fn engram_test_child_temp_env(home: &FsPath) -> Vec<(&'static str, std::ffi::OsS
 /// The directory inside an Engram home that a test's fixture child uses as
 /// its TEMP, created on demand. None, with nothing created, unless the home
 /// exists inside <user temp>/termal/tests, the root the fixtures require.
-fn engram_test_child_temp(home: &FsPath) -> Option<PathBuf> {
+pub(crate) fn engram_test_child_temp(home: &FsPath) -> Option<PathBuf> {
     let test_root = PathBuf::from(engram_test_user_temp())
         .join("termal")
         .join("tests");

@@ -6,8 +6,10 @@
 // Extracted from api.rs into its own `include!()` fragment so the FS-path
 // plumbing is distinct from HTTP handler code.
 
+use super::*;
+
 /// Resolves requested path.
-fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
+pub(crate) fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
     let raw_path = FsPath::new(path);
     let resolved = if raw_path.is_absolute() {
         raw_path.to_path_buf()
@@ -21,7 +23,10 @@ fn resolve_requested_path(path: &str) -> Result<PathBuf, ApiError> {
 }
 
 /// Resolves existing requested path.
-fn resolve_existing_requested_path(path: &str, label: &str) -> Result<PathBuf, ApiError> {
+pub(crate) fn resolve_existing_requested_path(
+    path: &str,
+    label: &str,
+) -> Result<PathBuf, ApiError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err(ApiError::bad_request(format!("{label} cannot be empty")));
@@ -34,14 +39,14 @@ fn resolve_existing_requested_path(path: &str, label: &str) -> Result<PathBuf, A
 
 /// Enumerates scoped path modes.
 #[derive(Clone, Copy)]
-enum ScopedPathMode {
+pub(crate) enum ScopedPathMode {
     ExistingFile,
     ExistingPath,
     AllowMissingLeaf,
 }
 
 /// Normalizes optional identifier.
-fn normalize_optional_identifier(value: Option<&str>) -> Option<&str> {
+pub(crate) fn normalize_optional_identifier(value: Option<&str>) -> Option<&str> {
     value
         .map(str::trim)
         .filter(|candidate| !candidate.is_empty())
@@ -96,7 +101,7 @@ fn resolve_session_project_root_path(
 }
 
 /// Resolves project root path by ID.
-fn resolve_project_root_path_by_id(
+pub(crate) fn resolve_project_root_path_by_id(
     state: &AppState,
     project_id: &str,
 ) -> Result<PathBuf, ApiError> {
@@ -128,7 +133,7 @@ fn resolve_project_root_path_by_id(
 }
 
 /// Resolves request project root path.
-fn resolve_request_project_root_path(
+pub(crate) fn resolve_request_project_root_path(
     state: &AppState,
     session_id: Option<&str>,
     project_id: Option<&str>,
@@ -145,7 +150,7 @@ fn resolve_request_project_root_path(
 }
 
 /// Resolves project scoped requested path.
-fn resolve_project_scoped_requested_path(
+pub(crate) fn resolve_project_scoped_requested_path(
     state: &AppState,
     session_id: Option<&str>,
     project_id: Option<&str>,
@@ -175,7 +180,7 @@ fn resolve_project_scoped_requested_path(
 
 /// Resolves session scoped requested path.
 #[cfg(test)]
-fn resolve_session_scoped_requested_path(
+pub(crate) fn resolve_session_scoped_requested_path(
     state: &AppState,
     session_id: &str,
     path: &str,
@@ -200,7 +205,7 @@ fn canonicalize_existing_path(path: &FsPath, label: &str) -> Result<PathBuf, Api
 }
 
 /// Canonicalizes path with existing ancestor.
-fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, ApiError> {
+pub(crate) fn canonicalize_path_with_existing_ancestor(path: &FsPath) -> Result<PathBuf, ApiError> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -274,7 +279,7 @@ fn validate_missing_path_component(component: &std::ffi::OsStr) -> Result<(), Ap
 }
 
 /// Verifies the write parent after any missing directories are created.
-fn verify_scoped_write_path_after_parent_creation(
+pub(crate) fn verify_scoped_write_path_after_parent_creation(
     state: &AppState,
     session_id: Option<&str>,
     project_id: Option<&str>,
@@ -319,7 +324,7 @@ fn verify_scoped_write_path_after_parent_creation(
 /// macOS can canonicalize public paths through `/private`, and Windows can
 /// return verbatim prefixes, so normalizing only one side can create false
 /// "outside project" results.
-fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
+pub(crate) fn normalize_user_facing_path(path: &FsPath) -> PathBuf {
     #[cfg(target_os = "macos")]
     {
         for (private_prefix, public_prefix) in [
@@ -373,17 +378,17 @@ fn resolve_directory_path(path: &str, label: &str) -> Result<String, ApiError> {
 }
 
 /// Resolves project root path.
-fn resolve_project_root_path(path: &str) -> Result<String, ApiError> {
+pub(crate) fn resolve_project_root_path(path: &str) -> Result<String, ApiError> {
     resolve_directory_path(path, "project root path")
 }
 
 /// Resolves session working directory.
-fn resolve_session_workdir(path: &str) -> Result<String, ApiError> {
+pub(crate) fn resolve_session_workdir(path: &str) -> Result<String, ApiError> {
     resolve_directory_path(path, "session workdir")
 }
 
 /// Picks project root path.
-fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiError> {
+pub(crate) fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiError> {
     #[cfg(target_os = "macos")]
     {
         let output = Command::new("osascript")
@@ -447,7 +452,7 @@ fn pick_project_root_path(default_workdir: &str) -> Result<Option<String>, ApiEr
 }
 
 /// Returns the default project name.
-fn default_project_name(root_path: &str) -> String {
+pub(crate) fn default_project_name(root_path: &str) -> String {
     let path = FsPath::new(root_path);
     path.file_name()
         .and_then(|value| value.to_str())
@@ -457,7 +462,7 @@ fn default_project_name(root_path: &str) -> String {
 }
 
 /// Deduplicates project name.
-fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
+pub(crate) fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
     let existing_names = existing
         .iter()
         .map(|project| project.name.as_str())
@@ -476,14 +481,14 @@ fn dedupe_project_name(existing: &[Project], base_name: &str) -> String {
     }
 }
 
-fn path_contains(root_path: &str, candidate_path: &FsPath) -> bool {
+pub(crate) fn path_contains(root_path: &str, candidate_path: &FsPath) -> bool {
     let root = normalize_path_best_effort(FsPath::new(root_path));
     let candidate = normalize_path_best_effort(candidate_path);
     candidate == root || candidate.starts_with(root)
 }
 
 /// Normalizes path best effort.
-fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
+pub(crate) fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
     #[cfg(test)]
     PATH_NORMALIZATION_TEST_HOOK.with(|hook| {
         if let Some(hook) = hook.borrow().as_ref() {
@@ -503,10 +508,10 @@ fn normalize_path_best_effort(path: &FsPath) -> PathBuf {
 
 // Thread-local so a blocked watcher fixture cannot intercept another test's I/O.
 #[cfg(test)]
-type PathNormalizationTestHook = Box<dyn Fn(&FsPath)>;
+pub(crate) type PathNormalizationTestHook = Box<dyn Fn(&FsPath)>;
 
 #[cfg(test)]
 thread_local! {
-    static PATH_NORMALIZATION_TEST_HOOK: std::cell::RefCell<Option<PathNormalizationTestHook>> =
+    pub(crate) static PATH_NORMALIZATION_TEST_HOOK: std::cell::RefCell<Option<PathNormalizationTestHook>> =
         const { std::cell::RefCell::new(None) };
 }

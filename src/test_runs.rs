@@ -8,12 +8,14 @@
 // (`test_runs_disk.rs`) or HTTP (`test_runs_api.rs`), and never starts,
 // cancels or settles a run.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
-    static TEST_RUN_PROJECTION_STARTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_RUN_SUMMARY_STARTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_RUN_PROJECTION_PREPARED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_RUN_PROJECTION_FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_RUN_PROJECTION_STARTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_RUN_SUMMARY_STARTED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_RUN_PROJECTION_PREPARED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_RUN_PROJECTION_FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The background thread's tick: it rescans on every tick while some indexed
@@ -24,16 +26,16 @@ thread_local! {
 const TEST_RUN_TICK: Duration = Duration::from_secs(2);
 /// The idle backstop: a full rescan at least this often, for a change made in
 /// the same modification-time tick as a stat.
-const TEST_RUN_IDLE_RESCAN_INTERVAL: Duration = Duration::from_secs(10);
+pub(crate) const TEST_RUN_IDLE_RESCAN_INTERVAL: Duration = Duration::from_secs(10);
 /// Terminal runs kept in the index per project, newest first.
-const TEST_RUN_TERMINAL_RUNS_PER_PROJECT: usize = 50;
+pub(crate) const TEST_RUN_TERMINAL_RUNS_PER_PROJECT: usize = 50;
 /// Reads after a liveness check, per run per rescan. A run hands over from its
 /// creator to at most one worker, so two reads settle it; one more is slack.
 const TEST_RUN_READS_AFTER_CHECK_MAX: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunState {
+pub(crate) enum TestRunState {
     Running,
     Passed,
     Failed,
@@ -44,7 +46,7 @@ enum TestRunState {
 /// a wait; missing executor or heartbeat evidence is pending uncertainty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunUnknownReason {
+pub(crate) enum TestRunUnknownReason {
     ProcessGone,
     ResultsUnreadable,
     NoPid,
@@ -53,7 +55,7 @@ enum TestRunUnknownReason {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunStageState {
+pub(crate) enum TestRunStageState {
     Unrun,
     Running,
     Passed,
@@ -62,7 +64,7 @@ enum TestRunStageState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunPreset {
+pub(crate) enum TestRunPreset {
     Full,
     Focused,
     Live,
@@ -70,150 +72,150 @@ enum TestRunPreset {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunStageSummary {
-    name: String,
-    state: TestRunStageState,
-    exit_code: Option<i64>,
-    started_at: Option<String>,
-    ended_at: Option<String>,
+pub(crate) struct TestRunStageSummary {
+    pub(crate) name: String,
+    pub(crate) state: TestRunStageState,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) started_at: Option<String>,
+    pub(crate) ended_at: Option<String>,
 }
 
 /// One run as the snapshot and deltas carry it: never diagnostics or logs.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunSummary {
+pub(crate) struct TestRunSummary {
     #[serde(flatten)]
-    registration: TestRunRegistrationView,
-    run_id: String,
-    project_id: Option<String>,
-    worktree: String,
-    run_dir: String,
-    preset: TestRunPreset,
-    command: Option<Vec<String>>,
-    command_truncated: bool,
-    detached: Option<bool>,
-    state: TestRunState,
+    pub(crate) registration: TestRunRegistrationView,
+    pub(crate) run_id: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) worktree: String,
+    pub(crate) run_dir: String,
+    pub(crate) preset: TestRunPreset,
+    pub(crate) command: Option<Vec<String>>,
+    pub(crate) command_truncated: bool,
+    pub(crate) detached: Option<bool>,
+    pub(crate) state: TestRunState,
     /// Only with `state: unknown`, and only when the reason is known. Sent
     /// only when set, an additive field: a missing reason means "not known".
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    unknown_reason: Option<TestRunUnknownReason>,
-    interrupted: bool,
-    current_stage: Option<String>,
-    stages: Vec<TestRunStageSummary>,
-    owner_session_id: Option<String>,
-    notify_to: Option<String>,
-    notify_session_id: Option<String>,
-    started_at: Option<String>,
-    ended_at: Option<String>,
-    exit_code: Option<i64>,
-    error: Option<String>,
+    pub(crate) unknown_reason: Option<TestRunUnknownReason>,
+    pub(crate) interrupted: bool,
+    pub(crate) current_stage: Option<String>,
+    pub(crate) stages: Vec<TestRunStageSummary>,
+    pub(crate) owner_session_id: Option<String>,
+    pub(crate) notify_to: Option<String>,
+    pub(crate) notify_session_id: Option<String>,
+    pub(crate) started_at: Option<String>,
+    pub(crate) ended_at: Option<String>,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) error: Option<String>,
     /// Opaque: the digest of the `results.json` bytes this summary was built
     /// from, which the detail is built from too, so a client can tell an open
     /// detail is stale even when every other summary field is equal. `None`
     /// without readable results.
-    detail_version: Option<String>,
+    pub(crate) detail_version: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunDiagnostics {
-    text: String,
-    truncated: bool,
+pub(crate) struct TestRunDiagnostics {
+    pub(crate) text: String,
+    pub(crate) truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunStageDetail {
+pub(crate) struct TestRunStageDetail {
     #[serde(flatten)]
-    summary: TestRunStageSummary,
-    command: Option<Vec<String>>,
-    cwd: Option<String>,
-    log: Option<String>,
-    diagnostics: Option<TestRunDiagnostics>,
-    error: Option<String>,
+    pub(crate) summary: TestRunStageSummary,
+    pub(crate) command: Option<Vec<String>>,
+    pub(crate) cwd: Option<String>,
+    pub(crate) log: Option<String>,
+    pub(crate) diagnostics: Option<TestRunDiagnostics>,
+    pub(crate) error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunPreflight {
-    name: String,
-    command: Option<Vec<String>>,
-    exit_code: Option<i64>,
-    log: Option<String>,
-    diagnostics: Option<TestRunDiagnostics>,
+pub(crate) struct TestRunPreflight {
+    pub(crate) name: String,
+    pub(crate) command: Option<Vec<String>>,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) log: Option<String>,
+    pub(crate) diagnostics: Option<TestRunDiagnostics>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunDetail {
+pub(crate) struct TestRunDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
-    native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
-    stages: Vec<TestRunStageDetail>,
-    preflight: Vec<TestRunPreflight>,
-    source_id: Option<EngramSourceId>,
-    source_id_before: Option<EngramSourceId>,
-    source_id_after: Option<EngramSourceId>,
-    source_comparison: Option<String>,
+    pub(crate) native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
+    pub(crate) stages: Vec<TestRunStageDetail>,
+    pub(crate) preflight: Vec<TestRunPreflight>,
+    pub(crate) source_id: Option<EngramSourceId>,
+    pub(crate) source_id_before: Option<EngramSourceId>,
+    pub(crate) source_id_after: Option<EngramSourceId>,
+    pub(crate) source_comparison: Option<String>,
     // Historical artifacts remain readable; these fields never qualify a
     // new full-source run or become a parent-held expected value.
-    expected_fingerprint: Option<String>,
-    before: Option<String>,
-    after: Option<String>,
-    limitations: Option<String>,
+    pub(crate) expected_fingerprint: Option<String>,
+    pub(crate) before: Option<String>,
+    pub(crate) after: Option<String>,
+    pub(crate) limitations: Option<String>,
     /// Only what results.json's `input` records (src/test_run_committed_input.rs).
-    committed_input: Option<TestRunCommittedInput>,
+    pub(crate) committed_input: Option<TestRunCommittedInput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunLogTail {
-    text: String,
-    truncated: bool,
-    size: u64,
+pub(crate) struct TestRunLogTail {
+    pub(crate) text: String,
+    pub(crate) truncated: bool,
+    pub(crate) size: u64,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunListResponse {
-    revision: u64,
-    server_instance_id: String,
-    total: usize,
-    runs: Vec<TestRunSummary>,
-    limit: usize,
-    next_cursor: Option<String>,
+pub(crate) struct TestRunListResponse {
+    pub(crate) revision: u64,
+    pub(crate) server_instance_id: String,
+    pub(crate) total: usize,
+    pub(crate) runs: Vec<TestRunSummary>,
+    pub(crate) limit: usize,
+    pub(crate) next_cursor: Option<String>,
     #[serde(flatten)]
-    history: TestRunHistory,
+    pub(crate) history: TestRunHistory,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunDetailResponse {
-    source: &'static str,
+pub(crate) struct TestRunDetailResponse {
+    pub(crate) source: &'static str,
     #[serde(serialize_with = "serialize_test_run_detail_summary")]
-    run: TestRunSummary,
-    detail: TestRunDetail,
+    pub(crate) run: TestRunSummary,
+    pub(crate) detail: TestRunDetail,
     // Whether the registration this response was served from, live or
     // retained, bound the run to work. Only the registration view reports it.
     #[serde(skip)]
-    registration_bound: bool,
+    pub(crate) registration_bound: bool,
 }
 
 /// One indexed run: what its directory said, and the summary built from it.
 #[derive(Clone, Debug)]
-struct TestRunEntry {
-    disk: Arc<TestRunDisk>,
-    summary: TestRunSummary,
+pub(crate) struct TestRunEntry {
+    pub(crate) disk: Arc<TestRunDisk>,
+    pub(crate) summary: TestRunSummary,
     // Preserve scanner fallback separately from the live registration override.
-    discovered_project_id: Option<String>,
+    pub(crate) discovered_project_id: Option<String>,
 }
 
 /// The indexed runs in list order, with a maintained run id -> positions
 /// lookup that keeps vector order and multiplicity. Reads see the vector;
 /// every change goes through a method that keeps the lookup equal to it.
 #[derive(Clone, Debug, Default)]
-struct TestRunEntries {
-    entries: Vec<TestRunEntry>,
-    positions: HashMap<String, Vec<usize>>,
+pub(crate) struct TestRunEntries {
+    pub(crate) entries: Vec<TestRunEntry>,
+    pub(crate) positions: HashMap<String, Vec<usize>>,
 }
 
 impl TestRunEntries {
@@ -228,7 +230,7 @@ impl TestRunEntries {
     }
 
     /// The entries with this run id, in vector order, duplicates included.
-    fn with_run_id(&self, run_id: &str) -> impl Iterator<Item = &TestRunEntry> {
+    pub(crate) fn with_run_id(&self, run_id: &str) -> impl Iterator<Item = &TestRunEntry> {
         self.positions
             .get(run_id)
             .into_iter()
@@ -237,7 +239,7 @@ impl TestRunEntries {
     }
 
     #[cfg(test)]
-    fn push(&mut self, entry: TestRunEntry) {
+    pub(crate) fn push(&mut self, entry: TestRunEntry) {
         self.positions
             .entry(entry.summary.run_id.clone())
             .or_default()
@@ -248,26 +250,30 @@ impl TestRunEntries {
     /// Removes like Vec::remove; later positions shift, so the lookup is
     /// rebuilt, at the same order of cost as the vector's own shift.
     #[cfg(test)]
-    fn remove(&mut self, position: usize) -> TestRunEntry {
+    pub(crate) fn remove(&mut self, position: usize) -> TestRunEntry {
         let removed = self.entries.remove(position);
         self.reposition();
         removed
     }
 
-    fn retain(&mut self, keep: impl FnMut(&TestRunEntry) -> bool) {
+    pub(crate) fn retain(&mut self, keep: impl FnMut(&TestRunEntry) -> bool) {
         self.entries.retain(keep);
         self.reposition();
     }
 
     #[cfg(test)]
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.positions.clear();
     }
 
     /// Test-only change of one entry in place; the lookup follows its run id.
     #[cfg(test)]
-    fn update<R>(&mut self, position: usize, change: impl FnOnce(&mut TestRunEntry) -> R) -> R {
+    pub(crate) fn update<R>(
+        &mut self,
+        position: usize,
+        change: impl FnOnce(&mut TestRunEntry) -> R,
+    ) -> R {
         let result = change(&mut self.entries[position]);
         self.reposition();
         result
@@ -275,7 +281,7 @@ impl TestRunEntries {
 
     /// The lookup rebuilt from scratch, for test-only consistency oracles.
     #[cfg(test)]
-    fn rebuilt_positions(&self) -> HashMap<String, Vec<usize>> {
+    pub(crate) fn rebuilt_positions(&self) -> HashMap<String, Vec<usize>> {
         let mut rebuilt = Self {
             entries: self.entries.clone(),
             positions: HashMap::new(),
@@ -285,7 +291,7 @@ impl TestRunEntries {
     }
 
     #[cfg(test)]
-    fn positions(&self) -> &HashMap<String, Vec<usize>> {
+    pub(crate) fn positions(&self) -> &HashMap<String, Vec<usize>> {
         &self.positions
     }
 }
@@ -325,63 +331,63 @@ impl<'a> IntoIterator for &'a TestRunEntries {
 /// The runtime-only test-run index kept in `StateInner`, in list order. It
 /// mirrors disk and is never persisted.
 #[derive(Clone, Debug, Default)]
-struct TestRunIndex {
+pub(crate) struct TestRunIndex {
     // Only the scanner holds this transient batch under StateInner. Its
     // internal lifecycle events precede index installation; public counters
     // are emitted once after installation at the final committed revision.
-    transport_batch_pending: bool,
-    transport_version: Arc<AtomicU64>,
+    pub(crate) transport_batch_pending: bool,
+    pub(crate) transport_version: Arc<AtomicU64>,
     /// Scheduling hint only. Proof predicates are always recomputed when
     /// selection runs. A writer that changes a selection input clears it; a
     /// rescan selects only when it changed the index or this is cleared.
-    compaction_examined_revision: Option<u64>,
-    compactions_durable: HashSet<String>,
-    compactions_revalidating: HashSet<String>,
-    compaction_persistence: TestRunCompactionPersistence,
-    compaction_stamps: HashMap<String, (TestRunFileStamp, TestRunFileStamp, bool)>,
-    registered: HashSet<String>,
-    registration_failures: HashSet<String>,
-    observations_durable: HashSet<String>,
-    observations_failed: HashSet<String>,
-    observation_persistence: TestRunObservationPersistence,
-    observation_cursors: TestRunObservationCursors,
-    lifecycle_revalidated: HashSet<(String, String)>,
-    unclassified_commands: BTreeMap<String, TestRunUnclassifiedCommand>,
+    pub(crate) compaction_examined_revision: Option<u64>,
+    pub(crate) compactions_durable: HashSet<String>,
+    pub(crate) compactions_revalidating: HashSet<String>,
+    pub(crate) compaction_persistence: TestRunCompactionPersistence,
+    pub(crate) compaction_stamps: HashMap<String, (TestRunFileStamp, TestRunFileStamp, bool)>,
+    pub(crate) registered: HashSet<String>,
+    pub(crate) registration_failures: HashSet<String>,
+    pub(crate) observations_durable: HashSet<String>,
+    pub(crate) observations_failed: HashSet<String>,
+    pub(crate) observation_persistence: TestRunObservationPersistence,
+    pub(crate) observation_cursors: TestRunObservationCursors,
+    pub(crate) lifecycle_revalidated: HashSet<(String, String)>,
+    pub(crate) unclassified_commands: BTreeMap<String, TestRunUnclassifiedCommand>,
     // Original native executions that may outlive their prompt. Retain the
     // same job (including identity refusal and pending registration), never
     // reconstruct an execution from a later task notification.
-    declared_executions: BTreeMap<String, Arc<Mutex<DeclaredRunExecution>>>,
-    entries: TestRunEntries,
+    pub(crate) declared_executions: BTreeMap<String, Arc<Mutex<DeclaredRunExecution>>>,
+    pub(crate) entries: TestRunEntries,
     /// Every run directory the last rescan parsed, listed or aged out, so a
     /// run whose files did not change is never parsed again. Aged-out runs
     /// outnumber listed ones as run directories accumulate.
-    parsed: HashMap<PathBuf, Arc<TestRunDisk>>,
+    pub(crate) parsed: HashMap<PathBuf, Arc<TestRunDisk>>,
     /// The directories whose change means a run appeared or became readable,
     /// with the modification time each had when the last rescan listed or
     /// read it: every `review-runs` directory, and every run directory the
     /// rescan skipped for want of a readable request (the launcher creates the
     /// directory, then renames `request.json` into it). The background thread
     /// stats them between rescans (`test_run_tracked_dirs_changed`).
-    tracked_dirs: Vec<(PathBuf, Option<std::time::SystemTime>)>,
+    pub(crate) tracked_dirs: Vec<(PathBuf, Option<std::time::SystemTime>)>,
     /// Held for a whole rescan, so rescans never interleave: a scan that
     /// started earlier can never commit over a newer one.
-    rescan: Arc<Mutex<()>>,
+    pub(crate) rescan: Arc<Mutex<()>>,
     /// When this host process first saw each indexed run, which decides
     /// whether a run already terminal then still gets a card
     /// (`test_run_cards.rs`).
-    first_sight: HashMap<String, TestRunFirstSight>,
+    pub(crate) first_sight: HashMap<String, TestRunFirstSight>,
     /// Whether the card epoch is durable, so cards may be created.
-    cards_enabled: bool,
+    pub(crate) cards_enabled: bool,
     /// Set when cards become enabled in this process: the next scan
     /// re-evaluates every indexed run without a card once.
-    cards_reevaluate: bool,
+    pub(crate) cards_reevaluate: bool,
     /// Whether this process has completed a full scan. Until it has, an
     /// empty index says nothing, so no run wait settles.
-    scanned_once: bool,
+    pub(crate) scanned_once: bool,
 }
 
 impl TestRunIndex {
-    fn summaries(&self) -> Vec<TestRunSummary> {
+    pub(crate) fn summaries(&self) -> Vec<TestRunSummary> {
         self.entries
             .iter()
             .map(|entry| entry.summary.clone())
@@ -390,7 +396,7 @@ impl TestRunIndex {
 
     /// A linear lookup for a single run. Loops over history rows use a set
     /// built once per pass (`test_run_indexed_ids`) instead.
-    fn find(&self, run_id: &str) -> Option<&TestRunEntry> {
+    pub(crate) fn find(&self, run_id: &str) -> Option<&TestRunEntry> {
         #[cfg(test)]
         TEST_TEST_RUN_INDEX_FINDS.with(|count| count.set(count.get() + 1));
         // The first entry with this run id, as the linear scan found it.
@@ -408,11 +414,11 @@ impl TestRunIndex {
 
 /// A run read from disk with its state and project, before session
 /// attribution, which needs the state lock.
-struct TestRunScanned {
-    disk: Arc<TestRunDisk>,
-    state: TestRunState,
-    unknown_reason: Option<TestRunUnknownReason>,
-    project_id: Option<String>,
+pub(crate) struct TestRunScanned {
+    pub(crate) disk: Arc<TestRunDisk>,
+    pub(crate) state: TestRunState,
+    pub(crate) unknown_reason: Option<TestRunUnknownReason>,
+    pub(crate) project_id: Option<String>,
 }
 
 /// Why `state` is `unknown`. `processGone` and `noPid` are classified only
@@ -454,7 +460,7 @@ fn test_run_unknown_reason(
 /// once the idle interval has passed since the last rescan (or there has been
 /// none). `dirs_changed` is only asked when nothing else decides.
 #[cfg(test)]
-fn test_run_rescan_due(
+pub(crate) fn test_run_rescan_due(
     active: bool,
     since_last_rescan: Option<Duration>,
     dirs_changed: impl FnOnce() -> bool,
@@ -462,7 +468,7 @@ fn test_run_rescan_due(
     test_run_rescan_origin(active, since_last_rescan, dirs_changed).is_some()
 }
 
-fn test_run_rescan_origin(
+pub(crate) fn test_run_rescan_origin(
     active: bool,
     since_last_rescan: Option<Duration>,
     dirs_changed: impl FnOnce() -> bool,
@@ -483,7 +489,7 @@ fn test_run_rescan_origin(
 /// The session id `reference` names: an id of a visible session, or the name
 /// of exactly one visible root session (not a delegation child), compared
 /// without case, as the mailbox resolves `--to`.
-fn test_run_resolve_session(
+pub(crate) fn test_run_resolve_session(
     inner: &impl TestRunProjectionSource,
     reference: &str,
 ) -> Option<String> {
@@ -540,7 +546,7 @@ fn test_run_registered_project_id(
 
 // Registration can become durable between scans. Read/wait boundaries must
 // derive authority from that current proof, not the scanner's older summary.
-fn test_run_effective_project_id(
+pub(crate) fn test_run_effective_project_id(
     inner: &impl TestRunProjectionSource,
     entry: &TestRunEntry,
 ) -> Option<String> {
@@ -549,11 +555,11 @@ fn test_run_effective_project_id(
 }
 
 #[cfg(test)]
-fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSummary {
+pub(crate) fn test_run_summary(inner: &StateInner, scanned: &TestRunScanned) -> TestRunSummary {
     test_run_summary_from_observations(inner, scanned, inner.test_run_observations.values())
 }
 
-fn test_run_summary_from_observations<'a>(
+pub(crate) fn test_run_summary_from_observations<'a>(
     inner: &impl TestRunProjectionSource,
     scanned: &TestRunScanned,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation> + Clone,
@@ -622,7 +628,7 @@ fn test_run_summary_from_observations<'a>(
 
 /// Membership only: the caller retains removal ordering, publication and the
 /// previous entries needed when a delta cannot be sent.
-fn test_run_removed_ids<'a>(
+pub(crate) fn test_run_removed_ids<'a>(
     previous_ids: impl IntoIterator<Item = &'a str>,
     current_ids: impl IntoIterator<Item = &'a str>,
 ) -> Vec<String> {
@@ -638,7 +644,7 @@ fn test_run_removed_ids<'a>(
 /// was not sent keeps its previous entry (stays absent if it was new, stays
 /// listed if it was removed), so the index never claims a change clients did
 /// not receive, and the next rescan finds the difference again and sends it.
-fn test_run_settle_entries(
+pub(crate) fn test_run_settle_entries(
     mut entries: Vec<TestRunEntry>,
     before: &HashMap<String, TestRunEntry>,
     unsent_changed: &HashSet<String>,
@@ -678,11 +684,11 @@ impl AppState {
     /// changed. Returns whether any indexed run is `running`, which sets the
     /// next rescan's interval.
     #[cfg(test)]
-    fn refresh_test_runs(&self) -> bool {
+    pub(crate) fn refresh_test_runs(&self) -> bool {
         self.refresh_test_runs_from("direct")
     }
 
-    fn refresh_test_runs_from(&self, origin: &'static str) -> bool {
+    pub(crate) fn refresh_test_runs_from(&self, origin: &'static str) -> bool {
         self.refresh_test_runs_at_from(
             chrono::Utc::now(),
             origin,
@@ -697,7 +703,7 @@ impl AppState {
     /// it was last written. `publish` is called under the state lock that
     /// allocated the event's revision.
     #[cfg(test)]
-    fn refresh_test_runs_with(
+    pub(crate) fn refresh_test_runs_with(
         &self,
         writer_may_be_alive: &TestRunLiveness,
         publish: &dyn Fn(&StateInner, &DeltaEvent),
@@ -708,7 +714,7 @@ impl AppState {
     /// One observation time for the scan, including cached parses and
     /// post-liveness rereads. Tests inject time without a state-wide clock.
     #[cfg(test)]
-    fn refresh_test_runs_at_with(
+    pub(crate) fn refresh_test_runs_at_with(
         &self,
         now: chrono::DateTime<chrono::Utc>,
         writer_may_be_alive: &TestRunLiveness,
@@ -1414,14 +1420,14 @@ impl AppState {
     }
 
     /// The indexed run `run_id` and its directory.
-    fn test_run_entry(&self, run_id: &str) -> Option<(TestRunSummary, PathBuf)> {
+    pub(crate) fn test_run_entry(&self, run_id: &str) -> Option<(TestRunSummary, PathBuf)> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         test_run_entry_locked(&inner, run_id)
     }
 
     /// Indexed runs, optionally for one project, in list order.
     #[cfg(test)]
-    fn test_run_summaries(&self, project_id: Option<&str>) -> Vec<TestRunSummary> {
+    pub(crate) fn test_run_summaries(&self, project_id: Option<&str>) -> Vec<TestRunSummary> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         test_run_summaries_locked(&inner)
             .into_iter()
@@ -1435,7 +1441,7 @@ impl AppState {
     /// the last rescan recorded: a run was created or removed in a
     /// `review-runs` directory, or a skipped run directory got its request.
     /// Stats only; the state lock is not held while they run.
-    fn test_run_tracked_dirs_changed(&self) -> bool {
+    pub(crate) fn test_run_tracked_dirs_changed(&self) -> bool {
         let tracked = self
             .inner
             .lock()
@@ -1455,7 +1461,7 @@ impl AppState {
     /// polls. It stops once shutdown is signalled, so no delta is committed
     /// after persistence has shut down.
     #[cfg(not(test))]
-    fn spawn_test_run_index(&self) {
+    pub(crate) fn spawn_test_run_index(&self) {
         let state = self.clone();
         let shutdown = self.subscribe_shutdown_signal();
         let spawned = std::thread::Builder::new()

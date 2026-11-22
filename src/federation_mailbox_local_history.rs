@@ -1,11 +1,13 @@
 // Selects original native mailbox ownership before domain/relay routing.
 // Does not retry refused domain operations against a different store or actor.
 
-const NATIVE_MAILBOX_ROUTE_MISS_LIMIT: usize = 64;
+use super::*;
+
+pub(crate) const NATIVE_MAILBOX_ROUTE_MISS_LIMIT: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum OriginalMailboxLookup {
+pub(crate) enum OriginalMailboxLookup {
     Member,
     NoMembership,
     StoreUnavailable,
@@ -13,17 +15,17 @@ enum OriginalMailboxLookup {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NativeMailboxRouteMiss {
-    at: String,
-    operation: &'static str,
+pub(crate) struct NativeMailboxRouteMiss {
+    pub(crate) at: String,
+    pub(crate) operation: &'static str,
     caller_session_id: Option<String>,
-    mailbox_id: Option<String>,
-    coordination_store_id: Option<String>,
+    pub(crate) mailbox_id: Option<String>,
+    pub(crate) coordination_store_id: Option<String>,
     native_lookup: OriginalMailboxLookup,
 }
 
 impl AppState {
-    async fn replay_original_native_mailbox_send(
+    pub(crate) async fn replay_original_native_mailbox_send(
         &self,
         native: &str,
         request: &SendMailboxMessageRequest,
@@ -109,7 +111,7 @@ impl AppState {
         .await
     }
 
-    async fn lookup_original_mailbox_resource(
+    pub(crate) async fn lookup_original_mailbox_resource(
         &self,
         native: &str,
         id: &str,
@@ -138,7 +140,7 @@ impl AppState {
         }).await
     }
 
-    fn describe_mailbox_route_miss(
+    pub(crate) fn describe_mailbox_route_miss(
         &self,
         mut error: ApiError,
         operation: &'static str,
@@ -172,7 +174,9 @@ impl AppState {
         error.message = format!(
             "{}; domain mailbox {operation} returned 404 after {reason} for caller {} and mailbox {} in coordination store {} (server instance {})",
             error.message,
-            caller_session_id.as_deref().unwrap_or("<invalid session id>"),
+            caller_session_id
+                .as_deref()
+                .unwrap_or("<invalid session id>"),
             mailbox_id.as_deref().unwrap_or("<invalid mailbox id>"),
             coordination_store_id.as_deref().unwrap_or("unavailable"),
             self.server_instance_id,

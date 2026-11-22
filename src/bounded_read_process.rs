@@ -1,38 +1,56 @@
 // Shared finite read-command transport, introduced for host freeze and Work
 // reads. Owns child/group and bounded pipe observation, not caller authority,
 // command construction or response parsing. Extracted from review_freeze_process.rs.
+
+use super::*;
 #[derive(Debug)]
-struct BoundedReadFailure {
-    stage: &'static str,
-    kind: String,
-    elapsed: Duration,
-    launch_lock_wait: Option<Duration>,
-    read_expired_at_return: Option<bool>,
-    cleanup_certified: Option<bool>,
+pub(crate) struct BoundedReadFailure {
+    pub(crate) stage: &'static str,
+    pub(crate) kind: String,
+    pub(crate) elapsed: Duration,
+    pub(crate) launch_lock_wait: Option<Duration>,
+    pub(crate) read_expired_at_return: Option<bool>,
+    pub(crate) cleanup_certified: Option<bool>,
     #[cfg(all(windows, test))]
     launch_lock_holders: String,
-    detail: String,
+    pub(crate) detail: String,
 }
 
 impl std::fmt::Display for BoundedReadFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "read_expired_at_return={:?} cleanup_certified={:?}; ",
-            self.read_expired_at_return, self.cleanup_certified)?;
+        write!(
+            f,
+            "read_expired_at_return={:?} cleanup_certified={:?}; ",
+            self.read_expired_at_return, self.cleanup_certified
+        )?;
         let lock_wait = self.launch_lock_wait.map_or_else(
-            || "unobserved".to_owned(), |wait| wait.as_millis().to_string(),
+            || "unobserved".to_owned(),
+            |wait| wait.as_millis().to_string(),
         );
         #[cfg(all(windows, test))]
         {
-            write!(f, "bounded read stage={} kind={} elapsed_ms={} lock_wait_ms={}: {}",
-                self.stage, self.kind, self.elapsed.as_millis(),
-                lock_wait, self.detail)?;
+            write!(
+                f,
+                "bounded read stage={} kind={} elapsed_ms={} lock_wait_ms={}: {}",
+                self.stage,
+                self.kind,
+                self.elapsed.as_millis(),
+                lock_wait,
+                self.detail
+            )?;
             write!(f, "; {}", self.launch_lock_holders)
         }
         #[cfg(not(all(windows, test)))]
         {
-            write!(f, "bounded read stage={} kind={} elapsed_ms={} lock_wait_ms={}: {}",
-                self.stage, self.kind, self.elapsed.as_millis(),
-                lock_wait, self.detail)
+            write!(
+                f,
+                "bounded read stage={} kind={} elapsed_ms={} lock_wait_ms={}: {}",
+                self.stage,
+                self.kind,
+                self.elapsed.as_millis(),
+                lock_wait,
+                self.detail
+            )
         }
     }
 }
@@ -40,7 +58,7 @@ impl std::fmt::Display for BoundedReadFailure {
 impl std::error::Error for BoundedReadFailure {}
 
 #[cfg(test)]
-static BOUNDED_READ_TIMING_DIAGNOSTIC: std::sync::atomic::AtomicBool =
+pub(crate) static BOUNDED_READ_TIMING_DIAGNOSTIC: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 // Explicit ignored diagnostics only; never changes a read's deadline or custody.
@@ -64,14 +82,20 @@ impl Drop for BoundedReadTimingDiagnostic {
 // expires. One deadline per command: an error path must not renew the floor.
 #[cfg(any(windows, test))]
 #[derive(Default)]
-struct BoundedReadCleanup {
-    deadline: Option<std::time::Instant>,
+pub(crate) struct BoundedReadCleanup {
+    pub(crate) deadline: Option<std::time::Instant>,
 }
 
 #[cfg(any(windows, test))]
 impl BoundedReadCleanup {
-    fn deadline(&mut self, read_deadline: std::time::Instant, entered: std::time::Instant) -> std::time::Instant {
-        *self.deadline.get_or_insert_with(|| read_deadline.max(entered + Duration::from_secs(1)))
+    pub(crate) fn deadline(
+        &mut self,
+        read_deadline: std::time::Instant,
+        entered: std::time::Instant,
+    ) -> std::time::Instant {
+        *self
+            .deadline
+            .get_or_insert_with(|| read_deadline.max(entered + Duration::from_secs(1)))
     }
 }
 
@@ -79,18 +103,18 @@ impl BoundedReadCleanup {
 thread_local! {
     // Consume only after a real child has launched and its test setup ran.
     // Expiry is the injected failure, never a performance/success oracle.
-    static TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    pub(crate) static TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
 
-struct BoundedReadObservation {
-    started: std::time::Instant,
+pub(crate) struct BoundedReadObservation {
+    pub(crate) started: std::time::Instant,
     warning_operation: Option<String>,
     complete_stderr_limit: Option<usize>,
-    warned: bool,
-    stage: &'static str,
-    launch_lock_wait: Option<Duration>,
-    read_deadline: Option<std::time::Instant>,
-    cleanup_certified: Option<bool>,
+    pub(crate) warned: bool,
+    pub(crate) stage: &'static str,
+    pub(crate) launch_lock_wait: Option<Duration>,
+    pub(crate) read_deadline: Option<std::time::Instant>,
+    pub(crate) cleanup_certified: Option<bool>,
     #[cfg(all(windows, test))]
     lock_observation: host_command::telemetry::Observation,
     #[cfg(test)]
@@ -98,13 +122,19 @@ struct BoundedReadObservation {
 }
 
 impl BoundedReadObservation {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            started: std::time::Instant::now(), stage: "spawn",
-            warning_operation: None, warned: false,
+            started: std::time::Instant::now(),
+            stage: "spawn",
+            warning_operation: None,
+            warned: false,
             complete_stderr_limit: None,
             // The legacy Windows Command path does not expose its lock wait.
-            launch_lock_wait: if cfg!(windows) { None } else { Some(Duration::ZERO) },
+            launch_lock_wait: if cfg!(windows) {
+                None
+            } else {
+                Some(Duration::ZERO)
+            },
             read_deadline: None,
             cleanup_certified: None,
             #[cfg(all(windows, test))]
@@ -120,21 +150,31 @@ impl BoundedReadObservation {
         }
     }
 
-    fn failure(&self, error: anyhow::Error) -> anyhow::Error {
-        let kind = error.chain().find_map(|cause| {
-            if let Some(error) = cause.downcast_ref::<io::Error>() {
-                return Some(format!("{:?}", error.kind()));
-            }
-            cause.downcast_ref::<mpsc::RecvTimeoutError>().map(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => "TimedOut".to_owned(),
-                mpsc::RecvTimeoutError::Disconnected => "Disconnected".to_owned(),
+    pub(crate) fn failure(&self, error: anyhow::Error) -> anyhow::Error {
+        let kind = error
+            .chain()
+            .find_map(|cause| {
+                if let Some(error) = cause.downcast_ref::<io::Error>() {
+                    return Some(format!("{:?}", error.kind()));
+                }
+                cause
+                    .downcast_ref::<mpsc::RecvTimeoutError>()
+                    .map(|error| match error {
+                        mpsc::RecvTimeoutError::Timeout => "TimedOut".to_owned(),
+                        mpsc::RecvTimeoutError::Disconnected => "Disconnected".to_owned(),
+                    })
             })
-        }).unwrap_or_else(|| "Other".to_owned());
+            .unwrap_or_else(|| "Other".to_owned());
         let detail = error.to_string();
         error.context(BoundedReadFailure {
-            stage: self.stage, kind, elapsed: self.started.elapsed(),
-            launch_lock_wait: self.launch_lock_wait, detail,
-            read_expired_at_return: self.read_deadline.map(|deadline| std::time::Instant::now() >= deadline),
+            stage: self.stage,
+            kind,
+            elapsed: self.started.elapsed(),
+            launch_lock_wait: self.launch_lock_wait,
+            detail,
+            read_expired_at_return: self
+                .read_deadline
+                .map(|deadline| std::time::Instant::now() >= deadline),
             cleanup_certified: self.cleanup_certified,
             #[cfg(all(windows, test))]
             launch_lock_holders: self.lock_observation.summary(),
@@ -143,18 +183,18 @@ impl BoundedReadObservation {
 }
 
 #[cfg(windows)]
-type BoundedReadCommand = windows_launch::LaunchSpec;
+pub(crate) type BoundedReadCommand = windows_launch::LaunchSpec;
 #[cfg(not(windows))]
-type BoundedReadCommand = Command;
+pub(crate) type BoundedReadCommand = Command;
 
 // This is constructed at the read caller, rather than copying opaque Command
 // state. The adapter keeps its separate transport during this migration.
 #[cfg(not(windows))]
-fn bounded_read_command(binary: &FsPath) -> BoundedReadCommand {
+pub(crate) fn bounded_read_command(binary: &FsPath) -> BoundedReadCommand {
     engram_command(binary)
 }
 
-fn run_bounded_read_command(
+pub(crate) fn run_bounded_read_command(
     command: &mut BoundedReadCommand,
     deadline: std::time::Instant,
     output_limit: usize,
@@ -173,20 +213,24 @@ fn run_bounded_read_command(
 
 // Engram reads retain the same process/cancellation/cleanup owner as Git
 // reads, with an operation-named soft warning. No extra watcher is spawned.
-fn run_engram_bounded_read_command(
+pub(crate) fn run_engram_bounded_read_command(
     command: &mut BoundedReadCommand,
     deadline: std::time::Instant,
     output_limit: usize,
     operation: &str,
 ) -> Result<std::process::Output> {
     run_engram_bounded_read_command_with_stderr_limit(
-        command, deadline, output_limit, operation, None,
+        command,
+        deadline,
+        output_limit,
+        operation,
+        None,
     )
 }
 
 // Source admission validates every diagnostic byte. Other read callers retain
 // their existing truncating stderr policy and the same finite process owner.
-fn run_engram_bounded_read_command_with_stderr_limit(
+pub(crate) fn run_engram_bounded_read_command_with_stderr_limit(
     command: &mut BoundedReadCommand,
     deadline: std::time::Instant,
     output_limit: usize,
@@ -197,16 +241,30 @@ fn run_engram_bounded_read_command_with_stderr_limit(
     observed.warning_operation = Some(operation.to_owned());
     observed.complete_stderr_limit = complete_stderr_limit;
     #[cfg(windows)]
-    let result = run_bounded_read_windows_observed(command, deadline, output_limit, |_| Ok(()), &mut observed);
+    let result = run_bounded_read_windows_observed(
+        command,
+        deadline,
+        output_limit,
+        |_| Ok(()),
+        &mut observed,
+    );
     #[cfg(not(windows))]
-    let result = run_bounded_read_process_input_observed(command, deadline, output_limit, true, |_| Ok(()), None, &mut observed);
+    let result = run_bounded_read_process_input_observed(
+        command,
+        deadline,
+        output_limit,
+        true,
+        |_| Ok(()),
+        None,
+        &mut observed,
+    );
     result.map_err(|error| observed.failure(error))
 }
 
 // Fixed host-owned Git batch input only; no caller-controlled executable,
 // script, redirection, or scratch file. Pipe writers run beside pipe readers
 // and are released by the same deadline/tree cleanup as the ordinary read.
-fn run_bounded_read_input(
+pub(crate) fn run_bounded_read_input(
     command: &mut BoundedReadCommand,
     deadline: std::time::Instant,
     output_limit: usize,
@@ -242,20 +300,31 @@ fn run_bounded_read_input(
 // Same private setup boundary as the legacy transport: tests can pin every
 // fixture identity and force leader exit before the supervisor observes it.
 #[cfg(windows)]
-fn run_bounded_read_windows_with_setup(
+pub(crate) fn run_bounded_read_windows_with_setup(
     command: &mut BoundedReadCommand,
     deadline: std::time::Instant,
     output_limit: usize,
     before_observe: impl FnOnce(&Arc<windows_launch::WindowsChild>) -> Result<()>,
 ) -> Result<std::process::Output> {
     let mut observed = BoundedReadObservation::new();
-    let result = run_bounded_read_windows_observed(command, deadline, output_limit, before_observe, &mut observed);
+    let result = run_bounded_read_windows_observed(
+        command,
+        deadline,
+        output_limit,
+        before_observe,
+        &mut observed,
+    );
     #[cfg(test)]
     if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
-        eprintln!("bounded timing thread={:?} ok={} elapsed_ms={} lock_wait_ms={:?} phases={:?}; {}",
-            std::thread::current().id(), result.is_ok(), observed.started.elapsed().as_millis(),
-            observed.launch_lock_wait.map(|wait| wait.as_millis()), observed.timing_phases,
-            observed.lock_observation.summary());
+        eprintln!(
+            "bounded timing thread={:?} ok={} elapsed_ms={} lock_wait_ms={:?} phases={:?}; {}",
+            std::thread::current().id(),
+            result.is_ok(),
+            observed.started.elapsed().as_millis(),
+            observed.launch_lock_wait.map(|wait| wait.as_millis()),
+            observed.timing_phases,
+            observed.lock_observation.summary()
+        );
     }
     result.map_err(|error| observed.failure(error))
 }
@@ -276,13 +345,18 @@ fn run_bounded_read_windows_observed(
     observed.read_deadline = Some(deadline);
     command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     if deadline <= std::time::Instant::now() {
-        return Err(io::Error::new(io::ErrorKind::TimedOut,
-            "bounded read deadline exceeded before launch").into());
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "bounded read deadline exceeded before launch",
+        )
+        .into());
     }
     let mut lock_wait = Duration::ZERO;
     let launch = windows_launch::prepare_with_lock_timing(command, &mut lock_wait);
     #[cfg(test)]
-    observed.timing_phases.push(("prepare", observed.started.elapsed()));
+    observed
+        .timing_phases
+        .push(("prepare", observed.started.elapsed()));
     observed.launch_lock_wait = Some(lock_wait);
     let launch = Arc::new(launch?);
     #[cfg(test)]
@@ -300,7 +374,9 @@ fn run_bounded_read_windows_observed(
                 return Err(error.into());
             }
         }
-    } else { None };
+    } else {
+        None
+    };
     let cancel_launch = launch.clone();
     let cancel_process = process.clone();
     let cancel_job = capture_job.clone();
@@ -330,7 +406,8 @@ fn run_bounded_read_windows_observed(
         observed.stage = "spawn";
         check_capture_cancellation()?;
         if current_capture_cancellation().is_some() {
-            if let windows_launch::ContainmentStatus::Unavailable { reason } = launch.containment() {
+            if let windows_launch::ContainmentStatus::Unavailable { reason } = launch.containment()
+            {
                 // The leader is still suspended. Error cleanup terminates it
                 // before it can run code or create an unowned descendant.
                 bail!("capture containment unavailable: {reason}");
@@ -339,12 +416,16 @@ fn run_bounded_read_windows_observed(
         launch.resume_after_attach(&process)?;
         before_observe(&process)?;
         #[cfg(test)]
-        if let Some(injected) = TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP.with(|deadline| deadline.take()) {
+        if let Some(injected) =
+            TEST_BOUNDED_READ_DEADLINE_AFTER_SETUP.with(|deadline| deadline.take())
+        {
             deadline = injected;
             observed.read_deadline = Some(deadline);
         }
         #[cfg(test)]
-        observed.timing_phases.push(("setup", setup_started.elapsed()));
+        observed
+            .timing_phases
+            .push(("setup", setup_started.elapsed()));
         observed.stage = "wait";
         #[cfg(test)]
         let wait_started = std::time::Instant::now();
@@ -353,15 +434,25 @@ fn run_bounded_read_windows_observed(
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             let wait = if observed.warning_operation.is_some() && !observed.warned {
                 remaining.min(ENGRAM_CALL_WARNING_AFTER.saturating_sub(observed.started.elapsed()))
-            } else { remaining };
+            } else {
+                remaining
+            };
             match process.wait_timeout(wait)? {
                 Some(status) => break status,
                 None if std::time::Instant::now() < deadline => continue,
-                None => return Err(io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded").into()),
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "bounded read deadline exceeded",
+                    )
+                    .into());
+                }
             }
         };
         #[cfg(test)]
-        observed.timing_phases.push(("wait", wait_started.elapsed()));
+        observed
+            .timing_phases
+            .push(("wait", wait_started.elapsed()));
         if let Some(job) = &capture_job {
             observed.stage = "cleanup";
             #[cfg(test)]
@@ -371,35 +462,50 @@ fn run_bounded_read_windows_observed(
             let finished = job.finish(Some(cleanup_deadline));
             observed.cleanup_certified = finished.as_ref().ok().copied();
             #[cfg(test)]
-            observed.timing_phases.push(("cleanup", cleanup_started.elapsed()));
+            observed
+                .timing_phases
+                .push(("cleanup", cleanup_started.elapsed()));
             if !finished? {
-                return Err(io::Error::new(io::ErrorKind::TimedOut,
-                    "capture job cleanup not certified before cleanup deadline").into());
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "capture job cleanup not certified before cleanup deadline",
+                )
+                .into());
             }
         } else {
             launch.cleanup_after_shell_exit(&process, "bounded read")?;
         }
         if capture_job.is_some() && std::time::Instant::now() >= deadline {
-            return Err(io::Error::new(io::ErrorKind::TimedOut,
-                "bounded read deadline exceeded; cleanup does not extend the read budget").into());
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "bounded read deadline exceeded; cleanup does not extend the read budget",
+            )
+            .into());
         }
         check_capture_cancellation()?;
         #[cfg(test)]
         let pipes_started = std::time::Instant::now();
         let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
         observed.stage = "pipe";
-        let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stdout =
+            out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
         observed.stage = "read";
         let stdout = stdout?;
         observed.stage = "pipe";
-        let stderr = err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stderr =
+            err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
         observed.stage = "read";
         let stderr = stderr?;
         #[cfg(test)]
-        observed.timing_phases.push(("pipes", pipes_started.elapsed()));
+        observed
+            .timing_phases
+            .push(("pipes", pipes_started.elapsed()));
         if capture_job.is_some() && std::time::Instant::now() >= deadline {
-            return Err(io::Error::new(io::ErrorKind::TimedOut,
-                "bounded read deadline exceeded while collecting pipes").into());
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "bounded read deadline exceeded while collecting pipes",
+            )
+            .into());
         }
         Ok(std::process::Output {
             status,
@@ -427,7 +533,9 @@ fn run_bounded_read_windows_observed(
                 }
             }
             #[cfg(test)]
-            observed.timing_phases.push(("error_cleanup", cleanup_started.elapsed()));
+            observed
+                .timing_phases
+                .push(("error_cleanup", cleanup_started.elapsed()));
         } else {
             if let Err(error) = launch.kill(&process, "bounded read") {
                 eprintln!("bounded read> cleanup: {error:#}");
@@ -438,7 +546,7 @@ fn run_bounded_read_windows_observed(
     result
 }
 
-fn bounded_read_pipe(
+pub(crate) fn bounded_read_pipe(
     mut reader: impl std::io::Read + Send + 'static,
     limit: usize,
     truncate: bool,
@@ -470,7 +578,7 @@ fn bounded_read_pipe(
 }
 
 #[cfg(any(not(windows), test))]
-fn run_bounded_read_process(
+pub(crate) fn run_bounded_read_process(
     command: &mut Command,
     deadline: std::time::Instant,
     output_limit: usize,
@@ -482,7 +590,7 @@ fn run_bounded_read_process(
 // The setup boundary lets ownership tests force leader exit before observation.
 // Production never installs another waiter or exposes this hook to callers.
 #[cfg(any(not(windows), test))]
-fn run_bounded_read_process_with_setup(
+pub(crate) fn run_bounded_read_process_with_setup(
     command: &mut Command,
     deadline: std::time::Instant,
     output_limit: usize,
@@ -500,7 +608,7 @@ fn run_bounded_read_process_with_setup(
 }
 
 #[cfg(any(not(windows), test))]
-fn run_bounded_read_process_input(
+pub(crate) fn run_bounded_read_process_input(
     command: &mut Command,
     deadline: std::time::Instant,
     output_limit: usize,
@@ -510,8 +618,15 @@ fn run_bounded_read_process_input(
 ) -> Result<std::process::Output> {
     let mut observed = BoundedReadObservation::new();
     run_bounded_read_process_input_observed(
-        command, deadline, output_limit, own_tree, before_observe, input, &mut observed,
-    ).map_err(|error| observed.failure(error))
+        command,
+        deadline,
+        output_limit,
+        own_tree,
+        before_observe,
+        input,
+        &mut observed,
+    )
+    .map_err(|error| observed.failure(error))
 }
 
 #[cfg(any(not(windows), test))]
@@ -609,7 +724,11 @@ fn run_bounded_read_process_input_observed(
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                return Err(io::Error::new(io::ErrorKind::TimedOut, "bounded read deadline exceeded").into());
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "bounded read deadline exceeded",
+                )
+                .into());
             }
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -632,11 +751,13 @@ fn run_bounded_read_process_input_observed(
         // timeout racing their sends and not an unbounded receive.
         let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
         observed.stage = "pipe";
-        let stdout = out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stdout =
+            out.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
         observed.stage = "read";
         let stdout = stdout?;
         observed.stage = "pipe";
-        let stderr = err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
+        let stderr =
+            err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
         observed.stage = "read";
         let stderr = stderr?;
         Ok(std::process::Output {
@@ -684,7 +805,7 @@ fn run_bounded_read_process_input_observed(
 }
 
 #[cfg(any(not(windows), test))]
-fn finish_read_process_tree(
+pub(crate) fn finish_read_process_tree(
     tree: &TerminalProcessTree,
     process: &Arc<SharedChild>,
     reaped: &mut bool,
@@ -712,7 +833,8 @@ fn finish_read_process_tree(
             reap_state,
             pgid,
             probe_deadline: std::time::Instant::now() + Duration::from_millis(250),
-        }).inspect(|_| {
+        })
+        .inspect(|_| {
             // Reaping the leader alone does not certify that its group is gone.
             remove_reaped_bounded_read(process);
         })
@@ -727,7 +849,7 @@ fn finish_read_process_tree(
 }
 
 #[cfg(any(not(windows), test))]
-fn read_child_has_exited(process: &Arc<SharedChild>) -> io::Result<bool> {
+pub(crate) fn read_child_has_exited(process: &Arc<SharedChild>) -> io::Result<bool> {
     #[cfg(unix)]
     {
         // This worker is the sole wait owner. waitid only observes the child;

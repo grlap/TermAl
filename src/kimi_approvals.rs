@@ -17,6 +17,8 @@
 // `allow_once` too, so a policy that picked the first `allow_once` would
 // answer the user's question or approve a plan.
 
+use super::*;
+
 /// Longest Kimi effort value the app default accepts. Kimi advertises short
 /// tokens (`low`, `high`, `max`); the value is checked against the model's
 /// advertised list only when a session prompts.
@@ -25,7 +27,7 @@ const MAX_DEFAULT_KIMI_EFFORT_CHARS: usize = 64;
 /// The app-wide default Kimi effort: `auto` (leave the CLI's choice) or one
 /// effort token. Empty text means `auto`. Pure validation: callers run it
 /// before they change any preference, so a rejected request changes nothing.
-fn normalize_default_kimi_effort(value: &str) -> Result<String, ApiError> {
+pub(crate) fn normalize_default_kimi_effort(value: &str) -> Result<String, ApiError> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("auto") {
         return Ok(default_kimi_effort_preference());
@@ -66,7 +68,7 @@ impl AppState {
     /// `handle_acp_message`: the decision and the send happen under the lock
     /// that also guards Stop, and a stale or stopping runtime of an
     /// auto-approve session is answered `cancelled`, never approved.
-    fn answer_kimi_auto_approval(
+    pub(crate) fn answer_kimi_auto_approval(
         &self,
         message: &Value,
         session_id: &str,
@@ -126,7 +128,7 @@ impl AppState {
     /// Records the mode Kimi reports, for display only. It never changes the
     /// session's `kimiMode`, and it never decides an approval: the effective
     /// mode comes only from the pre-prompt ACK.
-    fn record_kimi_current_mode(
+    pub(crate) fn record_kimi_current_mode(
         &self,
         session_id: &str,
         runtime_token: &RuntimeToken,

@@ -8,6 +8,8 @@
 // New file: the denial text it replaces was one generic sentence inline in
 // claude.rs, so this is new logic, not a code move.
 
+use super::*;
+
 /// The refusal a read-only Claude child gets for a request the gate denied:
 /// the rule it broke and what it may do instead, so it can adapt in one step
 /// rather than guess. It says "delegation", not "reviewer": the gate is shared
@@ -16,7 +18,7 @@
 /// This only explains a decision already taken; it never decides. The Bash
 /// rule comes from [`claude_bash_refusal_rule`], which runs after
 /// [`claude_bash_command_is_read_only`] has denied the command.
-fn read_only_claude_denial(
+pub(crate) fn read_only_claude_denial(
     request: &ClaudeToolPermissionRequest,
     cwd: &str,
     is_tracker_tool: bool,
@@ -309,7 +311,7 @@ fn claude_git_refusal_rule(tokens: &[&str]) -> Option<String> {
 
 /// The git subcommands [`claude_git_tokens_are_read_only`] can allow, named in
 /// a refusal so that a refused option is not mistaken for a refused command.
-const CLAUDE_READ_ONLY_GIT_SUBCOMMANDS: &[&str] = &[
+pub(crate) const CLAUDE_READ_ONLY_GIT_SUBCOMMANDS: &[&str] = &[
     "diff",
     "log",
     "show",

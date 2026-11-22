@@ -30,14 +30,16 @@
 // New file; nothing was split out of another. It replaces the per-frame
 // foreign scope that `claude_runtime_turns.rs` held.
 
+use super::*;
+
 /// At most this many outstanding work entries are kept per session; past
 /// that, the oldest detail is dropped and the work is kept as unknown, which
 /// no later frame can release.
-const CLAUDE_OUTSTANDING_WORK_LIMIT: usize = 256;
+pub(crate) const CLAUDE_OUTSTANDING_WORK_LIMIT: usize = 256;
 
 /// The turn a Claude frame's work belongs to.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeWorkOrigin {
+pub(crate) enum ClaudeWorkOrigin {
     /// The prompt attempt dispatched under this session turn generation.
     Attempt { turn_generation: u64 },
     /// A root frame proven to belong to this adopted runtime turn. Nested
@@ -52,26 +54,29 @@ enum ClaudeWorkOrigin {
 /// frame and the turn the frame belongs to. Fixed before the frame's parser
 /// or control step runs, and checked again where the observation is applied.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeObservationProvenance {
-    token: RuntimeToken,
-    origin: ClaudeWorkOrigin,
+pub(crate) struct ClaudeObservationProvenance {
+    pub(crate) token: RuntimeToken,
+    pub(crate) origin: ClaudeWorkOrigin,
 }
 
 /// The provenance a recorder gives its observations. `Ambient` is that of a
 /// separately fenced Codex adapter and of tests driving a recorder directly.
 /// Claude frames and ACP reader events carry their producing runtime and turn.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-enum EngramObservationProvenance {
+pub(crate) enum EngramObservationProvenance {
     #[default]
     Ambient,
     Claude(ClaudeObservationProvenance),
-    Runtime { token: RuntimeToken, turn_generation: u64 },
+    Runtime {
+        token: RuntimeToken,
+        turn_generation: u64,
+    },
 }
 
 /// What the sink does with one observation, decided under the state lock in
 /// the section that applies it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeObservationDisposition {
+pub(crate) enum ClaudeObservationDisposition {
     /// The session's own turn: attributed to its grant as ever.
     Current,
     /// A turn no prompt owns is open on the session and hides what the
@@ -90,12 +95,15 @@ enum ClaudeObservationDisposition {
 }
 
 /// The disposition of an observation of `provenance` on `record`, now.
-fn claude_observation_disposition(
+pub(crate) fn claude_observation_disposition(
     record: &SessionRecord,
     provenance: &EngramObservationProvenance,
 ) -> ClaudeObservationDisposition {
     let provenance = match provenance {
-        EngramObservationProvenance::Runtime { token, turn_generation } => {
+        EngramObservationProvenance::Runtime {
+            token,
+            turn_generation,
+        } => {
             return if !record.runtime.matches_runtime_token(token) {
                 ClaudeObservationDisposition::Replaced
             } else if *turn_generation != record.active_turn_generation {
@@ -107,7 +115,9 @@ fn claude_observation_disposition(
             };
         }
         EngramObservationProvenance::Ambient => {
-            return if human_prompt_turn_is_current(record) || unmediated_claude_turn_hides_observations(record) {
+            return if human_prompt_turn_is_current(record)
+                || unmediated_claude_turn_hides_observations(record)
+            {
                 ClaudeObservationDisposition::Unowned
             } else {
                 ClaudeObservationDisposition::Current
@@ -125,7 +135,9 @@ fn claude_observation_disposition(
         {
             ClaudeObservationDisposition::Foreign
         }
-        _ if human_prompt_turn_is_current(record) || unmediated_claude_turn_hides_observations(record) => {
+        _ if human_prompt_turn_is_current(record)
+            || unmediated_claude_turn_hides_observations(record) =>
+        {
             ClaudeObservationDisposition::Unowned
         }
         ClaudeWorkOrigin::Attempt { .. } => ClaudeObservationDisposition::Current,
@@ -138,7 +150,7 @@ fn claude_observation_disposition(
 impl ClaudeObservationDisposition {
     /// Whether the live grant must be excluded from the work: it is another
     /// turn's or a replaced runtime's.
-    fn excludes_live_grant(self) -> bool {
+    pub(crate) fn excludes_live_grant(self) -> bool {
         matches!(self, Self::Foreign | Self::Replaced)
     }
 }
@@ -146,7 +158,7 @@ impl ClaudeObservationDisposition {
 /// Why a check or an evaluation is refused credit for outstanding Claude
 /// work: told from the same retained facts that fenced it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeHazardCause {
+pub(crate) enum ClaudeHazardCause {
     /// The session's own Claude work with no verified completion: the
     /// session's provenance is unresolved, whatever workspace it measures.
     OwnSession,
@@ -157,7 +169,7 @@ enum ClaudeHazardCause {
 }
 
 impl ClaudeHazardCause {
-    fn describe(&self) -> String {
+    pub(crate) fn describe(&self) -> String {
         match self {
             Self::OwnSession => "this session's own Claude work (a background or subagent task, \
                  or a command a stopped or replaced runtime started) has no verified completion, \
@@ -181,7 +193,9 @@ fn claude_evidence_restricted_notice(record: &SessionRecord) -> String {
     let work = &record.claude_outstanding;
     let current = record.runtime.runtime_token();
     let hazards = work.hazard_count(
-        current.as_ref(), record.active_turn_generation, record.adopted_claude_turn_generation,
+        current.as_ref(),
+        record.active_turn_generation,
+        record.adopted_claude_turn_generation,
     );
     let orphaned = work.unknown
         || work
@@ -240,13 +254,15 @@ fn claude_exclude_current_turn(record: &mut SessionRecord) {
     for check in &mut record.engram.active_turn_checks {
         if check.open_to_writes() {
             check.overlapped = true;
-            check.fenced_by_outstanding.get_or_insert(ClaudeHazardCause::OwnSession);
+            check
+                .fenced_by_outstanding
+                .get_or_insert(ClaudeHazardCause::OwnSession);
         }
     }
     claude_mark_observation_mixed(record);
 }
 
-fn claude_mark_observation_mixed(record: &mut SessionRecord) {
+pub(crate) fn claude_mark_observation_mixed(record: &mut SessionRecord) {
     if !mark_runtime_observation_source_uncertain(record) {
         return;
     }
@@ -263,7 +279,7 @@ fn claude_mark_observation_mixed(record: &mut SessionRecord) {
 /// replaced runtime's work only when it shows new activity (a command
 /// starting). Under the state lock, in the section that applies the
 /// observation.
-fn claude_exclude_observation(
+pub(crate) fn claude_exclude_observation(
     record: &mut SessionRecord,
     disposition: ClaudeObservationDisposition,
     provenance: &EngramObservationProvenance,
@@ -312,33 +328,33 @@ fn claude_merge_locations(locations: &mut Vec<Option<String>>, more: &[Option<St
 /// One piece of outstanding work: a tool call a Claude runtime started that
 /// may still run and write, until a correlated end from that runtime arrives.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeOutstandingEntry {
+pub(crate) struct ClaudeOutstandingEntry {
     /// The runtime that started it.
-    token: RuntimeToken,
+    pub(crate) token: RuntimeToken,
     /// Its tool-use id.
-    key: String,
+    pub(crate) key: String,
     /// The turn that started it.
-    origin: ClaudeWorkOrigin,
+    pub(crate) origin: ClaudeWorkOrigin,
     /// Launched, or later moved, to run in the background: its tool result
     /// marks only the launch, and its end is a terminal task notification
     /// naming it.
-    background: bool,
+    pub(crate) background: bool,
     /// A subagent started it.
-    nested: bool,
+    pub(crate) nested: bool,
     /// It is a top-level call of a recognised simple full gate: by the
     /// interference rule (`engram_claude_interference.rs`) it does not fence
     /// the check and the carried run it launched itself, and fences
     /// everything else.
-    self_gate: bool,
+    pub(crate) self_gate: bool,
     /// Where it may write: the worktrees known when it was registered (the
     /// session's workdir worktree, the grant's named root) and every place
     /// its command was later placed. Only grows while the work is
     /// outstanding; `None` is a worktree TermAl could not name, so any.
-    locations: Vec<Option<String>>,
+    pub(crate) locations: Vec<Option<String>>,
     /// When it was registered on the interference clock
     /// (`engram_claude_interference.rs`): it may have written from then on,
     /// wherever it is later found to run.
-    registered_at: u64,
+    pub(crate) registered_at: u64,
 }
 
 impl ClaudeOutstandingEntry {
@@ -350,7 +366,7 @@ impl ClaudeOutstandingEntry {
     /// is the prompt attempt of `turn_generation`, or the runtime-started
     /// turn adopted at it (`adopted_generation`): an adopted turn's own root
     /// foreground command is its own as well.
-    fn is_hazard(
+    pub(crate) fn is_hazard(
         &self,
         current: Option<&RuntimeToken>,
         turn_generation: u64,
@@ -366,24 +382,24 @@ impl ClaudeOutstandingEntry {
 /// The outstanding work of a session's Claude runtimes, and the notices the
 /// session owes about it.
 #[derive(Clone, Debug, Default)]
-struct ClaudeOutstandingWork {
-    entries: VecDeque<ClaudeOutstandingEntry>,
+pub(crate) struct ClaudeOutstandingWork {
+    pub(crate) entries: VecDeque<ClaudeOutstandingEntry>,
     /// Work past the bound was dropped: it is kept as unknown, and nothing
     /// releases it.
-    unknown: bool,
+    pub(crate) unknown: bool,
     /// Where the dropped work may write, kept when its detail was dropped.
-    unknown_locations: Vec<Option<String>>,
+    pub(crate) unknown_locations: Vec<Option<String>>,
     /// The earliest registration of the dropped work.
-    unknown_registered_at: u64,
+    pub(crate) unknown_registered_at: u64,
     /// A restriction newly took effect and the session has not said so yet.
     notice_due: bool,
     /// The session said its evidence is restricted, and has not yet said it
     /// was lifted.
-    restricting: bool,
+    pub(crate) restricting: bool,
 }
 
 impl ClaudeOutstandingWork {
-    fn register(&mut self, entry: ClaudeOutstandingEntry) {
+    pub(crate) fn register(&mut self, entry: ClaudeOutstandingEntry) {
         if let Some(known) = self
             .entries
             .iter_mut()
@@ -414,7 +430,7 @@ impl ClaudeOutstandingWork {
 
     /// The command `key` was placed in `worktrees`: they join where its
     /// entry may write, if it is still outstanding.
-    fn place(&mut self, key: &str, worktrees: &[Option<String>]) {
+    pub(crate) fn place(&mut self, key: &str, worktrees: &[Option<String>]) {
         for entry in self.entries.iter_mut().filter(|entry| entry.key == key) {
             claude_merge_locations(&mut entry.locations, worktrees);
         }
@@ -425,7 +441,12 @@ impl ClaudeOutstandingWork {
     /// first; then a foreground call ended, and a background one only
     /// started. Work a subagent of that call started ends only with its own
     /// result.
-    fn tool_result(&mut self, token: &RuntimeToken, key: &str, moved_to_background: bool) {
+    pub(crate) fn tool_result(
+        &mut self,
+        token: &RuntimeToken,
+        key: &str,
+        moved_to_background: bool,
+    ) {
         if moved_to_background {
             for entry in self
                 .entries
@@ -441,23 +462,26 @@ impl ClaudeOutstandingWork {
 
     /// The background work `key` of the runtime `token` reached a terminal
     /// status. Work its subagent started ends only with its own end.
-    fn task_ended(&mut self, token: &RuntimeToken, key: &str) {
+    pub(crate) fn task_ended(&mut self, token: &RuntimeToken, key: &str) {
         self.entries
             .retain(|entry| entry.token != *token || entry.key != key);
     }
 
-    fn holds(&self, key: &str) -> bool {
+    pub(crate) fn holds(&self, key: &str) -> bool {
         self.entries.iter().any(|entry| entry.key == key)
     }
 
     /// Whether any work may still be running, known or unknown. A grant
     /// beginning now started none of it.
-    fn any(&self) -> bool {
+    pub(crate) fn any(&self) -> bool {
         self.unknown || !self.entries.is_empty()
     }
 
     fn hazard_count(
-        &self, current: Option<&RuntimeToken>, turn_generation: u64, adopted_generation: Option<u64>,
+        &self,
+        current: Option<&RuntimeToken>,
+        turn_generation: u64,
+        adopted_generation: Option<u64>,
     ) -> usize {
         self.entries
             .iter()
@@ -468,8 +492,11 @@ impl ClaudeOutstandingWork {
     /// Whether any work restricts the session's turn `turn_generation` of
     /// the runtime `current` (`ClaudeOutstandingEntry::is_hazard`), or
     /// unknown work does: the current status an agent is told.
-    fn restricts(
-        &self, current: Option<&RuntimeToken>, turn_generation: u64, adopted_generation: Option<u64>,
+    pub(crate) fn restricts(
+        &self,
+        current: Option<&RuntimeToken>,
+        turn_generation: u64,
+        adopted_generation: Option<u64>,
     ) -> bool {
         self.unknown
             || self
@@ -480,7 +507,7 @@ impl ClaudeOutstandingWork {
 
     /// Takes in `other`'s work (a removed session's), keeping what each may
     /// write in; taking the same work twice adds nothing.
-    fn absorb(&mut self, other: &ClaudeOutstandingWork) {
+    pub(crate) fn absorb(&mut self, other: &ClaudeOutstandingWork) {
         for entry in &other.entries {
             self.register(entry.clone());
         }
@@ -492,7 +519,7 @@ impl ClaudeOutstandingWork {
 
 /// Whether Claude work restricts `record`'s current turn now
 /// (`ClaudeOutstandingWork::restricts`): the status its notices tell.
-fn claude_session_work_restricts(record: &SessionRecord) -> bool {
+pub(crate) fn claude_session_work_restricts(record: &SessionRecord) -> bool {
     record.claude_outstanding.restricts(
         record.runtime.runtime_token().as_ref(),
         record.active_turn_generation,
@@ -504,9 +531,9 @@ fn claude_session_work_restricts(record: &SessionRecord) -> bool {
 /// interference outlives the session record. Process-local: a host restart
 /// forgets it, which is a limitation, not a proof that the work ended.
 #[derive(Clone, Debug)]
-struct ClaudeOrphanedWork {
-    session_id: String,
-    work: ClaudeOutstandingWork,
+pub(crate) struct ClaudeOrphanedWork {
+    pub(crate) session_id: String,
+    pub(crate) work: ClaudeOutstandingWork,
 }
 
 impl StateInner {
@@ -514,7 +541,7 @@ impl StateInner {
     /// `session_id` being removed, on the host. Called under the state lock
     /// in the section that removes the session, so no interference query
     /// sees a gap; keeping the same work twice adds nothing.
-    fn orphan_claude_work(&mut self, session_id: &str, work: &ClaudeOutstandingWork) {
+    pub(crate) fn orphan_claude_work(&mut self, session_id: &str, work: &ClaudeOutstandingWork) {
         if !work.any() {
             return;
         }
@@ -547,16 +574,16 @@ impl StateInner {
 /// What one Claude frame does to the outstanding work: tool calls it starts,
 /// tool results it returns, background tasks it reports ended.
 #[derive(Debug, Default, PartialEq, Eq)]
-struct ClaudeFrameWork {
+pub(crate) struct ClaudeFrameWork {
     /// The frame starts a tool call, registered or not: new activity.
     starts_work: bool,
     /// Tool calls to register: key, background, recognised simple full gate.
-    started: Vec<(String, bool, bool)>,
+    pub(crate) started: Vec<(String, bool, bool)>,
     /// Tool results, by tool-use id, with whether the result says the call
     /// now runs in the background.
-    results: Vec<(String, bool)>,
+    pub(crate) results: Vec<(String, bool)>,
     /// Background tasks that reached a terminal status, by tool-use id.
-    ended: Vec<(String, bool)>,
+    pub(crate) ended: Vec<(String, bool)>,
 }
 
 impl ClaudeFrameWork {
@@ -592,7 +619,7 @@ fn claude_tool_call_may_outlive_its_turn(
 /// in the background (launched there, moved there by a timeout, the user or
 /// a turn abort): Claude Code 2.1.285 reports its end as a task notification
 /// naming the call.
-fn claude_frame_work(message: &Value, nested: bool) -> ClaudeFrameWork {
+pub(crate) fn claude_frame_work(message: &Value, nested: bool) -> ClaudeFrameWork {
     let mut work = ClaudeFrameWork::default();
     match message.get("type").and_then(Value::as_str) {
         Some("assistant") => {
@@ -652,8 +679,13 @@ fn claude_frame_work(message: &Value, nested: bool) -> ClaudeFrameWork {
                 .and_then(Value::as_str)
                 .is_some_and(claude_task_status_is_terminal);
             if terminal && let Some(key) = message.get("tool_use_id").and_then(Value::as_str) {
-                let interrupted = message.get("status").and_then(Value::as_str)
-                    .is_some_and(|status| matches!(status, "killed" | "stopped" | "cancelled" | "canceled"));
+                let interrupted =
+                    message
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .is_some_and(|status| {
+                            matches!(status, "killed" | "stopped" | "cancelled" | "canceled")
+                        });
                 work.ended.push((key.to_owned(), interrupted));
             }
         }
@@ -670,7 +702,7 @@ impl AppState {
     /// subagent, starts background work, or (for a replaced runtime) starts
     /// anything, so no report built from here on is clean of it. One lock
     /// section.
-    fn admit_claude_frame(
+    pub(crate) fn admit_claude_frame(
         &self,
         session_id: &str,
         provenance: &ClaudeObservationProvenance,
@@ -753,7 +785,12 @@ impl AppState {
     /// results and the terminal task notifications retire what they prove
     /// ended. Only the session's current runtime settles anything: a replaced
     /// runtime's late frame retires no entry. One lock section.
-    fn settle_claude_frame(&self, session_id: &str, token: &RuntimeToken, work: &ClaudeFrameWork) {
+    pub(crate) fn settle_claude_frame(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        work: &ClaudeFrameWork,
+    ) {
         if work.results.is_empty() && work.ended.is_empty() {
             return;
         }
@@ -773,7 +810,9 @@ impl AppState {
             return;
         }
         for (key, moved_to_background) in &work.results {
-            record.claude_outstanding.tool_result(token, key, *moved_to_background);
+            record
+                .claude_outstanding
+                .tool_result(token, key, *moved_to_background);
         }
         // A task can finish after its originating prompt. Match its original
         // runtime/tool identity, without borrowing the current turn's identity.
@@ -783,7 +822,9 @@ impl AppState {
             origin: ClaudeWorkOrigin::Unattributed,
         });
         for (key, _) in &work.ended {
-            inner.sessions[index].claude_outstanding.task_ended(token, key);
+            inner.sessions[index]
+                .claude_outstanding
+                .task_ended(token, key);
             self.observe_test_command_end_locked(
                 &mut inner,
                 session_id,
@@ -801,7 +842,7 @@ impl AppState {
     /// no work restricts the session any more. Each is told once; the earlier
     /// ones stay in the transcript. Only for the session's current runtime
     /// `token`.
-    fn give_claude_evidence_notices(&self, session_id: &str, token: &RuntimeToken) {
+    pub(crate) fn give_claude_evidence_notices(&self, session_id: &str, token: &RuntimeToken) {
         let notice = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -857,7 +898,7 @@ impl AppState {
     /// or deleted) that may write in the measured workspace. Tests run while
     /// it lasts earn no credit, so an evaluation that needs that credit
     /// cannot pass on them.
-    fn claude_evidence_restriction_notice(
+    pub(crate) fn claude_evidence_restriction_notice(
         &self,
         session_id: &str,
         place: &EngramBasisPlace,

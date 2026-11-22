@@ -1,9 +1,11 @@
 // Shared ownership and capacity for read-only source capture workers.
 // Source identity itself is supplied by the configured Engram owner.
 
+use super::*;
+
 /// A definitive refusal retained by historical capture paths and Git reads.
 #[derive(Clone, Copy, Debug)]
-enum SourceBasisRefusal {
+pub(crate) enum SourceBasisRefusal {
     ConfiguredGitFilters,
     UnsupportedGitlinks,
 }
@@ -26,7 +28,7 @@ impl std::error::Error for SourceBasisRefusal {}
 /// host lifetime until shutdown joins it (or retains pending cleanup). `live`
 /// counts healthy and abandoned workers; no thread starts while at `limit`.
 /// Failure, timeout, panic and capacity exhaustion all leave no capture.
-fn bounded_source_capture<T: Send + 'static>(
+pub(crate) fn bounded_source_capture<T: Send + 'static>(
     live: &Arc<std::sync::atomic::AtomicUsize>,
     lifetime: &Arc<CaptureLifetime>,
     limit: usize,
@@ -62,5 +64,7 @@ fn bounded_source_capture<T: Send + 'static>(
         eprintln!("engram> no thread for a source capture: {error}");
         return None;
     }
-    receive_engram_call(&receiver, started, budget, "source capture").ok().flatten()
+    receive_engram_call(&receiver, started, budget, "source capture")
+        .ok()
+        .flatten()
 }

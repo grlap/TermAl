@@ -2,12 +2,15 @@
 // only a delegation id; verdicts, source bytes, actor and attempt key all come
 // from the durable submission. Uses the ordinary submission flight and writer.
 
-const TERMAL_REPLAY_ACCEPTANCE_EVALUATION_TOOL_NAME: &str = "termal_replay_acceptance_evaluation";
+use super::*;
+
+pub(crate) const TERMAL_REPLAY_ACCEPTANCE_EVALUATION_TOOL_NAME: &str =
+    "termal_replay_acceptance_evaluation";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReplayAcceptanceEvaluationRequest {
-    delegation_id: String,
+pub(crate) struct ReplayAcceptanceEvaluationRequest {
+    pub(crate) delegation_id: String,
 }
 
 #[derive(Serialize)]
@@ -16,7 +19,7 @@ struct ReplayAcceptanceEvaluationRequest {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-enum AcceptanceEvaluationReplayResponse {
+pub(crate) enum AcceptanceEvaluationReplayResponse {
     Recorded {
         #[serde(flatten)]
         submission: AcceptanceEvaluationSubmitResponse,
@@ -39,7 +42,7 @@ fn acceptance_replay_durability_error(error: ApiError) -> ApiError {
     }
 }
 
-fn acceptance_evaluation_replay_tool_definition() -> Value {
+pub(crate) fn acceptance_evaluation_replay_tool_definition() -> Value {
     json!({
         "name": TERMAL_REPLAY_ACCEPTANCE_EVALUATION_TOOL_NAME,
         "description": "Resend an ended evaluator's retained Unconfirmed acceptance submission once. Parent root only. Supply its delegationId, never verdicts or a new key. TermAl verifies the stored digest and sends the original payload, source and evaluator actor under the original attempt key. Recorded attempts refuse without another write. A timeout stays Unconfirmed; a typed refused resend also leaves the original outcome unknown. This creates no evaluator or new judgment.",
@@ -52,7 +55,7 @@ fn acceptance_evaluation_replay_tool_definition() -> Value {
 }
 
 impl TermalDelegationMcpBridge {
-    fn tool_replay_acceptance_evaluation(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_replay_acceptance_evaluation(&self, arguments: Value) -> Result<Value> {
         let request: ReplayAcceptanceEvaluationRequest = serde_json::from_value(arguments)
             .context("invalid acceptance evaluation replay request")?;
         self.post_long_call(
@@ -86,7 +89,7 @@ impl AppState {
         )
     }
 
-    fn replay_acceptance_evaluation_with_runner(
+    pub(crate) fn replay_acceptance_evaluation_with_runner(
         &self,
         parent: &str,
         request: ReplayAcceptanceEvaluationRequest,
@@ -309,7 +312,7 @@ impl AppState {
     }
 }
 
-async fn replay_session_acceptance_evaluation(
+pub(crate) async fn replay_session_acceptance_evaluation(
     AxumPath(parent): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<ReplayAcceptanceEvaluationRequest>, JsonRejection>,

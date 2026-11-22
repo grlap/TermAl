@@ -55,8 +55,10 @@ mutations flow through `session_mut_by_index`-adjacent calls on
 affected sessions.
 */
 
+use super::*;
+
 /// Resolves orchestrator templates path.
-fn resolve_orchestrator_templates_path(default_workdir: &str) -> PathBuf {
+pub(crate) fn resolve_orchestrator_templates_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("orchestrators.json")
 }
 
@@ -96,7 +98,7 @@ fn persist_orchestrator_template_store(
 }
 
 /// Stamps orchestrator template now.
-fn stamp_orchestrator_template_now() -> String {
+pub(crate) fn stamp_orchestrator_template_now() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
@@ -106,7 +108,7 @@ fn default_next_orchestrator_template_number() -> usize {
 }
 
 /// Returns whether false.
-fn is_false(value: &bool) -> bool {
+pub(crate) fn is_false(value: &bool) -> bool {
     !*value
 }
 
@@ -161,7 +163,7 @@ impl OrchestratorTemplateStore {
 /// Defines the orchestrator transition trigger variants.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum OrchestratorTransitionTrigger {
+pub(crate) enum OrchestratorTransitionTrigger {
     #[default]
     OnCompletion,
 }
@@ -169,7 +171,7 @@ enum OrchestratorTransitionTrigger {
 /// Enumerates orchestrator transition result modes.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum OrchestratorTransitionResultMode {
+pub(crate) enum OrchestratorTransitionResultMode {
     None,
     LastResponse,
     Summary,
@@ -179,7 +181,7 @@ enum OrchestratorTransitionResultMode {
 /// Enumerates orchestrator session input modes.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum OrchestratorSessionInputMode {
+pub(crate) enum OrchestratorSessionInputMode {
     #[default]
     Queue,
     Consolidate,
@@ -188,96 +190,98 @@ enum OrchestratorSessionInputMode {
 /// Represents orchestrator node position.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorNodePosition {
-    x: f64,
-    y: f64,
+pub(crate) struct OrchestratorNodePosition {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
 }
 
 /// Represents the orchestrator session template.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorSessionTemplate {
-    id: String,
-    name: String,
-    agent: Agent,
+pub(crate) struct OrchestratorSessionTemplate {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) agent: Agent,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    model: Option<String>,
+    pub(crate) model: Option<String>,
     #[serde(default)]
-    instructions: String,
+    pub(crate) instructions: String,
     #[serde(default)]
-    auto_approve: bool,
-    input_mode: OrchestratorSessionInputMode,
-    position: OrchestratorNodePosition,
+    pub(crate) auto_approve: bool,
+    pub(crate) input_mode: OrchestratorSessionInputMode,
+    pub(crate) position: OrchestratorNodePosition,
 }
 
 /// Represents orchestrator template transition.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorTemplateTransition {
-    id: String,
-    from_session_id: String,
-    to_session_id: String,
+pub(crate) struct OrchestratorTemplateTransition {
+    pub(crate) id: String,
+    pub(crate) from_session_id: String,
+    pub(crate) to_session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    from_anchor: Option<String>,
+    pub(crate) from_anchor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    to_anchor: Option<String>,
+    pub(crate) to_anchor: Option<String>,
     #[serde(default)]
-    trigger: OrchestratorTransitionTrigger,
-    result_mode: OrchestratorTransitionResultMode,
+    pub(crate) trigger: OrchestratorTransitionTrigger,
+    pub(crate) result_mode: OrchestratorTransitionResultMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    prompt_template: Option<String>,
+    pub(crate) prompt_template: Option<String>,
 }
 
 /// Represents orchestrator template draft.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorTemplateDraft {
-    name: String,
+pub(crate) struct OrchestratorTemplateDraft {
+    pub(crate) name: String,
     #[serde(default)]
-    description: String,
+    pub(crate) description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
+    pub(crate) project_id: Option<String>,
     #[serde(default)]
-    sessions: Vec<OrchestratorSessionTemplate>,
+    pub(crate) sessions: Vec<OrchestratorSessionTemplate>,
     #[serde(default)]
-    transitions: Vec<OrchestratorTemplateTransition>,
+    pub(crate) transitions: Vec<OrchestratorTemplateTransition>,
 }
 
 /// Represents the orchestrator template.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorTemplate {
-    id: String,
-    name: String,
+pub(crate) struct OrchestratorTemplate {
+    pub(crate) id: String,
+    pub(crate) name: String,
     #[serde(default)]
-    description: String,
+    pub(crate) description: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
+    pub(crate) project_id: Option<String>,
     #[serde(default)]
-    sessions: Vec<OrchestratorSessionTemplate>,
+    pub(crate) sessions: Vec<OrchestratorSessionTemplate>,
     #[serde(default)]
-    transitions: Vec<OrchestratorTemplateTransition>,
-    created_at: String,
-    updated_at: String,
+    pub(crate) transitions: Vec<OrchestratorTemplateTransition>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 /// Represents the orchestrator templates response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorTemplatesResponse {
-    templates: Vec<OrchestratorTemplate>,
+pub(crate) struct OrchestratorTemplatesResponse {
+    pub(crate) templates: Vec<OrchestratorTemplate>,
 }
 
 /// Represents the orchestrator template response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorTemplateResponse {
-    template: OrchestratorTemplate,
+pub(crate) struct OrchestratorTemplateResponse {
+    pub(crate) template: OrchestratorTemplate,
 }
 
 impl AppState {
     /// Lists orchestrator templates.
-    fn list_orchestrator_templates(&self) -> Result<OrchestratorTemplatesResponse, ApiError> {
+    pub(crate) fn list_orchestrator_templates(
+        &self,
+    ) -> Result<OrchestratorTemplatesResponse, ApiError> {
         let _guard = self
             .orchestrator_templates_lock
             .lock()
@@ -292,7 +296,7 @@ impl AppState {
     }
 
     /// Gets orchestrator template.
-    fn get_orchestrator_template(
+    pub(crate) fn get_orchestrator_template(
         &self,
         template_id: &str,
     ) -> Result<OrchestratorTemplateResponse, ApiError> {
@@ -313,7 +317,7 @@ impl AppState {
     }
 
     /// Creates orchestrator template.
-    fn create_orchestrator_template(
+    pub(crate) fn create_orchestrator_template(
         &self,
         request: OrchestratorTemplateDraft,
     ) -> Result<OrchestratorTemplateResponse, ApiError> {
@@ -348,7 +352,7 @@ impl AppState {
     }
 
     /// Updates orchestrator template.
-    fn update_orchestrator_template(
+    pub(crate) fn update_orchestrator_template(
         &self,
         template_id: &str,
         request: OrchestratorTemplateDraft,
@@ -387,7 +391,7 @@ impl AppState {
     }
 
     /// Deletes orchestrator template.
-    fn delete_orchestrator_template(
+    pub(crate) fn delete_orchestrator_template(
         &self,
         template_id: &str,
     ) -> Result<OrchestratorTemplatesResponse, ApiError> {
@@ -416,7 +420,7 @@ impl AppState {
 }
 
 /// Lists orchestrator templates.
-async fn list_orchestrator_templates(
+pub(crate) async fn list_orchestrator_templates(
     State(state): State<AppState>,
 ) -> Result<Json<OrchestratorTemplatesResponse>, ApiError> {
     let response = run_blocking_api(move || state.list_orchestrator_templates()).await?;
@@ -424,7 +428,7 @@ async fn list_orchestrator_templates(
 }
 
 /// Gets orchestrator template.
-async fn get_orchestrator_template(
+pub(crate) async fn get_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
 ) -> Result<Json<OrchestratorTemplateResponse>, ApiError> {
@@ -433,7 +437,7 @@ async fn get_orchestrator_template(
 }
 
 /// Creates orchestrator template.
-async fn create_orchestrator_template(
+pub(crate) async fn create_orchestrator_template(
     State(state): State<AppState>,
     Json(request): Json<OrchestratorTemplateDraft>,
 ) -> Result<(StatusCode, Json<OrchestratorTemplateResponse>), ApiError> {
@@ -442,7 +446,7 @@ async fn create_orchestrator_template(
 }
 
 /// Updates orchestrator template.
-async fn update_orchestrator_template(
+pub(crate) async fn update_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
     Json(request): Json<OrchestratorTemplateDraft>,
@@ -453,7 +457,7 @@ async fn update_orchestrator_template(
 }
 
 /// Deletes orchestrator template.
-async fn delete_orchestrator_template(
+pub(crate) async fn delete_orchestrator_template(
     State(state): State<AppState>,
     AxumPath(template_id): AxumPath<String>,
 ) -> Result<Json<OrchestratorTemplatesResponse>, ApiError> {
@@ -548,7 +552,7 @@ fn normalize_orchestrator_template_draft(
 }
 
 /// Builds a runtime template from a draft payload.
-fn orchestrator_template_from_draft(
+pub(crate) fn orchestrator_template_from_draft(
     template_id: &str,
     draft: OrchestratorTemplateDraft,
 ) -> Result<OrchestratorTemplate, ApiError> {
@@ -567,7 +571,9 @@ fn orchestrator_template_from_draft(
 }
 
 /// Converts a stored template into a launch payload.
-fn orchestrator_template_to_draft(template: &OrchestratorTemplate) -> OrchestratorTemplateDraft {
+pub(crate) fn orchestrator_template_to_draft(
+    template: &OrchestratorTemplate,
+) -> OrchestratorTemplateDraft {
     OrchestratorTemplateDraft {
         name: template.name.clone(),
         description: template.description.clone(),
@@ -578,7 +584,7 @@ fn orchestrator_template_to_draft(template: &OrchestratorTemplate) -> Orchestrat
 }
 
 /// Normalizes orchestrator session template.
-fn normalize_orchestrator_session_template(
+pub(crate) fn normalize_orchestrator_session_template(
     template: OrchestratorSessionTemplate,
 ) -> Result<OrchestratorSessionTemplate, ApiError> {
     let model = normalize_optional_orchestrator_text(template.model);
@@ -658,7 +664,7 @@ fn normalize_orchestrator_position(
 /// Enumerates orchestrator instance states.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum OrchestratorInstanceStatus {
+pub(crate) enum OrchestratorInstanceStatus {
     #[default]
     Running,
     Paused,
@@ -668,48 +674,48 @@ enum OrchestratorInstanceStatus {
 /// Represents a orchestrator session instance.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorSessionInstance {
-    template_session_id: String,
-    session_id: String,
+pub(crate) struct OrchestratorSessionInstance {
+    pub(crate) template_session_id: String,
+    pub(crate) session_id: String,
     /// Highest completion revision observed for this runtime session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_completion_revision: Option<u64>,
+    pub(crate) last_completion_revision: Option<u64>,
     /// Highest completion revision whose transitions were fully acknowledged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_delivered_completion_revision: Option<u64>,
+    pub(crate) last_delivered_completion_revision: Option<u64>,
 }
 
 /// Represents pending transition.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PendingTransition {
-    id: String,
-    transition_id: String,
-    source_session_id: String,
-    destination_session_id: String,
-    completion_revision: u64,
-    rendered_prompt: String,
-    created_at: String,
+pub(crate) struct PendingTransition {
+    pub(crate) id: String,
+    pub(crate) transition_id: String,
+    pub(crate) source_session_id: String,
+    pub(crate) destination_session_id: String,
+    pub(crate) completion_revision: u64,
+    pub(crate) rendered_prompt: String,
+    pub(crate) created_at: String,
 }
 
 /// Represents consolidated pending transitions.
 #[derive(Clone, Debug)]
-struct ConsolidatedPendingTransitions {
-    prompt_pendings: Vec<PendingTransition>,
-    acknowledged_pendings: Vec<PendingTransition>,
+pub(crate) struct ConsolidatedPendingTransitions {
+    pub(crate) prompt_pendings: Vec<PendingTransition>,
+    pub(crate) acknowledged_pendings: Vec<PendingTransition>,
 }
 
 /// Represents consolidated pending inspection.
 #[derive(Clone, Debug)]
-struct ConsolidatedPendingInspection {
-    prompt_pendings: Vec<PendingTransition>,
-    acknowledged_pendings: Vec<PendingTransition>,
-    missing_source_session_ids: Vec<String>,
+pub(crate) struct ConsolidatedPendingInspection {
+    pub(crate) prompt_pendings: Vec<PendingTransition>,
+    pub(crate) acknowledged_pendings: Vec<PendingTransition>,
+    pub(crate) missing_source_session_ids: Vec<String>,
 }
 
 /// Enumerates pending transition actions.
 #[derive(Clone, Debug)]
-enum PendingTransitionAction {
+pub(crate) enum PendingTransitionAction {
     Acknowledge {
         instance_index: usize,
         pendings: Vec<PendingTransition>,
@@ -726,71 +732,71 @@ enum PendingTransitionAction {
 /// Represents a orchestrator instance.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorInstance {
-    id: String,
+pub(crate) struct OrchestratorInstance {
+    pub(crate) id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    remote_id: Option<String>,
+    pub(crate) remote_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    remote_orchestrator_id: Option<String>,
-    template_id: String,
+    pub(crate) remote_orchestrator_id: Option<String>,
+    pub(crate) template_id: String,
     #[serde(default)]
-    project_id: String,
-    template_snapshot: OrchestratorTemplate,
+    pub(crate) project_id: String,
+    pub(crate) template_snapshot: OrchestratorTemplate,
     #[serde(default)]
-    status: OrchestratorInstanceStatus,
+    pub(crate) status: OrchestratorInstanceStatus,
     #[serde(default)]
-    session_instances: Vec<OrchestratorSessionInstance>,
+    pub(crate) session_instances: Vec<OrchestratorSessionInstance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pending_transitions: Vec<PendingTransition>,
-    created_at: String,
+    pub(crate) pending_transitions: Vec<PendingTransition>,
+    pub(crate) created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    error_message: Option<String>,
+    pub(crate) error_message: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    completed_at: Option<String>,
+    pub(crate) completed_at: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
-    stop_in_progress: bool,
+    pub(crate) stop_in_progress: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    active_session_ids_during_stop: Option<Vec<String>>,
+    pub(crate) active_session_ids_during_stop: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    stopped_session_ids_during_stop: Vec<String>,
+    pub(crate) stopped_session_ids_during_stop: Vec<String>,
 }
 
 /// Represents the create orchestrator instance request payload.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateOrchestratorInstanceRequest {
-    template_id: String,
+pub(crate) struct CreateOrchestratorInstanceRequest {
+    pub(crate) template_id: String,
     #[serde(default)]
-    project_id: Option<String>,
+    pub(crate) project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    template: Option<OrchestratorTemplateDraft>,
+    pub(crate) template: Option<OrchestratorTemplateDraft>,
 }
 
 /// Represents the orchestrator instances response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorInstancesResponse {
-    orchestrators: Vec<OrchestratorInstance>,
+pub(crate) struct OrchestratorInstancesResponse {
+    pub(crate) orchestrators: Vec<OrchestratorInstance>,
 }
 
 /// Represents the orchestrator instance response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OrchestratorInstanceResponse {
-    orchestrator: OrchestratorInstance,
+pub(crate) struct OrchestratorInstanceResponse {
+    pub(crate) orchestrator: OrchestratorInstance,
 }
 
 /// Represents the create orchestrator instance response payload.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateOrchestratorInstanceResponse {
-    orchestrator: OrchestratorInstance,
-    state: StateResponse,
+pub(crate) struct CreateOrchestratorInstanceResponse {
+    pub(crate) orchestrator: OrchestratorInstance,
+    pub(crate) state: StateResponse,
 }
 
 impl StateInner {
     /// Normalizes orchestrator instances.
-    fn normalize_orchestrator_instances(&mut self) {
+    pub(crate) fn normalize_orchestrator_instances(&mut self) {
         let persisted_non_running_session_ids = HashSet::new();
         self.normalize_orchestrator_instances_with_persisted_non_running(
             &persisted_non_running_session_ids,
@@ -798,7 +804,7 @@ impl StateInner {
     }
 
     /// Normalizes orchestrator instances with persisted non running.
-    fn normalize_orchestrator_instances_with_persisted_non_running(
+    pub(crate) fn normalize_orchestrator_instances_with_persisted_non_running(
         &mut self,
         persisted_non_running_session_ids: &HashSet<String>,
     ) {
@@ -927,7 +933,9 @@ impl StateInner {
 
 impl AppState {
     /// Lists orchestrator instances.
-    fn list_orchestrator_instances(&self) -> Result<OrchestratorInstancesResponse, ApiError> {
+    pub(crate) fn list_orchestrator_instances(
+        &self,
+    ) -> Result<OrchestratorInstancesResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         Ok(OrchestratorInstancesResponse {
             orchestrators: inner.orchestrator_instances.clone(),
@@ -935,7 +943,7 @@ impl AppState {
     }
 
     /// Gets orchestrator instance.
-    fn get_orchestrator_instance(
+    pub(crate) fn get_orchestrator_instance(
         &self,
         instance_id: &str,
     ) -> Result<OrchestratorInstanceResponse, ApiError> {
@@ -950,7 +958,7 @@ impl AppState {
     }
 
     /// Publishes orchestrators updated.
-    fn publish_orchestrators_updated(
+    pub(crate) fn publish_orchestrators_updated(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -969,7 +977,7 @@ impl AppState {
     }
 
     /// Creates orchestrator instance.
-    fn create_orchestrator_instance(
+    pub(crate) fn create_orchestrator_instance(
         &self,
         request: CreateOrchestratorInstanceRequest,
     ) -> Result<CreateOrchestratorInstanceResponse, ApiError> {
@@ -983,7 +991,7 @@ impl AppState {
     /// Keeping the interleaving point explicit lets lifecycle tests mutate the
     /// project while validation is in flight without adding test-only behavior
     /// to the production readiness resolver.
-    fn create_orchestrator_instance_with_agent_setup_validator(
+    pub(crate) fn create_orchestrator_instance_with_agent_setup_validator(
         &self,
         request: CreateOrchestratorInstanceRequest,
         mut validate_agent_session_setup: impl FnMut(Agent, &str) -> Result<(), String>,
@@ -1118,7 +1126,7 @@ impl AppState {
 }
 
 /// Lists orchestrator instances.
-async fn list_orchestrator_instances(
+pub(crate) async fn list_orchestrator_instances(
     State(state): State<AppState>,
 ) -> Result<Json<OrchestratorInstancesResponse>, ApiError> {
     let response = run_blocking_api(move || state.list_orchestrator_instances()).await?;
@@ -1126,7 +1134,7 @@ async fn list_orchestrator_instances(
 }
 
 /// Gets orchestrator instance.
-async fn get_orchestrator_instance(
+pub(crate) async fn get_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<OrchestratorInstanceResponse>, ApiError> {
@@ -1135,7 +1143,7 @@ async fn get_orchestrator_instance(
 }
 
 /// Creates orchestrator instance.
-async fn create_orchestrator_instance(
+pub(crate) async fn create_orchestrator_instance(
     State(state): State<AppState>,
     Json(request): Json<CreateOrchestratorInstanceRequest>,
 ) -> Result<(StatusCode, Json<CreateOrchestratorInstanceResponse>), ApiError> {
@@ -1144,7 +1152,7 @@ async fn create_orchestrator_instance(
 }
 
 /// Pauses orchestrator instance.
-async fn pause_orchestrator_instance(
+pub(crate) async fn pause_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1154,7 +1162,7 @@ async fn pause_orchestrator_instance(
 }
 
 /// Resumes orchestrator instance.
-async fn resume_orchestrator_instance(
+pub(crate) async fn resume_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1164,7 +1172,7 @@ async fn resume_orchestrator_instance(
 }
 
 /// Stops orchestrator instance.
-async fn stop_orchestrator_instance(
+pub(crate) async fn stop_orchestrator_instance(
     State(state): State<AppState>,
     AxumPath(instance_id): AxumPath<String>,
 ) -> Result<Json<StateResponse>, ApiError> {

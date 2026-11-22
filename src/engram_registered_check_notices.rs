@@ -2,18 +2,18 @@
 // the original tool's explicit artifact association; never verification authority.
 // All native path, artifact and process reads precede the terminal state lock.
 #[derive(Clone)]
-struct RegisteredCheckNotice {
-    generation: u64,
-    runtime: Option<String>,
-    check: EngramTurnCheck,
-    observation: Option<TestRunCommandObservation>,
-    runs: Vec<(TestRunRegistration, Option<TestRunState>)>,
+pub(crate) struct RegisteredCheckNotice {
+    pub(crate) generation: u64,
+    pub(crate) runtime: Option<String>,
+    pub(crate) check: EngramTurnCheck,
+    pub(crate) observation: Option<TestRunCommandObservation>,
+    pub(crate) runs: Vec<(TestRunRegistration, Option<TestRunState>)>,
     clean_commit_runs: Vec<String>,
-    received: Option<ReceivedCheckNotice>,
+    pub(crate) received: Option<ReceivedCheckNotice>,
 }
 
 impl AppState {
-    fn prepare_registered_check_notices(&self, session_id: &str) -> Vec<RegisteredCheckNotice> {
+    pub(crate) fn prepare_registered_check_notices(&self, session_id: &str) -> Vec<RegisteredCheckNotice> {
         let mut prepared = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else { return Vec::new() };
@@ -93,7 +93,7 @@ impl AppState {
     // Component tests can prepare the same receipt the owned observer
     // reads. Terminal callers use only the cheap preparation above.
     #[cfg(test)]
-    fn prepare_registered_check_notices_until(
+    pub(crate) fn prepare_registered_check_notices_until(
         &self, session_id: &str, deadline: std::time::Instant,
     ) -> Vec<RegisteredCheckNotice> {
         let mut prepared = self.prepare_registered_check_notices(session_id);
@@ -112,7 +112,7 @@ fn read_received_registered_check_notices_until(
     }
 }
 
-fn registered_check_notices_locked(
+pub(crate) fn registered_check_notices_locked(
     inner: &mut StateInner, index: usize, prepared: &[RegisteredCheckNotice],
 ) -> (Vec<String>, Vec<(String, usize)>) {
     let record = &inner.sessions[index];

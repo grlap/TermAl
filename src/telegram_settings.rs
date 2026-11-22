@@ -31,15 +31,17 @@ through the filesystem, so read/merge paths must treat parse failures and
 unrelated-file fields carefully.
 */
 
-const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;
-const TELEGRAM_TARGET_ID_MAX_BYTES: usize = 256;
-const TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT: usize = 100;
-const TELEGRAM_TEST_COOLDOWN: Duration = Duration::from_secs(2);
-const TELEGRAM_TEST_COOLDOWN_RETRY_AFTER: &str = "2";
-const TELEGRAM_TEST_RATE_LIMIT_MESSAGE: &str =
+use super::*;
+
+pub(crate) const TELEGRAM_BOT_TOKEN_MAX_CHARS: usize = 256;
+pub(crate) const TELEGRAM_TARGET_ID_MAX_BYTES: usize = 256;
+pub(crate) const TELEGRAM_SUBSCRIBED_PROJECT_IDS_MAX_COUNT: usize = 100;
+pub(crate) const TELEGRAM_TEST_COOLDOWN: Duration = Duration::from_secs(2);
+pub(crate) const TELEGRAM_TEST_COOLDOWN_RETRY_AFTER: &str = "2";
+pub(crate) const TELEGRAM_TEST_RATE_LIMIT_MESSAGE: &str =
     "Telegram connection tests are rate-limited. Try again in a moment.";
-const TELEGRAM_BOT_TOKEN_KEYRING_SERVICE: &str = "TermAl";
-const TELEGRAM_BOT_TOKEN_KEYRING_USER_PREFIX: &str = "telegram-bot-token";
+pub(crate) const TELEGRAM_BOT_TOKEN_KEYRING_SERVICE: &str = "TermAl";
+pub(crate) const TELEGRAM_BOT_TOKEN_KEYRING_USER_PREFIX: &str = "telegram-bot-token";
 
 static TELEGRAM_SETTINGS_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static TELEGRAM_TEST_RATE_LIMIT: LazyLock<Mutex<Option<std::time::Instant>>> =
@@ -89,7 +91,7 @@ impl TelegramStatusResponse {
 }
 
 impl AppState {
-    fn telegram_data_dir(&self) -> PathBuf {
+    pub(crate) fn telegram_data_dir(&self) -> PathBuf {
         #[cfg(test)]
         if let Some(root) = self.test_temp_root_path() {
             return root.join(".termal");
@@ -101,11 +103,11 @@ impl AppState {
         resolve_termal_data_dir(&self.default_workdir)
     }
 
-    fn telegram_bot_file_path(&self) -> PathBuf {
+    pub(crate) fn telegram_bot_file_path(&self) -> PathBuf {
         self.telegram_data_dir().join("telegram-bot.json")
     }
 
-    fn telegram_status(&self) -> Result<TelegramStatusResponse, ApiError> {
+    pub(crate) fn telegram_status(&self) -> Result<TelegramStatusResponse, ApiError> {
         let _guard = telegram_settings_file_guard();
         let file = self.load_telegram_bot_file()?;
         let mut config = self.telegram_config_from_state();
@@ -114,7 +116,7 @@ impl AppState {
         self.telegram_status_from_parts(config, file)
     }
 
-    fn update_telegram_config(
+    pub(crate) fn update_telegram_config(
         &self,
         request: UpdateTelegramConfigRequest,
     ) -> Result<TelegramStatusResponse, ApiError> {
@@ -122,7 +124,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn update_telegram_config_with_post_validation_hook<F>(
+    pub(crate) fn update_telegram_config_with_post_validation_hook<F>(
         &self,
         request: UpdateTelegramConfigRequest,
         post_validation_hook: F,
@@ -209,7 +211,7 @@ impl AppState {
         self.telegram_status_from_parts(config, file)
     }
 
-    fn test_telegram_connection(
+    pub(crate) fn test_telegram_connection(
         &self,
         request: TelegramTestRequest,
     ) -> Result<TelegramTestResponse, ApiError> {
@@ -252,12 +254,12 @@ impl AppState {
         ))
     }
 
-    fn telegram_config_from_state(&self) -> TelegramUiConfig {
+    pub(crate) fn telegram_config_from_state(&self) -> TelegramUiConfig {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner.preferences.telegram.clone()
     }
 
-    fn commit_telegram_config_if_changed(
+    pub(crate) fn commit_telegram_config_if_changed(
         &self,
         config: TelegramUiConfig,
     ) -> Result<bool, ApiError> {
@@ -272,7 +274,7 @@ impl AppState {
         Ok(true)
     }
 
-    fn load_telegram_bot_file(&self) -> Result<TelegramBotState, ApiError> {
+    pub(crate) fn load_telegram_bot_file(&self) -> Result<TelegramBotState, ApiError> {
         let path = self.telegram_bot_file_path();
         let raw = match fs::read(&path) {
             Ok(raw) => raw,
@@ -285,7 +287,10 @@ impl AppState {
             .map_err(|err| telegram_settings_file_error("parse", &path, err))
     }
 
-    fn persist_telegram_bot_file(&self, file: &TelegramBotState) -> Result<(), ApiError> {
+    pub(crate) fn persist_telegram_bot_file(
+        &self,
+        file: &TelegramBotState,
+    ) -> Result<(), ApiError> {
         let path = self.telegram_bot_file_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|err| {
@@ -313,7 +318,7 @@ impl AppState {
         format!("{TELEGRAM_BOT_TOKEN_KEYRING_USER_PREFIX}:{suffix}")
     }
 
-    fn telegram_bot_token_entry(&self) -> Result<keyring_core::Entry, ApiError> {
+    pub(crate) fn telegram_bot_token_entry(&self) -> Result<keyring_core::Entry, ApiError> {
         ensure_telegram_secret_store()?;
         keyring_core::Entry::new(
             TELEGRAM_BOT_TOKEN_KEYRING_SERVICE,
@@ -322,7 +327,7 @@ impl AppState {
         .map_err(|err| telegram_secret_store_error("open", err))
     }
 
-    fn saved_telegram_bot_token(&self) -> Result<Option<String>, ApiError> {
+    pub(crate) fn saved_telegram_bot_token(&self) -> Result<Option<String>, ApiError> {
         let entry = self.telegram_bot_token_entry()?;
         match entry.get_password() {
             Ok(token) => Ok(normalize_optional_secret(Some(token))),
@@ -331,14 +336,14 @@ impl AppState {
         }
     }
 
-    fn save_telegram_bot_token(&self, token: &str) -> Result<(), ApiError> {
+    pub(crate) fn save_telegram_bot_token(&self, token: &str) -> Result<(), ApiError> {
         let entry = self.telegram_bot_token_entry()?;
         entry
             .set_password(token)
             .map_err(|err| telegram_secret_store_error("write", err))
     }
 
-    fn delete_saved_telegram_bot_token(&self) -> Result<(), ApiError> {
+    pub(crate) fn delete_saved_telegram_bot_token(&self) -> Result<(), ApiError> {
         let entry = self.telegram_bot_token_entry()?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
@@ -346,7 +351,7 @@ impl AppState {
         }
     }
 
-    fn validate_and_normalize_telegram_config_with_token_status(
+    pub(crate) fn validate_and_normalize_telegram_config_with_token_status(
         &self,
         config: &mut TelegramUiConfig,
         bot_token_configured: bool,
@@ -381,7 +386,10 @@ impl AppState {
         }
     }
 
-    fn prune_telegram_config_for_deleted_project(&self, project_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn prune_telegram_config_for_deleted_project(
+        &self,
+        project_id: &str,
+    ) -> Result<(), ApiError> {
         let _guard = telegram_settings_file_guard();
         let file = self.load_telegram_bot_file()?;
         let mut config = self.telegram_config_from_state();
@@ -409,7 +417,10 @@ impl AppState {
         Ok(())
     }
 
-    fn prune_telegram_state_for_deleted_session(&self, session_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn prune_telegram_state_for_deleted_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), ApiError> {
         let _guard = telegram_settings_file_guard();
         let mut file = self.load_telegram_bot_file()?;
         let mut config = self.telegram_config_from_state();
@@ -444,7 +455,7 @@ impl AppState {
         Ok(())
     }
 
-    fn sanitize_telegram_config_for_current_state(
+    pub(crate) fn sanitize_telegram_config_for_current_state(
         &self,
         mut config: TelegramUiConfig,
     ) -> TelegramUiConfig {
@@ -452,7 +463,7 @@ impl AppState {
         config
     }
 
-    fn sanitize_telegram_config_for_current_state_in_place(
+    pub(crate) fn sanitize_telegram_config_for_current_state_in_place(
         &self,
         config: &mut TelegramUiConfig,
     ) -> bool {
@@ -502,7 +513,7 @@ impl AppState {
     }
 
     #[cfg_attr(test, allow(dead_code))]
-    fn reconcile_telegram_relay_from_saved_settings(&self) {
+    pub(crate) fn reconcile_telegram_relay_from_saved_settings(&self) {
         let _guard = telegram_settings_file_guard();
         match self.load_telegram_bot_file() {
             Ok(file) => {
@@ -658,14 +669,14 @@ fn apply_telegram_config_normalization(
     config.default_session_id = normalization.default_session_id;
 }
 
-async fn get_telegram_status(
+pub(crate) async fn get_telegram_status(
     State(state): State<AppState>,
 ) -> Result<Json<TelegramStatusResponse>, ApiError> {
     let response = run_blocking_api(move || state.telegram_status()).await?;
     Ok(Json(response))
 }
 
-async fn update_telegram_config(
+pub(crate) async fn update_telegram_config(
     State(state): State<AppState>,
     request: Result<Json<UpdateTelegramConfigRequest>, JsonRejection>,
 ) -> Result<Json<TelegramStatusResponse>, ApiError> {
@@ -675,7 +686,7 @@ async fn update_telegram_config(
     Ok(Json(response))
 }
 
-async fn test_telegram_connection(
+pub(crate) async fn test_telegram_connection(
     State(state): State<AppState>,
     request: Result<Json<TelegramTestRequest>, JsonRejection>,
 ) -> Result<Response, ApiError> {
@@ -698,7 +709,7 @@ async fn test_telegram_connection(
     }
 }
 
-fn telegram_settings_file_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn telegram_settings_file_guard() -> std::sync::MutexGuard<'static, ()> {
     TELEGRAM_SETTINGS_FILE_LOCK
         .lock()
         .expect("telegram settings file mutex poisoned")
@@ -725,10 +736,10 @@ fn configure_telegram_secret_store() -> Result<(), ApiError> {
 }
 
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
-type NativeTelegramSecretStore = std::sync::Arc<keyring_core::CredentialStore>;
+pub(crate) type NativeTelegramSecretStore = std::sync::Arc<keyring_core::CredentialStore>;
 
 #[cfg(windows)]
-fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
+pub(crate) fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
     Ok(windows_native_keyring_store::Store::new_with_configuration(
         &config,
@@ -736,13 +747,13 @@ fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretSt
 }
 
 #[cfg(target_os = "macos")]
-fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
+pub(crate) fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
     Ok(apple_native_keyring_store::keychain::Store::new_with_configuration(&config)?)
 }
 
 #[cfg(target_os = "linux")]
-fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
+pub(crate) fn native_telegram_secret_store() -> keyring_core::Result<NativeTelegramSecretStore> {
     let config = HashMap::<&str, &str>::new();
     Ok(zbus_secret_service_keyring_store::Store::new_with_configuration(&config)?)
 }
@@ -785,7 +796,7 @@ fn normalize_optional_id(value: Option<String>, label: &str) -> Result<Option<St
     Ok(Some(value))
 }
 
-fn validate_telegram_bot_token(token: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_telegram_bot_token(token: &str) -> Result<(), ApiError> {
     if token.chars().count() > TELEGRAM_BOT_TOKEN_MAX_CHARS {
         return Err(ApiError::bad_request(format!(
             "Telegram bot token must be at most {TELEGRAM_BOT_TOKEN_MAX_CHARS} characters"
@@ -798,7 +809,10 @@ fn check_telegram_test_rate_limit(token: &str) -> Result<(), ApiError> {
     check_telegram_test_rate_limit_at(token, std::time::Instant::now())
 }
 
-fn check_telegram_test_rate_limit_at(_token: &str, now: std::time::Instant) -> Result<(), ApiError> {
+pub(crate) fn check_telegram_test_rate_limit_at(
+    _token: &str,
+    now: std::time::Instant,
+) -> Result<(), ApiError> {
     let mut last_attempt = TELEGRAM_TEST_RATE_LIMIT
         .lock()
         .expect("telegram test rate limit mutex poisoned");
@@ -817,13 +831,13 @@ fn check_telegram_test_rate_limit_at(_token: &str, now: std::time::Instant) -> R
 }
 
 #[cfg(test)]
-fn reset_telegram_test_rate_limit_for_tests() {
+pub(crate) fn reset_telegram_test_rate_limit_for_tests() {
     *TELEGRAM_TEST_RATE_LIMIT
         .lock()
         .expect("telegram test rate limit mutex poisoned") = None;
 }
 
-fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
+pub(crate) fn telegram_test_connection_error(err: anyhow::Error) -> ApiError {
     let detail = sanitize_telegram_log_detail(&err.to_string());
     let message = format!("Telegram connection test failed: {detail}");
     if let Some(api_error) = err
@@ -944,7 +958,7 @@ fn telegram_bot_token_is_configured(token: Option<&str>) -> bool {
     token.is_some_and(|token| !token.trim().is_empty())
 }
 
-fn mask_telegram_bot_token(token: &str) -> Option<String> {
+pub(crate) fn mask_telegram_bot_token(token: &str) -> Option<String> {
     let token = token.trim();
     if token.is_empty() {
         return None;
@@ -976,13 +990,13 @@ fn telegram_secret_store_error(operation: &str, err: impl std::fmt::Display) -> 
     ))
 }
 
-fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
+pub(crate) fn write_telegram_bot_file(path: &FsPath, encoded: &[u8]) -> io::Result<()> {
     write_telegram_bot_file_with_writer(path, encoded, write_telegram_bot_temp_file, |from, to| {
         replace_telegram_bot_file(from, to)
     })
 }
 
-fn write_telegram_bot_file_with_writer(
+pub(crate) fn write_telegram_bot_file_with_writer(
     path: &FsPath,
     encoded: &[u8],
     write_temp_file: impl FnOnce(&FsPath, &[u8]) -> io::Result<()>,
@@ -1020,7 +1034,7 @@ fn telegram_bot_temp_file_path(path: &FsPath) -> PathBuf {
 }
 
 #[cfg(windows)]
-fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
+pub(crate) fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
@@ -1047,7 +1061,7 @@ fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()
 }
 
 #[cfg(not(windows))]
-fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
+pub(crate) fn replace_telegram_bot_file(temp_path: &FsPath, path: &FsPath) -> io::Result<()> {
     fs::rename(temp_path, path)
 }
 
@@ -1075,7 +1089,7 @@ fn open_telegram_bot_temp_file(path: &FsPath) -> io::Result<fs::File> {
 }
 
 #[cfg(unix)]
-fn harden_telegram_bot_file_permissions(path: &FsPath) -> io::Result<()> {
+pub(crate) fn harden_telegram_bot_file_permissions(path: &FsPath) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
 
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
@@ -1083,6 +1097,6 @@ fn harden_telegram_bot_file_permissions(path: &FsPath) -> io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn harden_telegram_bot_file_permissions(_path: &FsPath) -> io::Result<()> {
+pub(crate) fn harden_telegram_bot_file_permissions(_path: &FsPath) -> io::Result<()> {
     Ok(())
 }

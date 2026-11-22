@@ -39,6 +39,8 @@
 // tag fallback payloads so clients can dedup retransmits.
 // `empty_state_events_response` is the minimal skeleton.
 
+use super::*;
+
 /// How often `/api/events` sends a named `heartbeat` event. Unlike the SSE
 /// keep-alive comment, a named event reaches the browser's EventSource, so a
 /// client can tell a live but quiet stream from one that silently stopped
@@ -46,7 +48,7 @@
 /// it after a few missed beats.
 const STATE_EVENTS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 
-fn stable_text_hash(value: &str) -> String {
+pub(crate) fn stable_text_hash(value: &str) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in value.as_bytes() {
         hash ^= u64::from(*byte);
@@ -55,7 +57,7 @@ fn stable_text_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn empty_state_events_response(server_instance_id: String) -> StateResponse {
+pub(crate) fn empty_state_events_response(server_instance_id: String) -> StateResponse {
     debug_assert!(!server_instance_id.trim().is_empty());
     StateResponse {
         remote_transport_statuses: Vec::new(),
@@ -77,11 +79,11 @@ fn empty_state_events_response(server_instance_id: String) -> StateResponse {
 }
 
 #[derive(Deserialize)]
-struct StateEventPayload {
+pub(crate) struct StateEventPayload {
     #[serde(default, rename = "_sseFallback")]
-    sse_fallback: bool,
+    pub(crate) sse_fallback: bool,
     #[serde(flatten)]
-    state: StateResponse,
+    pub(crate) state: StateResponse,
 }
 
 #[derive(Serialize)]
@@ -95,7 +97,7 @@ struct FallbackStateEventPayload {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, allow(dead_code))]
 #[serde(rename_all = "camelCase")]
-enum WorkspaceFileChangeKind {
+pub(crate) enum WorkspaceFileChangeKind {
     Created,
     Modified,
     Deleted,
@@ -107,44 +109,48 @@ enum WorkspaceFileChangeKind {
 /// Represents a file changed during an agent turn.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FileChangeSummaryEntry {
-    path: String,
-    kind: WorkspaceFileChangeKind,
+pub(crate) struct FileChangeSummaryEntry {
+    pub(crate) path: String,
+    pub(crate) kind: WorkspaceFileChangeKind,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[cfg_attr(test, allow(dead_code))]
 #[serde(rename_all = "camelCase")]
-struct WorkspaceFileChangeEvent {
-    path: String,
-    kind: WorkspaceFileChangeKind,
+pub(crate) struct WorkspaceFileChangeEvent {
+    pub(crate) path: String,
+    pub(crate) kind: WorkspaceFileChangeKind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    root_path: Option<String>,
+    pub(crate) root_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<String>,
+    pub(crate) session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    mtime_ms: Option<u64>,
+    pub(crate) mtime_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    size_bytes: Option<u64>,
+    pub(crate) size_bytes: Option<u64>,
 }
 
 #[derive(Deserialize, Serialize)]
 #[cfg_attr(test, allow(dead_code))]
 #[serde(rename_all = "camelCase")]
-struct WorkspaceFilesChangedEvent {
-    revision: u64,
-    changes: Vec<WorkspaceFileChangeEvent>,
+pub(crate) struct WorkspaceFilesChangedEvent {
+    pub(crate) revision: u64,
+    pub(crate) changes: Vec<WorkspaceFileChangeEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    summary: Option<WorkspacePublicationSummary>,
+    pub(crate) summary: Option<WorkspacePublicationSummary>,
 }
 
-fn workspace_files_covering_invalidation(revision: u64) -> WorkspaceFilesChangedEvent {
+pub(crate) fn workspace_files_covering_invalidation(revision: u64) -> WorkspaceFilesChangedEvent {
     WorkspaceFilesChangedEvent {
         revision,
         summary: None,
         changes: vec![WorkspaceFileChangeEvent {
-            path: String::new(), kind: WorkspaceFileChangeKind::Subtree,
-            root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
+            path: String::new(),
+            kind: WorkspaceFileChangeKind::Subtree,
+            root_path: None,
+            session_id: None,
+            mtime_ms: None,
+            size_bytes: None,
         }],
     }
 }
@@ -161,14 +167,14 @@ fn fallback_state_events_response(
     }
 }
 
-fn fallback_state_events_payload(
+pub(crate) fn fallback_state_events_payload(
     revision: u64,
     server_instance_id: String,
 ) -> Result<String, ApiError> {
-    encode_sse_json("state", &fallback_state_events_response(
-        revision,
-        server_instance_id,
-    ))
+    encode_sse_json(
+        "state",
+        &fallback_state_events_response(revision, server_instance_id),
+    )
     .map_err(|err| {
         ApiError::internal(format!(
             "failed to serialize fallback SSE state snapshot: {err}"
@@ -178,7 +184,7 @@ fn fallback_state_events_payload(
 
 /// Serializes a metadata-first state snapshot for SSE on the blocking pool
 /// because summary_snapshot() acquires the synchronous app-state mutex.
-async fn state_snapshot_payload_for_sse(state: AppState) -> Result<String, ApiError> {
+pub(crate) async fn state_snapshot_payload_for_sse(state: AppState) -> Result<String, ApiError> {
     let fallback_server_instance_id = state.server_instance_id.clone();
     let budget = output_budget_bytes();
     run_blocking_api(move || {
@@ -244,7 +250,7 @@ fn lagged_state_recovery_marker() -> Event {
 /// `GET /api/events` query. Only `stateDiff=1` opts in; an absent, unknown or
 /// malformed query keeps the legacy full-`state` stream.
 #[derive(Deserialize)]
-struct StateEventsQuery {
+pub(crate) struct StateEventsQuery {
     #[serde(default, rename = "stateDiff")]
     state_diff: Option<String>,
 }
@@ -257,10 +263,10 @@ fn state_events_query_opts_into_diffs(
 
 /// Counts one legacy `/api/events` connection for as long as it lives. The
 /// broadcaster pairs every diff with a full snapshot while any is counted.
-struct LegacyStateSubscriber(Arc<std::sync::atomic::AtomicUsize>);
+pub(crate) struct LegacyStateSubscriber(pub(crate) Arc<std::sync::atomic::AtomicUsize>);
 
 impl LegacyStateSubscriber {
-    fn register(senders: &StateBroadcastSenders) -> Self {
+    pub(crate) fn register(senders: &StateBroadcastSenders) -> Self {
         let count = senders.legacy_state_subscribers.clone();
         count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Self(count)
@@ -275,7 +281,7 @@ impl Drop for LegacyStateSubscriber {
 
 /// Opens a new full-state request generation. Only a cut captured after this
 /// (it reads the generation under StateInner) can answer it.
-fn request_state_diff_base(senders: &StateBroadcastSenders) {
+pub(crate) fn request_state_diff_base(senders: &StateBroadcastSenders) {
     senders
         .full_state_request_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -284,7 +290,7 @@ fn request_state_diff_base(senders: &StateBroadcastSenders) {
 /// What `POST /api/events/full-state` asks the broadcaster for.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
-enum FullStateRequestMode {
+pub(crate) enum FullStateRequestMode {
     /// The next cut as a full `state` marked `stateDiffBase: true`.
     #[default]
     Base,
@@ -300,9 +306,9 @@ enum FullStateRequestMode {
 /// the shared CORS layer governs. `{}` asks for a base; `{"mode":"cut"}` for
 /// a cut.
 #[derive(Deserialize)]
-struct FullStateRequest {
+pub(crate) struct FullStateRequest {
     #[serde(default)]
-    mode: FullStateRequestMode,
+    pub(crate) mode: FullStateRequestMode,
 }
 
 /// `POST /api/events/full-state`: an opted-in client that cannot apply a
@@ -310,7 +316,7 @@ struct FullStateRequest {
 /// the current cut (`mode: "cut"`). Idempotent. It publishes the current cut
 /// at once, with no revision bump and nothing to persist, so an idle host
 /// answers without waiting for an unrelated commit.
-async fn request_full_state(
+pub(crate) async fn request_full_state(
     State(state): State<AppState>,
     request: Result<Json<FullStateRequest>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
@@ -345,7 +351,7 @@ async fn request_full_state(
 /// Streams state and delta events over SSE. Opted-in connections receive
 /// `stateDiff` instead of the full `state` that accompanies a diff; a full
 /// `state` sent without a diff, the initial state and lag recovery reach both.
-async fn state_events(
+pub(crate) async fn state_events(
     State(state): State<AppState>,
     query: Result<Query<StateEventsQuery>, QueryRejection>,
 ) -> Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>> {
@@ -359,7 +365,7 @@ async fn state_events(
 
 /// The `/api/events` stream itself. The heartbeat interval is a parameter so a
 /// test can observe heartbeats without waiting the production interval.
-async fn state_events_stream(
+pub(crate) async fn state_events_stream(
     state: AppState,
     state_diffs: bool,
     heartbeat_interval: Duration,

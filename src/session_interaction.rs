@@ -35,9 +35,11 @@
 // Extracted from state.rs so state.rs can stay focused on `StateInner`
 // + commit_locked() + SSE broadcasting.
 
+use super::*;
+
 /// Returns whether pending requests for test assertions.
 #[cfg(test)]
-fn has_pending_requests(record: &SessionRecord) -> bool {
+pub(crate) fn has_pending_requests(record: &SessionRecord) -> bool {
     !record.pending_claude_approvals.is_empty()
         || !record.pending_claude_user_inputs.is_empty()
         || !record.pending_codex_approvals.is_empty()
@@ -48,7 +50,7 @@ fn has_pending_requests(record: &SessionRecord) -> bool {
 }
 
 /// Clears all pending requests.
-fn clear_all_pending_requests(record: &mut SessionRecord) {
+pub(crate) fn clear_all_pending_requests(record: &mut SessionRecord) {
     record.pending_claude_approvals.clear();
     record.pending_claude_user_inputs.clear();
     record.pending_codex_approvals.clear();
@@ -60,7 +62,7 @@ fn clear_all_pending_requests(record: &mut SessionRecord) {
 }
 
 /// Merges agent commands.
-fn merge_agent_commands(
+pub(crate) fn merge_agent_commands(
     preferred: &[AgentCommand],
     fallback: &[AgentCommand],
 ) -> Vec<AgentCommand> {
@@ -77,7 +79,7 @@ fn merge_agent_commands(
 }
 
 /// Deduplicates agent commands.
-fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
+pub(crate) fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::new();
     for command in commands {
@@ -96,7 +98,7 @@ fn dedupe_agent_commands(commands: Vec<AgentCommand>) -> Vec<AgentCommand> {
 }
 
 /// Returns the normalized Codex thread state.
-fn normalized_codex_thread_state(
+pub(crate) fn normalized_codex_thread_state(
     agent: Agent,
     external_session_id: Option<&str>,
     current_state: Option<CodexThreadState>,
@@ -109,7 +111,7 @@ fn normalized_codex_thread_state(
 }
 
 /// Syncs Codex thread state.
-fn sync_codex_thread_state(record: &mut SessionRecord) {
+pub(crate) fn sync_codex_thread_state(record: &mut SessionRecord) {
     record.session.codex_thread_state = normalized_codex_thread_state(
         record.session.agent,
         record.external_session_id.as_deref(),
@@ -118,7 +120,10 @@ fn sync_codex_thread_state(record: &mut SessionRecord) {
 }
 
 /// Sets record external session ID.
-fn set_record_external_session_id(record: &mut SessionRecord, external_session_id: Option<String>) {
+pub(crate) fn set_record_external_session_id(
+    record: &mut SessionRecord,
+    external_session_id: Option<String>,
+) {
     if record.external_session_id != external_session_id {
         record.codex_terminal_archive = None;
     }
@@ -128,7 +133,10 @@ fn set_record_external_session_id(record: &mut SessionRecord, external_session_i
 }
 
 /// Sets record Codex thread state.
-fn set_record_codex_thread_state(record: &mut SessionRecord, thread_state: CodexThreadState) {
+pub(crate) fn set_record_codex_thread_state(
+    record: &mut SessionRecord,
+    thread_state: CodexThreadState,
+) {
     record.session.codex_thread_state = normalized_codex_thread_state(
         record.session.agent,
         record.external_session_id.as_deref(),
@@ -140,14 +148,14 @@ fn set_record_codex_thread_state(record: &mut SessionRecord, thread_state: Codex
 }
 
 /// Records has archived Codex thread.
-fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
+pub(crate) fn record_has_archived_codex_thread(record: &SessionRecord) -> bool {
     record.session.codex_thread_state == Some(CodexThreadState::Archived)
 }
 
 /// Defines the queued prompt source variants.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum QueuedPromptSource {
+pub(crate) enum QueuedPromptSource {
     #[default]
     User,
     /// Classified at the explicit human request boundary, before attribution
@@ -159,51 +167,52 @@ enum QueuedPromptSource {
 
 /// Represents a queued prompt record.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct QueuedPromptRecord {
+pub(crate) struct QueuedPromptRecord {
     // Saved before an ordinary degraded handoff. After a restart this means
     // provider delivery is unknown, never permission to replay the prompt.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    engram_ordinary_handoff: bool,
+    pub(crate) engram_ordinary_handoff: bool,
     // Global transcript position survives eviction from the resident window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    promoted_message_index: Option<usize>,
+    pub(crate) promoted_message_index: Option<usize>,
     // `None` is a definitive not-yet-promoted disposition only for current
     // records. Legacy rows omit this marker and remain fail-closed when their
     // possible transcript position has already been evicted.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    promotion_disposition_known: bool,
+    pub(crate) promotion_disposition_known: bool,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    engram_waiting: bool,
+    pub(crate) engram_waiting: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_bind: Option<Value>,
+    pub(crate) engram_bind: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    engram_evaluate: Option<Value>,
+    pub(crate) engram_evaluate: Option<Value>,
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    engram_interrupted: bool,
-    source: QueuedPromptSource,
-    attachments: Vec<PromptImageAttachment>,
-    pending_prompt: PendingPrompt,
+    pub(crate) engram_interrupted: bool,
+    pub(crate) source: QueuedPromptSource,
+    pub(crate) attachments: Vec<PromptImageAttachment>,
+    pub(crate) pending_prompt: PendingPrompt,
 }
 
 impl QueuedPromptRecord {
     fn projected_interrupted(&self) -> bool {
-        self.engram_interrupted
-            || self.engram_ordinary_handoff
-            || !self.promotion_disposition_known
+        self.engram_interrupted || self.engram_ordinary_handoff || !self.promotion_disposition_known
     }
 
     // History protects immutable stored content from mailbox coalescing. It
     // is never consulted as an authorization or a prerequisite to dispatch.
-    fn has_stored_history(&self) -> bool {
-        self.engram_bind.is_some() || self.engram_evaluate.is_some()
-            || self.engram_waiting || self.engram_interrupted
-            || self.engram_ordinary_handoff || self.promoted_message_index.is_some()
+    pub(crate) fn has_stored_history(&self) -> bool {
+        self.engram_bind.is_some()
+            || self.engram_evaluate.is_some()
+            || self.engram_waiting
+            || self.engram_interrupted
+            || self.engram_ordinary_handoff
+            || self.promoted_message_index.is_some()
             || !self.promotion_disposition_known
     }
 }
 
 /// Syncs pending prompts.
-fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
+pub(crate) fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
     record
         .queued_prompts
         .iter()
@@ -219,24 +228,41 @@ fn projected_pending_prompts(record: &SessionRecord) -> Vec<PendingPrompt> {
 // The public queue hash depends only on ordered identity and disposition, not
 // prompt bodies. Borrow the same authority as projected_pending_prompts so a
 // warm metadata cut can validate it without cloning prompts or hashing again.
-fn projected_pending_prompt_identities(
+pub(crate) fn projected_pending_prompt_identities(
     record: &SessionRecord,
 ) -> impl Iterator<Item = (&str, bool, bool)> {
     let authoritative = record.is_local_session() && !record.queued_prompts.is_empty();
-    let queued_count = if authoritative { record.queued_prompts.len() } else { 0 };
-    let embedded = if authoritative { &[] } else { record.session.pending_prompts.as_slice() };
-    record.queued_prompts.iter().take(queued_count).map(|queued| {
-        (
-            queued.pending_prompt.id.as_str(),
-            queued.projected_interrupted(),
-            queued.has_stored_history(),
-        )
-    }).chain(embedded.iter().map(|prompt| {
-        (prompt.id.as_str(), prompt.engram_interrupted, prompt.is_engram_retained)
-    }))
+    let queued_count = if authoritative {
+        record.queued_prompts.len()
+    } else {
+        0
+    };
+    let embedded = if authoritative {
+        &[]
+    } else {
+        record.session.pending_prompts.as_slice()
+    };
+    record
+        .queued_prompts
+        .iter()
+        .take(queued_count)
+        .map(|queued| {
+            (
+                queued.pending_prompt.id.as_str(),
+                queued.projected_interrupted(),
+                queued.has_stored_history(),
+            )
+        })
+        .chain(embedded.iter().map(|prompt| {
+            (
+                prompt.id.as_str(),
+                prompt.engram_interrupted,
+                prompt.is_engram_retained,
+            )
+        }))
 }
 
-fn sync_pending_prompts(record: &mut SessionRecord) {
+pub(crate) fn sync_pending_prompts(record: &mut SessionRecord) {
     if !record.is_local_session() {
         return;
     }
@@ -280,7 +306,7 @@ fn sync_pending_prompts(record: &mut SessionRecord) {
 }
 
 /// Sets approval decision on record.
-fn set_approval_decision_on_record(
+pub(crate) fn set_approval_decision_on_record(
     record: &mut SessionRecord,
     message_id: &str,
     decision: ApprovalDecision,
@@ -306,7 +332,7 @@ fn set_approval_decision_on_record(
 }
 
 /// Sets user input request state on record.
-fn set_user_input_request_state_on_record(
+pub(crate) fn set_user_input_request_state_on_record(
     record: &mut SessionRecord,
     message_id: &str,
     state: InteractionRequestState,
@@ -335,7 +361,7 @@ fn set_user_input_request_state_on_record(
 }
 
 /// Sets MCP elicitation request state on record.
-fn set_mcp_elicitation_request_state_on_record(
+pub(crate) fn set_mcp_elicitation_request_state_on_record(
     record: &mut SessionRecord,
     message_id: &str,
     state: InteractionRequestState,
@@ -367,7 +393,7 @@ fn set_mcp_elicitation_request_state_on_record(
 }
 
 /// Sets Codex app request state on record.
-fn set_codex_app_request_state_on_record(
+pub(crate) fn set_codex_app_request_state_on_record(
     record: &mut SessionRecord,
     message_id: &str,
     state: InteractionRequestState,
@@ -443,7 +469,7 @@ fn latest_pending_interaction_preview(record: &SessionRecord) -> Option<String> 
     None
 }
 
-fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String {
+pub(crate) fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String {
     match decision {
         ApprovalDecision::Pending => "Approval pending.".to_owned(),
         ApprovalDecision::Interrupted => "Approval expired after TermAl restarted.".to_owned(),
@@ -462,7 +488,10 @@ fn approval_preview_text(agent_name: &str, decision: ApprovalDecision) -> String
     }
 }
 
-fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
+pub(crate) fn user_input_request_preview_text(
+    agent_name: &str,
+    state: InteractionRequestState,
+) -> String {
     match state {
         InteractionRequestState::Pending => "Input requested.".to_owned(),
         InteractionRequestState::Submitted => {
@@ -483,7 +512,7 @@ fn user_input_request_preview_text(agent_name: &str, state: InteractionRequestSt
 }
 
 /// Handles MCP elicitation request preview text.
-fn mcp_elicitation_request_preview_text(
+pub(crate) fn mcp_elicitation_request_preview_text(
     agent_name: &str,
     state: InteractionRequestState,
     action: Option<McpElicitationAction>,
@@ -518,7 +547,10 @@ fn mcp_elicitation_request_preview_text(
 }
 
 /// Handles Codex app request preview text.
-fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestState) -> String {
+pub(crate) fn codex_app_request_preview_text(
+    agent_name: &str,
+    state: InteractionRequestState,
+) -> String {
     match state {
         InteractionRequestState::Pending => "Codex response requested.".to_owned(),
         InteractionRequestState::Submitted => {
@@ -539,7 +571,7 @@ fn codex_app_request_preview_text(agent_name: &str, state: InteractionRequestSta
 }
 
 /// Syncs session interaction state.
-fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: String) {
+pub(crate) fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: String) {
     if !record.runtime_projection_allowed() {
         return;
     }
@@ -559,7 +591,7 @@ fn sync_session_interaction_state(record: &mut SessionRecord, resolved_preview: 
 }
 /// Queues prompt on record.
 #[cfg(test)]
-fn queue_prompt_on_record(
+pub(crate) fn queue_prompt_on_record(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
     attachments: Vec<PromptImageAttachment>,
@@ -573,7 +605,7 @@ fn queue_prompt_on_record(
 }
 
 /// Queues orchestrator prompt on record.
-fn queue_orchestrator_prompt_on_record(
+pub(crate) fn queue_orchestrator_prompt_on_record(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
     attachments: Vec<PromptImageAttachment>,
@@ -587,7 +619,7 @@ fn queue_orchestrator_prompt_on_record(
 }
 
 /// Queues prompt on record with source.
-fn queue_prompt_on_record_with_source(
+pub(crate) fn queue_prompt_on_record_with_source(
     record: &mut SessionRecord,
     pending_prompt: PendingPrompt,
     attachments: Vec<PromptImageAttachment>,
@@ -637,7 +669,7 @@ fn queue_prompt_on_record_with_source(
     sync_pending_prompts(record);
 }
 
-const PEER_MESSAGE_BATCH_PREFIX: &str = "[TermAl cross-session message batch]";
+pub(crate) const PEER_MESSAGE_BATCH_PREFIX: &str = "[TermAl cross-session message batch]";
 
 fn append_to_tail_peer_message_batch(
     record: &mut SessionRecord,
@@ -652,12 +684,12 @@ fn append_to_tail_peer_message_batch(
             && queued.attachments.is_empty()
             && !queued.has_stored_history()
             && !queued_prompt_kept_standalone(record, queued))
-            .then(|| {
-                (
-                    queued.pending_prompt.id.clone(),
-                    queued.pending_prompt.clone(),
-                )
-            })
+        .then(|| {
+            (
+                queued.pending_prompt.id.clone(),
+                queued.pending_prompt.clone(),
+            )
+        })
     }) else {
         return false;
     };
@@ -740,16 +772,31 @@ To reply, use the TermAl MCP tool `termal_send_to_session` with the `sessionId` 
 }
 
 /// Handles prioritize user queued prompts.
-fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
-    if record.queued_prompts.iter().any(|queued| queued_prompt_held_for_durability(record, queued)) {
+pub(crate) fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
+    if record
+        .queued_prompts
+        .iter()
+        .any(|queued| queued_prompt_held_for_durability(record, queued))
+    {
         return;
     }
-    let positions = record.queued_prompts.iter().enumerate()
+    let positions = record
+        .queued_prompts
+        .iter()
+        .enumerate()
         .filter(|(_, queued)| ordinary_queue_entry_is_runnable(record, queued))
-        .map(|(position, _)| position).collect::<Vec<_>>();
-    let mut ordered = positions.iter().map(|position| record.queued_prompts[*position].clone())
+        .map(|(position, _)| position)
         .collect::<Vec<_>>();
-    ordered.sort_by_key(|queued| !matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human));
+    let mut ordered = positions
+        .iter()
+        .map(|position| record.queued_prompts[*position].clone())
+        .collect::<Vec<_>>();
+    ordered.sort_by_key(|queued| {
+        !matches!(
+            queued.source,
+            QueuedPromptSource::User | QueuedPromptSource::Human
+        )
+    });
     for (position, queued) in positions.into_iter().zip(ordered) {
         record.queued_prompts[position] = queued;
     }
@@ -757,7 +804,10 @@ fn prioritize_user_queued_prompts(record: &mut SessionRecord) {
 }
 
 /// Clears queued prompts by source.
-fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedPromptSource) {
+pub(crate) fn clear_queued_prompts_by_source(
+    record: &mut SessionRecord,
+    source: QueuedPromptSource,
+) {
     let original_len = record.queued_prompts.len();
     let removed_head = handing_off_head(record);
     record
@@ -773,12 +823,13 @@ fn clear_queued_prompts_by_source(record: &mut SessionRecord, source: QueuedProm
 
 /// Clears queued prompts from `source`, except for the exact promoted head
 /// whose admitted provider handoff is owned by an in-flight public Stop.
-fn clear_queued_prompts_by_source_except_delivery_owner(
+pub(crate) fn clear_queued_prompts_by_source_except_delivery_owner(
     record: &mut SessionRecord,
     source: QueuedPromptSource,
     admission_owner: Option<&QueuedTurnOwner>,
 ) {
-    let preserved_id = admission_owner.filter(|owner| owner.matches(record))
+    let preserved_id = admission_owner
+        .filter(|owner| owner.matches(record))
         .map(|owner| owner.prompt_id.clone());
     let keep = |_index: usize, queued: &QueuedPromptRecord| {
         queued.source != source || preserved_id.as_ref() == Some(&queued.pending_prompt.id)
@@ -800,6 +851,6 @@ fn clear_queued_prompts_by_source_except_delivery_owner(
 }
 
 /// Clears stopped orchestrator queued prompts.
-fn clear_stopped_orchestrator_queued_prompts(record: &mut SessionRecord) {
+pub(crate) fn clear_stopped_orchestrator_queued_prompts(record: &mut SessionRecord) {
     clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
 }

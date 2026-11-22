@@ -3,30 +3,34 @@
 // canonical bound-criterion closure index. Does not judge freshness or grant
 // citation authority; Engram still decides whether a submitted record counts.
 
+use super::*;
+
 // The whole obligation assessment of each indexed verification record.
 include!("acceptance_obligation_assessment.rs");
 
-const MAX_ACCEPTANCE_SELECTED_RECORDS: usize = 16;
-const MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES: usize = 16;
-const ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET: Duration = Duration::from_secs(60);
+pub(crate) const MAX_ACCEPTANCE_SELECTED_RECORDS: usize = 16;
+pub(crate) const MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES: usize = 16;
+pub(crate) const ACCEPTANCE_CRITERION_EVIDENCE_READ_BUDGET: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-struct AcceptanceEvidenceIdentity {
-    work_id: String,
-    work_ref: String,
-    revision: i64,
-    active_run_id: Option<String>,
-    root_execution_id: Option<String>,
-    run_generation: Option<i64>,
+pub(crate) struct AcceptanceEvidenceIdentity {
+    pub(crate) work_id: String,
+    pub(crate) work_ref: String,
+    pub(crate) revision: i64,
+    pub(crate) active_run_id: Option<String>,
+    pub(crate) root_execution_id: Option<String>,
+    pub(crate) run_generation: Option<i64>,
 }
 
-struct AcceptanceEvidenceDiscovery {
-    target: Option<EngramBindingTarget>,
-    identity: Option<AcceptanceEvidenceIdentity>,
-    unavailable: &'static str,
+pub(crate) struct AcceptanceEvidenceDiscovery {
+    pub(crate) target: Option<EngramBindingTarget>,
+    pub(crate) identity: Option<AcceptanceEvidenceIdentity>,
+    pub(crate) unavailable: &'static str,
 }
 
-fn acceptance_core_identity(value: &Value) -> Result<Option<AcceptanceEvidenceIdentity>, ApiError> {
+pub(crate) fn acceptance_core_identity(
+    value: &Value,
+) -> Result<Option<AcceptanceEvidenceIdentity>, ApiError> {
     let work = &value["status"]["work"];
     if !work.is_object()
         || !work["short_ref"]
@@ -100,7 +104,7 @@ fn acceptance_core_identity(value: &Value) -> Result<Option<AcceptanceEvidenceId
     }))
 }
 
-fn validate_acceptance_projection_identity(
+pub(crate) fn validate_acceptance_projection_identity(
     work: &Value,
     identity: &AcceptanceEvidenceIdentity,
 ) -> Result<(), ApiError> {
@@ -129,9 +133,9 @@ fn validate_acceptance_projection_identity(
 /// Agent receipts have operation-specific headers. Their scalar task/run
 /// basis is separate from the project catalog cut used by notes cursors.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct AcceptanceAgentEvidenceBasis {
-    acceptance_basis: i64,
-    evidence_basis: i64,
+pub(crate) struct AcceptanceAgentEvidenceBasis {
+    pub(crate) acceptance_basis: i64,
+    pub(crate) evidence_basis: i64,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +144,7 @@ struct AcceptanceContractIdentity {
     revision: i64,
 }
 
-fn acceptance_full_contract_identity(
+pub(crate) fn acceptance_full_contract_identity(
     full: &Value,
     identity: &AcceptanceEvidenceIdentity,
 ) -> Result<(), ApiError> {
@@ -157,26 +161,26 @@ fn acceptance_full_contract_identity(
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct AcceptanceNotesWindow {
-    selection: String,
-    order: String,
-    newer: u64,
-    older: u64,
-    shown: u64,
-    total: u64,
-    after: Option<String>,
-    includes_gates: bool,
-    read_cut: AcceptanceNotesCatalogCut,
+pub(crate) struct AcceptanceNotesWindow {
+    pub(crate) selection: String,
+    pub(crate) order: String,
+    pub(crate) newer: u64,
+    pub(crate) older: u64,
+    pub(crate) shown: u64,
+    pub(crate) total: u64,
+    pub(crate) after: Option<String>,
+    pub(crate) includes_gates: bool,
+    pub(crate) read_cut: AcceptanceNotesCatalogCut,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct AcceptanceNotesCatalogCut {
-    project_position: i64,
-    observed_at: String,
-    valid_until_ms: Option<i64>,
+pub(crate) struct AcceptanceNotesCatalogCut {
+    pub(crate) project_position: i64,
+    pub(crate) observed_at: String,
+    pub(crate) valid_until_ms: Option<i64>,
 }
 
-fn acceptance_initial_evidence_basis(
+pub(crate) fn acceptance_initial_evidence_basis(
     show: &Value,
     identity: &AcceptanceEvidenceIdentity,
 ) -> Result<AcceptanceAgentEvidenceBasis, ApiError> {
@@ -197,7 +201,7 @@ fn acceptance_initial_evidence_basis(
     Ok(basis)
 }
 
-fn acceptance_notes_window(page: &Value) -> Result<AcceptanceNotesWindow, ApiError> {
+pub(crate) fn acceptance_notes_window(page: &Value) -> Result<AcceptanceNotesWindow, ApiError> {
     let invalid =
         || ApiError::bad_gateway("engram work show notes continuation: malformed catalog window");
     let window: AcceptanceNotesWindow =
@@ -232,7 +236,7 @@ fn acceptance_notes_window(page: &Value) -> Result<AcceptanceNotesWindow, ApiErr
     Ok(window)
 }
 
-fn acceptance_compact_notes_carrier(
+pub(crate) fn acceptance_compact_notes_carrier(
     page: &Value,
     identity: &AcceptanceEvidenceIdentity,
     basis: &AcceptanceAgentEvidenceBasis,
@@ -297,7 +301,7 @@ fn acceptance_compact_notes_carrier(
     Ok(window)
 }
 
-fn acceptance_criterion_evidence_read_timeout(
+pub(crate) fn acceptance_criterion_evidence_read_timeout(
     deadline: std::time::Instant,
     now: &impl Fn() -> std::time::Instant,
 ) -> Result<Duration, ApiError> {
@@ -310,34 +314,40 @@ fn acceptance_criterion_evidence_read_timeout(
             "criterion evidence read budget was spent; no evaluation was started",
         ));
     }
-    Ok(engram_operation_timeout(remaining.min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT)))
+    Ok(engram_operation_timeout(
+        remaining.min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT),
+    ))
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceCriterionEvidenceRequest {
-    criterion: usize,
-    locators: Vec<String>,
+pub(crate) struct AcceptanceCriterionEvidenceRequest {
+    pub(crate) criterion: usize,
+    pub(crate) locators: Vec<String>,
 }
 
 /// Private discovery hints, bound by their target's canonical work/run identity.
 /// Bodies are never retained here: every fresh preparation reads them again.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceSelectedEvidence {
-    criterion: usize,
-    criterion_text: String,
-    locators: Vec<String>,
+pub(crate) struct AcceptanceSelectedEvidence {
+    pub(crate) criterion: usize,
+    pub(crate) criterion_text: String,
+    pub(crate) locators: Vec<String>,
 }
 
-fn carry_acceptance_evidence_selection(
+pub(crate) fn carry_acceptance_evidence_selection(
     old: &[AcceptanceSelectedEvidence],
     task: &AcceptanceEvaluationTask,
     disclosures: &mut Vec<String>,
 ) -> Result<Vec<AcceptanceCriterionEvidenceRequest>, ApiError> {
-    let all = old.iter().map(|row| AcceptanceCriterionEvidenceRequest {
-        criterion: row.criterion, locators: row.locators.clone(),
-    }).collect::<Vec<_>>();
+    let all = old
+        .iter()
+        .map(|row| AcceptanceCriterionEvidenceRequest {
+            criterion: row.criterion,
+            locators: row.locators.clone(),
+        })
+        .collect::<Vec<_>>();
     validate_acceptance_criterion_evidence_request(&all)?;
     Ok(old.iter().filter_map(|row| {
         if task.criteria.get(row.criterion - 1) == Some(&row.criterion_text) {
@@ -356,13 +366,16 @@ fn carry_acceptance_evidence_selection(
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceCriterionEvidence {
-    criterion: usize,
-    locators: Vec<String>,
-    association: String,
+pub(crate) struct AcceptanceCriterionEvidence {
+    pub(crate) criterion: usize,
+    pub(crate) locators: Vec<String>,
+    pub(crate) association: String,
 }
 
-fn acceptance_canonical_index_unavailable(task: &mut AcceptanceEvaluationTask, reason: &str) {
+pub(crate) fn acceptance_canonical_index_unavailable(
+    task: &mut AcceptanceEvaluationTask,
+    reason: &str,
+) {
     for binding in &task.bindings {
         task.criterion_evidence.push(AcceptanceCriterionEvidence {
             criterion: binding.criterion,
@@ -375,7 +388,7 @@ fn acceptance_canonical_index_unavailable(task: &mut AcceptanceEvaluationTask, r
     task.criterion_evidence.sort_by_key(|row| row.criterion);
 }
 
-fn acceptance_binding_read_unsupported(error: &EngramTransportError) -> bool {
+pub(crate) fn acceptance_binding_read_unsupported(error: &EngramTransportError) -> bool {
     error.kind == EngramTransportErrorKind::Remote
         && (matches!(
             error.code.as_deref(),
@@ -386,7 +399,7 @@ fn acceptance_binding_read_unsupported(error: &EngramTransportError) -> bool {
                 .contains("unknown variant `acceptance_binding_read`")))
 }
 
-fn acceptance_core_inspect_unsupported(error: &EngramTransportError) -> bool {
+pub(crate) fn acceptance_core_inspect_unsupported(error: &EngramTransportError) -> bool {
     (error.kind == EngramTransportErrorKind::Remote
         && matches!(
             error.code.as_deref(),
@@ -421,7 +434,7 @@ fn acceptance_binding_read_error(error: EngramTransportError) -> ApiError {
     }
 }
 
-fn validate_acceptance_criterion_evidence_request(
+pub(crate) fn validate_acceptance_criterion_evidence_request(
     links: &[AcceptanceCriterionEvidenceRequest],
 ) -> Result<(), ApiError> {
     let mut criteria = BTreeSet::new();
@@ -457,7 +470,7 @@ fn validate_acceptance_criterion_evidence_request(
 }
 
 #[cfg(test)]
-fn read_requested_acceptance_evidence(
+pub(crate) fn read_requested_acceptance_evidence(
     task: &mut AcceptanceEvaluationTask,
     links: &[AcceptanceCriterionEvidenceRequest],
     connection: &EngramConnectionConfig,
@@ -466,10 +479,12 @@ fn read_requested_acceptance_evidence(
     deadline: std::time::Instant,
     now: &impl Fn() -> std::time::Instant,
 ) -> Result<(), ApiError> {
-    read_acceptance_selected_evidence(task, links, connection, show_args, read, deadline, now, None)
+    read_acceptance_selected_evidence(
+        task, links, connection, show_args, read, deadline, now, None,
+    )
 }
 
-fn is_acceptance_selected_note_read(args: &[&str]) -> bool {
+pub(crate) fn is_acceptance_selected_note_read(args: &[&str]) -> bool {
     // Work actor/session attribution precedes the verb's subcommand. Match
     // only the exact selected-read tail, never strings in attribution values.
     args.first() == Some(&"work")
@@ -478,7 +493,7 @@ fn is_acceptance_selected_note_read(args: &[&str]) -> bool {
                 if is_acceptance_record_id(locator))
 }
 
-fn decode_acceptance_selected_cli_output(
+pub(crate) fn decode_acceptance_selected_cli_output(
     output: EngramCliOutput,
 ) -> Result<Value, EngramTransportError> {
     if output.success {
@@ -516,7 +531,7 @@ fn acceptance_selected_record_error(
     )
 }
 
-fn validate_acceptance_selected_record(
+pub(crate) fn validate_acceptance_selected_record(
     result: &Value,
     work_ref: &str,
     locator: &str,
@@ -566,7 +581,8 @@ fn validate_acceptance_selected_record(
     if summary.len() > 16 * 1024 {
         return Err(ApiError::conflict(format!(
             "selected evidence {locator}: body exceeds the brief read bound ({} UTF-8 bytes; limit {} bytes); select a smaller whole proof record",
-            summary.len(), 16 * 1024,
+            summary.len(),
+            16 * 1024,
         )));
     }
     Ok((note, summary))
@@ -587,7 +603,7 @@ fn collect_acceptance_selected_refusal(refusals: &mut Option<ApiError>, error: A
     *refusals = Some(merge_acceptance_selected_refusal(refusals.take(), error));
 }
 
-fn read_acceptance_selected_evidence(
+pub(crate) fn read_acceptance_selected_evidence(
     task: &mut AcceptanceEvaluationTask,
     links: &[AcceptanceCriterionEvidenceRequest],
     connection: &EngramConnectionConfig,
@@ -791,7 +807,7 @@ fn read_acceptance_selected_evidence(
     validate_acceptance_evidence_basis(task, &current)
 }
 
-fn validate_acceptance_evidence_basis(
+pub(crate) fn validate_acceptance_evidence_basis(
     task: &AcceptanceEvaluationTask,
     current: &Value,
 ) -> Result<(), ApiError> {
@@ -834,7 +850,9 @@ fn validate_acceptance_evidence_basis(
 
 // Requester associations come only from validated whole exact-record reads.
 // Their bodies are mandatory; canonical discovery projections remain context.
-fn acceptance_selected_proof_locators(task: &AcceptanceEvaluationTask) -> BTreeSet<&str> {
+pub(crate) fn acceptance_selected_proof_locators(
+    task: &AcceptanceEvaluationTask,
+) -> BTreeSet<&str> {
     task.criterion_evidence
         .iter()
         .filter(|row| row.association == "requester")
@@ -844,13 +862,13 @@ fn acceptance_selected_proof_locators(task: &AcceptanceEvaluationTask) -> BTreeS
 
 // Keep exact proof text as data, with a fence longer than any run in its body.
 // The framing is included in the renderer's normal UTF-8 budget.
-fn acceptance_brief_verbatim_body(body: &str) -> String {
+pub(crate) fn acceptance_brief_verbatim_body(body: &str) -> String {
     let fence_len = body.split(|c| c != '`').map(str::len).max().unwrap_or(0) + 1;
     let fence = "`".repeat(fence_len.max(3));
     format!("\n{fence}text\n{body}\n{fence}")
 }
 
-fn render_acceptance_criterion_evidence(
+pub(crate) fn render_acceptance_criterion_evidence(
     task: &AcceptanceEvaluationTask,
     detail: AcceptanceOmissionDetail,
     fully_rendered: &BTreeSet<String>,
@@ -897,7 +915,8 @@ fn render_acceptance_criterion_evidence(
             .iter()
             .filter(|row| {
                 row.criterion == criterion
-                    && (detail != AcceptanceOmissionDetail::Minimal || row.association == "requester")
+                    && (detail != AcceptanceOmissionDetail::Minimal
+                        || row.association == "requester")
             })
             .collect();
         if rows.is_empty() && detail != AcceptanceOmissionDetail::Minimal {
@@ -934,7 +953,11 @@ fn render_acceptance_criterion_evidence(
         }
     }
     if let Some(notice) = omission_notice {
-        if task.criterion_evidence.iter().any(|row| row.association != "requester") {
+        if task
+            .criterion_evidence
+            .iter()
+            .any(|row| row.association != "requester")
+        {
             lines.push(notice);
         }
     }
@@ -942,7 +965,7 @@ fn render_acceptance_criterion_evidence(
     lines.join("\n")
 }
 
-fn acceptance_criterion_evidence_cuts(
+pub(crate) fn acceptance_criterion_evidence_cuts(
     task: &AcceptanceEvaluationTask,
     cuts: &mut AcceptanceBriefCuts,
     detail: AcceptanceOmissionDetail,
@@ -999,90 +1022,93 @@ fn acceptance_criterion_evidence_cuts(
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceBasis {
-    project_id: String,
-    work_id: String,
-    work_revision: i64,
-    run_id: String,
-    run_cut: i64,
+pub(crate) struct AcceptanceBindingEvidenceBasis {
+    pub(crate) project_id: String,
+    pub(crate) work_id: String,
+    pub(crate) work_revision: i64,
+    pub(crate) run_id: String,
+    pub(crate) run_cut: i64,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidencePage {
-    basis: AcceptanceBindingEvidenceBasis,
-    total: usize,
-    earlier: usize,
-    shown: usize,
-    omitted: usize,
-    rows: Vec<AcceptanceBindingEvidenceRow>,
-    continuation: Option<String>,
+pub(crate) struct AcceptanceBindingEvidencePage {
+    pub(crate) basis: AcceptanceBindingEvidenceBasis,
+    pub(crate) total: usize,
+    pub(crate) earlier: usize,
+    pub(crate) shown: usize,
+    pub(crate) omitted: usize,
+    pub(crate) rows: Vec<AcceptanceBindingEvidenceRow>,
+    pub(crate) continuation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceRow {
-    criterion: usize,
-    binding: Option<AcceptanceBindingEvidenceBinding>,
+pub(crate) struct AcceptanceBindingEvidenceRow {
+    pub(crate) criterion: usize,
+    pub(crate) binding: Option<AcceptanceBindingEvidenceBinding>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceBinding {
-    requirement: EngramAcceptanceRequirementForEvaluation,
-    obligation: Option<AcceptanceBindingEvidenceObligation>,
+pub(crate) struct AcceptanceBindingEvidenceBinding {
+    pub(crate) requirement: EngramAcceptanceRequirementForEvaluation,
+    pub(crate) obligation: Option<AcceptanceBindingEvidenceObligation>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceObligation {
-    obligation_id: String,
-    definition: String,
-    work_revision: i64,
-    rule: Value,
-    triggering_observation: String,
-    trigger_position: i64,
-    definition_position: i64,
-    state: String,
-    resolution: Option<AcceptanceBindingEvidenceResolution>,
+pub(crate) struct AcceptanceBindingEvidenceObligation {
+    pub(crate) obligation_id: String,
+    pub(crate) definition: String,
+    pub(crate) work_revision: i64,
+    pub(crate) rule: Value,
+    pub(crate) triggering_observation: String,
+    pub(crate) trigger_position: i64,
+    pub(crate) definition_position: i64,
+    pub(crate) state: String,
+    pub(crate) resolution: Option<AcceptanceBindingEvidenceResolution>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceResolution {
-    record: String,
-    position: i64,
-    kind: String,
-    satisfaction: Option<AcceptanceBindingEvidenceSatisfaction>,
+pub(crate) struct AcceptanceBindingEvidenceResolution {
+    pub(crate) record: String,
+    pub(crate) position: i64,
+    pub(crate) kind: String,
+    pub(crate) satisfaction: Option<AcceptanceBindingEvidenceSatisfaction>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceSatisfaction {
-    evaluated_cut: i64,
-    verification: AcceptanceBindingEvidenceVerification,
+pub(crate) struct AcceptanceBindingEvidenceSatisfaction {
+    pub(crate) evaluated_cut: i64,
+    pub(crate) verification: AcceptanceBindingEvidenceVerification,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceVerification {
+pub(crate) struct AcceptanceBindingEvidenceVerification {
     /// Returned as stored; informational metadata never creates eligibility.
-    #[serde(default, deserialize_with = "deserialize_acceptance_verification_applicability")]
-    applicability: Option<AcceptanceVerificationApplicability>,
-    record: String,
-    position: i64,
-    check_kind: String,
-    check_fingerprint: String,
-    result: String,
-    source_basis: AcceptanceVerificationSourceBasis,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_acceptance_verification_applicability"
+    )]
+    pub(crate) applicability: Option<AcceptanceVerificationApplicability>,
+    pub(crate) record: String,
+    pub(crate) position: i64,
+    pub(crate) check_kind: String,
+    pub(crate) check_fingerprint: String,
+    pub(crate) result: String,
+    pub(crate) source_basis: AcceptanceVerificationSourceBasis,
     /// For a bound record, the original's producer: its position is on the
     /// original's run, not this one.
-    producer: AcceptanceBindingEvidenceProducer,
+    pub(crate) producer: AcceptanceBindingEvidenceProducer,
     /// Present only on a record Engram bound from a check run on another item
     /// (`verification_bind`, `engram_verification_bind.rs`); absent on every
     /// native record.
     #[serde(default)]
-    bound: Option<AcceptanceBindingEvidenceBound>,
+    pub(crate) bound: Option<AcceptanceBindingEvidenceBound>,
 }
 
 /// Where a bound record's check ran and how it was bound to this item, as
@@ -1090,42 +1116,42 @@ struct AcceptanceBindingEvidenceVerification {
 /// unknown one is refused; this reader uses the ones that place the original.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceBound {
+pub(crate) struct AcceptanceBindingEvidenceBound {
     /// The original native verification.
-    verification: String,
+    pub(crate) verification: String,
     /// The original's item.
-    work_ref: String,
+    pub(crate) work_ref: String,
     /// The original's run, on whose feed `original_position` and the
     /// producer's position lie.
     #[allow(dead_code)]
-    run: Value,
-    original_position: i64,
-    original_basis: AcceptanceVerificationSourceBasis,
+    pub(crate) run: Value,
+    pub(crate) original_position: i64,
+    pub(crate) original_basis: AcceptanceVerificationSourceBasis,
     #[allow(dead_code)]
-    original_completed_at: String,
+    pub(crate) original_completed_at: String,
     #[allow(dead_code)]
-    binder: Value,
+    pub(crate) binder: Value,
     #[allow(dead_code)]
-    bound_at: String,
+    pub(crate) bound_at: String,
     /// The target run's sighting the binding stood on.
-    sighting: String,
+    pub(crate) sighting: String,
     #[allow(dead_code)]
-    measurement: Value,
+    pub(crate) measurement: Value,
     #[allow(dead_code)]
     #[serde(default)]
-    criteria: Vec<u32>,
+    pub(crate) criteria: Vec<u32>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceBindingEvidenceProducer {
-    record: String,
-    position: i64,
-    outcome: String,
+pub(crate) struct AcceptanceBindingEvidenceProducer {
+    pub(crate) record: String,
+    pub(crate) position: i64,
+    pub(crate) outcome: String,
 }
 
 impl AppState {
-    fn acceptance_evidence_discovery_target(
+    pub(crate) fn acceptance_evidence_discovery_target(
         &self,
         session_id: &str,
         store: &EngramAuthorityStoreKey,
@@ -1151,7 +1177,7 @@ impl AppState {
         Ok(discovery)
     }
 
-    fn revalidate_acceptance_discovery_authority(
+    pub(crate) fn revalidate_acceptance_discovery_authority(
         &self,
         session_id: &str,
         store: &EngramAuthorityStoreKey,
@@ -1166,9 +1192,8 @@ impl AppState {
             ));
         }
         if let Some(opening) = &discovery.target {
-            let current =
-                Self::engram_source_root_target_locked(&inner, session_id)
-                    .map_err(ApiError::conflict)?;
+            let current = Self::engram_source_root_target_locked(&inner, session_id)
+                .map_err(ApiError::conflict)?;
             if current.is_none_or(|current| {
                 current.settings.authority_store_key.as_ref() != Some(store)
                     || current.connection != opening.connection
@@ -1184,7 +1209,7 @@ impl AppState {
         Ok(())
     }
 
-    fn read_acceptance_binding_evidence(
+    pub(crate) fn read_acceptance_binding_evidence(
         &self,
         store: &EngramAuthorityStoreKey,
         task: &mut AcceptanceEvaluationTask,
@@ -1203,11 +1228,14 @@ impl AppState {
             acceptance_canonical_index_unavailable(task, "work has no active run");
             return Ok(());
         };
-        target.adapter.read_work_session(
-            &target.connection,
-            store,
-            acceptance_criterion_evidence_read_timeout(deadline, now)?,
-        ).map_err(acceptance_binding_read_error)?;
+        target
+            .adapter
+            .read_work_session(
+                &target.connection,
+                store,
+                acceptance_criterion_evidence_read_timeout(deadline, now)?,
+            )
+            .map_err(acceptance_binding_read_error)?;
         let expected = AcceptanceBindingEvidenceBasis {
             project_id: store.project_id.clone(),
             work_id: identity.work_id.clone(),
@@ -1242,15 +1270,15 @@ impl AppState {
                 }
                 Err(error) => return Err(acceptance_binding_read_error(error)),
             };
-            if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES) {
+            if serde_json::to_vec(&value).map_or(true, |bytes| {
+                bytes.len() > ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES
+            }) {
                 return Err(ApiError::bad_gateway(
                     "acceptance binding evidence exceeds the wire page bound",
                 ));
             }
-            let page: AcceptanceBindingEvidencePage =
-                serde_json::from_value(value).map_err(|_| {
-                    ApiError::bad_gateway("acceptance binding evidence: invalid page")
-                })?;
+            let page: AcceptanceBindingEvidencePage = serde_json::from_value(value)
+                .map_err(|_| ApiError::bad_gateway("acceptance binding evidence: invalid page"))?;
             if page.basis != expected
                 || page.total != task.criteria.len()
                 || page.earlier != rows.len()
@@ -1301,20 +1329,31 @@ impl AppState {
 
 // Full private identities drive comparison. This function provides only the
 // bounded display label retained in the brief; it never supplies identity.
-fn acceptance_binding_source_revision(basis: &AcceptanceVerificationSourceBasis) -> Option<String> {
+pub(crate) fn acceptance_binding_source_revision(
+    basis: &AcceptanceVerificationSourceBasis,
+) -> Option<String> {
     match &basis.identity {
         AcceptanceSourceBasis::Shared(shared) => {
             acceptance_source_bytes(&shared.source_id).ok()?;
-            Some(acceptance_attempt_source_label(Some(&shared.source_id), None))
+            Some(acceptance_attempt_source_label(
+                Some(&shared.source_id),
+                None,
+            ))
         }
-        AcceptanceSourceBasis::Legacy(legacy) if (1..=96).contains(&legacy.fingerprint.len()) && legacy.fingerprint.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '.')) =>
-                Some(legacy.fingerprint.clone()),
+        AcceptanceSourceBasis::Legacy(legacy)
+            if (1..=96).contains(&legacy.fingerprint.len())
+                && legacy
+                    .fingerprint
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '.')) =>
+        {
+            Some(legacy.fingerprint.clone())
+        }
         _ => None,
     }
 }
 
-fn apply_acceptance_binding_evidence(
+pub(crate) fn apply_acceptance_binding_evidence(
     task: &mut AcceptanceEvaluationTask,
     rows: Vec<AcceptanceBindingEvidenceRow>,
 ) -> Result<(), ApiError> {
@@ -1390,8 +1429,8 @@ fn apply_acceptance_binding_evidence(
             continue;
         };
         let verification = satisfaction.verification;
-        let source_revision = acceptance_binding_source_revision(&verification.source_basis)
-            .ok_or_else(invalid)?;
+        let source_revision =
+            acceptance_binding_source_revision(&verification.source_basis).ok_or_else(invalid)?;
         // A native record's producer precedes it on this run. A bound
         // record's producer and original lie on the original's run, so they
         // are ordered there; the original ran at this record's revision.
@@ -1475,9 +1514,13 @@ fn apply_acceptance_binding_evidence(
             .verification
             .as_ref()
             .and_then(|verification| verification.source_revision.clone());
-        let source_basis = evidence.verification.as_ref()
+        let source_basis = evidence
+            .verification
+            .as_ref()
             .and_then(|verification| verification.source_basis.clone());
-        let applicability_tree = evidence.verification.as_ref()
+        let applicability_tree = evidence
+            .verification
+            .as_ref()
             .and_then(|verification| verification.applicability_tree.clone());
         for entry in task
             .indexed_evidence

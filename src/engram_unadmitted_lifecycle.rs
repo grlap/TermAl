@@ -1,3 +1,5 @@
+use super::*;
+
 include!("engram_registered_check_notices.rs");
 include!("engram_registered_closing_baseline.rs");
 include!("engram_received_check_notice.rs");
@@ -6,36 +8,51 @@ include!("engram_received_check_notice.rs");
 // Ordinary host-started turns and adopted runtime-started turns use the same
 // immutable report owner; foreign and replaced frames never enter its trace.
 
-fn ordinary_runtime_observation_enabled(inner: &StateInner, session_id: &str) -> bool {
+pub(crate) fn ordinary_runtime_observation_enabled(inner: &StateInner, session_id: &str) -> bool {
     engram_source_root_base_is_enabled_locked(inner, session_id)
         && engram_project_for_session_locked(inner, session_id)
             .and_then(|project| project.engram.as_ref())
             .is_some_and(|settings| settings.execution_observability)
 }
 
-fn runtime_observation_opening_root(inner: &StateInner, session_id: &str) -> Option<EngramRuntimeOpeningRoot> {
+pub(crate) fn runtime_observation_opening_root(
+    inner: &StateInner,
+    session_id: &str,
+) -> Option<EngramRuntimeOpeningRoot> {
     let index = inner.find_session_index(session_id)?;
     let binding = inner.sessions[index].engram.work_binding.clone()?;
     let store = engram_project_for_session_locked(inner, session_id)?
-        .engram.as_ref()?.authority_store_key.clone()?;
+        .engram
+        .as_ref()?
+        .authority_store_key
+        .clone()?;
     let source_root = engram_work_source_root_for_claim(
-        &inner.engram_work_source_roots, &store, &binding.work_id, &binding.claim_id,
-    ).map(EngramTurnSourceRoot::from_entry);
+        &inner.engram_work_source_roots,
+        &store,
+        &binding.work_id,
+        &binding.claim_id,
+    )
+    .map(EngramTurnSourceRoot::from_entry);
     Some(EngramRuntimeOpeningRoot {
         provenance: engram_root_capture_locked(inner, session_id),
-        store, binding, source_root,
+        store,
+        binding,
+        source_root,
     })
 }
 
-fn runtime_observation_check_owner(record: &SessionRecord) -> Option<&str> {
-    let trace = record.engram.unadmitted_active_turn.as_ref()
+pub(crate) fn runtime_observation_check_owner(record: &SessionRecord) -> Option<&str> {
+    let trace = record
+        .engram
+        .unadmitted_active_turn
+        .as_ref()
         .filter(|trace| trace.generation == record.active_turn_generation)?;
     let opening = trace.opening_root.as_ref()?;
     (record.engram.work_binding.as_ref() == Some(&opening.binding))
         .then_some(trace.host_turn_ref.as_str())
 }
 
-fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
+pub(crate) fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
     let session_id = inner.sessions[index].session.id.clone();
     if !ordinary_runtime_observation_enabled(inner, &session_id) {
         return;
@@ -57,24 +74,41 @@ fn start_ordinary_runtime_observation(inner: &mut StateInner, index: usize) {
     if record.engram.unadmitted_active_turn.is_some() {
         return;
     }
-    let Some(prompt) = record.provider_handoff_observations.prepared.as_ref()
+    let Some(prompt) = record
+        .provider_handoff_observations
+        .prepared
+        .as_ref()
         .filter(|prompt| prompt.turn_generation == record.active_turn_generation)
     else {
         return;
     };
     record.engram.unadmitted_active_turn = Some(EngramRuntimeObservedTurn::started(
-        prompt.prompt_id.clone(), record.active_turn_generation,
+        prompt.prompt_id.clone(),
+        record.active_turn_generation,
     ));
-    record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_root = opening_root;
-    record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_scope = opening_scope;
+    record
+        .engram
+        .unadmitted_active_turn
+        .as_mut()
+        .expect("installed trace")
+        .opening_root = opening_root;
+    record
+        .engram
+        .unadmitted_active_turn
+        .as_mut()
+        .expect("installed trace")
+        .opening_scope = opening_scope;
     if record.claude_outstanding.any() {
         mark_runtime_observation_source_uncertain(record);
     }
 }
 
-fn mark_runtime_observation_source_uncertain(record: &mut SessionRecord) -> bool {
+pub(crate) fn mark_runtime_observation_source_uncertain(record: &mut SessionRecord) -> bool {
     let generation = record.active_turn_generation;
-    let Some(trace) = record.engram.unadmitted_active_turn.as_mut()
+    let Some(trace) = record
+        .engram
+        .unadmitted_active_turn
+        .as_mut()
         .filter(|trace| trace.generation == generation)
     else {
         return false;
@@ -86,8 +120,10 @@ fn mark_runtime_observation_source_uncertain(record: &mut SessionRecord) -> bool
     true
 }
 
-fn adopt_runtime_observation(
-    record: &mut SessionRecord, notice_message_id: &str, generation: u64,
+pub(crate) fn adopt_runtime_observation(
+    record: &mut SessionRecord,
+    notice_message_id: &str,
+    generation: u64,
     opening_root: Option<EngramRuntimeOpeningRoot>,
 ) {
     if record.engram.unadmitted_active_turn.is_some() {
@@ -97,10 +133,15 @@ fn adopt_runtime_observation(
         notice_message_id.to_owned(),
         generation,
     ));
-    record.engram.unadmitted_active_turn.as_mut().expect("installed trace").opening_root = opening_root;
+    record
+        .engram
+        .unadmitted_active_turn
+        .as_mut()
+        .expect("installed trace")
+        .opening_root = opening_root;
 }
 
-fn observe_runtime_unadmitted_command(
+pub(crate) fn observe_runtime_unadmitted_command(
     record: &mut SessionRecord,
     provenance: &EngramObservationProvenance,
     observation: &EngramRecorderObservation<'_>,
@@ -108,17 +149,21 @@ fn observe_runtime_unadmitted_command(
     observe_runtime_unadmitted_recognized_command(record, provenance, observation, None, None);
 }
 
-fn runtime_unadmitted_trace<'a>(
-    record: &'a SessionRecord, provenance: &EngramObservationProvenance,
+pub(crate) fn runtime_unadmitted_trace<'a>(
+    record: &'a SessionRecord,
+    provenance: &EngramObservationProvenance,
 ) -> Option<&'a EngramRuntimeObservedTurn> {
     let trace = record.engram.unadmitted_active_turn.as_ref()?;
     if record.active_turn_generation != trace.generation {
         return None;
     }
     match provenance {
-        EngramObservationProvenance::Runtime { token, turn_generation } => {
-            if !record.runtime.matches_runtime_token(token)
-                || *turn_generation != trace.generation {
+        EngramObservationProvenance::Runtime {
+            token,
+            turn_generation,
+        } => {
+            if !record.runtime.matches_runtime_token(token) || *turn_generation != trace.generation
+            {
                 return None;
             }
         }
@@ -146,14 +191,16 @@ fn runtime_unadmitted_trace<'a>(
     Some(trace)
 }
 
-fn observe_runtime_unadmitted_recognized_command(
+pub(crate) fn observe_runtime_unadmitted_recognized_command(
     record: &mut SessionRecord,
     provenance: &EngramObservationProvenance,
     observation: &EngramRecorderObservation<'_>,
     recognized: Option<&EngramCheckCommand>,
     declared: Option<&EngramDeclaredBinding>,
 ) {
-    if runtime_unadmitted_trace(record, provenance).is_none() { return; }
+    if runtime_unadmitted_trace(record, provenance).is_none() {
+        return;
+    }
     let fresh_start = matches!(observation, EngramRecorderObservation::CommandStarted { key, .. }
         if !record.engram.running_command_keys.contains_key(*key));
     if let Some(trace) = record.engram.unadmitted_active_turn.as_mut() {
@@ -161,7 +208,7 @@ fn observe_runtime_unadmitted_recognized_command(
     }
 }
 
-fn observe_runtime_unadmitted_declared_end(
+pub(crate) fn observe_runtime_unadmitted_declared_end(
     record: &mut SessionRecord,
     provenance: &EngramObservationProvenance,
     observation: &EngramRecorderObservation<'_>,
@@ -170,11 +217,18 @@ fn observe_runtime_unadmitted_declared_end(
     binding: &EngramDeclaredBinding,
     outcome: Option<EngramExecutionOutcome>,
 ) {
-    observe_runtime_unadmitted_captured_end(record, provenance, observation,
-        expected_turn, expected_check, Some(binding), outcome);
+    observe_runtime_unadmitted_captured_end(
+        record,
+        provenance,
+        observation,
+        expected_turn,
+        expected_check,
+        Some(binding),
+        outcome,
+    );
 }
 
-fn observe_runtime_unadmitted_captured_end(
+pub(crate) fn observe_runtime_unadmitted_captured_end(
     record: &mut SessionRecord,
     provenance: &EngramObservationProvenance,
     observation: &EngramRecorderObservation<'_>,
@@ -183,12 +237,20 @@ fn observe_runtime_unadmitted_captured_end(
     binding: Option<&EngramDeclaredBinding>,
     outcome: Option<EngramExecutionOutcome>,
 ) {
-    let EngramRecorderObservation::CommandFinished { key, .. } = observation else { return; };
+    let EngramRecorderObservation::CommandFinished { key, .. } = observation else {
+        return;
+    };
     if runtime_unadmitted_trace(record, provenance).is_none_or(|trace| {
-        trace.host_turn_ref != expected_turn || trace.commands.iter().rev()
-            .find(|entry| entry.tool_key == *key)
-            .is_none_or(|entry| entry.check.host_check_id != expected_check)
-    }) { return; }
+        trace.host_turn_ref != expected_turn
+            || trace
+                .commands
+                .iter()
+                .rev()
+                .find(|entry| entry.tool_key == *key)
+                .is_none_or(|entry| entry.check.host_check_id != expected_check)
+    }) {
+        return;
+    }
     if let Some(trace) = record.engram.unadmitted_active_turn.as_mut() {
         trace.observe_with_facts(observation, None, binding, outcome, false);
     }
@@ -197,11 +259,16 @@ fn observe_runtime_unadmitted_captured_end(
 impl AppState {
     // Provider handoff uses only the opening captured at turn start. Remote
     // confirmation belongs to the observation owner, never a runtime reader.
-    fn prepare_ordinary_opening_root_before_handoff(
-        &self, session_id: &str, token: &RuntimeToken, generation: u64,
+    pub(crate) fn prepare_ordinary_opening_root_before_handoff(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        generation: u64,
     ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
         let record = &inner.sessions[index];
         if !record.runtime.matches_runtime_token(token)
             || record.active_turn_generation != generation
@@ -211,14 +278,35 @@ impl AppState {
             || session_resource_reset_in_progress(&inner, record)
             || !ordinary_runtime_observation_enabled(&inner, session_id)
             || record.engram.work_binding.is_none()
-        { return; }
-        if !record.engram.unadmitted_active_turn.as_ref().is_some_and(|trace|
-            trace.generation == generation && trace.commands.is_empty() && !trace.opening_prepared
-                && record.provider_handoff_observations.prepared.as_ref().is_some_and(|prompt|
-                    prompt.turn_generation == generation && prompt.prompt_id == trace.notice_message_id))
-        { return; }
-        inner.sessions[index].engram.unadmitted_active_turn.as_mut()
-            .expect("checked trace").opening_prepared = true;
+        {
+            return;
+        }
+        if !record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .is_some_and(|trace| {
+                trace.generation == generation
+                    && trace.commands.is_empty()
+                    && !trace.opening_prepared
+                    && record
+                        .provider_handoff_observations
+                        .prepared
+                        .as_ref()
+                        .is_some_and(|prompt| {
+                            prompt.turn_generation == generation
+                                && prompt.prompt_id == trace.notice_message_id
+                        })
+            })
+        {
+            return;
+        }
+        inner.sessions[index]
+            .engram
+            .unadmitted_active_turn
+            .as_mut()
+            .expect("checked trace")
+            .opening_prepared = true;
         if engram_turn_root_capture_locked(&inner, session_id) == EngramRootCapture::Unconfirmed {
             mark_runtime_observation_source_uncertain(&mut inner.sessions[index]);
         }
@@ -229,20 +317,18 @@ impl AppState {
     // Called only past a terminal path's runtime/generation/stop-owner fence,
     // before it clears those markers. Facts and the job share that path's
     // persistence commit; no RPC or source measurement occurs here.
-    fn queue_runtime_observation_close_with_notices_locked(
-        &self, inner: &mut StateInner, index: usize, outcome: EngramObservedTurnOutcome,
+    pub(crate) fn queue_runtime_observation_close_with_notices_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+        outcome: EngramObservedTurnOutcome,
         registered: &[RegisteredCheckNotice],
     ) {
         // Retained work can become hazardous without a fresh frame callback.
         // Freeze the source-attribution decision under this same close lock.
         engram_reconcile_claude_consumer(inner, index);
         let record = &inner.sessions[index];
-        let Some(mut trace) = record
-            .engram
-            .unadmitted_active_turn
-            .as_ref()
-            .cloned()
-        else {
+        let Some(mut trace) = record.engram.unadmitted_active_turn.as_ref().cloned() else {
             return;
         };
         if trace.generation != record.active_turn_generation {
@@ -260,12 +346,17 @@ impl AppState {
                     "Retained observation {} belongs to an earlier turn and was not captured at this turn's end. Its facts are preserved in this notice without new credit. The next ordinary turn can capture the current source root.",
                     trace.host_turn_ref
                 ),
-                expanded_text: Some(serde_json::to_string_pretty(&trace)
-                    .unwrap_or_else(|_| format!("{trace:#?}"))),
+                expanded_text: Some(
+                    serde_json::to_string_pretty(&trace).unwrap_or_else(|_| format!("{trace:#?}")),
+                ),
                 source: None,
             };
             push_message_on_record(&mut inner.sessions[index], message);
-            settle_engram_named_predecessor_locked(inner, index, Some("the predecessor generation no longer owns this close"));
+            settle_engram_named_predecessor_locked(
+                inner,
+                index,
+                Some("the predecessor generation no longer owns this close"),
+            );
             return;
         }
         let session_id = record.session.id.clone();
@@ -288,7 +379,8 @@ impl AppState {
                 (Some(opening), Some(selection))
                     if selection.applied_in_generation.is_none()
                         && selection.previous.is_some()
-                        && selection.named_turn_ref.as_deref() == Some(trace.host_turn_ref.as_str())
+                        && selection.named_turn_ref.as_deref()
+                            == Some(trace.host_turn_ref.as_str())
                         && selection.previous.as_ref() == opening.binding.as_ref()
                         && selection.previous.as_ref() != Some(&selection.binding)
                         && terminal.binding == opening.binding
@@ -304,30 +396,59 @@ impl AppState {
                 _ => terminal,
             }
         });
-        let baseline = baseline.or_else(|| scope.as_ref().ok()
-            .and_then(|scope| evaluation_closing_checkpoint(evaluation.as_ref(), &trace, scope)));
-        let check_baselines = scope.as_ref().ok().map(|scope|
-            registered_closing_baselines_locked(inner, index, registered, scope)).unwrap_or_default();
+        let baseline = baseline.or_else(|| {
+            scope
+                .as_ref()
+                .ok()
+                .and_then(|scope| evaluation_closing_checkpoint(evaluation.as_ref(), &trace, scope))
+        });
+        let check_baselines = scope
+            .as_ref()
+            .ok()
+            .map(|scope| registered_closing_baselines_locked(inner, index, registered, scope))
+            .unwrap_or_default();
         let (mut notices, correlated) = registered_check_notices_locked(inner, index, registered);
         let record = &mut inner.sessions[index];
-        notices.extend(engram_carry_running_codex_checks(record, &trace.host_turn_ref));
-        record.engram.active_turn_checks.retain(|check|
-            !correlated.iter().any(|(turn, sequence)|
-                turn == &check.host_turn_ref && *sequence == check.sequence));
-        notices.extend(engram_close_unended_checks(
-            &mut record.engram, Some(&trace.host_turn_ref), "the ordinary turn's end",
+        notices.extend(engram_carry_running_codex_checks(
+            record,
+            &trace.host_turn_ref,
         ));
-        record.engram.active_turn_checks.retain(|check| check.end.is_some());
+        record.engram.active_turn_checks.retain(|check| {
+            !correlated
+                .iter()
+                .any(|(turn, sequence)| turn == &check.host_turn_ref && *sequence == check.sequence)
+        });
+        notices.extend(engram_close_unended_checks(
+            &mut record.engram,
+            Some(&trace.host_turn_ref),
+            "the ordinary turn's end",
+        ));
+        record
+            .engram
+            .active_turn_checks
+            .retain(|check| check.end.is_some());
         for notice in notices {
-            engram_publish_check_notice(&session_id, &mut record.engram, notice, &mut std::io::stderr());
+            engram_publish_check_notice(
+                &session_id,
+                &mut record.engram,
+                notice,
+                &mut std::io::stderr(),
+            );
         }
         record.engram.unadmitted_active_turn = None;
         record.engram.runtime_closed_turn_ref = Some(trace.host_turn_ref.clone());
         // Only the checks accepted by this terminal's correlation fences may
         // later upgrade their exact published fragments. The observer can
         // start now, but its publication waits for this state lock to release.
-        let received = registered.iter().filter(|notice| correlated.iter().any(|(turn, sequence)|
-            turn == &notice.check.host_turn_ref && *sequence == notice.check.sequence)).cloned().collect();
+        let received = registered
+            .iter()
+            .filter(|notice| {
+                correlated.iter().any(|(turn, sequence)| {
+                    turn == &notice.check.host_turn_ref && *sequence == notice.check.sequence
+                })
+            })
+            .cloned()
+            .collect();
         self.schedule_received_launcher_notices(received);
         match scope {
             Ok(scope) => {
@@ -344,16 +465,16 @@ impl AppState {
                 {
                     let mut job = EngramRuntimeClosingJob::new(trace, baseline, scope);
                     job.registered_check_baselines = check_baselines;
-                    record
-                        .engram
-                        .unadmitted_closing_jobs
-                        .push(job);
+                    record.engram.unadmitted_closing_jobs.push(job);
                 }
                 // The kick waits for this lock to be released. Delivery still
                 // requires exact SQLite row read-back, even if commit fails.
                 let state = self.clone();
-                if let Err(error) = self.capture_lifetime.spawn_observer("termal-observation-kick",
-                    move || state.start_runtime_observation_worker(&session_id))
+                if let Err(error) = self
+                    .capture_lifetime
+                    .spawn_observer("termal-observation-kick", move || {
+                        state.start_runtime_observation_worker(&session_id)
+                    })
                 {
                     eprintln!("engram> observation worker kick failed: {error}");
                 }
@@ -367,31 +488,39 @@ impl AppState {
                     text: format!(
                         "Runtime-started turn not reported to Engram: {reason}. Its checks remain uncredited."
                     ),
-                    expanded_text: Some(serde_json::to_string_pretty(&trace)
-                        .unwrap_or_else(|_| format!("{trace:#?}"))),
+                    expanded_text: Some(
+                        serde_json::to_string_pretty(&trace)
+                            .unwrap_or_else(|_| format!("{trace:#?}")),
+                    ),
                     source: None,
                 };
                 push_message_on_record(&mut inner.sessions[index], message);
-                settle_engram_named_predecessor_locked(inner, index, Some("closing scope could not be captured"));
+                settle_engram_named_predecessor_locked(
+                    inner,
+                    index,
+                    Some("closing scope could not be captured"),
+                );
             }
         }
     }
 
-    fn close_runtime_observation_logged(
+    pub(crate) fn close_runtime_observation_logged(
         &self,
         session_id: &str,
         token: &RuntimeToken,
         adopted_generation: Option<u64>,
         outcome: EngramObservedTurnOutcome,
     ) {
-        if let Err(error) = self.close_runtime_observation(session_id, token, adopted_generation, outcome) {
+        if let Err(error) =
+            self.close_runtime_observation(session_id, token, adopted_generation, outcome)
+        {
             eprintln!(
                 "engram> runtime observation for {session_id} could not be queued: {error:#}"
             );
         }
     }
 
-    fn close_runtime_observation(
+    pub(crate) fn close_runtime_observation(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -416,7 +545,10 @@ impl AppState {
         }
         let messages_before = session_message_count(&inner.sessions[index]);
         self.queue_runtime_observation_close_with_notices_locked(
-            &mut inner, index, outcome, &registered,
+            &mut inner,
+            index,
+            outcome,
+            &registered,
         );
         inner.stamp_session_at_index(index);
         if session_message_count(&inner.sessions[index]) != messages_before {

@@ -10,17 +10,19 @@
 // decision: it reports what the launcher recorded and infers nothing from
 // any other field. New module, included beside src/test_runs_disk.rs.
 
+use super::*;
+
 /// The only input kind the launcher records today.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum TestRunCommittedInputKind {
+pub(crate) enum TestRunCommittedInputKind {
     Commit,
 }
 
 /// How the launcher classified the checkout after the run.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum TestRunCommittedInputOutcome {
+pub(crate) enum TestRunCommittedInputOutcome {
     /// HEAD unchanged and Git reports nothing.
     Clean,
     /// Historical classification: HEAD unchanged and only new untracked paths.
@@ -33,11 +35,11 @@ enum TestRunCommittedInputOutcome {
 /// a rename or copy carries its origin path.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCommittedInputPath {
-    status: String,
-    path: String,
+pub(crate) struct TestRunCommittedInputPath {
+    pub(crate) status: String,
+    pub(crate) path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    origin: Option<String>,
+    pub(crate) origin: Option<String>,
 }
 
 /// A tracked path the index tells Git to skip, as `git ls-files -v` tags it:
@@ -45,29 +47,29 @@ struct TestRunCommittedInputPath {
 /// not read its worktree copy, so a checkout with one is not clean.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCommittedInputSkippedPath {
-    tag: String,
-    path: String,
+pub(crate) struct TestRunCommittedInputSkippedPath {
+    pub(crate) tag: String,
+    pub(crate) path: String,
 }
 
 /// The checkout as the launcher found it after the run.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCommittedInputAfter {
-    commit: String,
-    clean: bool,
+pub(crate) struct TestRunCommittedInputAfter {
+    pub(crate) commit: String,
+    pub(crate) clean: bool,
     #[serde(default)]
-    paths: Vec<TestRunCommittedInputPath>,
+    pub(crate) paths: Vec<TestRunCommittedInputPath>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    skipped_paths: Vec<TestRunCommittedInputSkippedPath>,
+    pub(crate) skipped_paths: Vec<TestRunCommittedInputSkippedPath>,
     /// The Git filters (clean, smudge or process keys) configured when the
     /// run ended. Git's status was not read under them, so any is a change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    filters: Vec<String>,
+    pub(crate) filters: Vec<String>,
     /// The submodule gitlinks the index held when the run ended. Git's
     /// status was not read with them, so any is a change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    gitlinks: Vec<String>,
+    pub(crate) gitlinks: Vec<String>,
 }
 
 /// A committed-input run's `input` record. `commit` is absent only for a run
@@ -77,35 +79,35 @@ struct TestRunCommittedInputAfter {
 /// the launcher records them. Fields the launcher adds later are ignored.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCommittedInput {
-    kind: TestRunCommittedInputKind,
+pub(crate) struct TestRunCommittedInput {
+    pub(crate) kind: TestRunCommittedInputKind,
     #[serde(default)]
-    commit: Option<String>,
-    clean_before: bool,
+    pub(crate) commit: Option<String>,
+    pub(crate) clean_before: bool,
     #[serde(default)]
-    dirty_paths: Vec<TestRunCommittedInputPath>,
+    pub(crate) dirty_paths: Vec<TestRunCommittedInputPath>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    skipped_paths: Vec<TestRunCommittedInputSkippedPath>,
+    pub(crate) skipped_paths: Vec<TestRunCommittedInputSkippedPath>,
     /// The Git filters (clean, smudge or process keys) configured before the
     /// run, for a run refused because of them; the committed-input status
     /// does not run under a filter.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    filters: Vec<String>,
+    pub(crate) filters: Vec<String>,
     /// The submodule gitlinks the index held before the run, for a run
     /// refused because of them; the committed-input status does not inspect
     /// a submodule, whose own config could name a filter.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    gitlinks: Vec<String>,
+    pub(crate) gitlinks: Vec<String>,
     #[serde(default)]
-    after: Option<TestRunCommittedInputAfter>,
+    pub(crate) after: Option<TestRunCommittedInputAfter>,
     #[serde(default)]
-    outcome: Option<TestRunCommittedInputOutcome>,
+    pub(crate) outcome: Option<TestRunCommittedInputOutcome>,
     #[serde(default)]
-    eligible: Option<bool>,
+    pub(crate) eligible: Option<bool>,
 }
 
 /// A full Git object id: SHA-1 (40) or SHA-256 (64) lowercase hex.
-fn test_run_commit_id_valid(value: &str) -> bool {
+pub(crate) fn test_run_commit_id_valid(value: &str) -> bool {
     matches!(value.len(), 40 | 64)
         && value
             .bytes()
@@ -117,15 +119,18 @@ impl TestRunCommittedInput {
     /// for runs older than the record; none, too, for one that does not
     /// parse or contradicts itself, since a half-read record could only
     /// mislead.
-    fn read(results: &Value) -> Option<Self> {
+    pub(crate) fn read(results: &Value) -> Option<Self> {
         let input: Self = serde_json::from_value(results.get("input")?.clone()).ok()?;
         input.coherent().then_some(input)
     }
 
     /// Whether the record's parts agree with each other as the launcher
     /// writes them; nothing is filled in from elsewhere.
-    fn coherent(&self) -> bool {
-        if self.commit.as_deref().is_some_and(|commit| !test_run_commit_id_valid(commit))
+    pub(crate) fn coherent(&self) -> bool {
+        if self
+            .commit
+            .as_deref()
+            .is_some_and(|commit| !test_run_commit_id_valid(commit))
             || self
                 .after
                 .as_ref()
@@ -135,9 +140,7 @@ impl TestRunCommittedInput {
         }
         if !self.clean_before {
             // Refused before any stage: nothing ran, so nothing after.
-            return self.after.is_none()
-                && self.outcome.is_none()
-                && self.eligible != Some(true);
+            return self.after.is_none() && self.outcome.is_none() && self.eligible != Some(true);
         }
         let Some(commit) = self.commit.as_deref() else {
             return false;

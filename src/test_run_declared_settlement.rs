@@ -68,7 +68,7 @@ fn test_run_late_declared_binding(
 }
 
 impl AppState {
-    fn settle_reported_test_observation(
+    pub(crate) fn settle_reported_test_observation(
         &self,
         session_id: &str,
         key: &str,
@@ -140,7 +140,7 @@ impl AppState {
         self.apply_declared_verdict_to_test_run_with_detail(&ended, outcome, detail);
     }
 
-    fn observe_test_command_end_awaiting_declared_verdict(
+    pub(crate) fn observe_test_command_end_awaiting_declared_verdict(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,

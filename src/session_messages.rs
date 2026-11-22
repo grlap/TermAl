@@ -38,6 +38,8 @@
 // app-server events in `src/codex_events.rs`, ACP session updates in
 // `src/acp.rs` — all reach these through the trait-backed recorders.
 
+use super::*;
+
 impl AppState {
     /// Appends a new `Message` variant to the session transcript. Allocates
     /// no message id itself — the caller provides one via
@@ -48,7 +50,7 @@ impl AppState {
     /// cards remain visible without parking the session. Called by every
     /// recorder `push_*` path (see `src/recorders.rs`) for whole-block
     /// events (text, thinking, diff, approval, subagent result, etc.).
-    fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
+    pub(crate) fn push_message(&self, session_id: &str, message: Message) -> Result<()> {
         // The broader predicate is deliberate here: parent delegation
         // summaries should refresh for a newly recorded resolved audit card
         // as well as for a card that is still waiting on the operator.
@@ -78,7 +80,10 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                if let Some(next_preview) = message.preview_text().filter(|_| record.runtime_projection_allowed()) {
+                if let Some(next_preview) = message
+                    .preview_text()
+                    .filter(|_| record.runtime_projection_allowed())
+                {
                     record.session.preview = next_preview;
                 }
                 // Only a request that is actually waiting parks the session
@@ -254,7 +259,12 @@ impl AppState {
     /// streaming-text path (Claude NDJSON in `src/claude.rs`, Codex
     /// reasoning/assistant deltas in `src/codex_events.rs`, ACP
     /// `text_delta` in `src/acp.rs`).
-    fn append_text_delta(&self, session_id: &str, message_id: &str, delta: &str) -> Result<()> {
+    pub(crate) fn append_text_delta(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        delta: &str,
+    ) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (
             preview,
@@ -371,13 +381,18 @@ impl AppState {
     /// replacement when non-empty. Called from the same runtime paths as
     /// `append_text_delta` when their message-stop handler detects a
     /// mismatch.
-    fn replace_text_message(&self, session_id: &str, message_id: &str, text: &str) -> Result<()> {
+    pub(crate) fn replace_text_message(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Result<()> {
         self.replace_text_message_inner(session_id, message_id, text, false)
     }
 
     /// Publishes repair text only if the target still holds that exact body.
     /// The check and publication revision allocation share the state lock.
-    fn republish_unchanged_text_message(
+    pub(crate) fn republish_unchanged_text_message(
         &self,
         session_id: &str,
         message_id: &str,
@@ -523,7 +538,7 @@ impl AppState {
     /// `recorder_command_started` and `recorder_command_completed`
     /// (see `src/recorders.rs`), which drive it from the Claude `bash`
     /// tool, Codex exec events, and ACP tool-call updates.
-    fn upsert_command_message(
+    pub(crate) fn upsert_command_message(
         &self,
         session_id: &str,
         message_id: &str,
@@ -720,7 +735,7 @@ impl AppState {
     /// `recorder_upsert_parallel_agents` (see `src/recorders.rs`) which
     /// currently only fires from Claude's `task` tool subagent
     /// progress tracking.
-    fn upsert_parallel_agents_message(
+    pub(crate) fn upsert_parallel_agents_message(
         &self,
         session_id: &str,
         message_id: &str,

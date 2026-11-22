@@ -5,8 +5,10 @@
 // the only judges, and every variant names exactly one of their branches.
 // Sentences name a condition only: no path, store, id or secret.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramUnconfirmedRootReason {
+pub(crate) enum EngramUnconfirmedRootReason {
     SessionMissing,
     StoreIdentityMissing,
     WorkHistoryMissing,
@@ -30,11 +32,15 @@ enum EngramUnconfirmedRootReason {
 impl EngramUnconfirmedRootReason {
     /// Why this claim's own root journal needs reconciliation, if it does:
     /// exactly `EngramNamedRootJournal::requires_reconciliation`, by branch.
-    fn of_journal(journal: &EngramNamedRootJournal) -> Option<Self> {
+    pub(crate) fn of_journal(journal: &EngramNamedRootJournal) -> Option<Self> {
         if journal.pending.is_some() {
             return Some(Self::JournalPending);
         }
-        if journal.reconciliation.as_ref().is_some_and(|read| !read.settled) {
+        if journal
+            .reconciliation
+            .as_ref()
+            .is_some_and(|read| !read.settled)
+        {
             return Some(Self::JournalReconciliationUnsettled);
         }
         (journal.obsolete
@@ -45,7 +51,7 @@ impl EngramUnconfirmedRootReason {
         .then_some(Self::JournalRetired)
     }
 
-    fn sentence(self) -> &'static str {
+    pub(crate) fn sentence(self) -> &'static str {
         match self {
             Self::SessionMissing => "the session is not in the host's state",
             Self::StoreIdentityMissing => "the project has no verified Engram store identity",

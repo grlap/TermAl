@@ -39,41 +39,43 @@
 // grants no verdict. New module, included beside
 // src/acceptance_named_root_sighting.rs.
 
+use super::*;
+
 /// The most matching registrations, newest first, whose results one request
 /// reads for a start: the work's own claim narrows them to a handful, and the
 /// bound keeps a request's reads bounded however many runs the host retains.
 /// A claim with more, none of the read ones started, is refused as an
 /// incomplete scan rather than taken as the legacy flow.
-const ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX: usize = 32;
+pub(crate) const ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX: usize = 32;
 
 #[cfg(test)]
 thread_local! {
     // Runs once the run and its record were read, before the root's HEAD is
     // read again: a test changes the root there.
-    static TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_RECHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+    pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_RECHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
     // Counts the runs' results files the decision reads on this thread.
-    static TEST_ACCEPTANCE_COMMITTED_INPUT_RESULTS_READS: std::cell::Cell<usize> =
+    pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_RESULTS_READS: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
     // A test changes a result between the start scan and terminal selection.
-    static TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+    pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
 }
 
 /// The run that admitted an evaluation, and the commit it was judged on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceCommittedInputAdmission {
-    run_id: String,
-    commit: String,
+pub(crate) struct AcceptanceCommittedInputAdmission {
+    pub(crate) run_id: String,
+    pub(crate) commit: String,
     // Native and predecessor-generation evidence retain their complete identity
     // through the request's independent owner capture; commit equality alone
     // never admits either route.
-    recorded_source: Option<EngramSourceId>,
+    pub(crate) recorded_source: Option<EngramSourceId>,
 }
 
 /// Which flow an evaluation request is in, when it is not refused.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum AcceptanceCommittedInputDecision {
+pub(crate) enum AcceptanceCommittedInputDecision {
     /// The task's claim has no registered committed-input run pinned to its
     /// named root: the sighting preflight decides, exactly as before.
     Legacy,
@@ -85,7 +87,7 @@ enum AcceptanceCommittedInputDecision {
 /// Why the committed flow refused an evaluation request. The sighting is
 /// never read in its place.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum AcceptanceCommittedInputRefusal {
+pub(crate) enum AcceptanceCommittedInputRefusal {
     /// An acknowledged check belongs to a different name of this claim's root.
     RootRebound {
         run_id: String,
@@ -127,7 +129,7 @@ enum AcceptanceCommittedInputRefusal {
 
 impl AcceptanceCommittedInputRefusal {
     /// The refusal's stable code, which leads its message.
-    fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::RootRebound { .. } => "registered_check_root_rebound",
             Self::NotClean => "committed_input_not_clean",
@@ -140,7 +142,7 @@ impl AcceptanceCommittedInputRefusal {
         }
     }
 
-    fn into_api_error(self, work_ref: &str) -> ApiError {
+    pub(crate) fn into_api_error(self, work_ref: &str) -> ApiError {
         let detail = match &self {
             Self::RootRebound {
                 run_id,
@@ -202,7 +204,7 @@ impl AppState {
     /// Acceptance retains its clean-commit policy; the initiating project's
     /// pinned owner supplies that verdict. Unavailable ownership or input
     /// supplies no judged commit, without a local Git fallback.
-    fn acceptance_judged_commit(
+    pub(crate) fn acceptance_judged_commit(
         &self,
         session: &str,
         root: &FsPath,
@@ -277,7 +279,7 @@ impl AppState {
 
 /// Reads a run's `results.json`; the one read of a run's results this
 /// decision makes, counted in test builds.
-fn acceptance_committed_input_read_results(run_directory: &str) -> TestRunJson {
+pub(crate) fn acceptance_committed_input_read_results(run_directory: &str) -> TestRunJson {
     #[cfg(test)]
     TEST_ACCEPTANCE_COMMITTED_INPUT_RESULTS_READS.with(|reads| reads.set(reads.get() + 1));
     test_run_read_json(&FsPath::new(run_directory).join("results.json"))
@@ -287,7 +289,7 @@ fn acceptance_committed_input_read_results(run_directory: &str) -> TestRunJson {
 /// Ok(None) skips a coherent unfinished or other-commit result; Ok(Some(false))
 /// selects a failed or ineligible result. An unreadable or incoherent result
 /// refuses selection rather than falling back to an older PASS.
-fn acceptance_committed_input_run_outcome(
+pub(crate) fn acceptance_committed_input_run_outcome(
     run_id: &str,
     run_directory: &str,
     current: &EngramSourceId,
@@ -317,17 +319,16 @@ fn acceptance_committed_input_run_outcome(
     if terminal != TestRunState::Passed {
         return Ok(Some(false));
     }
-    let source_matches = if results.get("sourceIdBefore").is_some()
-        || results.get("sourceIdAfter").is_some()
-    {
-        let (before, after) = test_run_source_endpoints(&results)
-            .ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
-        before == *current && after == *current
-    } else {
-        // A genuine historical Commit record retains its original path.
-        // A full source_id receipt is checked separately against current.
-        true
-    };
+    let source_matches =
+        if results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some() {
+            let (before, after) = test_run_source_endpoints(&results)
+                .ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
+            before == *current && after == *current
+        } else {
+            // A genuine historical Commit record retains its original path.
+            // A full source_id receipt is checked separately against current.
+            true
+        };
     Ok(Some(
         source_matches
             && input.clean_before
@@ -342,7 +343,7 @@ fn acceptance_committed_input_run_outcome(
 
 /// What a matching committed-input run's results show about its start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AcceptanceCommittedInputRunStart {
+pub(crate) enum AcceptanceCommittedInputRunStart {
     /// A coherent committed-input record, clean before the run, and a stage
     /// started: the run selects the committed flow.
     Started,
@@ -363,7 +364,7 @@ enum AcceptanceCommittedInputRunStart {
 
 /// Whether the results in `run_directory` show the run started on a clean
 /// checkout, never started, or neither ([`AcceptanceCommittedInputRunStart`]).
-fn acceptance_committed_input_run_start(
+pub(crate) fn acceptance_committed_input_run_start(
     run_id: &str,
     run_directory: &str,
 ) -> AcceptanceCommittedInputRunStart {
@@ -465,7 +466,7 @@ fn acceptance_committed_input_result_start(
 /// are read directly from the run's request and terminal results, without
 /// waiting for or writing sender progress. Other pending reasons come from
 /// the state file and affect refusal guidance only.
-fn acceptance_committed_input_record_acknowledged(
+pub(crate) fn acceptance_committed_input_record_acknowledged(
     registration: &TestRunRegistration,
     commit: &str,
 ) -> Result<EngramVerificationRecordBody, AcceptanceCommittedInputRefusal> {
@@ -571,14 +572,14 @@ fn acceptance_committed_input_record_acknowledged(
 /// recovery keeps the claim id but raises the fence. Existing evidence keeps
 /// its registered binding; new registrations still require a current name.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceCurrentClaim {
-    claim_id: String,
-    claim_fence: i64,
-    binding: Option<EngramControlWorkBinding>,
+pub(crate) struct AcceptanceCurrentClaim {
+    pub(crate) claim_id: String,
+    pub(crate) claim_fence: i64,
+    pub(crate) binding: Option<EngramControlWorkBinding>,
 }
 
 impl AcceptanceCurrentClaim {
-    fn of_held(claim: &EngramHeldClaim) -> Self {
+    pub(crate) fn of_held(claim: &EngramHeldClaim) -> Self {
         Self {
             claim_id: claim.claim_id.clone(),
             claim_fence: claim.claim_fence,
@@ -636,7 +637,9 @@ fn acceptance_committed_input_predecessor_matches(
     current: Option<&AcceptanceCurrentClaim>,
 ) -> bool {
     let Some(current) = current else { return false };
-    let Some(live) = current.binding.as_ref() else { return false };
+    let Some(live) = current.binding.as_ref() else {
+        return false;
+    };
     registration.authority_store.as_ref() == Some(store)
         && current.same_claim(entry)
         && live.work_id == work_id
@@ -659,7 +662,7 @@ fn acceptance_committed_input_predecessor_matches(
 /// and named root, acknowledged for the same body. Received becoming settled
 /// for that body is no change; any other field the host fills in meanwhile is
 /// not looked at.
-fn acceptance_committed_input_registration_unchanged(
+pub(crate) fn acceptance_committed_input_registration_unchanged(
     admitted: &TestRunRegistration,
     row: &TestRunRegistration,
 ) -> bool {
@@ -688,13 +691,13 @@ fn acceptance_committed_input_registration_unchanged(
 const COMMITTED_SOURCE_REVISION_SCHEME: &str = "git-commit";
 
 /// The source revision an evaluation admitted on `commit` judges and declares.
-fn acceptance_committed_judged_revision(commit: &str) -> String {
+pub(crate) fn acceptance_committed_judged_revision(commit: &str) -> String {
     format!("{COMMITTED_SOURCE_REVISION_SCHEME}:{commit}")
 }
 
 /// The commit a declared source revision names, when it is a committed one
 /// ([`acceptance_committed_judged_revision`]); None for a content revision.
-fn acceptance_committed_revision_commit(revision: &str) -> Option<&str> {
+pub(crate) fn acceptance_committed_revision_commit(revision: &str) -> Option<&str> {
     revision
         .strip_prefix(COMMITTED_SOURCE_REVISION_SCHEME)?
         .strip_prefix(':')
@@ -706,7 +709,7 @@ impl AppState {
     /// retained-root request the sighting preflight. `Some` with the admission when the
     /// committed flow admitted the request, whose commit the evaluation then
     /// judges; `None` in the legacy flow.
-    fn require_acceptance_source_preflight_excluding(
+    pub(crate) fn require_acceptance_source_preflight_excluding(
         &self,
         parent_session_id: &str,
         reader: &EngramConnectionConfig,
@@ -797,7 +800,7 @@ impl AppState {
     /// truncated scan, or an expired deadline refuse as `ScanIncomplete`.
     /// Only a complete scan of coherent never-started runs selects `Legacy`.
     #[allow(clippy::too_many_arguments)]
-    fn acceptance_committed_input_decision(
+    pub(crate) fn acceptance_committed_input_decision(
         &self,
         parent_session_id: &str,
         reader: &EngramConnectionConfig,
@@ -808,7 +811,15 @@ impl AppState {
         now: &impl Fn() -> std::time::Instant,
     ) -> Result<AcceptanceCommittedInputDecision, AcceptanceCommittedInputRefusal> {
         self.acceptance_committed_input_decision_excluding(
-            parent_session_id, reader, store, task, root, deadline, now, &[])
+            parent_session_id,
+            reader,
+            store,
+            task,
+            root,
+            deadline,
+            now,
+            &[],
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -879,8 +890,11 @@ impl AppState {
                         })
                         .filter_map(|row| row.registration.as_ref()),
                 )
-                .filter(|row| !dispositions.iter().any(|d|
-                    acceptance_committed_input_registration_unchanged(&d.registration, row)));
+                .filter(|row| {
+                    !dispositions.iter().any(|d| {
+                        acceptance_committed_input_registration_unchanged(&d.registration, row)
+                    })
+                });
             // Filtering by the new name must not erase an acknowledged check
             // and turn it into a legacy request. A current-name run still has
             // its ordinary admission rules; this guard only closes fallback.
@@ -932,7 +946,11 @@ impl AppState {
                         entry,
                         claim,
                     ) || acceptance_committed_input_predecessor_matches(
-                        registration, store, work_id, entry, claim,
+                        registration,
+                        store,
+                        work_id,
+                        entry,
+                        claim,
                     )
                 })
                 .cloned()
@@ -1025,13 +1043,17 @@ impl AppState {
                 _ => None,
             };
             if recorded_source.is_none()
-                && let Some(checked) = registration.named_root.as_ref()
+                && let Some(checked) = registration
+                    .named_root
+                    .as_ref()
                     .filter(|checked| checked.generation < root.generation)
             {
                 return Err(Refusal::RootRebound {
-                    run_id: registration.run_id.clone(), checked: checked.clone(),
+                    run_id: registration.run_id.clone(),
+                    checked: checked.clone(),
                     current: TestRunNamedRoot {
-                        workspace_id: root.root.clone(), generation: root.generation,
+                        workspace_id: root.root.clone(),
+                        generation: root.generation,
                     },
                 });
             }
@@ -1053,21 +1075,25 @@ impl AppState {
                 step();
             }
         });
-        let rechecked =
-            self.acceptance_judged_clean_source(parent_session_id, FsPath::new(&root.root), deadline);
-        if rechecked.as_ref().zip(recorded_source.as_ref())
+        let rechecked = self.acceptance_judged_clean_source(
+            parent_session_id,
+            FsPath::new(&root.root),
+            deadline,
+        );
+        if rechecked
+            .as_ref()
+            .zip(recorded_source.as_ref())
             .is_some_and(|(current, expected)| !current.same_format(expected))
         {
             return Err(Refusal::ScanIncomplete);
         }
         if rechecked.is_none_or(|current| {
-                if let Some(expected) = &recorded_source {
-                    &current != expected
-                } else {
-                    current.commit != commit
-                }
-            })
-        {
+            if let Some(expected) = &recorded_source {
+                &current != expected
+            } else {
+                current.commit != commit
+            }
+        }) {
             return Err(if now() >= deadline {
                 Refusal::ScanIncomplete
             } else {

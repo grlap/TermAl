@@ -2,11 +2,13 @@
 // owner. These are observations, never verification qualification. No new
 // result read, process probe, source capture or retrospective origin adoption.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TestRunNativeCompletion {
-    execution_id: String,
-    completion: native_test_completion::Completion,
+pub(crate) struct TestRunNativeCompletion {
+    pub(crate) execution_id: String,
+    pub(crate) completion: native_test_completion::Completion,
 }
 
 // Closed, factual diagnostics only. These never participate in completion
@@ -14,14 +16,14 @@ struct TestRunNativeCompletion {
 // text, paths, runtime tokens or identities enter this public projection.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum TestRunNativeCompletionPhase {
+pub(crate) enum TestRunNativeCompletionPhase {
     NativeCompletion,
     ArtifactAssociation,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum TestRunNativeCompletionRefusalCode {
+pub(crate) enum TestRunNativeCompletionRefusalCode {
     NativeOriginMissing,
     NativeHostIdentityUnavailable,
     NativeSessionCreationUnavailable,
@@ -59,7 +61,7 @@ enum TestRunNativeCompletionRefusalCode {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
-enum TestRunNativeCompletionFact {
+pub(crate) enum TestRunNativeCompletionFact {
     NativeOriginPresent,
     CurrentHostIdentityValid,
     CurrentSessionCreationValid,
@@ -105,14 +107,14 @@ enum TestRunNativeCompletionFact {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum TestRunNativeCompletionOutcome {
+pub(crate) enum TestRunNativeCompletionOutcome {
     Refused,
     Pending,
     Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-enum TestRunNativeCompletionRemedy {
+pub(crate) enum TestRunNativeCompletionRemedy {
     #[serde(
         rename = "Wait for the original durable registration acknowledgement; inspect its registration trace if it cannot finish."
     )]
@@ -163,16 +165,16 @@ enum TestRunNativeCompletionRemedy {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TestRunNativeCompletionRefusal {
-    phase: TestRunNativeCompletionPhase,
-    code: TestRunNativeCompletionRefusalCode,
-    outcome: TestRunNativeCompletionOutcome,
-    observed: BTreeMap<TestRunNativeCompletionFact, bool>,
-    remedy: TestRunNativeCompletionRemedy,
+pub(crate) struct TestRunNativeCompletionRefusal {
+    pub(crate) phase: TestRunNativeCompletionPhase,
+    pub(crate) code: TestRunNativeCompletionRefusalCode,
+    pub(crate) outcome: TestRunNativeCompletionOutcome,
+    pub(crate) observed: BTreeMap<TestRunNativeCompletionFact, bool>,
+    pub(crate) remedy: TestRunNativeCompletionRemedy,
 }
 
 impl TestRunNativeCompletionRefusal {
-    fn new(
+    pub(crate) fn new(
         phase: TestRunNativeCompletionPhase,
         code: TestRunNativeCompletionRefusalCode,
         observed: &[(TestRunNativeCompletionFact, bool)],
@@ -203,7 +205,9 @@ impl TestRunNativeCompletionRefusal {
         }
     }
 
-    fn remedy(code: TestRunNativeCompletionRefusalCode) -> TestRunNativeCompletionRemedy {
+    pub(crate) fn remedy(
+        code: TestRunNativeCompletionRefusalCode,
+    ) -> TestRunNativeCompletionRemedy {
         use TestRunNativeCompletionRefusalCode::*;
         use TestRunNativeCompletionRemedy::*;
         match code {
@@ -233,7 +237,7 @@ impl TestRunNativeCompletionRefusal {
     }
 }
 
-fn test_run_native_input(results: &Value) -> native_test_completion::Input {
+pub(crate) fn test_run_native_input(results: &Value) -> native_test_completion::Input {
     if results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some() {
         return native_test_completion::Input::SourceId(native_test_completion::SourceInput {
             kind: native_test_completion::SourceInputKind::SourceId,
@@ -244,24 +248,39 @@ fn test_run_native_input(results: &Value) -> native_test_completion::Input {
     let input = TestRunCommittedInput::read(results).filter(TestRunCommittedInput::coherent);
     let commit = input.and_then(|input| input.commit);
     let optional = |value: Option<&Value>, git: bool| {
-        value.and_then(Value::as_str).filter(|text| if git {
-            test_run_commit_id_valid(text)
-        } else {
-            text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        }).map(str::to_owned)
+        value
+            .and_then(Value::as_str)
+            .filter(|text| {
+                if git {
+                    test_run_commit_id_valid(text)
+                } else {
+                    text.len() == 64
+                        && text
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                }
+            })
+            .map(str::to_owned)
     };
     // A checkout tree without an actual tested commit is not a tested-tree
     // fact. A plain/staged run does not acquire a committed-input identity.
     let tree = (commit.is_some() && results["source"]["commit"].as_str() == commit.as_deref())
-        .then(|| optional(results.get("source").and_then(|source| source.get("tree")), true)).flatten();
+        .then(|| {
+            optional(
+                results.get("source").and_then(|source| source.get("tree")),
+                true,
+            )
+        })
+        .flatten();
     native_test_completion::Input::Legacy(native_test_completion::LegacyInput {
-        commit, tree,
+        commit,
+        tree,
         before_fingerprint: optional(results.get("before"), false),
         after_fingerprint: optional(results.get("after"), false),
     })
 }
 
-fn test_run_native_completion_from_settlement(
+pub(crate) fn test_run_native_completion_from_settlement(
     inner: &StateInner,
     registration: &TestRunRegistration,
     row: Option<&TestRunCommandObservation>,
@@ -277,38 +296,35 @@ fn test_run_native_completion_from_settlement(
             facts,
         )
     };
-    let origin = registration
-        .native_origin
-        .as_ref()
-        .ok_or_else(|| {
-            // Current capture prerequisites explain what a new run needs;
-            // they neither reconstruct nor replace the missing original origin.
-            let host_valid = inner
-                .federation
-                .local
-                .as_ref()
-                .is_some_and(|host| host.validate().is_ok());
-            let creation_valid = inner
-                .find_session_index(&registration.initiating_session_id)
-                .is_some_and(|index| {
-                    mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id)
-                });
-            let code = if !host_valid {
-                NativeHostIdentityUnavailable
-            } else if !creation_valid {
-                NativeSessionCreationUnavailable
-            } else {
-                NativeOriginMissing
-            };
-            refuse(
-                code,
-                &[
-                    (NativeOriginPresent, false),
-                    (CurrentHostIdentityValid, host_valid),
-                    (CurrentSessionCreationValid, creation_valid),
-                ],
-            )
-        })?;
+    let origin = registration.native_origin.as_ref().ok_or_else(|| {
+        // Current capture prerequisites explain what a new run needs;
+        // they neither reconstruct nor replace the missing original origin.
+        let host_valid = inner
+            .federation
+            .local
+            .as_ref()
+            .is_some_and(|host| host.validate().is_ok());
+        let creation_valid = inner
+            .find_session_index(&registration.initiating_session_id)
+            .is_some_and(|index| {
+                mailbox_relay_uuid(&inner.sessions[index].federation_native_creation_id)
+            });
+        let code = if !host_valid {
+            NativeHostIdentityUnavailable
+        } else if !creation_valid {
+            NativeSessionCreationUnavailable
+        } else {
+            NativeOriginMissing
+        };
+        refuse(
+            code,
+            &[
+                (NativeOriginPresent, false),
+                (CurrentHostIdentityValid, host_valid),
+                (CurrentSessionCreationValid, creation_valid),
+            ],
+        )
+    })?;
     let results = entry
         .disk
         .results
@@ -426,7 +442,7 @@ fn test_run_native_completion_from_settlement(
 
 // Detail-only projection of an existing durable owner row. It neither infers
 // a provider association nor adds diagnostics to snapshot/SSE summaries.
-fn test_run_native_completion_refusal_for_detail(
+pub(crate) fn test_run_native_completion_refusal_for_detail(
     inner: &StateInner,
     run: &TestRunSummary,
 ) -> Option<TestRunNativeCompletionRefusal> {

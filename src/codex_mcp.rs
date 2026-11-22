@@ -6,12 +6,16 @@
 // app-server authority (`mcpServerStatus/list`) and returns a narrow, sanitized
 // view to the browser.
 
+use super::*;
+
 const CODEX_MCP_STATUS_PAGE_LIMIT: u64 = 100;
-const CODEX_MCP_STATUS_MAX_PAGES: usize = 50;
-const CODEX_MCP_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const CODEX_MCP_STATUS_MAX_PAGES: usize = 50;
+pub(crate) const CODEX_MCP_STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 const CODEX_MCP_STATUS_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
 
-fn codex_mcp_request_timeout(deadline: std::time::Instant) -> Result<Duration, ApiError> {
+pub(crate) fn codex_mcp_request_timeout(
+    deadline: std::time::Instant,
+) -> Result<Duration, ApiError> {
     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
     if remaining.is_zero() {
         return Err(ApiError::internal(
@@ -74,7 +78,7 @@ impl AppState {
     /// Local sessions query the shared app-server directly. Remote proxy
     /// sessions forward the same read to their owning TermAl, so the inventory
     /// always describes the runtime that will execute the next Codex turn.
-    fn list_codex_mcp_servers(
+    pub(crate) fn list_codex_mcp_servers(
         &self,
         session_id: &str,
     ) -> Result<CodexMcpServersResponse, ApiError> {

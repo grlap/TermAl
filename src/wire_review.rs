@@ -7,69 +7,71 @@
 // Consumed by the routes in `api_review.rs` and persisted by
 // `review.rs` under `<workdir>/.termal/reviews/…`.
 
-const REVIEW_DOCUMENT_VERSION: u32 = 1;
+use super::*;
+
+pub(crate) const REVIEW_DOCUMENT_VERSION: u32 = 1;
 
 /// Represents the review document.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewDocument {
-    version: u32,
+pub(crate) struct ReviewDocument {
+    pub(crate) version: u32,
     #[serde(default)]
-    revision: u64,
-    change_set_id: String,
+    pub(crate) revision: u64,
+    pub(crate) change_set_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    origin: Option<ReviewOrigin>,
+    pub(crate) origin: Option<ReviewOrigin>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    files: Vec<ReviewFileEntry>,
+    pub(crate) files: Vec<ReviewFileEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    threads: Vec<ReviewThread>,
+    pub(crate) threads: Vec<ReviewThread>,
 }
 
 /// Represents review origin.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewOrigin {
-    session_id: String,
-    message_id: String,
-    agent: String,
-    workdir: String,
-    created_at: String,
+pub(crate) struct ReviewOrigin {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
+    pub(crate) agent: String,
+    pub(crate) workdir: String,
+    pub(crate) created_at: String,
 }
 
 /// Represents review file entry.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewFileEntry {
-    file_path: String,
-    change_type: ChangeType,
+pub(crate) struct ReviewFileEntry {
+    pub(crate) file_path: String,
+    pub(crate) change_type: ChangeType,
 }
 
 /// Represents review thread.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewThread {
-    id: String,
-    anchor: ReviewAnchor,
-    status: ReviewThreadStatus,
+pub(crate) struct ReviewThread {
+    pub(crate) id: String,
+    pub(crate) anchor: ReviewAnchor,
+    pub(crate) status: ReviewThreadStatus,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    comments: Vec<ReviewThreadComment>,
+    pub(crate) comments: Vec<ReviewThreadComment>,
 }
 
 /// Represents review thread comment.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewThreadComment {
-    id: String,
-    author: ReviewCommentAuthor,
-    body: String,
-    created_at: String,
-    updated_at: String,
+pub(crate) struct ReviewThreadComment {
+    pub(crate) id: String,
+    pub(crate) author: ReviewCommentAuthor,
+    pub(crate) body: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
 }
 
 /// Defines the review anchor variants.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-enum ReviewAnchor {
+pub(crate) enum ReviewAnchor {
     ChangeSet,
     File {
         file_path: String,
@@ -89,7 +91,7 @@ enum ReviewAnchor {
 /// Defines the review comment author variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum ReviewCommentAuthor {
+pub(crate) enum ReviewCommentAuthor {
     User,
     Agent,
 }
@@ -97,7 +99,7 @@ enum ReviewCommentAuthor {
 /// Enumerates review thread states.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum ReviewThreadStatus {
+pub(crate) enum ReviewThreadStatus {
     Open,
     Resolved,
     Applied,
@@ -107,29 +109,29 @@ enum ReviewThreadStatus {
 /// Represents the review document response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewDocumentResponse {
-    review_file_path: String,
-    review: ReviewDocument,
+pub(crate) struct ReviewDocumentResponse {
+    pub(crate) review_file_path: String,
+    pub(crate) review: ReviewDocument,
 }
 
 /// Represents the review summary response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewSummaryResponse {
-    change_set_id: String,
-    review_file_path: String,
-    thread_count: usize,
-    open_thread_count: usize,
-    resolved_thread_count: usize,
-    comment_count: usize,
-    has_threads: bool,
+pub(crate) struct ReviewSummaryResponse {
+    pub(crate) change_set_id: String,
+    pub(crate) review_file_path: String,
+    pub(crate) thread_count: usize,
+    pub(crate) open_thread_count: usize,
+    pub(crate) resolved_thread_count: usize,
+    pub(crate) comment_count: usize,
+    pub(crate) has_threads: bool,
 }
 
 /// Summarizes review document.
 #[derive(Default)]
-struct ReviewDocumentSummary {
-    thread_count: usize,
-    open_thread_count: usize,
-    resolved_thread_count: usize,
-    comment_count: usize,
+pub(crate) struct ReviewDocumentSummary {
+    pub(crate) thread_count: usize,
+    pub(crate) open_thread_count: usize,
+    pub(crate) resolved_thread_count: usize,
+    pub(crate) comment_count: usize,
 }

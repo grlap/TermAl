@@ -3,68 +3,72 @@
 // Readers copy the ring off StateInner and format off both locks. Every point
 // here shares one process origin, distinct from the phase-trace clock. Failed
 // try-lock probes have no span. Missing samples and scheduling time are not causes.
+
+use super::*;
 const STATE_LOCK_HISTORY: usize = 256;
 static STATE_LOCK_IDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static STATE_LOCK_EPOCHS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-static STATE_LOCK_ORIGIN: LazyLock<std::time::Instant> = LazyLock::new(std::time::Instant::now);
+pub(crate) static STATE_LOCK_ORIGIN: LazyLock<std::time::Instant> =
+    LazyLock::new(std::time::Instant::now);
 #[cfg(test)]
-static STATE_LOCK_PROCESS: LazyLock<String> = LazyLock::new(|| Uuid::new_v4().to_string());
+pub(crate) static STATE_LOCK_PROCESS: LazyLock<String> =
+    LazyLock::new(|| Uuid::new_v4().to_string());
 
 #[cfg(test)]
 thread_local! {
     // One-shot scheduling only: production counters and history supply evidence.
-    static TEST_STATE_LOCK_COUNTERS_SAMPLED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_STATE_LOCK_COUNTERS_SAMPLED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
-fn next_state_lock_epoch() -> u64 {
+pub(crate) fn next_state_lock_epoch() -> u64 {
     STATE_LOCK_EPOCHS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-fn state_lock_point(at: std::time::Instant) -> u64 {
+pub(crate) fn state_lock_point(at: std::time::Instant) -> u64 {
     at.saturating_duration_since(*STATE_LOCK_ORIGIN)
         .as_micros()
         .min(u128::from(u64::MAX)) as u64
 }
 
-fn state_lock_value_epoch<T: 'static>(value: &T, fallback: u64) -> u64 {
+pub(crate) fn state_lock_value_epoch<T: 'static>(value: &T, fallback: u64) -> u64 {
     (value as &dyn std::any::Any)
         .downcast_ref::<StateInner>()
         .map_or(fallback, |inner| inner.state_lock_epoch)
 }
 
 #[derive(Clone, Copy)]
-struct StateLockSpan {
-    id: u64,
-    epoch: u64,
-    site: &'static std::panic::Location<'static>,
-    requested: u64,
-    acquired: u64,
-    released: Option<u64>,
+pub(crate) struct StateLockSpan {
+    pub(crate) id: u64,
+    pub(crate) epoch: u64,
+    pub(crate) site: &'static std::panic::Location<'static>,
+    pub(crate) requested: u64,
+    pub(crate) acquired: u64,
+    pub(crate) released: Option<u64>,
 }
 
-struct StateLockRing {
-    slots: [Option<StateLockSpan>; STATE_LOCK_HISTORY],
-    next: usize,
-    count: usize,
+pub(crate) struct StateLockRing {
+    pub(crate) slots: [Option<StateLockSpan>; STATE_LOCK_HISTORY],
+    pub(crate) next: usize,
+    pub(crate) count: usize,
 }
 
-struct StateLockObserver {
-    instance: String,
-    fallback_epoch: u64,
-    active_id: std::sync::atomic::AtomicU64,
+pub(crate) struct StateLockObserver {
+    pub(crate) instance: String,
+    pub(crate) fallback_epoch: u64,
+    pub(crate) active_id: std::sync::atomic::AtomicU64,
     active_epoch: std::sync::atomic::AtomicU64,
     active_site: std::sync::atomic::AtomicPtr<std::panic::Location<'static>>,
     active_requested: std::sync::atomic::AtomicU64,
     active_acquired: std::sync::atomic::AtomicU64,
-    ring: Mutex<StateLockRing>,
-    loss: std::sync::atomic::AtomicU64,
+    pub(crate) ring: Mutex<StateLockRing>,
+    pub(crate) loss: std::sync::atomic::AtomicU64,
     evictions: std::sync::atomic::AtomicU64,
-    changing: std::sync::atomic::AtomicU64,
-    generation: std::sync::atomic::AtomicU64,
+    pub(crate) changing: std::sync::atomic::AtomicU64,
+    pub(crate) generation: std::sync::atomic::AtomicU64,
 }
 
 impl StateLockObserver {
-    fn new(instance: &str) -> Self {
+    pub(crate) fn new(instance: &str) -> Self {
         // Initialize the origin during construction, never lazily under StateInner.
         let _ = *STATE_LOCK_ORIGIN;
         Self {
@@ -87,7 +91,7 @@ impl StateLockObserver {
         }
     }
 
-    fn acquired(
+    pub(crate) fn acquired(
         &self,
         epoch: u64,
         site: &'static std::panic::Location<'static>,
@@ -119,7 +123,7 @@ impl StateLockObserver {
         span
     }
 
-    fn active(&self) -> Result<Option<StateLockSpan>, ()> {
+    pub(crate) fn active(&self) -> Result<Option<StateLockSpan>, ()> {
         use std::sync::atomic::Ordering::SeqCst;
         let id = self.active_id.load(SeqCst);
         if id == 0 {
@@ -148,13 +152,13 @@ impl StateLockObserver {
         }))
     }
 
-    fn begin_release(&self) {
+    pub(crate) fn begin_release(&self) {
         use std::sync::atomic::Ordering::SeqCst;
         self.changing.fetch_add(1, SeqCst);
         self.generation.fetch_add(1, SeqCst);
     }
 
-    fn finish_release(&self, span: StateLockSpan) {
+    pub(crate) fn finish_release(&self, span: StateLockSpan) {
         use std::sync::atomic::Ordering::SeqCst;
         match self.ring.try_lock() {
             Ok(mut ring) => {
@@ -178,7 +182,7 @@ impl StateLockObserver {
     }
 
     #[cfg(test)]
-    fn released(&self, span: StateLockSpan) {
+    pub(crate) fn released(&self, span: StateLockSpan) {
         self.begin_release();
         self.finish_release(span);
     }
@@ -186,10 +190,10 @@ impl StateLockObserver {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateLockSite {
-    file: String,
-    line: u32,
-    column: u32,
+pub(crate) struct StateLockSite {
+    pub(crate) file: String,
+    pub(crate) line: u32,
+    pub(crate) column: u32,
 }
 
 impl StateLockSite {
@@ -215,44 +219,44 @@ impl StateLockSite {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateLockWait {
-    hold_id: String,
-    site: StateLockSite,
-    requested_micros: u64,
-    acquired_micros: u64,
+pub(crate) struct StateLockWait {
+    pub(crate) hold_id: String,
+    pub(crate) site: StateLockSite,
+    pub(crate) requested_micros: u64,
+    pub(crate) acquired_micros: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateLockHolder {
-    hold_id: String,
-    site: StateLockSite,
-    acquired_micros: u64,
+pub(crate) struct StateLockHolder {
+    pub(crate) hold_id: String,
+    pub(crate) site: StateLockSite,
+    pub(crate) acquired_micros: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    released_micros: Option<u64>,
+    pub(crate) released_micros: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    age_micros: Option<u64>,
-    state: &'static str,
+    pub(crate) age_micros: Option<u64>,
+    pub(crate) state: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StateLockBlock {
-    contract: &'static str,
-    version: u32,
-    instance_id: String,
-    mutex_epoch: String,
-    loss_count: u64,
-    eviction_count: u64,
-    truncation_count: u64,
-    partial: bool,
-    unavailable: bool,
-    note: &'static str,
-    waits: Vec<StateLockWait>,
-    holders: Vec<StateLockHolder>,
+pub(crate) struct StateLockBlock {
+    pub(crate) contract: &'static str,
+    pub(crate) version: u32,
+    pub(crate) instance_id: String,
+    pub(crate) mutex_epoch: String,
+    pub(crate) loss_count: u64,
+    pub(crate) eviction_count: u64,
+    pub(crate) truncation_count: u64,
+    pub(crate) partial: bool,
+    pub(crate) unavailable: bool,
+    pub(crate) note: &'static str,
+    pub(crate) waits: Vec<StateLockWait>,
+    pub(crate) holders: Vec<StateLockHolder>,
 }
 
-fn state_lock_overlap(holder: StateLockSpan, wait: StateLockSpan, now: u64) -> bool {
+pub(crate) fn state_lock_overlap(holder: StateLockSpan, wait: StateLockSpan, now: u64) -> bool {
     holder.epoch == wait.epoch
         && holder.id != wait.id
         && holder.acquired < wait.acquired
@@ -260,7 +264,7 @@ fn state_lock_overlap(holder: StateLockSpan, wait: StateLockSpan, now: u64) -> b
 }
 
 impl StateLockBlock {
-    fn empty(instance: &str) -> Self {
+    pub(crate) fn empty(instance: &str) -> Self {
         Self {
             contract: "termal-state-lock-observation",
             version: 1,
@@ -277,7 +281,7 @@ impl StateLockBlock {
         }
     }
 
-    fn collect(
+    pub(crate) fn collect(
         observer: &StateLockObserver,
         waits: &[Option<StateLockSpan>; 8],
         loss: u64,
@@ -290,7 +294,7 @@ impl StateLockBlock {
         )
     }
 
-    fn collect_at(
+    pub(crate) fn collect_at(
         observer: &StateLockObserver,
         waits: &[Option<StateLockSpan>; 8],
         loss: u64,
@@ -433,7 +437,7 @@ impl StateLockBlock {
         block
     }
 
-    fn bound(&mut self) {
+    pub(crate) fn bound(&mut self) {
         self.partial |= self.unavailable
             || self.loss_count > 0
             || self.eviction_count > 0

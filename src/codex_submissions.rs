@@ -43,6 +43,8 @@
 // `set_approval_decision_on_record` + the `set_*_request_state_on_record`
 // helpers; `src/tests/http_routes.rs` for end-to-end route coverage.
 
+use super::*;
+
 /// Written onto the declined card alongside the semantic `Declined` state so
 /// the transcript clearly explains how a user Skip differs from an agent-side
 /// cancel.
@@ -69,7 +71,7 @@ enum PendingUserInputRuntimeAction {
 
 /// Maps completed Claude user input onto an AskUserQuestion permission allow
 /// whose `updatedInput` carries the answers.
-fn claude_user_input_runtime_command(
+pub(crate) fn claude_user_input_runtime_command(
     request_id: String,
     updated_input: Value,
 ) -> ClaudeRuntimeCommand {
@@ -92,16 +94,23 @@ fn claude_user_input_decline_runtime_command(
 impl PendingUserInputRuntimeAction {
     fn send(&self) -> std::result::Result<(), ApiError> {
         match self {
-            Self::Acp { handle, pending, outcome } => handle
+            Self::Acp {
+                handle,
+                pending,
+                outcome,
+            } => handle
                 .input_tx
                 .send(AcpRuntimeCommand::JsonRpcMessage(
                     json_rpc_result_response_message(
-                        pending.request_id.clone(), json!({ "outcome": outcome }),
+                        pending.request_id.clone(),
+                        json!({ "outcome": outcome }),
                     ),
                 ))
-                .map_err(|err| ApiError::internal(format!(
-                    "failed to deliver user input response to Kimi: {err}"
-                ))),
+                .map_err(|err| {
+                    ApiError::internal(format!(
+                        "failed to deliver user input response to Kimi: {err}"
+                    ))
+                }),
             Self::Claude {
                 handle,
                 command,
@@ -157,7 +166,7 @@ impl PendingUserInputRuntimeAction {
     }
 }
 
-fn validate_claude_user_input_answers(
+pub(crate) fn validate_claude_user_input_answers(
     pending: &ClaudePendingUserInput,
     answers: BTreeMap<String, Vec<String>>,
 ) -> std::result::Result<(Value, BTreeMap<String, Vec<String>>), ApiError> {
@@ -299,7 +308,7 @@ impl AppState {
     /// Explicit AutoApprove selection can answer a live prompting turn's
     /// existing routine tool requests, without changing that turn's policy.
     /// Never run this on startup or in response to an incidental settings edit.
-    fn recover_codex_mcp_tool_approvals(
+    pub(crate) fn recover_codex_mcp_tool_approvals(
         &self,
         session_id: &str,
     ) -> std::result::Result<Option<StateResponse>, ApiError> {
@@ -487,7 +496,7 @@ impl AppState {
     /// The closure must return the in-bounds index of `message_id` after
     /// mutation; violating that contract panics because it is an internal
     /// state invariant, not a recoverable API error.
-    fn commit_interaction_message_update<F>(
+    pub(crate) fn commit_interaction_message_update<F>(
         &self,
         session_id: &str,
         message_id: &str,
@@ -565,7 +574,7 @@ impl AppState {
     /// Cursor/Gemini (sent as an ACP selected-option response). After
     /// delivery, updates the approval state on the record and
     /// publishes a delta so the UI shows the resolution immediately.
-    fn update_approval(
+    pub(crate) fn update_approval(
         &self,
         session_id: &str,
         message_id: &str,
@@ -808,7 +817,7 @@ impl AppState {
     /// runtime that owns the transcript card. Claude receives a permission
     /// allow/deny; Codex receives its JSON-RPC result; Kimi receives the exact
     /// selected permission-option ID (or dismissal).
-    fn submit_user_input(
+    pub(crate) fn submit_user_input(
         &self,
         session_id: &str,
         message_id: &str,
@@ -931,17 +940,28 @@ impl AppState {
                         .pending_acp_approvals
                         .get(message_id)
                         .cloned()
-                        .ok_or_else(|| ApiError::conflict("user input request is no longer live"))?;
+                        .ok_or_else(|| {
+                            ApiError::conflict("user input request is no longer live")
+                        })?;
                     let handle = match &record.runtime {
                         SessionRuntime::Acp(handle) if !record.runtime_stop_in_progress => {
                             handle.clone()
                         }
-                        _ => return Err(ApiError::conflict("Kimi session is not currently running")),
+                        _ => {
+                            return Err(ApiError::conflict(
+                                "Kimi session is not currently running",
+                            ));
+                        }
                     };
-                    let (outcome, display_answers) = kimi_question_answer(&pending, answers, declined)?;
+                    let (outcome, display_answers) =
+                        kimi_question_answer(&pending, answers, declined)?;
                     record.pending_acp_approvals.remove(message_id);
                     (
-                        PendingUserInputRuntimeAction::Acp { handle, pending, outcome },
+                        PendingUserInputRuntimeAction::Acp {
+                            handle,
+                            pending,
+                            outcome,
+                        },
                         display_answers,
                     )
                 }
@@ -1015,7 +1035,7 @@ impl AppState {
     /// the requested schema. Dispatches a JSON-RPC `sendResponse`
     /// with `result = { "action": <action>, "content":
     /// <normalized_content> }`.
-    fn submit_codex_mcp_elicitation(
+    pub(crate) fn submit_codex_mcp_elicitation(
         &self,
         session_id: &str,
         message_id: &str,
@@ -1125,7 +1145,7 @@ impl AppState {
     /// `pending_codex_app_requests` by message_id and dispatches a
     /// JSON-RPC `sendResponse` carrying the caller's result as the
     /// `result` field verbatim.
-    fn submit_codex_app_request(
+    pub(crate) fn submit_codex_app_request(
         &self,
         session_id: &str,
         message_id: &str,
@@ -1208,7 +1228,7 @@ impl AppState {
 /// semantics. Missing protocol options fail closed at the API boundary:
 /// rejection must never select an allow option, and approval must never select
 /// a reject option.
-fn acp_approval_option_id(
+pub(crate) fn acp_approval_option_id(
     pending: &AcpPendingApproval,
     decision: ApprovalDecision,
 ) -> Option<String> {
@@ -1230,7 +1250,7 @@ fn acp_approval_option_id(
 /// (via `unreachable!`) on `Pending` / `Interrupted` / `Canceled` —
 /// those decisions are never delivered to Codex; `update_approval`
 /// rejects them at the entry point.
-fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -> Value {
+pub(crate) fn codex_approval_result(kind: &CodexApprovalKind, decision: ApprovalDecision) -> Value {
     match kind {
         CodexApprovalKind::CommandExecution => match decision {
             ApprovalDecision::Accepted => json!({ "decision": "accept" }),

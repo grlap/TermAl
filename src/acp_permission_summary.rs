@@ -3,14 +3,19 @@
 // This projection only formats transcript text. The pending-request owner
 // keeps provider payloads and opaque decision IDs unchanged.
 
+use super::*;
+
 const MAX_ACP_APPROVAL_TITLE_CHARS: usize = 1_000;
 const MAX_ACP_APPROVAL_NAME_CHARS: usize = 200;
 const MAX_ACP_APPROVAL_DETAIL_CHARS: usize = 8_000;
 const MAX_ACP_APPROVAL_DIFF_SIDE_CHARS: usize = 3_000;
 const MAX_ACP_APPROVAL_ENTRIES: usize = 32;
-const MAX_ACP_APPROVAL_REFUSAL_CHARS: usize = 1_600;
+pub(crate) const MAX_ACP_APPROVAL_REFUSAL_CHARS: usize = 1_600;
 
-fn summarize_acp_permission_request(params: &Value, agent: AcpAgent) -> (String, String) {
+pub(crate) fn summarize_acp_permission_request(
+    params: &Value,
+    agent: AcpAgent,
+) -> (String, String) {
     let tool_call = params.get("toolCall").unwrap_or(&Value::Null);
     let raw_tool_name = params
         .get("toolName")
@@ -211,7 +216,7 @@ fn acp_permission_locations_preview(value: &Value) -> String {
 }
 
 /// Bounds single-line approval metadata before transcript persistence.
-fn bounded_acp_approval_text(value: &str, max_chars: usize, fallback: &str) -> String {
+pub(crate) fn bounded_acp_approval_text(value: &str, max_chars: usize, fallback: &str) -> String {
     let bounded = value
         .chars()
         .filter(|character| !character.is_control())
@@ -226,7 +231,7 @@ fn bounded_acp_approval_text(value: &str, max_chars: usize, fallback: &str) -> S
 }
 
 /// Bounds agent-provided approval detail before storing it in the transcript.
-fn truncate_acp_approval_detail(value: &str) -> String {
+pub(crate) fn truncate_acp_approval_detail(value: &str) -> String {
     truncate_acp_approval_text(value, MAX_ACP_APPROVAL_DETAIL_CHARS)
 }
 

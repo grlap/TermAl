@@ -7,22 +7,32 @@
 // launcher's terminal results.json. Does not own the index, the state
 // snapshot or deltas (`test_runs.rs`), or HTTP (`test_runs_api.rs`).
 
+use super::*;
+
 /// The most `request.json` or `results.json` bytes read for one run.
-const TEST_RUN_JSON_MAX_BYTES: usize = 1024 * 1024;
+pub(crate) const TEST_RUN_JSON_MAX_BYTES: usize = 1024 * 1024;
 
 /// Read the owner's complete value through the shared closed validator. A
 /// missing, partial or oversized value is unavailable, including null/null.
-fn test_run_source_id(value: Option<&Value>) -> Option<EngramSourceId> {
+pub(crate) fn test_run_source_id(value: Option<&Value>) -> Option<EngramSourceId> {
     let value = value?;
-    if serde_json::to_vec(value).ok()?.len() > ENGRAM_SOURCE_JSON_LIMIT { return None; }
+    if serde_json::to_vec(value).ok()?.len() > ENGRAM_SOURCE_JSON_LIMIT {
+        return None;
+    }
     let source: EngramSourceId = serde_json::from_value(value.clone()).ok()?;
-    source.validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET).ok()?;
+    source
+        .validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET)
+        .ok()?;
     Some(source)
 }
 
-fn test_run_source_endpoints(results: &Value) -> Option<(EngramSourceId, EngramSourceId)> {
-    Some((test_run_source_id(results.get("sourceIdBefore"))?,
-        test_run_source_id(results.get("sourceIdAfter"))?))
+pub(crate) fn test_run_source_endpoints(
+    results: &Value,
+) -> Option<(EngramSourceId, EngramSourceId)> {
+    Some((
+        test_run_source_id(results.get("sourceIdBefore"))?,
+        test_run_source_id(results.get("sourceIdAfter"))?,
+    ))
 }
 
 fn test_run_source_comparison(before: &EngramSourceId, after: &EngramSourceId) -> &'static str {
@@ -33,8 +43,10 @@ fn test_run_source_comparison(before: &EngramSourceId, after: &EngramSourceId) -
     }
 }
 
-fn test_run_source_input_matches(request: &Value, results: &Value) -> bool {
-    let Some(admitted) = test_run_source_id(request.get("sourceId")) else { return false; };
+pub(crate) fn test_run_source_input_matches(request: &Value, results: &Value) -> bool {
+    let Some(admitted) = test_run_source_id(request.get("sourceId")) else {
+        return false;
+    };
     test_run_source_endpoints(results).is_some_and(|(before, after)| {
         admitted.compare(&before) == Some(true) && before.compare(&after) == Some(true)
     })
@@ -46,20 +58,20 @@ const TEST_RUN_COMMAND_MAX_BYTES: usize = 512;
 /// A summary's error text is cut to this many bytes.
 const TEST_RUN_ERROR_MAX_BYTES: usize = 512;
 /// The index keeps at most this many stages of a run.
-const TEST_RUN_STAGES_MAX: usize = 64;
+pub(crate) const TEST_RUN_STAGES_MAX: usize = 64;
 /// The longest identifier, session reference or timestamp the index accepts.
 /// Identifiers are never cut, since a cut one could alias another: a run
 /// whose run id or session reference is longer is not indexed, a stage with a
 /// longer or invalid name is left out, and a longer timestamp reads as null.
-const TEST_RUN_TEXT_MAX_BYTES: usize = 128;
+pub(crate) const TEST_RUN_TEXT_MAX_BYTES: usize = 128;
 /// The longest worktree or run directory path the index accepts; a run with
 /// a longer one is not indexed.
-const TEST_RUN_PATH_MAX_BYTES: usize = 4096;
+pub(crate) const TEST_RUN_PATH_MAX_BYTES: usize = 4096;
 
 /// Whether the index accepts a run directory's path: its displayed form fits
 /// `TEST_RUN_PATH_MAX_BYTES`, so a card's core, which is never cut, stays
 /// bounded.
-fn test_run_dir_within_bounds(run_dir: &FsPath) -> bool {
+pub(crate) fn test_run_dir_within_bounds(run_dir: &FsPath) -> bool {
     test_run_display_path(run_dir).len() <= TEST_RUN_PATH_MAX_BYTES
 }
 
@@ -69,7 +81,7 @@ fn test_run_within(text: String, max: usize) -> Option<String> {
 }
 
 /// A launcher stage name: what the log route accepts.
-fn test_run_valid_stage_name(name: &str) -> bool {
+pub(crate) fn test_run_valid_stage_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= TEST_RUN_TEXT_MAX_BYTES
         && name
@@ -82,9 +94,9 @@ const TEST_RUN_LOG_TAIL_MAX_BYTES: u64 = 1024 * 1024;
 
 /// The size and modification time of a run file, which decide whether a
 /// cached parse is still current.
-type TestRunFileStamp = Option<(u64, std::time::SystemTime)>;
+pub(crate) type TestRunFileStamp = Option<(u64, std::time::SystemTime)>;
 
-fn test_run_file_stamp(path: &FsPath) -> TestRunFileStamp {
+pub(crate) fn test_run_file_stamp(path: &FsPath) -> TestRunFileStamp {
     let metadata = fs::metadata(path).ok()?;
     Some((metadata.len(), metadata.modified().ok()?))
 }
@@ -93,7 +105,7 @@ fn test_run_file_stamp(path: &FsPath) -> TestRunFileStamp {
 /// filesystem alone, so a periodic rescan never starts a process: the nearest
 /// `.git` directory, or a `.git` file's `gitdir:` target and that directory's
 /// `commondir`.
-fn test_runs_git_common_dir(root: &FsPath) -> Option<PathBuf> {
+pub(crate) fn test_runs_git_common_dir(root: &FsPath) -> Option<PathBuf> {
     // A removed project must not inherit its enclosing repository's runs.
     // Existing subdirectories still discover the repository they belong to.
     if !fs::metadata(root).ok()?.is_dir() {
@@ -121,7 +133,7 @@ fn test_runs_git_common_dir(root: &FsPath) -> Option<PathBuf> {
 /// A directory's modification time, which changes when an entry is created,
 /// removed or renamed in it. `None` when it cannot be read or does not exist,
 /// so a directory that appears later reads as changed.
-fn test_run_dir_stamp(dir: &FsPath) -> Option<std::time::SystemTime> {
+pub(crate) fn test_run_dir_stamp(dir: &FsPath) -> Option<std::time::SystemTime> {
     fs::metadata(dir).ok()?.modified().ok()
 }
 
@@ -131,7 +143,7 @@ fn test_run_dir_stamp(dir: &FsPath) -> Option<std::time::SystemTime> {
 /// modification time, taken before it is listed, so an entry created after
 /// the listing changes the stamp: every `review-runs` directory, and the
 /// `worktrees` directory, whose stamp changes when a linked worktree is added.
-fn test_runs_directories(
+pub(crate) fn test_runs_directories(
     common_dir: &FsPath,
     tracked: &mut Vec<(PathBuf, Option<std::time::SystemTime>)>,
 ) -> Vec<PathBuf> {
@@ -164,7 +176,7 @@ fn test_runs_directories(
 /// Display/discovery key only, never a native locator fence: forward slashes,
 /// no trailing slash, no Windows
 /// verbatim prefix, and lower case on Windows, whose paths ignore case.
-fn test_run_path_key(path: &str) -> String {
+pub(crate) fn test_run_path_key(path: &str) -> String {
     let path = path
         .strip_prefix(r"\\?\")
         .unwrap_or(path)
@@ -179,18 +191,22 @@ fn test_run_path_key(path: &str) -> String {
 
 /// User-facing path; Windows uses forward slashes and no verbatim prefix.
 /// Unix literal backslashes remain part of the filename.
-fn test_run_display_path(path: &FsPath) -> String {
+pub(crate) fn test_run_display_path(path: &FsPath) -> String {
     let path = normalize_user_facing_path(path);
     let text = path.to_string_lossy();
     #[cfg(windows)]
-    { text.replace('\\', "/") }
+    {
+        text.replace('\\', "/")
+    }
     #[cfg(not(windows))]
-    { text.into_owned() }
+    {
+        text.into_owned()
+    }
 }
 
 // Native bytes, not display text, fence identity. Called only on canonical
 // paths; canonicalization and artifact reads remain outside StateInner.
-fn test_run_native_path_key(path: &FsPath) -> String {
+pub(crate) fn test_run_native_path_key(path: &FsPath) -> String {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
     #[cfg(unix)]
@@ -208,11 +224,13 @@ fn test_run_native_path_key(path: &FsPath) -> String {
     format!("{:x}", digest.finalize())
 }
 
-fn test_run_locator_identity(path: &FsPath) -> Option<String> {
-    fs::canonicalize(path).ok().map(|path| test_run_native_path_key(&path))
+pub(crate) fn test_run_locator_identity(path: &FsPath) -> Option<String> {
+    fs::canonicalize(path)
+        .ok()
+        .map(|path| test_run_native_path_key(&path))
 }
 
-fn test_run_truncate(text: &str, max: usize) -> String {
+pub(crate) fn test_run_truncate(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_owned();
     }
@@ -224,7 +242,7 @@ fn test_run_truncate(text: &str, max: usize) -> String {
 }
 
 /// One read of a run's JSON file.
-enum TestRunJson {
+pub(crate) enum TestRunJson {
     /// The parsed file, the digest of the bytes it was parsed from, and the
     /// stamp of the file version those bytes came from. A stamp taken before
     /// or after the read can belong to another version when the launcher
@@ -244,7 +262,7 @@ enum TestRunJson {
     TooLarge,
 }
 
-fn test_run_read_json(path: &FsPath) -> TestRunJson {
+pub(crate) fn test_run_read_json(path: &FsPath) -> TestRunJson {
     if fs::metadata(path).is_ok_and(|metadata| metadata.len() > TEST_RUN_JSON_MAX_BYTES as u64) {
         return TestRunJson::TooLarge;
     }
@@ -289,7 +307,7 @@ fn test_run_js_integer(value: &Value) -> bool {
 }
 
 /// `Passed` or `Failed` for terminal results, `None` otherwise.
-fn test_run_terminal_state(results: &Value) -> Option<TestRunState> {
+pub(crate) fn test_run_terminal_state(results: &Value) -> Option<TestRunState> {
     test_run_results_are_terminal(results).then(|| {
         match results.get("state").and_then(Value::as_str) {
             Some("passed") => TestRunState::Passed,
@@ -299,7 +317,7 @@ fn test_run_terminal_state(results: &Value) -> Option<TestRunState> {
 }
 
 /// The launcher's `isTerminal(result)`.
-fn test_run_results_are_terminal(results: &Value) -> bool {
+pub(crate) fn test_run_results_are_terminal(results: &Value) -> bool {
     matches!(
         results.get("state").and_then(Value::as_str),
         Some("passed" | "failed")
@@ -307,11 +325,11 @@ fn test_run_results_are_terminal(results: &Value) -> bool {
         && results.get("exitCode").is_some_and(test_run_js_integer)
 }
 
-fn test_run_str(value: &Value, key: &str) -> Option<String> {
+pub(crate) fn test_run_str(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn test_run_argv(value: Option<&Value>) -> Option<Vec<String>> {
+pub(crate) fn test_run_argv(value: Option<&Value>) -> Option<Vec<String>> {
     value?
         .as_array()?
         .iter()
@@ -332,14 +350,14 @@ fn test_run_pid(value: &Value, key: &str) -> Option<u32> {
 /// Counts include every entry, including unnamed/unknown entries; unlike the
 /// stage summary they are not limited to the first 64 valid stage names.
 #[derive(Clone, Debug)]
-struct TestRunWaitEvidence {
-    stages: Option<[usize; 6]>,
-    preflight: Option<[usize; 6]>,
-    source_comparison: &'static str,
+pub(crate) struct TestRunWaitEvidence {
+    pub(crate) stages: Option<[usize; 6]>,
+    pub(crate) preflight: Option<[usize; 6]>,
+    pub(crate) source_comparison: &'static str,
 }
 
 impl TestRunWaitEvidence {
-    fn from_results(results: &Value) -> Self {
+    pub(crate) fn from_results(results: &Value) -> Self {
         let totals = |key: &str, infer_code: bool| {
             results.get(key).and_then(Value::as_array).map(|items| {
                 let mut counts = [0; 6];
@@ -354,11 +372,13 @@ impl TestRunWaitEvidence {
                             Some("interrupted") => 2,
                             Some("running") => 3,
                             Some("unrun") => 4,
-                            None if infer_code && item.get("state").is_none() => match item.get("code").and_then(Value::as_i64) {
-                                Some(0) => 0,
-                                Some(_) => 1,
-                                None => 5,
-                            },
+                            None if infer_code && item.get("state").is_none() => {
+                                match item.get("code").and_then(Value::as_i64) {
+                                    Some(0) => 0,
+                                    Some(_) => 1,
+                                    None => 5,
+                                }
+                            }
                             _ => 5,
                         }
                     };
@@ -380,7 +400,7 @@ impl TestRunWaitEvidence {
 
     /// Admission reserves the largest numeric representation, even for a run
     /// with no published results yet. Actual counts are bounded by the JSON cap.
-    fn mandatory_bound() -> Self {
+    pub(crate) fn mandatory_bound() -> Self {
         Self {
             stages: Some([usize::MAX; 6]),
             preflight: Some([usize::MAX; 6]),
@@ -394,33 +414,33 @@ impl TestRunWaitEvidence {
 /// file afresh. What is kept per run is bounded, listed or not; the total
 /// grows with the number of run directories.
 #[derive(Clone, Debug)]
-struct TestRunResultsExtract {
-    wait_evidence: TestRunWaitEvidence,
+pub(crate) struct TestRunResultsExtract {
+    pub(crate) wait_evidence: TestRunWaitEvidence,
     /// Optional facts projected during this same bounded native results read.
     /// They carry no source/credit qualification or new measurement.
-    native_input: native_test_completion::Input,
+    pub(crate) native_input: native_test_completion::Input,
     /// The digest of the bytes this extract was read from (`detailVersion`).
-    digest: String,
+    pub(crate) digest: String,
     /// `Passed` or `Failed` when the results are terminal.
-    terminal_state: Option<TestRunState>,
+    pub(crate) terminal_state: Option<TestRunState>,
     /// The first `TEST_RUN_STAGES_MAX` stages with valid names.
-    stages: Vec<TestRunStageSummary>,
+    pub(crate) stages: Vec<TestRunStageSummary>,
     /// The running stage, found among all stages, not only the kept ones.
-    current_stage: Option<String>,
-    interrupted: bool,
-    ended: Option<String>,
-    exit_code: Option<i64>,
-    error: Option<String>,
+    pub(crate) current_stage: Option<String>,
+    pub(crate) interrupted: bool,
+    pub(crate) ended: Option<String>,
+    pub(crate) exit_code: Option<i64>,
+    pub(crate) error: Option<String>,
     /// Whether `error` is shorter than the results.json error, so a card can
     /// say its error was cut (slice 2).
-    error_truncated: bool,
-    pid: Option<u32>,
-    heartbeat: Option<TestRunHeartbeat>,
-    started: Option<String>,
+    pub(crate) error_truncated: bool,
+    pub(crate) pid: Option<u32>,
+    pub(crate) heartbeat: Option<TestRunHeartbeat>,
+    pub(crate) started: Option<String>,
 }
 
 impl TestRunResultsExtract {
-    fn new(results: &Value, digest: String) -> Self {
+    pub(crate) fn new(results: &Value, digest: String) -> Self {
         let text = |key: &str| {
             test_run_str(results, key)
                 .and_then(|text| test_run_within(text, TEST_RUN_TEXT_MAX_BYTES))
@@ -473,26 +493,30 @@ impl TestRunResultsExtract {
 
 /// Bounded producer evidence, not proof of an executor's identity or death.
 #[derive(Clone, Debug)]
-struct TestRunHeartbeat {
-    at: chrono::DateTime<chrono::Utc>,
-    every_ms: i64,
+pub(crate) struct TestRunHeartbeat {
+    pub(crate) at: chrono::DateTime<chrono::Utc>,
+    pub(crate) every_ms: i64,
 }
 
 impl TestRunHeartbeat {
-    fn parse(value: &Value) -> Option<Self> {
+    pub(crate) fn parse(value: &Value) -> Option<Self> {
         let at = value.get("at")?.as_str()?;
         if at.len() > TEST_RUN_TEXT_MAX_BYTES {
             return None;
         }
-        let at = chrono::DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&chrono::Utc);
+        let at = chrono::DateTime::parse_from_rfc3339(at)
+            .ok()?
+            .with_timezone(&chrono::Utc);
         let every_ms = value.get("everyMs")?.as_i64()?;
-        (1000..=600_000).contains(&every_ms).then_some(Self { at, every_ms })
+        (1000..=600_000)
+            .contains(&every_ms)
+            .then_some(Self { at, every_ms })
     }
 
     /// `None` for a timestamp beyond one interval into the future. A valid
     /// old timestamp is stale, not malformed. Differences avoid overflowing
     /// an instant near the timestamp range's endpoints.
-    fn fresh_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<bool> {
+    pub(crate) fn fresh_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<bool> {
         let age = now.signed_duration_since(self.at);
         (age >= -chrono::TimeDelta::milliseconds(self.every_ms))
             .then_some(age <= chrono::TimeDelta::milliseconds(3 * self.every_ms))
@@ -500,7 +524,7 @@ impl TestRunHeartbeat {
 }
 
 /// What a read of a run directory found.
-enum TestRunRead {
+pub(crate) enum TestRunRead {
     /// A run to index.
     Run(TestRunDisk),
     /// No readable request, and no earlier good read to keep: a directory the
@@ -524,39 +548,39 @@ impl TestRunRead {
 
 /// What one run directory says, parsed once per change of its files.
 #[derive(Clone, Debug)]
-struct TestRunDisk {
-    run_id: String,
-    request_identity: Option<String>,
-    locator_identity: Option<String>,
-    run_dir: PathBuf,
-    request_stamp: TestRunFileStamp,
-    results_stamp: TestRunFileStamp,
-    worktree: String,
-    preset: TestRunPreset,
-    command: Option<Vec<String>>,
-    command_truncated: bool,
-    detached: Option<bool>,
-    creator_pid: Option<u32>,
-    owner: Option<String>,
-    notify_to: Option<String>,
+pub(crate) struct TestRunDisk {
+    pub(crate) run_id: String,
+    pub(crate) request_identity: Option<String>,
+    pub(crate) locator_identity: Option<String>,
+    pub(crate) run_dir: PathBuf,
+    pub(crate) request_stamp: TestRunFileStamp,
+    pub(crate) results_stamp: TestRunFileStamp,
+    pub(crate) worktree: String,
+    pub(crate) preset: TestRunPreset,
+    pub(crate) command: Option<Vec<String>>,
+    pub(crate) command_truncated: bool,
+    pub(crate) detached: Option<bool>,
+    pub(crate) creator_pid: Option<u32>,
+    pub(crate) owner: Option<String>,
+    pub(crate) notify_to: Option<String>,
     /// The extract of `results.json`, when readable.
-    results: Option<TestRunResultsExtract>,
-    started_at: Option<String>,
+    pub(crate) results: Option<TestRunResultsExtract>,
+    pub(crate) started_at: Option<String>,
     /// Consecutive rescans whose read of a file failed. Nonzero means the
     /// next rescan reads the files again whatever their stamps, so a failed
     /// read is never cached as if it were an answer, unless
     /// `results_malformed` says the failure was the content itself.
-    read_failures: u8,
+    pub(crate) read_failures: u8,
     /// The last read found `results.json` whole and unparseable, with no
     /// earlier results kept. The same bytes fail the same way, so while both
     /// stamps are unchanged the rescan keeps this entry instead of reading it
     /// again; the run stays unknown (results unreadable).
-    results_malformed: bool,
+    pub(crate) results_malformed: bool,
     /// Set when these results were read again after the liveness check found
     /// their responsible process gone (`Some(pid)`), or found no pid at all
     /// (`None`). Such a read is final for that process, so an unchanged run
     /// is not read again on every rescan.
-    confirmed_unknown: Option<Option<u32>>,
+    pub(crate) confirmed_unknown: Option<Option<u32>>,
 }
 
 impl TestRunDisk {
@@ -574,13 +598,13 @@ impl TestRunDisk {
     /// run. An earlier pass is never shown past one rescan of unreadable
     /// results, and every failed read is tried again on the next rescan.
     /// `None` when the run has no readable request to report.
-    fn read(run_dir: &FsPath, previous: Option<&Self>) -> Option<Self> {
+    pub(crate) fn read(run_dir: &FsPath, previous: Option<&Self>) -> Option<Self> {
         Self::read_classified(run_dir, previous).into_run()
     }
 
     /// `read`, telling a run whose request is not readable yet from one that
     /// can never be indexed as its files stand.
-    fn read_classified(run_dir: &FsPath, previous: Option<&Self>) -> TestRunRead {
+    pub(crate) fn read_classified(run_dir: &FsPath, previous: Option<&Self>) -> TestRunRead {
         Self::read_classified_pausing(run_dir, previous, &|| {})
     }
 
@@ -588,7 +612,11 @@ impl TestRunDisk {
     /// and the reads themselves: the window in which the launcher can replace
     /// a file, which a test uses to replace one deterministically.
     #[cfg(test)]
-    fn read_pausing(run_dir: &FsPath, previous: Option<&Self>, after_stamp: &dyn Fn()) -> Option<Self> {
+    pub(crate) fn read_pausing(
+        run_dir: &FsPath,
+        previous: Option<&Self>,
+        after_stamp: &dyn Fn(),
+    ) -> Option<Self> {
         Self::read_classified_pausing(run_dir, previous, after_stamp).into_run()
     }
 
@@ -794,7 +822,7 @@ impl TestRunDisk {
     /// (or found no pid) can predate that write. Such a verdict needs one more
     /// read after the check, unless this read already was one for the same
     /// process.
-    fn unknown_needs_read_after_check(&self, state: TestRunState) -> bool {
+    pub(crate) fn unknown_needs_read_after_check(&self, state: TestRunState) -> bool {
         state == TestRunState::Unknown
             && self.results.is_some()
             && self.confirmed_unknown != Some(self.responsible_pid().map(|(pid, _)| pid))
@@ -803,7 +831,7 @@ impl TestRunDisk {
     /// Whether `results.json` is terminal, exactly as the launcher's
     /// `isTerminal` judges it: a passed or failed state, a truthy `ended`
     /// and an integer `exitCode`.
-    fn is_terminal(&self) -> bool {
+    pub(crate) fn is_terminal(&self) -> bool {
         self.results
             .as_ref()
             .is_some_and(|results| results.terminal_state.is_some())
@@ -812,7 +840,7 @@ impl TestRunDisk {
     /// The process responsible for a non-terminal run, with when the file
     /// that recorded its pid was last written: `results.json`'s pid, else the
     /// process that created the run (`request.json`'s `creatorPid`).
-    fn responsible_pid(&self) -> Option<(u32, Option<std::time::SystemTime>)> {
+    pub(crate) fn responsible_pid(&self) -> Option<(u32, Option<std::time::SystemTime>)> {
         let written = |stamp: TestRunFileStamp| stamp.map(|(_, modified)| modified);
         match self.results.as_ref().and_then(|results| results.pid) {
             Some(pid) => Some((pid, written(self.results_stamp))),
@@ -827,11 +855,11 @@ impl TestRunDisk {
     /// heartbeat or while its responsible process may still be the one
     /// that recorded its pid. Missing evidence alone never proves death.
     #[cfg(test)]
-    fn state(&self, writer_may_be_alive: &TestRunLiveness) -> TestRunState {
+    pub(crate) fn state(&self, writer_may_be_alive: &TestRunLiveness) -> TestRunState {
         self.state_at(writer_may_be_alive, chrono::Utc::now())
     }
 
-    fn state_at(
+    pub(crate) fn state_at(
         &self,
         writer_may_be_alive: &TestRunLiveness,
         now: chrono::DateTime<chrono::Utc>,
@@ -854,11 +882,11 @@ impl TestRunDisk {
         }
     }
 
-    fn heartbeat_fresh_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<bool> {
+    pub(crate) fn heartbeat_fresh_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<bool> {
         self.results.as_ref()?.heartbeat.as_ref()?.fresh_at(now)
     }
 
-    fn stages(&self) -> Vec<TestRunStageSummary> {
+    pub(crate) fn stages(&self) -> Vec<TestRunStageSummary> {
         self.results
             .as_ref()
             .map(|results| results.stages.clone())
@@ -866,7 +894,7 @@ impl TestRunDisk {
     }
 }
 
-fn test_run_stage_state(value: Option<&str>) -> TestRunStageState {
+pub(crate) fn test_run_stage_state(value: Option<&str>) -> TestRunStageState {
     match value {
         Some("running") => TestRunStageState::Running,
         Some("passed") => TestRunStageState::Passed,
@@ -885,7 +913,7 @@ fn test_run_stage_summary(stage: &Value) -> Option<TestRunStageSummary> {
     })
 }
 
-fn test_run_diagnostics(value: Option<&Value>) -> Option<TestRunDiagnostics> {
+pub(crate) fn test_run_diagnostics(value: Option<&Value>) -> Option<TestRunDiagnostics> {
     let value = value?;
     Some(TestRunDiagnostics {
         text: test_run_str(value, "text")?,
@@ -923,13 +951,13 @@ fn test_run_relative_log(run_dir: &FsPath, log: Option<String>) -> Option<String
 
 /// Refusal for a results file that exists but could not be read whole: an
 /// empty detail would read as "no stages", so the caller is told to retry.
-fn test_run_results_unreadable() -> ApiError {
+pub(crate) fn test_run_results_unreadable() -> ApiError {
     ApiError::conflict("the run's results could not be read, possibly mid-replacement; retry")
 }
 
 /// Refusal for a results file over the read limit: not retryable until the
 /// file changes.
-fn test_run_results_too_large() -> ApiError {
+pub(crate) fn test_run_results_too_large() -> ApiError {
     ApiError::from_status(
         StatusCode::UNPROCESSABLE_ENTITY,
         format!(
@@ -942,11 +970,13 @@ fn test_run_results_too_large() -> ApiError {
 /// The run detail: every stage with command, working directory, log and
 /// diagnostics, the preflight probes, and the fingerprints. Empty when the
 /// run has no results yet; 409 when they exist but could not be read.
-fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
+pub(crate) fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
     let results = match test_run_read_json(&run_dir.join("results.json")) {
         TestRunJson::Parsed(results, _, _) => results,
         TestRunJson::Missing => return Ok(TestRunDetail::default()),
-        TestRunJson::Failed | TestRunJson::Malformed(_) => return Err(test_run_results_unreadable()),
+        TestRunJson::Failed | TestRunJson::Malformed(_) => {
+            return Err(test_run_results_unreadable());
+        }
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
     };
     let request = match test_run_read_json(&run_dir.join("request.json")) {
@@ -957,17 +987,20 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
     let source_id_before = test_run_source_id(results.get("sourceIdBefore"));
     let source_id_after = test_run_source_id(results.get("sourceIdAfter"));
     let source_comparison = (request.get("sourceId").is_some()
-        || results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some()).then(|| {
+        || results.get("sourceIdBefore").is_some()
+        || results.get("sourceIdAfter").is_some())
+    .then(|| {
         match (&source_id, &source_id_before, &source_id_after) {
-            (Some(admitted), Some(before), Some(after)) => match (
-                admitted.compare(before), before.compare(after),
-            ) {
-                (Some(true), Some(true)) => "matched",
-                (None, _) | (_, None) => "incomparable",
-                _ => "mismatched",
-            },
+            (Some(admitted), Some(before), Some(after)) => {
+                match (admitted.compare(before), before.compare(after)) {
+                    (Some(true), Some(true)) => "matched",
+                    (None, _) | (_, None) => "incomparable",
+                    _ => "mismatched",
+                }
+            }
             _ => "unknown",
-        }.to_owned()
+        }
+        .to_owned()
     });
     let stages = results
         .get("stages")
@@ -1026,7 +1059,7 @@ fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiError> {
 /// The last `tail` bytes of stage `name`'s log, read only when the log path
 /// `results.json` records resolves, symlinks and junctions included, inside
 /// the run directory.
-fn test_run_stage_log_tail(
+pub(crate) fn test_run_stage_log_tail(
     run_dir: &FsPath,
     name: &str,
     tail: Option<u64>,
@@ -1042,7 +1075,9 @@ fn test_run_stage_log_tail(
     let results = match test_run_read_json(&run_dir.join("results.json")) {
         TestRunJson::Parsed(results, _, _) => results,
         TestRunJson::Missing => return Err(ApiError::not_found("run results are unavailable")),
-        TestRunJson::Failed | TestRunJson::Malformed(_) => return Err(test_run_results_unreadable()),
+        TestRunJson::Failed | TestRunJson::Malformed(_) => {
+            return Err(test_run_results_unreadable());
+        }
         TestRunJson::TooLarge => return Err(test_run_results_too_large()),
     };
     let log = results
@@ -1103,11 +1138,11 @@ fn test_run_stage_log_tail(
 
 /// Judges whether the process at a recorded pid may still be the one that
 /// recorded it: the pid, and when the file carrying it was last written.
-type TestRunLiveness = dyn Fn(u32, Option<std::time::SystemTime>) -> bool;
+pub(crate) type TestRunLiveness = dyn Fn(u32, Option<std::time::SystemTime>) -> bool;
 
 /// Slack between a file's modification time and the creation time of the
 /// process that wrote it, for coarse file and boot-time resolution.
-const TEST_RUN_PID_REUSE_MARGIN: Duration = Duration::from_secs(2);
+pub(crate) const TEST_RUN_PID_REUSE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether the process at `pid` may still be the one that wrote the file
 /// carrying `pid` at `written_at`. It must be alive, as far as anything
@@ -1116,7 +1151,7 @@ const TEST_RUN_PID_REUSE_MARGIN: Duration = Duration::from_secs(2);
 /// only reuses the number. Only proof counts: when either time is unknown,
 /// the process may be the writer. This only ever turns running into unknown,
 /// and never decides passed or failed.
-fn test_run_writer_may_be_alive(
+pub(crate) fn test_run_writer_may_be_alive(
     pid: u32,
     written_at: Option<std::time::SystemTime>,
     may_be_alive: &dyn Fn(u32) -> bool,
@@ -1137,7 +1172,7 @@ fn test_run_writer_may_be_alive(
 }
 
 /// `test_run_writer_may_be_alive` against the real process table.
-fn test_run_process_writer_may_be_alive(
+pub(crate) fn test_run_process_writer_may_be_alive(
     pid: u32,
     written_at: Option<std::time::SystemTime>,
 ) -> bool {
@@ -1151,7 +1186,7 @@ fn test_run_process_writer_may_be_alive(
 
 /// When the live process `pid` was created, if that can be read.
 #[cfg(windows)]
-fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
+pub(crate) fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
     use windows_sys::Win32::System::Threading::{
         GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -1182,7 +1217,7 @@ fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
 /// time in clock ticks after boot (`/proc/<pid>/stat` field 22) plus the boot
 /// time (`btime` in `/proc/stat`, whole seconds, so never later than true).
 #[cfg(target_os = "linux")]
-fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
+pub(crate) fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     // The command name is parenthesised and may itself hold spaces or
     // parentheses; the fields after it start at field 3.
@@ -1208,7 +1243,7 @@ fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
 
 /// When the live process `pid` was created, if that can be read.
 #[cfg(target_os = "macos")]
-fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
+pub(crate) fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
     let pid = libc::c_int::try_from(pid).ok()?;
     let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
@@ -1231,7 +1266,7 @@ fn test_run_process_created_at(pid: u32) -> Option<std::time::SystemTime> {
 
 /// Elsewhere the creation time is not read, so pid reuse is not detected.
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
-fn test_run_process_created_at(_pid: u32) -> Option<std::time::SystemTime> {
+pub(crate) fn test_run_process_created_at(_pid: u32) -> Option<std::time::SystemTime> {
     None
 }
 
@@ -1239,7 +1274,7 @@ fn test_run_process_created_at(_pid: u32) -> Option<std::time::SystemTime> {
 /// launcher's `processMayBeAlive`: a process that cannot be inspected is
 /// alive.
 #[cfg(windows)]
-fn test_run_process_may_be_alive(pid: u32) -> bool {
+pub(crate) fn test_run_process_may_be_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE,
     };
@@ -1258,7 +1293,7 @@ fn test_run_process_may_be_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(windows))]
-fn test_run_process_may_be_alive(pid: u32) -> bool {
+pub(crate) fn test_run_process_may_be_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return true;
     };

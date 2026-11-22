@@ -35,8 +35,10 @@
 // CLI's message shape changes with CLI version and we want to
 // degrade gracefully when new / unknown fields appear.
 
+use super::*;
+
 /// Returns the Claude CLI model argument, or None to use Claude's own default selector.
-fn claude_cli_model_arg(model: &str) -> Option<&str> {
+pub(crate) fn claude_cli_model_arg(model: &str) -> Option<&str> {
     let model = model.trim();
     if model.is_empty() || model.eq_ignore_ascii_case("default") {
         return None;
@@ -97,7 +99,7 @@ fn push_claude_cli_permission_args(
 // the long-lived stdin/stdout transport, Claude reads user/project/local
 // settings like the VS Code extension, no Chrome helper is launched, and
 // replayed user messages preserve transcript continuity when resuming.
-fn claude_cli_persistent_args(
+pub(crate) fn claude_cli_persistent_args(
     model: &str,
     approval_mode: ClaudeApprovalMode,
     effort: ClaudeEffortLevel,
@@ -131,7 +133,7 @@ fn claude_cli_persistent_args(
 /// `host_servers_only` it loads the host's servers alone, so a server the
 /// user's configuration names cannot reach a session that must have none.
 /// The strict flag goes first because `--mcp-config` takes a list.
-fn claude_cli_mcp_config_args(
+pub(crate) fn claude_cli_mcp_config_args(
     config_path: &FsPath,
     host_servers_only: bool,
 ) -> Vec<std::ffi::OsString> {
@@ -145,7 +147,7 @@ fn claude_cli_mcp_config_args(
 }
 
 /// Handles Claude model options.
-fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
+pub(crate) fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
     let models = message.pointer("/response/response/models")?.as_array()?;
     Some(
         models
@@ -198,7 +200,7 @@ fn claude_model_options(message: &Value) -> Option<Vec<SessionModelOption>> {
 }
 
 /// Handles Claude agent commands.
-fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
+pub(crate) fn claude_agent_commands(message: &Value) -> Option<Vec<AgentCommand>> {
     let commands = message.pointer("/response/response/commands")?.as_array()?;
     let parsed = commands
         .iter()
@@ -297,7 +299,7 @@ fn claude_model_badges(entry: &Value) -> Vec<String> {
 }
 
 /// Parses Claude effort level.
-fn parse_claude_effort_level(value: &str) -> Option<ClaudeEffortLevel> {
+pub(crate) fn parse_claude_effort_level(value: &str) -> Option<ClaudeEffortLevel> {
     match value.trim() {
         "default" => Some(ClaudeEffortLevel::Default),
         "low" => Some(ClaudeEffortLevel::Low),

@@ -9,15 +9,17 @@ checks live in the integration layer; this module owns validation, CAS,
 idempotency, persistence, history retention, and snapshot consistency.
 */
 
+use super::*;
+
 const COORDINATION_BOARD_WRITER_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
-const COORDINATION_BOARD_MAX_KEY_BYTES: usize = 128;
+pub(crate) const COORDINATION_BOARD_MAX_KEY_BYTES: usize = 128;
 const COORDINATION_BOARD_MAX_VALUE_BYTES: usize = 4 * 1024;
 const COORDINATION_BOARD_MAX_VALUE_DEPTH: usize = 32;
 const COORDINATION_BOARD_MAX_IDEMPOTENCY_KEY_BYTES: usize = 256;
 const COORDINATION_BOARD_MAX_STATE_STAMP_BYTES: usize = 256;
-const COORDINATION_BOARD_MAX_SCOPE_ID_BYTES: usize = 256;
+pub(crate) const COORDINATION_BOARD_MAX_SCOPE_ID_BYTES: usize = 256;
 const COORDINATION_BOARD_MAX_AUTHOR_ID_BYTES: usize = 256;
-const COORDINATION_BOARD_MAX_AUTHOR_NAME_BYTES: usize = 256;
+pub(crate) const COORDINATION_BOARD_MAX_AUTHOR_NAME_BYTES: usize = 256;
 const COORDINATION_BOARD_DEFAULT_PAGE_SIZE: usize = 100;
 const COORDINATION_BOARD_MAX_PAGE_SIZE: usize = 200;
 const COORDINATION_BOARD_MAX_LIVE_ENTRIES_PER_SCOPE: usize = 512;
@@ -31,7 +33,7 @@ const COORDINATION_BOARD_WRITE_SAFE_RETRY_CLAUSE: &str =
     "no coordination board write was committed by this operation, so retry the same request";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CoordinationBoardStoreErrorKind {
+pub(crate) enum CoordinationBoardStoreErrorKind {
     Validation,
     Conflict,
     NotFound,
@@ -40,11 +42,11 @@ enum CoordinationBoardStoreErrorKind {
 }
 
 #[derive(Clone, Debug)]
-struct CoordinationBoardStoreError {
-    kind: CoordinationBoardStoreErrorKind,
-    message: String,
-    current: Option<CoordinationBoardHead>,
-    current_generation: Option<u64>,
+pub(crate) struct CoordinationBoardStoreError {
+    pub(crate) kind: CoordinationBoardStoreErrorKind,
+    pub(crate) message: String,
+    pub(crate) current: Option<CoordinationBoardHead>,
+    pub(crate) current_generation: Option<u64>,
 }
 
 impl std::fmt::Display for CoordinationBoardStoreError {
@@ -55,7 +57,7 @@ impl std::fmt::Display for CoordinationBoardStoreError {
 
 impl std::error::Error for CoordinationBoardStoreError {}
 
-fn coordination_board_store_error(
+pub(crate) fn coordination_board_store_error(
     kind: CoordinationBoardStoreErrorKind,
     message: impl Into<String>,
 ) -> anyhow::Error {
@@ -84,26 +86,26 @@ fn coordination_board_conflict(
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CoordinationBoardHead {
-    key: String,
-    revision: u64,
+pub(crate) struct CoordinationBoardHead {
+    pub(crate) key: String,
+    pub(crate) revision: u64,
     /// Scope generation at which this key was last written. This is not the
     /// scope's current generation unless this key was the most recent write.
     updated_at_generation: u64,
-    value: Value,
-    deleted: bool,
-    author_session_id: String,
-    author_name: String,
-    updated_at: String,
+    pub(crate) value: Value,
+    pub(crate) deleted: bool,
+    pub(crate) author_session_id: String,
+    pub(crate) author_name: String,
+    pub(crate) updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    state_stamp: Option<String>,
+    pub(crate) state_stamp: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CoordinationBoardGetResponse {
+pub(crate) struct CoordinationBoardGetResponse {
     #[serde(flatten)]
-    head: CoordinationBoardHead,
+    pub(crate) head: CoordinationBoardHead,
     /// Current generation of the whole scope at the same read snapshot.
     scope_generation: u64,
 }
@@ -124,57 +126,57 @@ impl CoordinationBoardHead {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CoordinationBoardSetReceipt {
-    key: String,
-    revision: u64,
-    prior_revision: u64,
-    generation: u64,
-    value: Value,
-    deleted: bool,
-    author_session_id: String,
-    author_name: String,
-    updated_at: String,
+pub(crate) struct CoordinationBoardSetReceipt {
+    pub(crate) key: String,
+    pub(crate) revision: u64,
+    pub(crate) prior_revision: u64,
+    pub(crate) generation: u64,
+    pub(crate) value: Value,
+    pub(crate) deleted: bool,
+    pub(crate) author_session_id: String,
+    pub(crate) author_name: String,
+    pub(crate) updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    state_stamp: Option<String>,
-    duplicate: bool,
+    pub(crate) state_stamp: Option<String>,
+    pub(crate) duplicate: bool,
 }
 
 #[derive(Clone, Debug)]
-struct CoordinationBoardSetInput {
-    scope_project_id: String,
-    key: String,
-    value: Option<Value>,
-    expected_revision: u64,
-    author_session_id: String,
-    author_name: String,
-    idempotency_key: String,
-    state_stamp: Option<String>,
+pub(crate) struct CoordinationBoardSetInput {
+    pub(crate) scope_project_id: String,
+    pub(crate) key: String,
+    pub(crate) value: Option<Value>,
+    pub(crate) expected_revision: u64,
+    pub(crate) author_session_id: String,
+    pub(crate) author_name: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) state_stamp: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
-struct CoordinationBoardListRequest {
-    scope_project_id: String,
-    after_key: Option<String>,
-    limit: Option<usize>,
-    snapshot_generation: Option<u64>,
-    known_generation: Option<u64>,
+pub(crate) struct CoordinationBoardListRequest {
+    pub(crate) scope_project_id: String,
+    pub(crate) after_key: Option<String>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) snapshot_generation: Option<u64>,
+    pub(crate) known_generation: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CoordinationBoardListPage {
-    generation: u64,
-    entries: Vec<CoordinationBoardHead>,
+pub(crate) struct CoordinationBoardListPage {
+    pub(crate) generation: u64,
+    pub(crate) entries: Vec<CoordinationBoardHead>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_after_key: Option<String>,
-    unchanged: bool,
+    pub(crate) unchanged: bool,
 }
 
-struct CoordinationBoardStore {
-    connection: Mutex<Option<rusqlite::Connection>>,
+pub(crate) struct CoordinationBoardStore {
+    pub(crate) connection: Mutex<Option<rusqlite::Connection>>,
     interrupt_handle: Option<rusqlite::InterruptHandle>,
-    write_lock: Arc<SqliteStateWriterAdmission>,
-    write_admission_timeout: Duration,
+    pub(crate) write_lock: Arc<SqliteStateWriterAdmission>,
+    pub(crate) write_admission_timeout: Duration,
     #[cfg(test)]
     write_ordering_hook: Option<CoordinationBoardWriteOrderingHook>,
 }
@@ -186,8 +188,8 @@ struct CoordinationBoardWriteOrderingHook {
     continue_to_writer_admission: Arc<(Mutex<bool>, std::sync::Condvar)>,
 }
 
-struct CoordinationBoardConnectionGuard<'a> {
-    guard: std::sync::MutexGuard<'a, Option<rusqlite::Connection>>,
+pub(crate) struct CoordinationBoardConnectionGuard<'a> {
+    pub(crate) guard: std::sync::MutexGuard<'a, Option<rusqlite::Connection>>,
 }
 
 impl std::ops::Deref for CoordinationBoardConnectionGuard<'_> {
@@ -201,11 +203,11 @@ impl std::ops::Deref for CoordinationBoardConnectionGuard<'_> {
 }
 
 impl CoordinationBoardStore {
-    fn open(path: &FsPath) -> Result<Self> {
+    pub(crate) fn open(path: &FsPath) -> Result<Self> {
         Self::open_with_write_admission_timeout(path, COORDINATION_BOARD_WRITER_ADMISSION_TIMEOUT)
     }
 
-    fn open_with_write_admission_timeout(
+    pub(crate) fn open_with_write_admission_timeout(
         path: &FsPath,
         write_admission_timeout: Duration,
     ) -> Result<Self> {
@@ -231,7 +233,7 @@ impl CoordinationBoardStore {
     }
 
     #[cfg(test)]
-    fn disabled_for_tests() -> Self {
+    pub(crate) fn disabled_for_tests() -> Self {
         Self {
             connection: Mutex::new(None),
             interrupt_handle: None,
@@ -241,13 +243,13 @@ impl CoordinationBoardStore {
         }
     }
 
-    fn interrupt_current_operation(&self) {
+    pub(crate) fn interrupt_current_operation(&self) {
         if let Some(interrupt_handle) = &self.interrupt_handle {
             interrupt_handle.interrupt();
         }
     }
 
-    fn connection(&self) -> Result<CoordinationBoardConnectionGuard<'_>> {
+    pub(crate) fn connection(&self) -> Result<CoordinationBoardConnectionGuard<'_>> {
         self.connection_for_operation_with_timeout(
             "waiting for the coordination board connection",
             self.write_admission_timeout,
@@ -310,7 +312,7 @@ impl CoordinationBoardStore {
         }
     }
 
-    fn lock_writer(&self, operation: &str) -> Result<SqliteStateWriterGuard<'_>> {
+    pub(crate) fn lock_writer(&self, operation: &str) -> Result<SqliteStateWriterGuard<'_>> {
         self.lock_writer_with_timeout(operation, self.write_admission_timeout)
     }
 
@@ -330,7 +332,11 @@ impl CoordinationBoardStore {
         })
     }
 
-    fn get(&self, scope_project_id: &str, key: &str) -> Result<CoordinationBoardGetResponse> {
+    pub(crate) fn get(
+        &self,
+        scope_project_id: &str,
+        key: &str,
+    ) -> Result<CoordinationBoardGetResponse> {
         validate_coordination_board_scope_id(scope_project_id)?;
         validate_coordination_board_key(key)?;
         let connection = self.connection()?;
@@ -364,7 +370,10 @@ impl CoordinationBoardStore {
         result
     }
 
-    fn list(&self, request: &CoordinationBoardListRequest) -> Result<CoordinationBoardListPage> {
+    pub(crate) fn list(
+        &self,
+        request: &CoordinationBoardListRequest,
+    ) -> Result<CoordinationBoardListPage> {
         validate_coordination_board_scope_id(&request.scope_project_id)?;
         if let Some(after_key) = request.after_key.as_deref() {
             validate_coordination_board_key(after_key)?;
@@ -457,7 +466,10 @@ impl CoordinationBoardStore {
         })
     }
 
-    fn set(&self, input: &CoordinationBoardSetInput) -> Result<CoordinationBoardSetReceipt> {
+    pub(crate) fn set(
+        &self,
+        input: &CoordinationBoardSetInput,
+    ) -> Result<CoordinationBoardSetReceipt> {
         let canonical_value = validate_coordination_board_set_input(input)?;
         let request_hash = coordination_board_request_hash(input, canonical_value.as_deref());
         let canonical_receipt_value = canonical_value
@@ -704,7 +716,7 @@ impl CoordinationBoardStore {
     }
 
     #[cfg(test)]
-    fn delete_scope(&self, scope_project_id: &str) -> Result<bool> {
+    pub(crate) fn delete_scope(&self, scope_project_id: &str) -> Result<bool> {
         self.delete_scope_with_timeout(scope_project_id, self.write_admission_timeout)
     }
 
@@ -771,7 +783,10 @@ impl CoordinationBoardStore {
         )
     }
 
-    fn delete_scope_for_project_lifecycle(&self, scope_project_id: &str) -> Result<bool> {
+    pub(crate) fn delete_scope_for_project_lifecycle(
+        &self,
+        scope_project_id: &str,
+    ) -> Result<bool> {
         // Cleanup is backed by a durable outbox and retried by its dedicated
         // worker after later persist ticks and boots. It therefore uses a
         // short admission budget so a busy secondary coordination database

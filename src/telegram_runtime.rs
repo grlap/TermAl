@@ -5,18 +5,21 @@ This include! fragment keeps process lifecycle, UI-derived config, and
 in-process relay supervision out of the update handling module.
 */
 
-const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
-const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
+use super::*;
+
+pub(crate) const TELEGRAM_API_BASE_URL: &str = "https://api.telegram.org";
+pub(crate) const TELEGRAM_DEFAULT_POLL_TIMEOUT_SECS: u64 = 5;
 #[cfg(not(test))]
 const TELEGRAM_ERROR_RETRY_DELAY: Duration = Duration::from_secs(2);
-const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
-const TELEGRAM_MAX_UPDATES_PER_ITERATION: usize = TELEGRAM_GET_UPDATES_LIMIT as usize;
+pub(crate) const TELEGRAM_GET_UPDATES_LIMIT: i64 = 25;
+pub(crate) const TELEGRAM_MAX_UPDATES_PER_ITERATION: usize = TELEGRAM_GET_UPDATES_LIMIT as usize;
 #[cfg(not(test))]
 const TELEGRAM_RELAY_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
-const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
-const TELEGRAM_SAFE_USER_ERROR_DETAIL: &str = "Check TermAl for details, then try again.";
-const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
+pub(crate) const TELEGRAM_USER_ERROR_MAX_CHARS: usize = 240;
+pub(crate) const TELEGRAM_CALLBACK_ERROR_MAX_CHARS: usize = 180;
+pub(crate) const TELEGRAM_SAFE_USER_ERROR_DETAIL: &str =
+    "Check TermAl for details, then try again.";
+pub(crate) const TELEGRAM_CALLBACK_DATA_MAX_BYTES: usize = 64;
 
 /// Returns the default TermAl API base URL.
 #[cfg(not(test))]
@@ -117,7 +120,7 @@ fn telegram_relay_sleep(duration: Duration, shutdown: &Option<Arc<AtomicBool>>) 
     }
 }
 
-fn drain_telegram_updates_then_sync_replies(
+pub(crate) fn drain_telegram_updates_then_sync_replies(
     telegram: &impl TelegramCallbackResponder,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
@@ -174,28 +177,28 @@ fn drain_telegram_updates_then_sync_replies(
 
 /// Holds Telegram bot configuration.
 #[derive(Clone, Debug)]
-struct TelegramBotConfig {
+pub(crate) struct TelegramBotConfig {
     #[cfg(not(test))]
-    api_base_url: String,
-    bot_username: Option<String>,
+    pub(crate) api_base_url: String,
+    pub(crate) bot_username: Option<String>,
     #[cfg(not(test))]
-    bot_token: String,
-    chat_id: Option<i64>,
-    forward_assistant_replies: bool,
+    pub(crate) bot_token: String,
+    pub(crate) chat_id: Option<i64>,
+    pub(crate) forward_assistant_replies: bool,
     /// Temporary kill switch for the project digest UI and its expensive
     /// global-state projection. Production config keeps this false; the field
     /// remains explicit so the old rendering code can be removed separately.
-    project_digests_enabled: bool,
+    pub(crate) project_digests_enabled: bool,
     #[cfg(not(test))]
-    poll_timeout_secs: u64,
-    project_id: String,
-    public_base_url: Option<String>,
-    state_path: PathBuf,
-    subscribed_project_ids: Vec<String>,
+    pub(crate) poll_timeout_secs: u64,
+    pub(crate) project_id: String,
+    pub(crate) public_base_url: Option<String>,
+    pub(crate) state_path: PathBuf,
+    pub(crate) subscribed_project_ids: Vec<String>,
 }
 
 impl TelegramBotConfig {
-    fn from_ui_settings(
+    pub(crate) fn from_ui_settings(
         default_workdir: &str,
         config: &TelegramUiConfig,
         state: &TelegramBotState,
@@ -242,7 +245,7 @@ impl TelegramBotConfig {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum TelegramRelayConfigUnavailableReason {
+pub(crate) enum TelegramRelayConfigUnavailableReason {
     Disabled,
     MissingBotToken,
     MissingProjectTarget,
@@ -299,13 +302,13 @@ fn telegram_effective_subscribed_project_ids(
 }
 
 #[derive(Clone, Copy)]
-struct TelegramRelayStatusSnapshot {
-    running: bool,
-    lifecycle: TelegramLifecycle,
+pub(crate) struct TelegramRelayStatusSnapshot {
+    pub(crate) running: bool,
+    pub(crate) lifecycle: TelegramLifecycle,
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
-enum TelegramRelayRuntimeState {
+pub(crate) enum TelegramRelayRuntimeState {
     #[default]
     Idle,
     Spawning,
@@ -318,32 +321,32 @@ impl TelegramRelayRuntimeState {
         matches!(self, Self::Spawning | Self::Running | Self::Stopping)
     }
 
-    fn is_running(self) -> bool {
+    pub(crate) fn is_running(self) -> bool {
         self.is_active()
     }
 }
 
 #[derive(Default)]
-struct TelegramRelayRuntime {
+pub(crate) struct TelegramRelayRuntime {
     #[cfg(test)]
-    actions: Vec<TelegramRelayRuntimeActionForTest>,
+    pub(crate) actions: Vec<TelegramRelayRuntimeActionForTest>,
     #[cfg(not(test))]
     config_fingerprint: Option<String>,
     #[cfg(not(test))]
-    generation: u64,
+    pub(crate) generation: u64,
     #[cfg(not(test))]
-    handle: Option<std::thread::JoinHandle<()>>,
+    pub(crate) handle: Option<std::thread::JoinHandle<()>>,
     #[cfg(test)]
-    running: bool,
+    pub(crate) running: bool,
     #[cfg(not(test))]
-    shutdown: Option<Arc<AtomicBool>>,
+    pub(crate) shutdown: Option<Arc<AtomicBool>>,
     #[cfg(not(test))]
-    state: TelegramRelayRuntimeState,
+    pub(crate) state: TelegramRelayRuntimeState,
 }
 
 #[cfg(test)]
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum TelegramRelayRuntimeActionForTest {
+pub(crate) enum TelegramRelayRuntimeActionForTest {
     Start {
         project_id: String,
         subscribed_project_ids: Vec<String>,
@@ -353,7 +356,7 @@ enum TelegramRelayRuntimeActionForTest {
 
 #[cfg(not(test))]
 impl AppState {
-    fn start_telegram_relay_runtime(&self, config: TelegramBotConfig) {
+    pub(crate) fn start_telegram_relay_runtime(&self, config: TelegramBotConfig) {
         let runtime_handle = Arc::clone(&self.telegram_relay_runtime);
         let fingerprint = telegram_relay_config_fingerprint(&config);
         let mut runtime = runtime_handle
@@ -458,7 +461,7 @@ impl AppState {
         }
     }
 
-    fn stop_telegram_relay_runtime(&self) {
+    pub(crate) fn stop_telegram_relay_runtime(&self) {
         let mut runtime = self
             .telegram_relay_runtime
             .lock()
@@ -491,7 +494,7 @@ impl AppState {
         }
     }
 
-    fn telegram_relay_status_snapshot(&self) -> TelegramRelayStatusSnapshot {
+    pub(crate) fn telegram_relay_status_snapshot(&self) -> TelegramRelayStatusSnapshot {
         let runtime = self
             .telegram_relay_runtime
             .lock()
@@ -505,7 +508,7 @@ impl AppState {
 
 #[cfg(test)]
 impl AppState {
-    fn start_telegram_relay_runtime(&self, config: TelegramBotConfig) {
+    pub(crate) fn start_telegram_relay_runtime(&self, config: TelegramBotConfig) {
         let mut runtime = self
             .telegram_relay_runtime
             .lock()
@@ -519,7 +522,7 @@ impl AppState {
             });
     }
 
-    fn stop_telegram_relay_runtime(&self) {
+    pub(crate) fn stop_telegram_relay_runtime(&self) {
         let mut runtime = self
             .telegram_relay_runtime
             .lock()
@@ -530,7 +533,7 @@ impl AppState {
             .push(TelegramRelayRuntimeActionForTest::Stop);
     }
 
-    fn reset_telegram_relay_runtime_actions_for_tests(&self) {
+    pub(crate) fn reset_telegram_relay_runtime_actions_for_tests(&self) {
         let mut runtime = self
             .telegram_relay_runtime
             .lock()
@@ -539,7 +542,7 @@ impl AppState {
         runtime.running = false;
     }
 
-    fn take_telegram_relay_runtime_actions_for_tests(
+    pub(crate) fn take_telegram_relay_runtime_actions_for_tests(
         &self,
     ) -> Vec<TelegramRelayRuntimeActionForTest> {
         let mut runtime = self
@@ -549,7 +552,7 @@ impl AppState {
         std::mem::take(&mut runtime.actions)
     }
 
-    fn telegram_relay_status_snapshot(&self) -> TelegramRelayStatusSnapshot {
+    pub(crate) fn telegram_relay_status_snapshot(&self) -> TelegramRelayStatusSnapshot {
         let runtime = self
             .telegram_relay_runtime
             .lock()

@@ -1,14 +1,16 @@
 // Private bounded control-child stderr capture. Only fixed classes and scalar
 // metadata escape; it owns no protocol, authority, retry or cleanup decision.
+
+use super::*;
 const ENGRAM_CONTROL_STDERR_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramControlStderrObservation {
-    class: &'static str,
+pub(crate) struct EngramControlStderrObservation {
+    pub(crate) class: &'static str,
     observed_bytes: u64,
-    retained_bytes: usize,
-    complete: bool,
-    read_failed: bool,
+    pub(crate) retained_bytes: usize,
+    pub(crate) complete: bool,
+    pub(crate) read_failed: bool,
 }
 
 impl Default for EngramControlStderrObservation {
@@ -23,10 +25,10 @@ impl Default for EngramControlStderrObservation {
     }
 }
 
-type EngramControlStderr = Arc<Mutex<EngramControlStderrObservation>>;
+pub(crate) type EngramControlStderr = Arc<Mutex<EngramControlStderrObservation>>;
 
 impl EngramControlStderrObservation {
-    fn summary(&self) -> String {
+    pub(crate) fn summary(&self) -> String {
         format!(
             "stderr class={}; observedBytes={}; retainedBytes={}; truncated={}; complete={}; readFailed={}",
             self.class,
@@ -58,7 +60,10 @@ fn engram_control_stderr_class(bytes: &[u8]) -> &'static str {
     }
 }
 
-fn read_engram_control_stderr(mut pipe: impl std::io::Read, observation: &EngramControlStderr) {
+pub(crate) fn read_engram_control_stderr(
+    mut pipe: impl std::io::Read,
+    observation: &EngramControlStderr,
+) {
     // Raw text is private to this reader, never Debug/serialized or inherited.
     // Keep draining after the bound so stderr cannot block the control child.
     let mut tail = Vec::with_capacity(ENGRAM_CONTROL_STDERR_BYTES);
@@ -99,7 +104,7 @@ fn read_engram_control_stderr(mut pipe: impl std::io::Read, observation: &Engram
 }
 
 impl EngramTransportError {
-    fn with_control_stderr(mut self, observation: &EngramControlStderr) -> Self {
+    pub(crate) fn with_control_stderr(mut self, observation: &EngramControlStderr) -> Self {
         // Snapshot before cleanup, without waiting for stderr EOF: stdout can
         // close while the same child (and its stderr pipe) is still alive.
         let seen = observation

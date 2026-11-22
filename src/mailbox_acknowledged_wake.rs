@@ -19,14 +19,16 @@ New beside `mailboxes.rs`; it replaces the acknowledgement-time removal of
 covered wakes that lived there.
 */
 
+use super::*;
+
 /// The boundary row of a queued mailbox wake, read off the state lock.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct MailboxWakeBoundary {
-    sender_session_id: String,
-    sender_name: String,
-    topic: Option<String>,
+pub(crate) struct MailboxWakeBoundary {
+    pub(crate) sender_session_id: String,
+    pub(crate) sender_name: String,
+    pub(crate) topic: Option<String>,
     /// The row's mutable delivery record says a handoff covered it.
-    delivered: bool,
+    pub(crate) delivered: bool,
 }
 
 impl MailboxStore {
@@ -34,7 +36,7 @@ impl MailboxStore {
     /// visible to the session: it is gone, belongs to another target or
     /// mailbox, is a delegation review result, the session has left the
     /// mailbox, or the store is disabled.
-    fn mailbox_wake_boundary(
+    pub(crate) fn mailbox_wake_boundary(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -80,7 +82,7 @@ impl MailboxStore {
 
 /// Text of a kept wake whose mail the receiver already acknowledged. It never
 /// claims unread mail, and it tells the agent not to answer the wake itself.
-fn mailbox_continuation_notification_text(
+pub(crate) fn mailbox_continuation_notification_text(
     mailbox_id: &str,
     sequence: u64,
     sender_name: &str,
@@ -99,7 +101,7 @@ fn mailbox_continuation_notification_text(
 
 /// Rewrites a queued wake in place as the continuation for its boundary.
 /// Identity, position and boundary stay unchanged.
-fn rewrite_queued_wake_as_continuation(
+pub(crate) fn rewrite_queued_wake_as_continuation(
     queued: &mut QueuedPromptRecord,
     mailbox_id: &str,
     message_id: &str,
@@ -140,13 +142,15 @@ impl AppState {
     /// accepted wake. Stored prompt history stays immutable. A
     /// wake whose boundary row is invisible or already delivered is left for
     /// dispatch-time revalidation, which drops it.
-    fn refresh_acknowledged_mailbox_wakeups(
+    pub(crate) fn refresh_acknowledged_mailbox_wakeups(
         &self,
         session_id: &str,
         mailbox_id: &str,
         processed_through: u64,
     ) -> Result<bool> {
-        let Some(storage_key)=self.local_mailbox_storage_key(session_id, mailbox_id)? else { return Ok(false); };
+        let Some(storage_key) = self.local_mailbox_storage_key(session_id, mailbox_id)? else {
+            return Ok(false);
+        };
         let covered: Vec<(String, String, u64)> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -227,7 +231,7 @@ impl AppState {
         Ok(changed)
     }
 
-    fn acknowledge_mailbox_and_refresh_covered_wakeups(
+    pub(crate) fn acknowledge_mailbox_and_refresh_covered_wakeups(
         &self,
         session_id: &str,
         mailbox_id: &str,

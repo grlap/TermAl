@@ -3,7 +3,9 @@
 // feedback; never grants test credit, sends a producer record or adopts a
 // declaration that was not captured on the original native execution.
 
-fn unclassified_verification_detail(stages: &[String]) -> String {
+use super::*;
+
+pub(crate) fn unclassified_verification_detail(stages: &[String]) -> String {
     let names = stages
         .iter()
         .take(8)
@@ -37,20 +39,20 @@ fn unclassified_verification_detail(stages: &[String]) -> String {
 }
 
 #[derive(Debug)]
-struct EngramLocalRefusalPresentation {
-    registration: TestRunRegistration,
+pub(crate) struct EngramLocalRefusalPresentation {
+    pub(crate) registration: TestRunRegistration,
     notice_done: bool,
     mirror_done: bool,
 }
 
 impl EngramLocalRefusalPresentation {
-    fn finished(&self) -> bool {
+    pub(crate) fn finished(&self) -> bool {
         self.notice_done && self.mirror_done
     }
 }
 
 impl EngramVerificationRecordCursor {
-    fn repair_local_refusal(
+    pub(crate) fn repair_local_refusal(
         &mut self,
         state: &AppState,
         registration: &TestRunRegistration,
@@ -79,7 +81,7 @@ impl AppState {
     /// registration is checked again before the final disposition: an arriving
     /// native end, a held receipt or another owner cannot be overwritten by an
     /// earlier snapshot. A failed local persistence enqueue leaves it retryable.
-    fn reject_unclassified_verification_record(
+    pub(crate) fn reject_unclassified_verification_record(
         &self,
         registration: &TestRunRegistration,
         stages: &[String],

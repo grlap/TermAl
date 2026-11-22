@@ -3,19 +3,21 @@
 // task evaluations, enablement/doctor and agent MCP tools keep their owners.
 // New feature boundary alongside acceptance_evaluation_api.rs.
 
+use super::*;
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AcceptanceEvaluatorDefaults {
+pub(crate) struct AcceptanceEvaluatorDefaults {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    default_mode: Option<AcceptanceEvaluationMode>,
+    pub(crate) default_mode: Option<AcceptanceEvaluationMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    evaluator_agent: Option<Agent>,
+    pub(crate) evaluator_agent: Option<Agent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    evaluator_model: Option<String>,
+    pub(crate) evaluator_model: Option<String>,
 }
 
 impl AcceptanceEvaluatorDefaults {
-    fn normalize(&mut self) -> Result<(), ApiError> {
+    pub(crate) fn normalize(&mut self) -> Result<(), ApiError> {
         self.evaluator_model = self
             .evaluator_model
             .take()
@@ -23,7 +25,7 @@ impl AcceptanceEvaluatorDefaults {
         self.validate()
     }
 
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if self
             .evaluator_agent
             .is_some_and(|agent| !matches!(agent, Agent::Claude | Agent::Codex))
@@ -48,12 +50,13 @@ impl AcceptanceEvaluatorDefaults {
     }
 }
 
-fn auto_acceptance_evaluator_agent(parent: Agent, readiness: &[AgentReadiness]) -> Agent {
+pub(crate) fn auto_acceptance_evaluator_agent(
+    parent: Agent,
+    readiness: &[AgentReadiness],
+) -> Agent {
     let is_ready = |agent| {
         readiness.iter().any(|entry| {
-            entry.agent == agent
-                && !entry.blocking
-                && entry.status == AgentReadinessStatus::Ready
+            entry.agent == agent && !entry.blocking && entry.status == AgentReadinessStatus::Ready
         })
     };
     let other = match parent {
@@ -72,9 +75,9 @@ fn auto_acceptance_evaluator_agent(parent: Agent, readiness: &[AgentReadiness]) 
         .unwrap_or(Agent::Codex)
 }
 
-const EVALUATOR_USAGE_LIMIT_WINDOW: Duration = Duration::from_secs(5 * 60);
+pub(crate) const EVALUATOR_USAGE_LIMIT_WINDOW: Duration = Duration::from_secs(5 * 60);
 
-fn evaluator_usage_limit_slot(agent: Agent) -> Option<usize> {
+pub(crate) fn evaluator_usage_limit_slot(agent: Agent) -> Option<usize> {
     match agent {
         Agent::Claude => Some(0),
         Agent::Codex => Some(1),
@@ -98,53 +101,83 @@ impl AgentReadinessCache {
 impl AppState {
     // Called only for a typed terminal refusal, not for a rendered error message.
     // An unresolved Stop establishes no new quota observation.
-    fn note_evaluator_usage_limit(
+    pub(crate) fn note_evaluator_usage_limit(
         &self,
         session_id: &str,
         runtime: &RuntimeToken,
         generation: u64,
     ) {
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
         let record = &inner.sessions[index];
         if !record.runtime.matches_runtime_token(runtime)
             || record.active_turn_generation != generation
             || record.runtime_stop_in_progress
-            || !matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval)
+            || !matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval
+            )
         {
             return;
         }
         if let Some(slot) = evaluator_usage_limit_slot(record.session.agent) {
-            self.agent_readiness_cache.write().expect("agent readiness cache poisoned")
+            self.agent_readiness_cache
+                .write()
+                .expect("agent readiness cache poisoned")
                 .evaluator_usage_limits[slot] = Some(std::time::Instant::now());
         }
     }
 
-    fn auto_acceptance_evaluator_selection(
+    pub(crate) fn auto_acceptance_evaluator_selection(
         &self,
         parent: Agent,
     ) -> Result<(Agent, Option<String>), ApiError> {
         let readiness = self.agent_readiness_snapshot();
         let preferred = auto_acceptance_evaluator_agent(parent, &readiness);
         let now = std::time::Instant::now();
-        let cache = self.agent_readiness_cache.read().expect("agent readiness cache poisoned");
-        if cache.evaluator_usage_limit_remaining(preferred, now).is_none() {
+        let cache = self
+            .agent_readiness_cache
+            .read()
+            .expect("agent readiness cache poisoned");
+        if cache
+            .evaluator_usage_limit_remaining(preferred, now)
+            .is_none()
+        {
             return Ok((preferred, None));
         }
-        let alternative = if preferred == Agent::Claude { Agent::Codex } else { Agent::Claude };
-        if cache.evaluator_usage_limit_remaining(alternative, now).is_none()
-            && readiness.iter().any(|entry| entry.agent == alternative
-                && entry.status == AgentReadinessStatus::Ready && !entry.blocking)
+        let alternative = if preferred == Agent::Claude {
+            Agent::Codex
+        } else {
+            Agent::Claude
+        };
+        if cache
+            .evaluator_usage_limit_remaining(alternative, now)
+            .is_none()
+            && readiness.iter().any(|entry| {
+                entry.agent == alternative
+                    && entry.status == AgentReadinessStatus::Ready
+                    && !entry.blocking
+            })
         {
-            return Ok((alternative, Some(format!(
-                "Auto selected {alternative:?}: {preferred:?} recently reported a usage limit (evaluator_usage_limit)."
-            ))));
+            return Ok((
+                alternative,
+                Some(format!(
+                    "Auto selected {alternative:?}: {preferred:?} recently reported a usage limit (evaluator_usage_limit)."
+                )),
+            ));
         }
-        let remaining = [Agent::Claude, Agent::Codex].into_iter()
-            .filter_map(|agent| cache.evaluator_usage_limit_remaining(agent, now)).min()
+        let remaining = [Agent::Claude, Agent::Codex]
+            .into_iter()
+            .filter_map(|agent| cache.evaluator_usage_limit_remaining(agent, now))
+            .min()
             .expect("the preferred evaluator has an active window");
         let seconds = remaining.as_secs() + u64::from(remaining.subsec_nanos() != 0);
-        let vendors = if cache.evaluator_usage_limit_remaining(alternative, now).is_some() {
+        let vendors = if cache
+            .evaluator_usage_limit_remaining(alternative, now)
+            .is_some()
+        {
             "Claude and Codex recently reported usage limits"
         } else {
             "the preferred vendor recently reported a usage limit and no other vendor is ready"
@@ -157,31 +190,31 @@ impl AppState {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceStorePolicy {
-    modes: Vec<AcceptanceEvaluationMode>,
-    mechanical_basis: String,
-    require_source_freshness: bool,
+pub(crate) struct AcceptanceStorePolicy {
+    pub(crate) modes: Vec<AcceptanceEvaluationMode>,
+    pub(crate) mechanical_basis: String,
+    pub(crate) require_source_freshness: bool,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptancePolicySnapshot {
+pub(crate) struct AcceptancePolicySnapshot {
     // POST-only acknowledgement; independent of whether a follow-up read succeeds.
     #[serde(skip_serializing_if = "Option::is_none")]
-    write_applied: Option<bool>,
-    available: bool,
+    pub(crate) write_applied: Option<bool>,
+    pub(crate) available: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    reader_key: String,
+    pub(crate) error: Option<String>,
+    pub(crate) reader_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    policy: Option<String>,
+    pub(crate) policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    epoch: Option<u64>,
+    pub(crate) epoch: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    acceptance_evaluation: Option<AcceptanceStorePolicy>,
+    pub(crate) acceptance_evaluation: Option<AcceptanceStorePolicy>,
 }
 
-fn parse_acceptance_policy(
+pub(crate) fn parse_acceptance_policy(
     value: Value,
     reader_key: String,
 ) -> Result<AcceptancePolicySnapshot, ApiError> {
@@ -244,7 +277,7 @@ fn acceptance_policy_hash_valid(value: &str) -> bool {
     is_engram_record_id(value)
 }
 
-fn read_acceptance_control_policy(
+pub(crate) fn read_acceptance_control_policy(
     connection: &EngramConnectionConfig,
     read: impl Fn(
         &EngramConnectionConfig,
@@ -261,18 +294,18 @@ fn read_acceptance_control_policy(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct UpdateAcceptancePolicyRequest {
-    modes: Vec<AcceptanceEvaluationMode>,
-    mechanical_basis: String,
-    require_source_freshness: bool,
-    expected_policy: String,
-    reader_key: String,
+pub(crate) struct UpdateAcceptancePolicyRequest {
+    pub(crate) modes: Vec<AcceptanceEvaluationMode>,
+    pub(crate) mechanical_basis: String,
+    pub(crate) require_source_freshness: bool,
+    pub(crate) expected_policy: String,
+    pub(crate) reader_key: String,
     // Browser retains this key with the exact payload when the result is unknown.
-    idempotency_key: String,
+    pub(crate) idempotency_key: String,
 }
 
 impl UpdateAcceptancePolicyRequest {
-    fn args(&self, actor: &str) -> Result<Vec<String>, ApiError> {
+    pub(crate) fn args(&self, actor: &str) -> Result<Vec<String>, ApiError> {
         if self.modes.len() > 3
             || self
                 .modes
@@ -325,7 +358,7 @@ impl UpdateAcceptancePolicyRequest {
 }
 
 impl AppState {
-    fn acceptance_policy_target(
+    pub(crate) fn acceptance_policy_target(
         &self,
         project_id: &str,
         reader: Option<&str>,
@@ -346,7 +379,7 @@ impl AppState {
         })
     }
 
-    fn project_acceptance_policy_with_reader(
+    pub(crate) fn project_acceptance_policy_with_reader(
         &self,
         project_id: &str,
         read: impl Fn(
@@ -375,7 +408,7 @@ impl AppState {
     }
 
     // Preferences only: never doctor, reset, revoke, stop a runtime or alter store policy.
-    fn update_acceptance_defaults(
+    pub(crate) fn update_acceptance_defaults(
         &self,
         project_id: &str,
         mut defaults: AcceptanceEvaluatorDefaults,
@@ -436,7 +469,7 @@ impl AppState {
         )
     }
 
-    fn update_acceptance_policy_with_runner(
+    pub(crate) fn update_acceptance_policy_with_runner(
         &self,
         project_id: &str,
         request: UpdateAcceptancePolicyRequest,
@@ -514,13 +547,13 @@ impl AppState {
 }
 
 #[derive(Clone)]
-struct AcceptancePolicyLimiter {
-    reads: Arc<tokio::sync::Semaphore>,
-    writes: Arc<tokio::sync::Semaphore>,
+pub(crate) struct AcceptancePolicyLimiter {
+    pub(crate) reads: Arc<tokio::sync::Semaphore>,
+    pub(crate) writes: Arc<tokio::sync::Semaphore>,
 }
 
 impl AcceptancePolicyLimiter {
-    fn new(reads: usize, writes: usize) -> Self {
+    pub(crate) fn new(reads: usize, writes: usize) -> Self {
         Self {
             reads: Arc::new(tokio::sync::Semaphore::new(reads)),
             writes: Arc::new(tokio::sync::Semaphore::new(writes)),
@@ -528,7 +561,7 @@ impl AcceptancePolicyLimiter {
     }
 }
 
-async fn get_project_acceptance_policy(
+pub(crate) async fn get_project_acceptance_policy(
     AxumPath(id): AxumPath<String>,
     State(state): State<AppState>,
     axum::Extension(limiter): axum::Extension<AcceptancePolicyLimiter>,
@@ -543,7 +576,7 @@ async fn get_project_acceptance_policy(
     .await
 }
 
-async fn patch_project_acceptance_defaults(
+pub(crate) async fn patch_project_acceptance_defaults(
     AxumPath(id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<AcceptanceEvaluatorDefaults>, JsonRejection>,
@@ -552,7 +585,7 @@ async fn patch_project_acceptance_defaults(
     run_blocking_api(move || state.update_acceptance_defaults(&id, request).map(Json)).await
 }
 
-async fn post_project_acceptance_policy(
+pub(crate) async fn post_project_acceptance_policy(
     AxumPath(id): AxumPath<String>,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

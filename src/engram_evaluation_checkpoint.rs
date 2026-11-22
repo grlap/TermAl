@@ -6,14 +6,14 @@
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct EngramEvaluationCheckpoint {
-    store: EngramAuthorityStoreKey,
-    host_turn_ref: String,
-    generation: u64,
-    checkpoint: EngramRuntimeCheckpointBasis,
+pub(crate) struct EngramEvaluationCheckpoint {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) host_turn_ref: String,
+    pub(crate) generation: u64,
+    pub(crate) checkpoint: EngramRuntimeCheckpointBasis,
 }
 
-fn evaluation_closing_checkpoint(
+pub(crate) fn evaluation_closing_checkpoint(
     retained: Option<&EngramEvaluationCheckpoint>,
     trace: &EngramRuntimeObservedTurn,
     scope: &EngramRuntimeClosingScope,

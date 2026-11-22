@@ -11,22 +11,24 @@
 // outcome is withheld, reported or told (`engram_turn_checks.rs`). New
 // module beside `engram_declared_tests.rs`.
 
+use super::*;
+
 /// A larger artifact is UNKNOWN, at the start or at the end.
-const ENGRAM_ARTIFACT_MAX_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const ENGRAM_ARTIFACT_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// How much older than the check's start an artifact's modification time may
 /// read and still count as written at or after it: a file system stamps
 /// times from a coarser clock than the host's (FAT keeps two seconds), so a
 /// file written just after the start can read as just before it. The hash
 /// difference from the start image is the freshness rule; the time is a
 /// heuristic on top of it, never proof.
-const ENGRAM_ARTIFACT_CLOCK_SLACK: Duration = Duration::from_secs(2);
+pub(crate) const ENGRAM_ARTIFACT_CLOCK_SLACK: Duration = Duration::from_secs(2);
 /// Elements deeper than this are not a TRX run TermAl reads.
 const ENGRAM_TRX_MAX_DEPTH: usize = 256;
 
 /// The artifact's image when a declared check starts: absent, its hash, or a
 /// failed inspection (unreadable, not a regular file, too large), which is
 /// not absence.
-fn engram_artifact_start_image(root: &FsPath, artifact: &str) -> EngramArtifactStart {
+pub(crate) fn engram_artifact_start_image(root: &FsPath, artifact: &str) -> EngramArtifactStart {
     let path = root.join(artifact);
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => EngramArtifactStart::Absent,
@@ -47,22 +49,22 @@ fn engram_artifact_start_image(root: &FsPath, artifact: &str) -> EngramArtifactS
 
 /// The artifact as its check's end read it, for the record.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramArtifactFacts {
+pub(crate) struct EngramArtifactFacts {
     /// Root-relative, as declared.
-    path: String,
-    size: u64,
-    sha256: String,
-    modified: String,
+    pub(crate) path: String,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
+    pub(crate) modified: String,
 }
 
 /// The `Counters` of a TRX run, every attribute a real one carries.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct EngramTrxCounters {
-    values: Vec<(String, u64)>,
+pub(crate) struct EngramTrxCounters {
+    pub(crate) values: Vec<(String, u64)>,
 }
 
 impl EngramTrxCounters {
-    fn get(&self, name: &str) -> u64 {
+    pub(crate) fn get(&self, name: &str) -> u64 {
         self.values
             .iter()
             .find(|(counter, _)| counter == name)
@@ -71,7 +73,7 @@ impl EngramTrxCounters {
 
     /// `total=3,executed=3,…`, the counters real files carry in their order;
     /// a name only the file gives is not repeated.
-    fn describe(&self) -> String {
+    pub(crate) fn describe(&self) -> String {
         ENGRAM_TRX_COUNTERS
             .iter()
             .map(|name| format!("{name}={}", self.get(name)))
@@ -102,8 +104,13 @@ const ENGRAM_TRX_COUNTERS: [&str; 16] = [
 ];
 /// Counters that say tests failed or the run was cut short: any of them
 /// non-zero is FAIL.
-const ENGRAM_TRX_FAILURE_COUNTERS: [&str; 5] =
-    ["failed", "error", "timeout", "aborted", "passedButRunAborted"];
+const ENGRAM_TRX_FAILURE_COUNTERS: [&str; 5] = [
+    "failed",
+    "error",
+    "timeout",
+    "aborted",
+    "passedButRunAborted",
+];
 /// Counters whose meaning a PASS does not interpret: any of them non-zero,
 /// or any counter not in `ENGRAM_TRX_COUNTERS`, keeps a run from PASS.
 const ENGRAM_TRX_UNINTERPRETED_COUNTERS: [&str; 6] = [
@@ -117,7 +124,7 @@ const ENGRAM_TRX_UNINTERPRETED_COUNTERS: [&str; 6] = [
 
 /// A TRX run's verdict before the exit status and the artifact rules.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramTrxVerdict {
+pub(crate) enum EngramTrxVerdict {
     Pass,
     Fail(String),
     Unknown(String),
@@ -126,10 +133,10 @@ enum EngramTrxVerdict {
 /// What a TRX document said: its verdict, its run outcome word and its
 /// counters when it got that far.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramTrxReading {
-    verdict: EngramTrxVerdict,
-    outcome: Option<String>,
-    counters: Option<EngramTrxCounters>,
+pub(crate) struct EngramTrxReading {
+    pub(crate) verdict: EngramTrxVerdict,
+    pub(crate) outcome: Option<String>,
+    pub(crate) counters: Option<EngramTrxCounters>,
 }
 
 /// Reads one complete, well-formed TRX `TestRun` document from `bytes` and
@@ -146,7 +153,7 @@ struct EngramTrxReading {
 /// are (the outcome counters sum to `executed`, which is at most `total`; a
 /// skipped test is counted in neither), no uninterpreted counter non-zero,
 /// and at least one test executed and passed. Anything else is UNKNOWN.
-fn engram_read_trx(bytes: &[u8]) -> EngramTrxReading {
+pub(crate) fn engram_read_trx(bytes: &[u8]) -> EngramTrxReading {
     let unknown = |reason: &str| EngramTrxReading {
         verdict: EngramTrxVerdict::Unknown(reason.to_owned()),
         outcome: None,
@@ -411,14 +418,13 @@ fn engram_xml_name(name: &str) -> bool {
         )
     };
     let mut characters = name.chars();
-    characters.next().is_some_and(start)
-        && characters.all(|character| {
-            start(character)
-                || matches!(
-                    character,
-                    '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'
-                )
-        })
+    characters.next().is_some_and(start) && characters.all(|character| {
+        start(character)
+            || matches!(
+                character,
+                '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'
+            )
+    })
 }
 
 /// Whether an XML declaration at the start of `text`, if there is one,
@@ -460,7 +466,11 @@ fn engram_xml_declaration_well_formed(text: &str) -> bool {
         };
         rest = after;
         space(&mut rest);
-        let Some(quote) = rest.chars().next().filter(|quote| matches!(quote, '"' | '\'')) else {
+        let Some(quote) = rest
+            .chars()
+            .next()
+            .filter(|quote| matches!(quote, '"' | '\''))
+        else {
             return false;
         };
         let Some(close) = rest[1..].find(quote) else {
@@ -589,7 +599,9 @@ fn engram_trx_verdict(
         } else {
             "TermAl does not know"
         };
-        return unknown(format!("a TRX counter TermAl does not interpret is non-zero ({name})"));
+        return unknown(format!(
+            "a TRX counter TermAl does not interpret is non-zero ({name})"
+        ));
     }
     if executed == 0 {
         return unknown("no tests executed".to_owned());
@@ -603,12 +615,12 @@ fn engram_trx_verdict(
 /// A declared check's result when its command ended: its verdict, why when
 /// it is not PASS, and what its record carries.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramDeclaredResult {
-    verdict: EngramTrxVerdict,
-    format: EngramDeclaredArtifactFormat,
-    artifact: Option<EngramArtifactFacts>,
-    outcome: Option<String>,
-    counters: Option<EngramTrxCounters>,
+pub(crate) struct EngramDeclaredResult {
+    pub(crate) verdict: EngramTrxVerdict,
+    pub(crate) format: EngramDeclaredArtifactFormat,
+    pub(crate) artifact: Option<EngramArtifactFacts>,
+    pub(crate) outcome: Option<String>,
+    pub(crate) counters: Option<EngramTrxCounters>,
 }
 
 /// Judges a declared check whose command ended `exit`. Precedence: a
@@ -621,34 +633,40 @@ struct EngramDeclaredResult {
 /// and then the TRX reading decide, and an exit
 /// TermAl was not told is UNKNOWN. Reads the file system and runs Git, so it
 /// runs off the state lock.
-fn engram_declared_result(
+pub(crate) fn engram_declared_result(
     binding: &EngramDeclaredBinding,
     exit: EngramCommandExit,
 ) -> EngramDeclaredResult {
     let mut result = engram_declared_artifact_result(binding);
-    if binding.environment_missing.is_some() { return result; }
+    if binding.environment_missing.is_some() {
+        return result;
+    }
     if !engram_declaration_unchanged(binding) {
-        result.verdict = EngramTrxVerdict::Unknown("the declaration changed while the command ran".to_owned());
+        result.verdict =
+            EngramTrxVerdict::Unknown("the declaration changed while the command ran".to_owned());
         return result;
     }
     match exit {
-        EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess => {},
+        EngramCommandExit::Code(0) | EngramCommandExit::ReportedSuccess => {}
         EngramCommandExit::Code(code) => {
             result.verdict = EngramTrxVerdict::Fail(format!("the command exited {code}"));
-        },
+        }
         EngramCommandExit::Unknown | EngramCommandExit::NotFinished => {
-            result.verdict = EngramTrxVerdict::Unknown("the command ended without an exit status".to_owned());
+            result.verdict =
+                EngramTrxVerdict::Unknown("the command ended without an exit status".to_owned());
             result.artifact = None;
             result.outcome = None;
             result.counters = None;
-        },
+        }
     }
     result
 }
 
 // Native verification freezes this artifact verdict at the original END.
 // Provider exit and console delivery remain observations, not verdicts.
-fn engram_declared_artifact_result(binding: &EngramDeclaredBinding) -> EngramDeclaredResult {
+pub(crate) fn engram_declared_artifact_result(
+    binding: &EngramDeclaredBinding,
+) -> EngramDeclaredResult {
     let result = |verdict, artifact| EngramDeclaredResult {
         verdict,
         format: EngramDeclaredArtifactFormat::Trx,
@@ -657,7 +675,10 @@ fn engram_declared_artifact_result(binding: &EngramDeclaredBinding) -> EngramDec
         counters: None,
     };
     if let Some(name) = &binding.environment_missing {
-        return result(EngramTrxVerdict::Unknown(format!("environment_missing:{name}")), None);
+        return result(
+            EngramTrxVerdict::Unknown(format!("environment_missing:{name}")),
+            None,
+        );
     }
     if !engram_declaration_unchanged(binding) {
         return result(
@@ -730,7 +751,9 @@ fn engram_inspect_artifact(
         return Err("the artifact is too large for the 64 MiB bounded reader");
     }
     let after = file.metadata().map_err(|_| "the artifact cannot be read")?;
-    let modified = after.modified().map_err(|_| "the artifact cannot be read")?;
+    let modified = after
+        .modified()
+        .map_err(|_| "the artifact cannot be read")?;
     if after.len() != before.len()
         || bytes.len() as u64 != after.len()
         || before.modified().ok() != Some(modified)
@@ -806,7 +829,7 @@ fn engram_trx_outcome_word(outcome: &str) -> &str {
 
 /// The outcome a declared check's `result` reports, or `None` for a run
 /// that only launched (a background command, never reported).
-fn engram_declared_outcome(
+pub(crate) fn engram_declared_outcome(
     exit: EngramCommandExit,
     result: &EngramDeclaredResult,
 ) -> Option<EngramExecutionOutcome> {
@@ -824,7 +847,7 @@ fn engram_declared_outcome(
 /// verdict first, then its line, where it ran, how it ended and what its TRX
 /// said. Only the command line is shortened to fit, so a long line never
 /// cuts the verdict or the counters away.
-fn engram_declared_summary(
+pub(crate) fn engram_declared_summary(
     check: &EngramCheckCommand,
     binding: Option<&EngramDeclaredBinding>,
     exit: EngramCommandExit,
@@ -848,8 +871,14 @@ fn engram_declared_summary(
                 .saturating_sub(counters.get("executed"));
             for (count, label) in [
                 (counters.get("inconclusive"), "inconclusive"),
-                (if result.format == EngramDeclaredArtifactFormat::DartJson { 0 }
-                    else { counters.get("notExecuted") }, "not executed"),
+                (
+                    if result.format == EngramDeclaredArtifactFormat::DartJson {
+                        0
+                    } else {
+                        counters.get("notExecuted")
+                    },
+                    "not executed",
+                ),
                 (skipped, "skipped"),
             ] {
                 if count > 0 {
@@ -869,11 +898,17 @@ fn engram_declared_summary(
         if result.format == EngramDeclaredArtifactFormat::DartJson {
             tail.push_str(&format!("; Dart JSON outcome {outcome}"));
         } else {
-            tail.push_str(&format!("; TRX outcome {}", engram_trx_outcome_word(outcome)));
+            tail.push_str(&format!(
+                "; TRX outcome {}",
+                engram_trx_outcome_word(outcome)
+            ));
         }
     }
     if let Some(counters) = &result.counters {
-        tail.push_str(&format!("; counters {}", engram_declared_counter_description(result.format, counters)));
+        tail.push_str(&format!(
+            "; counters {}",
+            engram_declared_counter_description(result.format, counters)
+        ));
     }
     let head = format!("{verdict}. Declared test `");
     const CUT: &str = "...";
@@ -897,7 +932,7 @@ fn engram_declared_summary(
 /// built-in's, then `kind:declared`, the entry's cwd, the declaration's hash
 /// and size, the artifact's facts and the TRX outcome and counters. A
 /// reference past Engram's bound is left out, as a built-in's command is.
-fn engram_declared_refs(
+pub(crate) fn engram_declared_refs(
     check: &EngramCheckCommand,
     binding: Option<&EngramDeclaredBinding>,
     exit: EngramCommandExit,
@@ -927,8 +962,15 @@ fn engram_declared_refs(
         }
     }
     if let Some(counters) = &result.counters {
-        let prefix = if result.format == EngramDeclaredArtifactFormat::DartJson { "dart-json" } else { "trx" };
-        refs.push(format!("{prefix}-counters:{}", engram_declared_counter_description(result.format, counters)));
+        let prefix = if result.format == EngramDeclaredArtifactFormat::DartJson {
+            "dart-json"
+        } else {
+            "trx"
+        };
+        refs.push(format!(
+            "{prefix}-counters:{}",
+            engram_declared_counter_description(result.format, counters)
+        ));
     }
     refs.retain(|reference| reference.len() <= ENGRAM_CHECK_REF_MAX_BYTES);
     refs

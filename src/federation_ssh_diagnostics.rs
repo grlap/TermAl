@@ -1,28 +1,30 @@
 // Owns bounded SSH stderr classification and exit observations for the owned
 // child. Does not expose raw diagnostics, grant authority or replace cleanup.
-const FEDERATION_SSH_DIAGNOSTIC_BYTES: usize = 4096;
+
+use super::*;
+pub(crate) const FEDERATION_SSH_DIAGNOSTIC_BYTES: usize = 4096;
 
 #[derive(Default)]
-struct FederationSshDiagnostic {
-    class: Option<&'static str>,
-    truncated: bool,
-    stderr_complete: bool,
-    exit_code: Option<i32>,
-    exited: bool,
-    cleanup_requested: bool,
+pub(crate) struct FederationSshDiagnostic {
+    pub(crate) class: Option<&'static str>,
+    pub(crate) truncated: bool,
+    pub(crate) stderr_complete: bool,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) exited: bool,
+    pub(crate) cleanup_requested: bool,
 }
 
-type FederationSshDiagnostics = Arc<Mutex<FederationSshDiagnostic>>;
+pub(crate) type FederationSshDiagnostics = Arc<Mutex<FederationSshDiagnostic>>;
 
 impl FederationSshDiagnostic {
-    fn project(&self) -> Value {
+    pub(crate) fn project(&self) -> Value {
         json!({"class":self.class.unwrap_or("unknown"),
             "stderrComplete":self.stderr_complete, "truncated":self.truncated,
             "exited":self.exited, "exitCode":self.exit_code,
             "cleanupRequested":self.cleanup_requested})
     }
 
-    fn exit(&mut self, status: &std::process::ExitStatus) {
+    pub(crate) fn exit(&mut self, status: &std::process::ExitStatus) {
         self.exited = true;
         self.exit_code = status.code();
     }
@@ -59,7 +61,7 @@ fn federation_ssh_failure_class(bytes: &[u8]) -> &'static str {
     }
 }
 
-fn federation_read_ssh_diagnostics(
+pub(crate) fn federation_read_ssh_diagnostics(
     mut stderr: impl std::io::Read,
     diagnostic: &FederationSshDiagnostics,
 ) {

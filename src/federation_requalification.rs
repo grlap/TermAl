@@ -1,17 +1,23 @@
 // Restores previously authorized membership/placements after fresh pair proof.
 // Never enrolls, rotates keys, creates bindings, or authorizes an old channel.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationRequalification {
-    expected: FederationPeerSnapshot,
-    basis: String,
+pub(crate) struct FederationRequalification {
+    pub(crate) expected: FederationPeerSnapshot,
+    pub(crate) basis: String,
     previous_basis: String,
-    qualified_probe: FederationQualifiedProbe,
+    pub(crate) qualified_probe: FederationQualifiedProbe,
 }
 
 impl FederationRequalification {
-    fn matches(&self, peer: &FederationPeerRecord, current: &FederationPeerSnapshot) -> bool {
+    pub(crate) fn matches(
+        &self,
+        peer: &FederationPeerRecord,
+        current: &FederationPeerSnapshot,
+    ) -> bool {
         // Prevent a changed identity, enrollment, key reference, or configuration
         // from inheriting authorization. Transport generations intentionally differ.
         self.qualified_probe.valid()
@@ -33,7 +39,7 @@ impl FederationRequalification {
     }
 }
 
-fn federation_requalification_capture(
+pub(crate) fn federation_requalification_capture(
     domain: &FederationState,
     expected: &FederationPeerSnapshot,
 ) -> Option<FederationRequalification> {
@@ -61,7 +67,7 @@ fn federation_requalification_capture(
     retained.matches(peer, expected).then_some(retained)
 }
 
-fn federation_requalification_finish(
+pub(crate) fn federation_requalification_finish(
     domain: &mut FederationState,
     id: &str,
     current: &FederationPeerSnapshot,

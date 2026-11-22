@@ -2,17 +2,19 @@
 // transports and admission, never generic Engram recall/session context or
 // tracker writes. Source failures remain visible, never an empty success.
 
+use super::*;
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkMemoryQuery {
-    search: Option<String>,
-    after: Option<String>,
-    key: Option<String>,
-    reader_id: Option<String>,
+pub(crate) struct WorkMemoryQuery {
+    pub(crate) search: Option<String>,
+    pub(crate) after: Option<String>,
+    pub(crate) key: Option<String>,
+    pub(crate) reader_id: Option<String>,
 }
 
 impl WorkMemoryQuery {
-    fn validate(&self, source: &str) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self, source: &str) -> Result<(), ApiError> {
         if source != "engram" {
             return Err(ApiError::bad_request("Unknown memory source"));
         }
@@ -38,7 +40,7 @@ impl WorkMemoryQuery {
         Ok(())
     }
 
-    fn arguments(&self) -> Vec<String> {
+    pub(crate) fn arguments(&self) -> Vec<String> {
         let mut args = vec!["memories".into(), "--json".into()];
         if self.key.is_some() {
             args.push("--full".into());
@@ -57,31 +59,31 @@ impl WorkMemoryQuery {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkMemoryItem {
-    key: String,
-    summary: String,
-    body: Option<String>,
-    revision: Option<u64>,
-    remembered_at: Option<String>,
-    actor: Option<String>,
+pub(crate) struct WorkMemoryItem {
+    pub(crate) key: String,
+    pub(crate) summary: String,
+    pub(crate) body: Option<String>,
+    pub(crate) revision: Option<u64>,
+    pub(crate) remembered_at: Option<String>,
+    pub(crate) actor: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkMemoryResponse {
-    source: String,
-    state: &'static str,
-    message: String,
-    items: Vec<WorkMemoryItem>,
-    next_after: Option<String>,
-    omitted: usize,
-    exhausted: bool,
-    reader_id: Option<String>,
-    observed_at: String,
+pub(crate) struct WorkMemoryResponse {
+    pub(crate) source: String,
+    pub(crate) state: &'static str,
+    pub(crate) message: String,
+    pub(crate) items: Vec<WorkMemoryItem>,
+    pub(crate) next_after: Option<String>,
+    pub(crate) omitted: usize,
+    pub(crate) exhausted: bool,
+    pub(crate) reader_id: Option<String>,
+    pub(crate) observed_at: String,
 }
 
 impl WorkMemoryResponse {
-    fn empty(source: &str) -> Self {
+    pub(crate) fn empty(source: &str) -> Self {
         Self {
             source: source.into(),
             state: "ready",
@@ -105,7 +107,7 @@ struct EngramMemoryRow {
     actor_id: String,
 }
 
-fn normalize_work_memories(
+pub(crate) fn normalize_work_memories(
     source: &str,
     query: &WorkMemoryQuery,
     value: Value,
@@ -183,7 +185,7 @@ fn normalize_work_memories(
 }
 
 impl AppState {
-    fn read_work_memories<P>(
+    pub(crate) fn read_work_memories<P>(
         &self,
         project_id: &str,
         source: &str,
@@ -240,7 +242,7 @@ impl AppState {
     }
 }
 
-async fn get_project_work_memories(
+pub(crate) async fn get_project_work_memories(
     State(state): State<AppState>,
     AxumPath((project_id, source)): AxumPath<(String, String)>,
     limiter: Option<axum::Extension<WorkReadLimiter>>,

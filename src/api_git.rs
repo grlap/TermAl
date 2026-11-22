@@ -19,8 +19,10 @@
 // `Query<FileQuery>`, `Json<...>`) are the only contract this file
 // exposes.
 
+use super::*;
+
 /// Reads Git status.
-async fn read_git_status(
+pub(crate) async fn read_git_status(
     State(state): State<AppState>,
     query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
@@ -53,7 +55,7 @@ async fn read_git_status(
 }
 
 /// Reads Git diff.
-async fn read_git_diff(
+pub(crate) async fn read_git_diff(
     State(state): State<AppState>,
     Json(request): Json<GitDiffRequest>,
 ) -> Result<Json<GitDiffResponse>, ApiError> {
@@ -87,7 +89,7 @@ async fn read_git_diff(
 }
 
 /// Applies Git file action.
-fn ensure_git_repo_root_write_allowed(
+pub(crate) fn ensure_git_repo_root_write_allowed(
     state: &AppState,
     session_id: Option<&str>,
     project_id: Option<&str>,
@@ -103,7 +105,7 @@ fn ensure_git_repo_root_write_allowed(
     )
 }
 
-fn ensure_git_path_write_allowed(
+pub(crate) fn ensure_git_path_write_allowed(
     state: &AppState,
     session_id: Option<&str>,
     project_id: Option<&str>,
@@ -121,7 +123,7 @@ fn ensure_git_path_write_allowed(
     )
 }
 
-async fn apply_git_file_action(
+pub(crate) async fn apply_git_file_action(
     State(state): State<AppState>,
     Json(request): Json<GitFileActionRequest>,
 ) -> Result<Json<GitStatusResponse>, ApiError> {
@@ -239,7 +241,7 @@ async fn apply_git_file_action(
     Ok(Json(response))
 }
 
-async fn commit_git_changes(
+pub(crate) async fn commit_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitCommitRequest>,
 ) -> Result<Json<GitCommitResponse>, ApiError> {
@@ -326,7 +328,7 @@ async fn commit_git_changes(
 }
 
 /// Pushes Git changes.
-async fn push_git_changes(
+pub(crate) async fn push_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitRepoActionRequest>,
 ) -> Result<Json<GitRepoActionResponse>, ApiError> {
@@ -372,7 +374,7 @@ async fn push_git_changes(
 }
 
 /// Syncs Git changes.
-async fn sync_git_changes(
+pub(crate) async fn sync_git_changes(
     State(state): State<AppState>,
     Json(request): Json<GitRepoActionRequest>,
 ) -> Result<Json<GitRepoActionResponse>, ApiError> {

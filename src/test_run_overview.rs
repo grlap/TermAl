@@ -2,22 +2,24 @@
 // Counts and fixed-size session activity replace run rows on global transport;
 // they do not settle runs, own notifications, or discard history or evidence.
 
+use super::*;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCounts {
-    total: usize,
-    running: usize,
-    passed: usize,
-    failed: usize,
-    unknown: usize,
+pub(crate) struct TestRunCounts {
+    pub(crate) total: usize,
+    pub(crate) running: usize,
+    pub(crate) passed: usize,
+    pub(crate) failed: usize,
+    pub(crate) unknown: usize,
     needs_attention: usize,
     evidence_at_risk: usize,
     evidence_safe: usize,
-    evidence_unknown: usize,
+    pub(crate) evidence_unknown: usize,
 }
 
 impl TestRunCounts {
-    fn include(&mut self, run: &TestRunSummary, protected: &HashSet<String>) {
+    pub(crate) fn include(&mut self, run: &TestRunSummary, protected: &HashSet<String>) {
         self.total += 1;
         match run.state {
             TestRunState::Running => self.running += 1,
@@ -34,13 +36,13 @@ impl TestRunCounts {
     }
 }
 
-fn test_run_needs_attention(run: &TestRunSummary, protected: &HashSet<String>) -> bool {
+pub(crate) fn test_run_needs_attention(run: &TestRunSummary, protected: &HashSet<String>) -> bool {
     matches!(run.state, TestRunState::Running | TestRunState::Unknown)
         || run.registration.restart_would_void_evidence != Some(false)
         || test_run_summary_ids(run).any(|id| protected.contains(id))
 }
 
-fn test_run_attention_ids(inner: &StateInner) -> HashSet<String> {
+pub(crate) fn test_run_attention_ids(inner: &StateInner) -> HashSet<String> {
     let mut protected = test_run_waited_ids(inner);
     protected.extend(
         inner
@@ -66,27 +68,27 @@ fn test_run_attention_ids(inner: &StateInner) -> HashSet<String> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ProjectTestRunCounts {
+pub(crate) struct ProjectTestRunCounts {
     // None is the explicit unassigned bucket, not an all-project total.
-    project_id: Option<String>,
+    pub(crate) project_id: Option<String>,
     #[serde(flatten)]
-    counts: TestRunCounts,
+    pub(crate) counts: TestRunCounts,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunOverview {
-    version: u64,
-    ready: bool,
+pub(crate) struct TestRunOverview {
+    pub(crate) version: u64,
+    pub(crate) ready: bool,
     #[serde(flatten)]
-    counts: TestRunCounts,
-    projects: Vec<ProjectTestRunCounts>,
+    pub(crate) counts: TestRunCounts,
+    pub(crate) projects: Vec<ProjectTestRunCounts>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SessionTestRunActivity {
-    owned_running: usize,
+pub(crate) struct SessionTestRunActivity {
+    pub(crate) owned_running: usize,
     foreground_running: usize,
     background_running: usize,
     mode_unknown_running: usize,
@@ -126,7 +128,7 @@ impl SessionTestRunActivity {
 
 // This output contains no run identity arrays or history. Only sessions with
 // running work have entries; every entry has the same bounded shape.
-fn test_run_overview(
+pub(crate) fn test_run_overview(
     runs: &[TestRunSummary],
     ready: bool,
     version: u64,

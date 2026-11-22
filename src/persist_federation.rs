@@ -2,7 +2,9 @@
 // Does not own a writer, credentials, transport, or session execution. New
 // persistence fragment used by persist.rs and the ordinary state writer.
 
-fn read_federation_host_identity(
+use super::*;
+
+pub(crate) fn read_federation_host_identity(
     connection: &rusqlite::Connection,
 ) -> Result<FederationHostIdentity> {
     let read = |key: &str| -> Result<String> {
@@ -24,7 +26,9 @@ fn read_federation_host_identity(
     Ok(identity)
 }
 
-fn validate_optional_federation_host_identity(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn validate_optional_federation_host_identity(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     let count: u64 = connection.query_row(
         "SELECT count(*) FROM meta WHERE key IN ('federation_host_id', 'federation_host_generation')",
         [], |row| row.get(0),
@@ -37,7 +41,7 @@ fn validate_optional_federation_host_identity(connection: &rusqlite::Connection)
 
 /// Called within the schema transaction. A partial identity is corruption,
 /// never a reason to mint a replacement identity for an existing installation.
-fn seed_federation_host_identity(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn seed_federation_host_identity(connection: &rusqlite::Connection) -> Result<()> {
     let count: u64 = connection.query_row(
         "SELECT count(*) FROM meta WHERE key IN ('federation_host_id', 'federation_host_generation')",
         [], |row| row.get(0),
@@ -56,7 +60,7 @@ fn seed_federation_host_identity(connection: &rusqlite::Connection) -> Result<()
     Ok(())
 }
 
-fn ensure_federation_host_identity(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn ensure_federation_host_identity(connection: &rusqlite::Connection) -> Result<()> {
     let transaction =
         rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)?;
     seed_federation_host_identity(&transaction)?;
@@ -66,7 +70,7 @@ fn ensure_federation_host_identity(connection: &rusqlite::Connection) -> Result<
 
 /// The epoch and the domain mutation commit in the SAME existing state writer
 /// transaction. A stale snapshot cannot lower the epoch or change host_id.
-fn write_federation_host_generation(
+pub(crate) fn write_federation_host_generation(
     transaction: &rusqlite::Transaction<'_>,
     metadata: &PersistedState,
 ) -> Result<()> {
@@ -115,7 +119,7 @@ fn write_federation_host_generation(
     Ok(())
 }
 
-fn bind_loaded_federation(
+pub(crate) fn bind_loaded_federation(
     inner: &mut StateInner,
     connection: &rusqlite::Connection,
     path: &FsPath,
@@ -214,7 +218,7 @@ fn persist_detected_federation_quarantine(
     Ok(())
 }
 
-fn prepare_federation_boot(
+pub(crate) fn prepare_federation_boot(
     inner: &mut StateInner,
     path: &FsPath,
     connection: &mut Option<rusqlite::Connection>,

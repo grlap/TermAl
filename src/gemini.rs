@@ -2,14 +2,16 @@
 // and launch arguments only. The shared ACP adapter owns the protocol.
 // Authentication and settings belong to the CLI; never inspect or rewrite them.
 
-fn resolve_gemini_executable() -> Option<PathBuf> {
+use super::*;
+
+pub(crate) fn resolve_gemini_executable() -> Option<PathBuf> {
     resolve_gemini_executable_with(
         std::env::var_os("PATH").as_deref(),
         std::env::var_os("LOCALAPPDATA").as_deref().map(FsPath::new),
     )
 }
 
-fn resolve_gemini_executable_with(
+pub(crate) fn resolve_gemini_executable_with(
     path: Option<&std::ffi::OsStr>,
     local_app_data: Option<&FsPath>,
 ) -> Option<PathBuf> {
@@ -41,7 +43,7 @@ fn resolve_gemini_executable_with(
     })
 }
 
-fn gemini_acp_command(
+pub(crate) fn gemini_acp_command(
     executable: Option<PathBuf>,
     approval_mode: Option<GeminiApprovalMode>,
 ) -> Result<Command> {
@@ -67,7 +69,7 @@ fn gemini_acp_command(
 
 // Cached sign-in is consumed by agy itself. Only noninteractive methods with
 // explicit process environment and an exact advertisement may be selected.
-fn agy_auth_method(initialize: &Value) -> Option<String> {
+pub(crate) fn agy_auth_method(initialize: &Value) -> Option<String> {
     let present = |key| std::env::var_os(key).is_some_and(|value| !value.is_empty());
     agy_auth_method_with(
         initialize,
@@ -76,7 +78,11 @@ fn agy_auth_method(initialize: &Value) -> Option<String> {
     )
 }
 
-fn agy_auth_method_with(initialize: &Value, api_key: bool, platform: bool) -> Option<String> {
+pub(crate) fn agy_auth_method_with(
+    initialize: &Value,
+    api_key: bool,
+    platform: bool,
+) -> Option<String> {
     let methods = initialize.get("authMethods")?.as_array()?;
     [("gemini-api-key", api_key), ("agent-platform", platform)]
         .into_iter()

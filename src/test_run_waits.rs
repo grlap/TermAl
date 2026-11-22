@@ -17,61 +17,63 @@
 //
 // New module, not split from another file.
 
+use super::*;
+
 /// Most runs one wait may name.
 const MAX_TEST_RUN_WAIT_RUNS: usize = 16;
 /// Every run's header and commands must fit this, which leaves room for
 /// excerpts in the resume prompt.
 const TEST_RUN_WAIT_MANDATORY_MAX_BYTES: usize = 48 * 1024;
 /// The whole resume prompt.
-const TEST_RUN_WAIT_PROMPT_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const TEST_RUN_WAIT_PROMPT_MAX_BYTES: usize = 64 * 1024;
 /// One run's failure excerpt, at most.
-const TEST_RUN_WAIT_EXCERPT_MAX_BYTES: usize = 8 * 1024;
+pub(crate) const TEST_RUN_WAIT_EXCERPT_MAX_BYTES: usize = 8 * 1024;
 include!("test_run_wait_observations.rs");
 /// How long registration waits for the forced rescan when an id is unknown.
 #[cfg(not(test))]
 const TEST_RUN_WAIT_FORCED_RESCAN_BOUND: Duration = Duration::from_secs(1);
 
 /// `any` or `all`, the same values and default as a delegation wait.
-type TestRunWaitMode = DelegationWaitMode;
+pub(crate) type TestRunWaitMode = DelegationWaitMode;
 
 /// A run's immutable registration identity, so a resume after the run left
 /// the index still names its evidence, plus its bounded settlement progress.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunWaitRunLabel {
+pub(crate) struct TestRunWaitRunLabel {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    remote: Option<RemoteTestRunWaitLabel>,
+    pub(crate) remote: Option<RemoteTestRunWaitLabel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    observation: Option<TestRunWaitObservationLabel>,
-    run_id: String,
-    run_dir: String,
-    preset: TestRunPreset,
-    worktree: String,
-    owner_session_id: Option<String>,
-    started_at: Option<String>,
+    pub(crate) observation: Option<TestRunWaitObservationLabel>,
+    pub(crate) run_id: String,
+    pub(crate) run_dir: String,
+    pub(crate) preset: TestRunPreset,
+    pub(crate) worktree: String,
+    pub(crate) owner_session_id: Option<String>,
+    pub(crate) started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    request_identity: Option<String>,
+    pub(crate) request_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    locator_identity: Option<String>,
+    pub(crate) locator_identity: Option<String>,
     /// Admitted from durable registration while the artifact index lagged.
     #[serde(default)]
-    registration_backed: bool,
+    pub(crate) registration_backed: bool,
     #[serde(default)]
-    registration_progress: TestRunWaitRegistrationProgress,
+    pub(crate) registration_progress: TestRunWaitRegistrationProgress,
 }
 
 /// Pre-index observations belong to this wait and leave with it. Persisting
 /// them preserves publication history and the indexed handoff across restart.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunWaitRegistrationProgress {
-    indexed: bool,
+pub(crate) struct TestRunWaitRegistrationProgress {
+    pub(crate) indexed: bool,
     results_seen: bool,
     unreadable_reads: u8,
     /// Runtime ordering only: no in-flight read survives restart. Every
     /// accepted observation, including a no-op success, advances this fence.
     #[serde(skip)]
-    generation: u64,
+    pub(crate) generation: u64,
 }
 
 impl TestRunWaitRegistrationProgress {
@@ -83,23 +85,23 @@ impl TestRunWaitRegistrationProgress {
 /// A pending run wait. It exists only while pending.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunWaitRecord {
-    id: String,
+pub(crate) struct TestRunWaitRecord {
+    pub(crate) id: String,
     /// The waiting session.
-    session_id: String,
+    pub(crate) session_id: String,
     /// Registration order, 1 to 16.
-    run_ids: Vec<String>,
-    mode: TestRunWaitMode,
-    created_at: String,
+    pub(crate) run_ids: Vec<String>,
+    pub(crate) mode: TestRunWaitMode,
+    pub(crate) created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    title: Option<String>,
+    pub(crate) title: Option<String>,
     /// Same order as `run_ids`.
-    runs: Vec<TestRunWaitRunLabel>,
+    pub(crate) runs: Vec<TestRunWaitRunLabel>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunWaitConsumedReason {
+pub(crate) enum TestRunWaitConsumedReason {
     Completed,
     SessionStopped,
     SessionUnavailable,
@@ -108,32 +110,32 @@ enum TestRunWaitConsumedReason {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CreateTestRunWaitRequest {
-    run_ids: Vec<String>,
+pub(crate) struct CreateTestRunWaitRequest {
+    pub(crate) run_ids: Vec<String>,
     #[serde(default)]
-    mode: TestRunWaitMode,
+    pub(crate) mode: TestRunWaitMode,
     #[serde(default)]
-    title: Option<String>,
+    pub(crate) title: Option<String>,
 }
 
 /// The registration result: the contract's `{ waitId, runIds, mode }`, plus
 /// the record and whether a resume was queued at once (runs already settled).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunWaitResponse {
-    revision: u64,
-    wait_id: String,
-    run_ids: Vec<String>,
-    mode: TestRunWaitMode,
-    wait: TestRunWaitRecord,
-    resume_prompt_queued: bool,
-    resume_dispatch_requested: bool,
-    server_instance_id: String,
+pub(crate) struct TestRunWaitResponse {
+    pub(crate) revision: u64,
+    pub(crate) wait_id: String,
+    pub(crate) run_ids: Vec<String>,
+    pub(crate) mode: TestRunWaitMode,
+    pub(crate) wait: TestRunWaitRecord,
+    pub(crate) resume_prompt_queued: bool,
+    pub(crate) resume_dispatch_requested: bool,
+    pub(crate) server_instance_id: String,
 }
 
 /// A settled run's verdict, as the resume prompt names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TestRunWaitVerdict {
+pub(crate) enum TestRunWaitVerdict {
     Pass,
     Fail,
     Unknown(TestRunCardUnknownReason),
@@ -143,7 +145,7 @@ enum TestRunWaitVerdict {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TestRunWaitRegistrationUnknownReason {
+pub(crate) enum TestRunWaitRegistrationUnknownReason {
     ArtifactsUnreadable,
     RegistrationRetired,
     IdentityChanged,
@@ -158,7 +160,10 @@ enum TestRunWaitRegistrationUnknownReason {
 /// indexes it again. Running, unknown with `noPid`, `heartbeatStale`,
 /// `resultsUnreadable` or with no reason are not settled either: the run may
 /// still finish, and the index retries.
-fn test_run_wait_verdict(summary: Option<&TestRunSummary>, gone: bool) -> Option<TestRunWaitVerdict> {
+fn test_run_wait_verdict(
+    summary: Option<&TestRunSummary>,
+    gone: bool,
+) -> Option<TestRunWaitVerdict> {
     let Some(summary) = summary else {
         return gone.then_some(TestRunWaitVerdict::Unknown(
             TestRunCardUnknownReason::NotIndexed,
@@ -176,7 +181,7 @@ fn test_run_wait_verdict(summary: Option<&TestRunSummary>, gone: bool) -> Option
 
 /// Each run's verdict, in registration order. `gone` answers, for a run no
 /// longer indexed, whether it is gone from disk (`test_run_wait_run_gone`).
-fn test_run_wait_verdicts(
+pub(crate) fn test_run_wait_verdicts(
     wait: &TestRunWaitRecord,
     summaries: &[Option<&TestRunSummary>],
     gone: impl Fn(&str) -> bool,
@@ -192,9 +197,12 @@ fn test_run_wait_verdicts(
 /// (`test_run_display_path`: native Unix names; forward slashes on Windows).
 /// Reconstruct Windows UNC as verbatim for filesystem reads, accepting both
 /// current `//server/share/...` and historical `UNC/server/share/...` displays.
-fn test_run_fs_path(display: &str) -> PathBuf {
+pub(crate) fn test_run_fs_path(display: &str) -> PathBuf {
     #[cfg(windows)]
-    if let Some(rest) = display.strip_prefix("//").or_else(|| display.strip_prefix("UNC/")) {
+    if let Some(rest) = display
+        .strip_prefix("//")
+        .or_else(|| display.strip_prefix("UNC/"))
+    {
         return PathBuf::from(format!(r"\\?\UNC\{}", rest.replace('/', r"\")));
     }
     PathBuf::from(display)
@@ -211,37 +219,49 @@ fn test_run_wait_run_gone(label: &TestRunWaitRunLabel) -> bool {
         });
     }
     // Unfenced old labels retain their existing readable-request grace.
-    !matches!(test_run_read_json(&run_dir.join("request.json")), TestRunJson::Parsed(..))
+    !matches!(
+        test_run_read_json(&run_dir.join("request.json")),
+        TestRunJson::Parsed(..)
+    )
 }
 
-fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -> String {
+pub(crate) fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -> String {
     match verdict {
         Some(TestRunWaitVerdict::Pass) => "PASS".to_owned(),
         Some(TestRunWaitVerdict::Fail) => "FAIL".to_owned(),
-        Some(TestRunWaitVerdict::RemoteConflict) => "UNKNOWN (conflicting authoritative remote terminals)".to_owned(),
+        Some(TestRunWaitVerdict::RemoteConflict) => {
+            "UNKNOWN (conflicting authoritative remote terminals)".to_owned()
+        }
         Some(TestRunWaitVerdict::Unknown(reason)) => format!(
             "UNKNOWN ({})",
             match reason {
                 TestRunCardUnknownReason::ProcessGone => "process gone",
                 TestRunCardUnknownReason::ResultsUnreadable => "results unreadable",
                 TestRunCardUnknownReason::NoPid => "no pid recorded",
-                TestRunCardUnknownReason::HeartbeatStale => "heartbeat stale; executor not published",
+                TestRunCardUnknownReason::HeartbeatStale =>
+                    "heartbeat stale; executor not published",
                 TestRunCardUnknownReason::NotIndexed => "not indexed",
             }
         ),
         Some(TestRunWaitVerdict::UnknownRegistration(reason)) => format!(
             "UNKNOWN ({})",
             match reason {
-                TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable => "registered artifacts unreadable",
+                TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable =>
+                    "registered artifacts unreadable",
                 TestRunWaitRegistrationUnknownReason::RegistrationRetired => "registration retired",
-                TestRunWaitRegistrationUnknownReason::IdentityChanged => "registered identity changed",
+                TestRunWaitRegistrationUnknownReason::IdentityChanged =>
+                    "registered identity changed",
             }
         ),
         Some(TestRunWaitVerdict::UnknownObservation(reason)) => format!(
-            "UNKNOWN ({})", match reason {
-                TestRunWaitObservationUnknownReason::Terminal => "host-observed execution ended without a verdict",
-                TestRunWaitObservationUnknownReason::Interrupted => "host observation monitoring interrupted",
-                TestRunWaitObservationUnknownReason::Unavailable => "host observation unavailable or identity changed",
+            "UNKNOWN ({})",
+            match reason {
+                TestRunWaitObservationUnknownReason::Terminal =>
+                    "host-observed execution ended without a verdict",
+                TestRunWaitObservationUnknownReason::Interrupted =>
+                    "host observation monitoring interrupted",
+                TestRunWaitObservationUnknownReason::Unavailable =>
+                    "host observation unavailable or identity changed",
             }
         ),
         None => "NOT SETTLED YET".to_owned(),
@@ -312,16 +332,26 @@ fn test_run_wait_run_section(
     if let Some(identity) = &label.request_identity {
         lines.push(format!("- Request identity: `{identity}`"));
     }
-    let totals = |counts: Option<[usize; 6]>| counts.map_or_else(
+    let totals = |counts: Option<[usize; 6]>| {
+        counts.map_or_else(
         || "unknown (results unavailable)".to_owned(),
         |[passed, failed, interrupted, running, unrun, unknown]| format!(
             "passed {passed}, failed {failed}, interrupted {interrupted}, running {running}, unrun {unrun}, unknown {unknown}"
         ),
-    );
-    lines.push(format!("- Stage totals: {}", totals(evidence.and_then(|value| value.stages))));
-    lines.push(format!("- Preflight totals: {}", totals(evidence.and_then(|value| value.preflight))));
-    lines.push(format!("- Before/after source_id: {} (boundary comparison only, not host check credit)",
-        evidence.map_or("unknown", |value| value.source_comparison)));
+    )
+    };
+    lines.push(format!(
+        "- Stage totals: {}",
+        totals(evidence.and_then(|value| value.stages))
+    ));
+    lines.push(format!(
+        "- Preflight totals: {}",
+        totals(evidence.and_then(|value| value.preflight))
+    ));
+    lines.push(format!(
+        "- Before/after source_id: {} (boundary comparison only, not host check credit)",
+        evidence.map_or("unknown", |value| value.source_comparison)
+    ));
     match verdict {
         Some(TestRunWaitVerdict::Fail) => {
             // The read names a preflight check or a stage past the summary's
@@ -346,7 +376,12 @@ fn test_run_wait_run_section(
                 lines.push(format!("- First failing: {phase} `{name}`"));
             }
         }
-        Some(TestRunWaitVerdict::Unknown(_) | TestRunWaitVerdict::UnknownRegistration(_) | TestRunWaitVerdict::UnknownObservation(_)) | None => {
+        Some(
+            TestRunWaitVerdict::Unknown(_)
+            | TestRunWaitVerdict::UnknownRegistration(_)
+            | TestRunWaitVerdict::UnknownObservation(_),
+        )
+        | None => {
             lines.push(format!(
                 "- Stage at the last observation: {}",
                 summary
@@ -359,7 +394,10 @@ fn test_run_wait_run_section(
     lines.push(format!(
         "- Inspect: `node scripts/test-launcher.mjs summary \"{run_dir}\"`"
     ));
-    if matches!(verdict, Some(TestRunWaitVerdict::Unknown(_) | TestRunWaitVerdict::UnknownRegistration(_))) {
+    if matches!(
+        verdict,
+        Some(TestRunWaitVerdict::Unknown(_) | TestRunWaitVerdict::UnknownRegistration(_))
+    ) {
         lines.push(format!(
             "- Settle it: `node scripts/test-launcher.mjs recover \"{run_dir}\"` (never a pass)"
         ));
@@ -423,7 +461,7 @@ fn test_run_wait_failure<'a>(
 /// excerpt gets min(8 KiB, (64 KiB minus everything else) / number of runs).
 /// `UNKNOWN` is never phrased as a pass. `verdicts` are the runs' verdicts
 /// (`test_run_wait_verdicts`), in registration order.
-fn build_test_run_wait_prompt(
+pub(crate) fn build_test_run_wait_prompt(
     wait: &TestRunWaitRecord,
     summaries: &[Option<&TestRunSummary>],
     verdicts: &[Option<TestRunWaitVerdict>],
@@ -450,14 +488,18 @@ fn build_test_run_wait_prompt(
     let mandatory = head.len()
         + sections.iter().map(String::len).sum::<usize>()
         + separator.len() * sections.len();
-    let per_run = (TEST_RUN_WAIT_PROMPT_MAX_BYTES.saturating_sub(mandatory) / wait.runs.len().max(1))
-        .min(TEST_RUN_WAIT_EXCERPT_MAX_BYTES);
+    let per_run = (TEST_RUN_WAIT_PROMPT_MAX_BYTES.saturating_sub(mandatory)
+        / wait.runs.len().max(1))
+    .min(TEST_RUN_WAIT_EXCERPT_MAX_BYTES);
     let parts: Vec<String> = sections
         .into_iter()
         .zip(&wait.runs)
         .zip(verdicts)
         .map(|((section, label), verdict)| {
-            if label.remote.is_some() || label.observation.is_some() || *verdict != Some(TestRunWaitVerdict::Fail) {
+            if label.remote.is_some()
+                || label.observation.is_some()
+                || *verdict != Some(TestRunWaitVerdict::Fail)
+            {
                 return section;
             }
             let failure = test_run_wait_failure(failures, &label.run_id);
@@ -494,7 +536,10 @@ fn build_test_run_wait_prompt(
 }
 
 /// Whether a wait's runs are settled for its mode, from their verdicts.
-fn test_run_wait_satisfied(wait: &TestRunWaitRecord, verdicts: &[Option<TestRunWaitVerdict>]) -> bool {
+fn test_run_wait_satisfied(
+    wait: &TestRunWaitRecord,
+    verdicts: &[Option<TestRunWaitVerdict>],
+) -> bool {
     let settled = verdicts.iter().filter(|verdict| verdict.is_some()).count();
     match wait.mode {
         DelegationWaitMode::Any => settled > 0,
@@ -509,7 +554,9 @@ fn test_run_wait_summaries(
     wait.runs
         .iter()
         .map(|label| {
-            if label.remote.is_some() { return None; }
+            if label.remote.is_some() {
+                return None;
+            }
             if label.observation.is_some() {
                 return test_run_wait_matching_observation(inner, label)
                     .map(|row| test_run_observation_summary(inner, row));
@@ -526,19 +573,19 @@ fn test_run_wait_summaries(
 fn test_run_wait_identity_matches(label: &TestRunWaitRunLabel, disk: &TestRunDisk) -> bool {
     // Keep the run/request/locator fence. Source equality uses the launcher's
     // own observations, without an independent parent-held expected value.
-    label
-        .request_identity
-        .as_ref()
-        .is_none_or(|identity| {
-            disk.request_identity.as_ref() == Some(identity)
-                && label.locator_identity.is_some()
-                && label.locator_identity == disk.locator_identity
-        })
+    label.request_identity.as_ref().is_none_or(|identity| {
+        disk.request_identity.as_ref() == Some(identity)
+            && label.locator_identity.is_some()
+            && label.locator_identity == disk.locator_identity
+    })
 }
 
 /// The durable launch that supplied this label must still be the same one.
 /// No filesystem access is needed while holding StateInner.
-fn test_run_wait_registration_matches(label: &TestRunWaitRunLabel, row: &TestRunRegistration) -> bool {
+fn test_run_wait_registration_matches(
+    label: &TestRunWaitRunLabel,
+    row: &TestRunRegistration,
+) -> bool {
     label.run_id == row.run_id
         && label.request_identity.as_ref() == Some(&row.request_identity)
         && label.locator_identity.is_some()
@@ -553,7 +600,10 @@ fn test_run_wait_registration_matches(label: &TestRunWaitRunLabel, row: &TestRun
 /// a wait needs only publication history and a failure count, not old results.
 fn test_run_wait_registration_observation(
     label: &TestRunWaitRunLabel,
-) -> (TestRunWaitRegistrationProgress, Option<TestRunWaitRegistrationUnknownReason>) {
+) -> (
+    TestRunWaitRegistrationProgress,
+    Option<TestRunWaitRegistrationUnknownReason>,
+) {
     let path = test_run_fs_path(&label.run_dir);
     let mut progress = label.registration_progress;
     let mut transient = false;
@@ -577,7 +627,8 @@ fn test_run_wait_registration_observation(
         TestRunRead::Pending => {
             // A removed directory is deterministic; a missing/malformed
             // request in an existing directory may be a replacement race.
-            if fs::metadata(&path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+            if fs::metadata(&path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
                 reason = Some(TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable);
             } else {
                 transient = true;
@@ -601,7 +652,7 @@ fn test_run_wait_registration_observation(
 
 /// Removes every pending run wait of a session whose turn the user stopped.
 /// Runs and cards stay; nothing reactivates on its own.
-fn consume_test_run_waits_for_stopped_session_locked(
+pub(crate) fn consume_test_run_waits_for_stopped_session_locked(
     inner: &mut StateInner,
     session_id: &str,
 ) -> Vec<TestRunWaitRecord> {
@@ -624,7 +675,7 @@ enum TestRunWaitValidation {
 }
 
 impl AppState {
-    fn publish_test_run_waits_consumed(
+    pub(crate) fn publish_test_run_waits_consumed(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -646,7 +697,7 @@ impl AppState {
     }
 
     /// Registers a run wait for `session_id`, the caller.
-    fn create_test_run_wait(
+    pub(crate) fn create_test_run_wait(
         &self,
         session_id: &str,
         request: CreateTestRunWaitRequest,
@@ -656,7 +707,7 @@ impl AppState {
 
     /// `create_test_run_wait` with the forced rescan injected, so tests fix
     /// liveness.
-    fn create_test_run_wait_with(
+    pub(crate) fn create_test_run_wait_with(
         &self,
         session_id: &str,
         request: CreateTestRunWaitRequest,
@@ -676,169 +727,207 @@ impl AppState {
             )));
         }
         let mode = request.mode;
-        let build = |inner: &StateInner| -> std::result::Result<TestRunWaitRecord, TestRunWaitValidation> {
-            match delegation_wait_parent_eligibility_locked(inner, &session_id) {
-                DelegationWaitParentEligibility::Eligible => {}
-                DelegationWaitParentEligibility::Missing => {
-                    return Err(TestRunWaitValidation::Rejected(ApiError::local_session_missing()));
+        let build =
+            |inner: &StateInner| -> std::result::Result<TestRunWaitRecord, TestRunWaitValidation> {
+                match delegation_wait_parent_eligibility_locked(inner, &session_id) {
+                    DelegationWaitParentEligibility::Eligible => {}
+                    DelegationWaitParentEligibility::Missing => {
+                        return Err(TestRunWaitValidation::Rejected(
+                            ApiError::local_session_missing(),
+                        ));
+                    }
+                    DelegationWaitParentEligibility::Unavailable => {
+                        return Err(TestRunWaitValidation::Rejected(ApiError::conflict(
+                            "the waiting session is archived; unarchive it before waiting on runs",
+                        )));
+                    }
                 }
-                DelegationWaitParentEligibility::Unavailable => {
-                    return Err(TestRunWaitValidation::Rejected(ApiError::conflict(
-                        "the waiting session is archived; unarchive it before waiting on runs",
+                let index = inner
+                    .find_visible_session_index(&session_id)
+                    .expect("an eligible session is visible");
+                // Root sessions only, the mailbox rule: a delegation child that
+                // ended its turn to wait would read as finished to its parent,
+                // then start a new turn when resumed. A child runs its gates in
+                // the foreground instead.
+                if inner.sessions[index].session.parent_delegation_id.is_some()
+                    || inner
+                        .find_delegation_index_by_child_session_id(&session_id)
+                        .is_some()
+                {
+                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                        "only a root session can wait on test runs; a delegation child runs its gates in the foreground",
                     )));
                 }
-            }
-            let index = inner
-                .find_visible_session_index(&session_id)
-                .expect("an eligible session is visible");
-            // Root sessions only, the mailbox rule: a delegation child that
-            // ended its turn to wait would read as finished to its parent,
-            // then start a new turn when resumed. A child runs its gates in
-            // the foreground instead.
-            if inner.sessions[index].session.parent_delegation_id.is_some()
-                || inner
-                    .find_delegation_index_by_child_session_id(&session_id)
-                    .is_some()
-            {
-                return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
-                    "only a root session can wait on test runs; a delegation child runs its gates in the foreground",
-                )));
-            }
-            let Some(project_id) = inner.sessions[index].session.project_id.clone() else {
-                return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
-                    "the waiting session has no project; only a session in a project can wait on its runs",
-                )));
-            };
-            let mut runs = Vec::with_capacity(run_ids.len());
-            for run_id in &run_ids {
-                if let Some((host, native_run)) = remote_test_run_reference(run_id)
-                    .map_err(TestRunWaitValidation::Rejected)? {
-                    runs.push(remote_test_run_wait_label(inner, index, &project_id, run_id, &host, &native_run)
-                        .map_err(TestRunWaitValidation::Rejected)?);
-                    continue;
-                }
-                if let Some(row) = test_run_wait_exact_observation(inner, run_id) {
-                    if row.summary.project_id.as_deref() != Some(project_id.as_str()) {
-                        return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(format!(
-                            "test run `{run_id}` is not in the waiting session's project"
-                        ))));
-                    }
-                    runs.push(test_run_wait_observation_run_label(row));
-                    continue;
-                }
-                let Some(entry) = inner.test_runs.find(run_id) else {
-                    if let Some(row) = inner.test_run_registrations.get(run_id) {
-                        if row.project_id.as_deref().is_some_and(|id| id != project_id.as_str()) {
-                            return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(format!(
-                                "test run `{run_id}` is not in the waiting session's project"
-                            ))));
-                        }
-                        if !inner.test_runs.registered.contains(run_id)
-                            || row.project_id.is_none()
-                            || row.locator_identity.is_none()
-                            || row.request_identity.is_empty()
-                            || row.owning_session_id != row.initiating_session_id
-                        {
-                            return Err(TestRunWaitValidation::Rejected(ApiError::conflict(format!(
-                                "test_run_wait_registration_unavailable: test run `{run_id}` has no confirmed durable project/request/native-locator identity; retain the run and report its registration status"
-                            )).with_kind(ApiErrorKind::TestRunWaitRegistrationUnavailable)));
-                        }
-                        runs.push(TestRunWaitRunLabel {
-                            remote: None,
-                            observation: None,
-                            run_id: run_id.clone(),
-                            run_dir: row.run_directory.clone(),
-                            preset: row.preset,
-                            worktree: row.worktree.clone(),
-                            owner_session_id: Some(row.owning_session_id.clone()),
-                            started_at: row.started_at.clone(),
-                            request_identity: Some(row.request_identity.clone()),
-                            locator_identity: row.locator_identity.clone(),
-                            registration_backed: true,
-                            registration_progress: TestRunWaitRegistrationProgress::default(),
-                        });
+                let Some(project_id) = inner.sessions[index].session.project_id.clone() else {
+                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                        "the waiting session has no project; only a session in a project can wait on its runs",
+                    )));
+                };
+                let mut runs = Vec::with_capacity(run_ids.len());
+                for run_id in &run_ids {
+                    if let Some((host, native_run)) = remote_test_run_reference(run_id)
+                        .map_err(TestRunWaitValidation::Rejected)?
+                    {
+                        runs.push(
+                            remote_test_run_wait_label(
+                                inner,
+                                index,
+                                &project_id,
+                                run_id,
+                                &host,
+                                &native_run,
+                            )
+                            .map_err(TestRunWaitValidation::Rejected)?,
+                        );
                         continue;
                     }
-                    return Err(TestRunWaitValidation::Unknown(run_id.clone()));
+                    if let Some(row) = test_run_wait_exact_observation(inner, run_id) {
+                        if row.summary.project_id.as_deref() != Some(project_id.as_str()) {
+                            return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                                format!(
+                                    "test run `{run_id}` is not in the waiting session's project"
+                                ),
+                            )));
+                        }
+                        runs.push(test_run_wait_observation_run_label(row));
+                        continue;
+                    }
+                    let Some(entry) = inner.test_runs.find(run_id) else {
+                        if let Some(row) = inner.test_run_registrations.get(run_id) {
+                            if row
+                                .project_id
+                                .as_deref()
+                                .is_some_and(|id| id != project_id.as_str())
+                            {
+                                return Err(TestRunWaitValidation::Rejected(
+                                    ApiError::bad_request(format!(
+                                        "test run `{run_id}` is not in the waiting session's project"
+                                    )),
+                                ));
+                            }
+                            if !inner.test_runs.registered.contains(run_id)
+                                || row.project_id.is_none()
+                                || row.locator_identity.is_none()
+                                || row.request_identity.is_empty()
+                                || row.owning_session_id != row.initiating_session_id
+                            {
+                                return Err(TestRunWaitValidation::Rejected(ApiError::conflict(format!(
+                                "test_run_wait_registration_unavailable: test run `{run_id}` has no confirmed durable project/request/native-locator identity; retain the run and report its registration status"
+                            )).with_kind(ApiErrorKind::TestRunWaitRegistrationUnavailable)));
+                            }
+                            runs.push(TestRunWaitRunLabel {
+                                remote: None,
+                                observation: None,
+                                run_id: run_id.clone(),
+                                run_dir: row.run_directory.clone(),
+                                preset: row.preset,
+                                worktree: row.worktree.clone(),
+                                owner_session_id: Some(row.owning_session_id.clone()),
+                                started_at: row.started_at.clone(),
+                                request_identity: Some(row.request_identity.clone()),
+                                locator_identity: row.locator_identity.clone(),
+                                registration_backed: true,
+                                registration_progress: TestRunWaitRegistrationProgress::default(),
+                            });
+                            continue;
+                        }
+                        return Err(TestRunWaitValidation::Unknown(run_id.clone()));
+                    };
+                    let summary = &entry.summary;
+                    if test_run_effective_project_id(inner, entry).as_deref()
+                        != Some(project_id.as_str())
+                    {
+                        return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                            format!("test run `{run_id}` is not in the waiting session's project"),
+                        )));
+                    }
+                    if entry.disk.locator_identity.is_none() {
+                        return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                            "test run native locator identity is unavailable",
+                        )));
+                    }
+                    if inner.test_runs.registered.contains(run_id)
+                        && inner.test_run_registrations.contains_key(run_id)
+                        && test_run_matching_registration(inner, &entry.disk).is_none()
+                    {
+                        return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                            format!(
+                                "test run `{run_id}` index conflicts with its durable registration; retain the original run and report the identity conflict"
+                            ),
+                        )));
+                    }
+                    runs.push(TestRunWaitRunLabel {
+                        remote: None,
+                        observation: None,
+                        run_id: run_id.clone(),
+                        run_dir: summary.run_dir.clone(),
+                        preset: summary.preset,
+                        worktree: summary.worktree.clone(),
+                        owner_session_id: summary.owner_session_id.clone(),
+                        started_at: summary.started_at.clone(),
+                        request_identity: entry.disk.request_identity.clone(),
+                        locator_identity: entry.disk.locator_identity.clone(),
+                        registration_backed: false,
+                        registration_progress: TestRunWaitRegistrationProgress::default(),
+                    });
+                }
+                let wait = TestRunWaitRecord {
+                    id: format!("test-run-wait-{}", Uuid::new_v4()),
+                    session_id: session_id.clone(),
+                    run_ids: run_ids.clone(),
+                    mode,
+                    created_at: stamp_now(),
+                    title: title.clone(),
+                    runs,
                 };
-                let summary = &entry.summary;
-                if test_run_effective_project_id(inner, entry).as_deref() != Some(project_id.as_str()) {
-                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(format!(
-                        "test run `{run_id}` is not in the waiting session's project"
-                    ))));
-                }
-                if entry.disk.locator_identity.is_none() {
-                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
-                        "test run native locator identity is unavailable"
-                    )));
-                }
-                if inner.test_runs.registered.contains(run_id)
-                    && inner.test_run_registrations.contains_key(run_id)
-                    && test_run_matching_registration(inner, &entry.disk).is_none()
-                {
-                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(format!(
-                        "test run `{run_id}` index conflicts with its durable registration; retain the original run and report the identity conflict"
-                    ))));
-                }
-                runs.push(TestRunWaitRunLabel {
-                    remote: None,
-                    observation: None,
-                    run_id: run_id.clone(),
-                    run_dir: summary.run_dir.clone(),
-                    preset: summary.preset,
-                    worktree: summary.worktree.clone(),
-                    owner_session_id: summary.owner_session_id.clone(),
-                    started_at: summary.started_at.clone(),
-                    request_identity: entry.disk.request_identity.clone(),
-                    locator_identity: entry.disk.locator_identity.clone(),
-                    registration_backed: false,
-                    registration_progress: TestRunWaitRegistrationProgress::default(),
-                });
-            }
-            let wait = TestRunWaitRecord {
-                id: format!("test-run-wait-{}", Uuid::new_v4()),
-                session_id: session_id.clone(),
-                run_ids: run_ids.clone(),
-                mode,
-                created_at: stamp_now(),
-                title: title.clone(),
-                runs,
-            };
-            // Headers and commands are never cut, so they must leave room for
-            // excerpts: measured with the longest verdict label.
-            let worst_verdict = Some(TestRunWaitVerdict::Unknown(
-                TestRunCardUnknownReason::HeartbeatStale,
-            ));
-            let worst: Vec<_> = wait.runs.iter().map(|label| {
-                if label.observation.is_some() {
-                    Some(TestRunWaitVerdict::UnknownObservation(TestRunWaitObservationUnknownReason::Unavailable))
-                } else { worst_verdict }
-            }).collect();
-            let mandatory = test_run_wait_prompt_head(&wait, &worst).len()
-                + wait
+                // Headers and commands are never cut, so they must leave room for
+                // excerpts: measured with the longest verdict label.
+                let worst_verdict = Some(TestRunWaitVerdict::Unknown(
+                    TestRunCardUnknownReason::HeartbeatStale,
+                ));
+                let worst: Vec<_> = wait
                     .runs
                     .iter()
-                    .zip(&worst)
-                    .map(|(label, verdict)| {
-                        test_run_wait_run_section(
-                            label,
-                            inner.test_runs.find(&label.run_id).map(|entry| &entry.summary),
-                            *verdict,
-                            None,
-                            Some(&TestRunWaitEvidence::mandatory_bound()),
-                        )
-                        .len()
-                            .max(if label.remote.is_some() { 4096 } else { 0 })
-                            + 8
+                    .map(|label| {
+                        if label.observation.is_some() {
+                            Some(TestRunWaitVerdict::UnknownObservation(
+                                TestRunWaitObservationUnknownReason::Unavailable,
+                            ))
+                        } else {
+                            worst_verdict
+                        }
                     })
-                    .sum::<usize>();
-            if mandatory > TEST_RUN_WAIT_MANDATORY_MAX_BYTES {
-                return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(format!(
-                    "the wait's run headers and commands need {mandatory} bytes, over the {TEST_RUN_WAIT_MANDATORY_MAX_BYTES}-byte limit; wait on fewer runs"
-                ))));
-            }
-            Ok(wait)
-        };
+                    .collect();
+                let mandatory = test_run_wait_prompt_head(&wait, &worst).len()
+                    + wait
+                        .runs
+                        .iter()
+                        .zip(&worst)
+                        .map(|(label, verdict)| {
+                            test_run_wait_run_section(
+                                label,
+                                inner
+                                    .test_runs
+                                    .find(&label.run_id)
+                                    .map(|entry| &entry.summary),
+                                *verdict,
+                                None,
+                                Some(&TestRunWaitEvidence::mandatory_bound()),
+                            )
+                            .len()
+                            .max(if label.remote.is_some() { 4096 } else { 0 })
+                                + 8
+                        })
+                        .sum::<usize>();
+                if mandatory > TEST_RUN_WAIT_MANDATORY_MAX_BYTES {
+                    return Err(TestRunWaitValidation::Rejected(ApiError::bad_request(
+                        format!(
+                            "the wait's run headers and commands need {mandatory} bytes, over the {TEST_RUN_WAIT_MANDATORY_MAX_BYTES}-byte limit; wait on fewer runs"
+                        ),
+                    )));
+                }
+                Ok(wait)
+            };
         let validated = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             build(&inner)
@@ -882,7 +971,11 @@ impl AppState {
         // session re-fetches a verdict.
         let refresh = self.refresh_test_run_waits();
         self.federation_executor_wake_signal.kick();
-        let queued = refresh.queue_results.get(&wait.id).copied().unwrap_or_default();
+        let queued = refresh
+            .queue_results
+            .get(&wait.id)
+            .copied()
+            .unwrap_or_default();
         Ok(TestRunWaitResponse {
             revision: refresh.revision.unwrap_or(revision),
             wait_id: wait.id.clone(),
@@ -923,20 +1016,23 @@ impl AppState {
     /// full scan (an empty index would read every run as not indexed).
     /// Disk is read without the state lock: failure excerpts, and whether a
     /// run no longer indexed is gone.
-    fn refresh_test_run_waits(&self) -> TestRunWaitRefresh {
+    pub(crate) fn refresh_test_run_waits(&self) -> TestRunWaitRefresh {
         self.refresh_test_run_waits_pausing(&|| {})
     }
 
     /// `refresh_test_run_waits`, calling `after_pick` once the reads are
     /// picked and before they are made: the window in which a scan can
     /// change the index, which a test uses to change it deterministically.
-    fn refresh_test_run_waits_pausing(&self, after_pick: &dyn Fn()) -> TestRunWaitRefresh {
+    pub(crate) fn refresh_test_run_waits_pausing(
+        &self,
+        after_pick: &dyn Fn(),
+    ) -> TestRunWaitRefresh {
         self.refresh_test_run_waits_with_hooks(after_pick, &|| {})
     }
 
     /// Also exposes the completed-read/before-lock window for deterministic
     /// concurrency tests. Production uses no-op hooks through the wrapper.
-    fn refresh_test_run_waits_with_hooks(
+    pub(crate) fn refresh_test_run_waits_with_hooks(
         &self,
         after_pick: &dyn Fn(),
         after_reads: &dyn Fn(),
@@ -956,21 +1052,28 @@ impl AppState {
                 let owned_summaries = test_run_wait_summaries(&inner, wait);
                 let summaries: Vec<_> = owned_summaries.iter().map(Option::as_ref).collect();
                 for (label, summary) in wait.runs.iter().zip(&summaries) {
-                    if label.remote.is_some() || label.observation.is_some() || !inner.test_runs.scanned_once { continue; }
+                    if label.remote.is_some()
+                        || label.observation.is_some()
+                        || !inner.test_runs.scanned_once
+                    {
+                        continue;
+                    }
                     if summary.is_none()
                         || (label.registration_backed && !label.registration_progress.indexed)
                     {
                         checks.push((wait.id.clone(), label.clone()));
                     }
                 }
-                let possibly_settled = |(label, summary): (&TestRunWaitRunLabel, &Option<&TestRunSummary>)| {
-                    if label.observation.is_some() {
-                        return test_run_wait_observation_verdict(&inner, label, false).is_some();
-                    }
-                    summary.is_none()
-                        || (label.registration_backed && !label.registration_progress.indexed)
-                        || test_run_wait_verdict(*summary, false).is_some()
-                };
+                let possibly_settled =
+                    |(label, summary): (&TestRunWaitRunLabel, &Option<&TestRunSummary>)| {
+                        if label.observation.is_some() {
+                            return test_run_wait_observation_verdict(&inner, label, false)
+                                .is_some();
+                        }
+                        summary.is_none()
+                            || (label.registration_backed && !label.registration_progress.indexed)
+                            || test_run_wait_verdict(*summary, false).is_some()
+                    };
                 let mut possibilities = wait.runs.iter().zip(&summaries);
                 let possibly_satisfied = match wait.mode {
                     DelegationWaitMode::Any => possibilities.any(possibly_settled),
@@ -1001,7 +1104,10 @@ impl AppState {
             .filter(|(_, label)| label.registration_backed && !label.registration_progress.indexed)
             .map(|(wait_id, label)| {
                 let (progress, reason) = test_run_wait_registration_observation(&label);
-                ((wait_id, label.run_id), (label.registration_progress, progress, reason))
+                (
+                    (wait_id, label.run_id),
+                    (label.registration_progress, progress, reason),
+                )
             })
             .collect();
         let failures: HashMap<String, TestRunCardFailureRead> = reads
@@ -1058,15 +1164,17 @@ impl AppState {
                     if let Some(remote) = &label.remote {
                         verdicts[index] = remote_test_run_wait_verdict(&inner, &wait, remote);
                     } else if label.observation.is_some() {
-                        verdicts[index] = test_run_wait_observation_verdict(
-                            &inner, label, project_removed,
-                        );
+                        verdicts[index] =
+                            test_run_wait_observation_verdict(&inner, label, project_removed);
                     } else if !inner.test_runs.scanned_once {
                         verdicts[index] = None;
                     }
                 }
                 for (index, label) in wait.runs.iter_mut().enumerate() {
-                    if !label.registration_backed || label.registration_progress.indexed || project_removed {
+                    if !label.registration_backed
+                        || label.registration_progress.indexed
+                        || project_removed
+                    {
                         continue;
                     }
                     // The admitting registration must still be valid at the
@@ -1075,10 +1183,13 @@ impl AppState {
                         || !inner.test_run_registrations.contains_key(&label.run_id)
                     {
                         Some(TestRunWaitRegistrationUnknownReason::RegistrationRetired)
-                    } else if !inner.test_run_registrations.get(&label.run_id)
+                    } else if !inner
+                        .test_run_registrations
+                        .get(&label.run_id)
                         .is_some_and(|row| test_run_wait_registration_matches(label, row))
-                        || inner.test_runs.find(&label.run_id)
-                            .is_some_and(|entry| !test_run_wait_identity_matches(label, &entry.disk))
+                        || inner.test_runs.find(&label.run_id).is_some_and(|entry| {
+                            !test_run_wait_identity_matches(label, &entry.disk)
+                        })
                     {
                         Some(TestRunWaitRegistrationUnknownReason::IdentityChanged)
                     } else {
@@ -1090,25 +1201,30 @@ impl AppState {
                     }
                     // Only healthy matching arrival hands off. A request-only
                     // index row must not erase previously observed publication.
-                    if summaries[index].is_some() && inner.test_runs.find(&label.run_id)
-                        .is_some_and(|entry| entry.disk.results.is_some() && entry.disk.read_failures == 0)
+                    if summaries[index].is_some()
+                        && inner.test_runs.find(&label.run_id).is_some_and(|entry| {
+                            entry.disk.results.is_some() && entry.disk.read_failures == 0
+                        })
                     {
                         label.registration_progress.indexed = true;
                         label.registration_progress.results_seen = true;
                         label.registration_progress.unreadable_reads = 0;
-                        label.registration_progress.generation = label.registration_progress.generation.saturating_add(1);
+                        label.registration_progress.generation =
+                            label.registration_progress.generation.saturating_add(1);
                         progress_changed = true;
                         continue;
                     }
-                    let reason = registration_observations.get(&(wait.id.clone(), label.run_id.clone()))
-                            .filter(|(picked, _, _)| *picked == label.registration_progress)
-                            .and_then(|(_, progress, reason)| {
-                                // Ordering-only no-ops fence old reads in memory
-                                // without persisting/publishing a full snapshot.
-                                progress_changed |= label.registration_progress.durable_state() != progress.durable_state();
-                                label.registration_progress = *progress;
-                                *reason
-                            });
+                    let reason = registration_observations
+                        .get(&(wait.id.clone(), label.run_id.clone()))
+                        .filter(|(picked, _, _)| *picked == label.registration_progress)
+                        .and_then(|(_, progress, reason)| {
+                            // Ordering-only no-ops fence old reads in memory
+                            // without persisting/publishing a full snapshot.
+                            progress_changed |= label.registration_progress.durable_state()
+                                != progress.durable_state();
+                            label.registration_progress = *progress;
+                            *reason
+                        });
                     if let Some(reason) = reason {
                         verdicts[index] = Some(TestRunWaitVerdict::UnknownRegistration(reason));
                     }
@@ -1125,32 +1241,46 @@ impl AppState {
                 // replacement race, or a file over the 1 MiB read limit).
                 // Waiting on those could defer the resume for good, so the
                 // prompt says the diagnostics are not available here instead.
-                let unread_failure = wait
-                    .run_ids
-                    .iter()
-                    .zip(&verdicts)
-                    .any(|(run_id, verdict)| {
-                        *verdict == Some(TestRunWaitVerdict::Fail)
-                            && wait.runs.iter().find(|label| &label.run_id == run_id).is_some_and(|label| label.remote.is_none() && label.observation.is_none())
-                            && !failures.contains_key(run_id)
-                    });
+                let unread_failure = wait.run_ids.iter().zip(&verdicts).any(|(run_id, verdict)| {
+                    *verdict == Some(TestRunWaitVerdict::Fail)
+                        && wait
+                            .runs
+                            .iter()
+                            .find(|label| &label.run_id == run_id)
+                            .is_some_and(|label| {
+                                label.remote.is_none() && label.observation.is_none()
+                            })
+                        && !failures.contains_key(run_id)
+                });
                 if unread_failure {
                     remaining.push(wait);
                     continue;
                 }
                 // Use the identity-matching index observation, never a fresh
                 // read of a possibly replaced run directory under this lock.
-                let evidence = wait.runs.iter().filter_map(|label| {
-                    if label.observation.is_some() { return None; }
-                    let entry = inner.test_runs.find(&label.run_id)?;
-                    if !test_run_wait_identity_matches(label, &entry.disk)
-                        || entry.disk.read_failures > 0 {
-                        return None;
-                    }
-                    Some((label.run_id.clone(), entry.disk.results.as_ref()?.wait_evidence.clone()))
-                }).collect();
-                let prompt = build_test_run_wait_prompt(&wait, &summaries, &verdicts, &failures, &evidence);
-                let queued = queue_delegation_wait_resume_locked(&mut inner, &wait.session_id, prompt);
+                let evidence = wait
+                    .runs
+                    .iter()
+                    .filter_map(|label| {
+                        if label.observation.is_some() {
+                            return None;
+                        }
+                        let entry = inner.test_runs.find(&label.run_id)?;
+                        if !test_run_wait_identity_matches(label, &entry.disk)
+                            || entry.disk.read_failures > 0
+                        {
+                            return None;
+                        }
+                        Some((
+                            label.run_id.clone(),
+                            entry.disk.results.as_ref()?.wait_evidence.clone(),
+                        ))
+                    })
+                    .collect();
+                let prompt =
+                    build_test_run_wait_prompt(&wait, &summaries, &verdicts, &failures, &evidence);
+                let queued =
+                    queue_delegation_wait_resume_locked(&mut inner, &wait.session_id, prompt);
                 if queued.dispatch_requested {
                     refresh.dispatch_sessions.push(wait.session_id.clone());
                 }
@@ -1243,8 +1373,8 @@ impl AppState {
 /// What a refresh did: the revision of its progress/consumption commit,
 /// the queue result per resumed wait, and the sessions to dispatch.
 #[derive(Default)]
-struct TestRunWaitRefresh {
-    revision: Option<u64>,
+pub(crate) struct TestRunWaitRefresh {
+    pub(crate) revision: Option<u64>,
     queue_results: BTreeMap<String, DelegationWaitQueueResult>,
     dispatch_sessions: Vec<String>,
 }

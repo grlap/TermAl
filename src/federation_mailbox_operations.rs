@@ -2,8 +2,10 @@
 // Does not relay requests or drain the durable remote wake obligations. New
 // application layer over the qualified directory and existing mailbox store.
 
+use super::*;
+
 impl AppState {
-    fn execute_federation_mailbox(
+    pub(crate) fn execute_federation_mailbox(
         &self,
         request: FederationMailboxRequest,
         lease: Option<FederationLinkLease>,
@@ -21,8 +23,14 @@ impl AppState {
         if matches!(request.operation, FederationMailboxOperation::Protocol) {
             return federation_mailbox_response(
                 central.clone(),
-                &federation_mailbox_protocol(central,
-                    &mut self.mailbox_store.federation_reads.lock().expect("mailbox read cache poisoned")),
+                &federation_mailbox_protocol(
+                    central,
+                    &mut self
+                        .mailbox_store
+                        .federation_reads
+                        .lock()
+                        .expect("mailbox read cache poisoned"),
+                ),
             );
         }
         let actor = request
@@ -71,7 +79,8 @@ impl AppState {
                     .collect();
                 let mut response = federation_mailbox_response(central, &entries)?;
                 if alias_basis {
-                    response.alias_basis = Some(federation_mailbox_alias_basis_locked(&guard._inner));
+                    response.alias_basis =
+                        Some(federation_mailbox_alias_basis_locked(&guard._inner));
                 }
                 Ok(response)
             }
@@ -127,12 +136,16 @@ impl AppState {
                 if delivery.sender != participant.binding {
                     return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
                 }
-                self.mailbox_store.cancel_federation_delivery(&delivery, || authority.lock())
+                self.mailbox_store
+                    .cancel_federation_delivery(&delivery, || authority.lock())
                     .map_err(mailbox_api_error)?;
-                federation_mailbox_response(central, &FederationDeliveryTerminal {
-                    state: FederationDeliveryTerminalState::Abandoned,
-                    canonical_digest: delivery.digest(),
-                })
+                federation_mailbox_response(
+                    central,
+                    &FederationDeliveryTerminal {
+                        state: FederationDeliveryTerminalState::Abandoned,
+                        canonical_digest: delivery.digest(),
+                    },
+                )
             }
             FederationMailboxOperation::List => {
                 let rows = self
@@ -148,19 +161,43 @@ impl AppState {
                 issue_receipt,
             } => {
                 if !issue_receipt {
-                    let page = self.capture_federation_mailbox_page(&authority, &mailbox_id,
-                        after_sequence, limit.clamp(1, FEDERATION_MAILBOX_PAGE_LIMIT), None)?;
+                    let page = self.capture_federation_mailbox_page(
+                        &authority,
+                        &mailbox_id,
+                        after_sequence,
+                        limit.clamp(1, FEDERATION_MAILBOX_PAGE_LIMIT),
+                        None,
+                    )?;
                     return federation_mailbox_response(central, &page);
                 }
-                let page = self.federation_mailbox_read_page(&authority, &mailbox_id,
-                    after_sequence, limit, issue_receipt, None, false)?;
+                let page = self.federation_mailbox_read_page(
+                    &authority,
+                    &mailbox_id,
+                    after_sequence,
+                    limit,
+                    issue_receipt,
+                    None,
+                    false,
+                )?;
                 federation_mailbox_response(central, &page)
             }
             FederationMailboxOperation::ReadKeyed {
-                mailbox_id, after_sequence, limit, issue_receipt, read_key, resolve,
+                mailbox_id,
+                after_sequence,
+                limit,
+                issue_receipt,
+                read_key,
+                resolve,
             } => {
-                let page = self.federation_mailbox_read_page(&authority, &mailbox_id,
-                    after_sequence, limit, issue_receipt, Some(read_key), resolve)?;
+                let page = self.federation_mailbox_read_page(
+                    &authority,
+                    &mailbox_id,
+                    after_sequence,
+                    limit,
+                    issue_receipt,
+                    Some(read_key),
+                    resolve,
+                )?;
                 federation_mailbox_response(central, &page)
             }
             FederationMailboxOperation::ReadMessage { message_id } => {
@@ -207,7 +244,7 @@ impl AppState {
         }
     }
 
-    fn execute_federation_delivery(
+    pub(crate) fn execute_federation_delivery(
         &self,
         central: FederationHostIdentity,
         participant: FederationMailboxParticipant,
@@ -219,19 +256,36 @@ impl AppState {
         authority.target = Some(target.clone());
         let input = delivery.input(participant.name.clone(), target.name.clone());
         let routing_only = std::cell::Cell::new(false);
-        let appended = self.mailbox_store
-            .append_with_delivery_policy(&input, Some(&delivery), None, || authority.lock(), |transaction, guard| {
-                routing_only.set(settle_routing_only_mailbox_delivery(transaction, &delivery, &guard._inner)?);
-                Ok(())
-            })
+        let appended = self
+            .mailbox_store
+            .append_with_delivery_policy(
+                &input,
+                Some(&delivery),
+                None,
+                || authority.lock(),
+                |transaction, guard| {
+                    routing_only.set(settle_routing_only_mailbox_delivery(
+                        transaction,
+                        &delivery,
+                        &guard._inner,
+                    )?);
+                    Ok(())
+                },
+            )
             .map_err(mailbox_api_error)?;
-        let MailboxAppendResult { mut receipt, finalization } = appended;
+        let MailboxAppendResult {
+            mut receipt,
+            finalization,
+        } = appended;
         if target.binding.identity.host_id != central.host_id {
             receipt.notification_cause = Some(if receipt.duplicate {
                 "duplicate delivery; original notification decision retained".to_owned()
             } else if routing_only.get() {
-                "delivered to mailbox; automatic participation does not authorize an executor wake".to_owned()
-            } else { FEDERATION_REMOTE_WAKE_CAUSE.to_owned() });
+                "delivered to mailbox; automatic participation does not authorize an executor wake"
+                    .to_owned()
+            } else {
+                FEDERATION_REMOTE_WAKE_CAUSE.to_owned()
+            });
         }
         // The committed obligation owns notification. Never put a native queue
         // commit, provider handoff or dispatch-finalization wait before this
@@ -252,11 +306,17 @@ impl AppState {
         drop(inner);
         if target_is_remote == Some(true) {
             message.notification_cause = Some(
-                if self.refresh_federation_executor_reservation_domain().is_err() {
+                if self
+                    .refresh_federation_executor_reservation_domain()
+                    .is_err()
+                {
                     "remote wake state unavailable; authority not durable".to_owned()
                 } else {
-                    self.mailbox_store.federation_executor_wake_state(&message.id)
-                        .unwrap_or_else(|_| "remote wake state unavailable; ownership not inferred".to_owned())
+                    self.mailbox_store
+                        .federation_executor_wake_state(&message.id)
+                        .unwrap_or_else(|_| {
+                            "remote wake state unavailable; ownership not inferred".to_owned()
+                        })
                 },
             );
             if let Some(cause) = message.notification_cause.as_deref() {
@@ -271,15 +331,20 @@ impl AppState {
             }
         } else if target_is_remote == Some(false) {
             match self.mailbox_store.native_mailbox_wake_pending(&message.id) {
-                Ok(true) => message.notification_cause = Some("committed; native wake pending".into()),
+                Ok(true) => {
+                    message.notification_cause = Some("committed; native wake pending".into())
+                }
                 Ok(false) => {}
-                Err(_) => message.notification_cause = Some("committed; native wake state unavailable".into()),
+                Err(_) => {
+                    message.notification_cause =
+                        Some("committed; native wake state unavailable".into())
+                }
             }
         }
     }
 }
 
-fn federation_mailbox_response(
+pub(crate) fn federation_mailbox_response(
     central: FederationHostIdentity,
     value: &impl Serialize,
 ) -> Result<FederationMailboxResponse, ApiError> {

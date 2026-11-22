@@ -19,11 +19,13 @@
 // remote host, so this backend forwards the query rather than
 // answering locally.
 
+use super::*;
+
 impl AppState {
     /// Returns lightweight summaries of every saved workspace layout
     /// in this app (name + revision + updated_at — no per-pane trees).
     /// Used by the "workspaces" dropdown in the UI.
-    fn list_workspace_layouts(&self) -> Result<WorkspaceLayoutsResponse, ApiError> {
+    pub(crate) fn list_workspace_layouts(&self) -> Result<WorkspaceLayoutsResponse, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         Ok(WorkspaceLayoutsResponse {
             workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
@@ -32,7 +34,7 @@ impl AppState {
 
     /// Returns the full pane-tree plus metadata for a single saved
     /// workspace layout by id. 404s if the id is unknown.
-    fn get_workspace_layout(
+    pub(crate) fn get_workspace_layout(
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceLayoutResponse, ApiError> {
@@ -53,7 +55,7 @@ impl AppState {
     /// snapshot so all clients see the new pane tree. The revision
     /// check in the request body lets the UI detect concurrent edits
     /// and reject stale writes with a 409.
-    fn put_workspace_layout(
+    pub(crate) fn put_workspace_layout(
         &self,
         workspace_id: &str,
         request: PutWorkspaceLayoutRequest,
@@ -93,7 +95,7 @@ impl AppState {
         Ok(WorkspaceLayoutResponse { layout })
     }
 
-    fn patch_workspace_label(
+    pub(crate) fn patch_workspace_label(
         &self,
         workspace_id: &str,
         request: PatchWorkspaceLabelRequest,
@@ -124,7 +126,7 @@ impl AppState {
     /// Removes a saved workspace layout by id. No-op (not an error)
     /// if the id wasn't present — the UI treats "delete" as
     /// idempotent.
-    fn delete_workspace_layout(
+    pub(crate) fn delete_workspace_layout(
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceLayoutsResponse, ApiError> {
@@ -149,7 +151,7 @@ impl AppState {
     /// every call. Remote-backed sessions forward to
     /// `proxy_remote_list_agent_commands` — the remote host owns the
     /// filesystem.
-    fn list_agent_commands(
+    pub(crate) fn list_agent_commands(
         &self,
         session_id: &str,
     ) -> std::result::Result<AgentCommandsResponse, ApiError> {
@@ -197,7 +199,7 @@ impl AppState {
     /// regular sends and delegation sends. Remote-backed sessions forward the
     /// whole resolution request so command template behavior stays owned by
     /// the host that owns the session workdir.
-    fn resolve_agent_command(
+    pub(crate) fn resolve_agent_command(
         &self,
         session_id: &str,
         command_name: &str,
@@ -254,7 +256,7 @@ impl AppState {
     /// session's workdir and returns match locations for the UI's
     /// slash-command autocomplete. Remote-backed sessions forward to
     /// `proxy_remote_search_instructions`.
-    fn search_instructions(
+    pub(crate) fn search_instructions(
         &self,
         session_id: &str,
         query: &str,
@@ -325,7 +327,7 @@ fn cached_agent_commands_for_workdir(
         .collect()
 }
 
-fn resolve_agent_command_payload(
+pub(crate) fn resolve_agent_command_payload(
     command: AgentCommand,
     request: ResolveAgentCommandRequest,
     metadata: Option<AgentCommandResolverMetadata>,
@@ -383,8 +385,8 @@ fn resolve_agent_command_payload(
     })
 }
 
-const MAX_AGENT_COMMAND_ARGUMENTS_BYTES: usize = 64 * 1024;
-const MAX_AGENT_COMMAND_NOTE_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_AGENT_COMMAND_ARGUMENTS_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_AGENT_COMMAND_NOTE_BYTES: usize = 64 * 1024;
 
 fn validate_resolve_agent_command_request(
     request: &ResolveAgentCommandRequest,
@@ -420,21 +422,21 @@ fn validate_agent_command_text_field(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AgentCommandResolverMetadata {
-    title: AgentCommandTitleStrategy,
-    delegation: Option<AgentCommandDelegationMetadata>,
+pub(crate) struct AgentCommandResolverMetadata {
+    pub(crate) title: AgentCommandTitleStrategy,
+    pub(crate) delegation: Option<AgentCommandDelegationMetadata>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum AgentCommandTitleStrategy {
+pub(crate) enum AgentCommandTitleStrategy {
     Default,
     PrefixFirstArgument { prefix: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AgentCommandDelegationMetadata {
-    mode: DelegationMode,
-    write_policy: DelegationWritePolicy,
+pub(crate) struct AgentCommandDelegationMetadata {
+    pub(crate) mode: DelegationMode,
+    pub(crate) write_policy: DelegationWritePolicy,
 }
 
 fn resolved_agent_command_visible_prompt(command: &AgentCommand, arguments: &str) -> String {

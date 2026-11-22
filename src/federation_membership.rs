@@ -1,12 +1,14 @@
 // Owns enrollment, connection and verification state transitions. Does not own credentials, transport or runtime execution.
 // Split from federation_registry.rs while implementing the new domain foundation.
 
+use super::*;
+
 // Staged domain APIs are consumed by the separately landed transport/operator slices.
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
     // A locator change is not enrollment. The existing mutation and supervisor
     // own durability and reconnect; old credential/channel bases stay fenced.
-    fn update_federation_ssh_host(
+    pub(crate) fn update_federation_ssh_host(
         &self,
         id: &str,
         expected_version: u64,
@@ -15,13 +17,19 @@ impl AppState {
         validate_federation_ssh_hostname(&ssh_host)?;
         self.mutate_federation(|domain, settings| {
             if settings.role != FederationRole::Central || !settings.enabled {
-                return Err(ApiError::conflict("SSH hostname updates require an enabled central"));
+                return Err(ApiError::conflict(
+                    "SSH hostname updates require an enabled central",
+                ));
             }
             if domain.version != expected_version {
-                return Err(ApiError::conflict("federation settings changed; read them again")
-                    .with_kind(ApiErrorKind::FederationVersionConflict));
+                return Err(
+                    ApiError::conflict("federation settings changed; read them again")
+                        .with_kind(ApiErrorKind::FederationVersionConflict),
+                );
             }
-            let old = domain.peers.get(id)
+            let old = domain
+                .peers
+                .get(id)
                 .ok_or_else(|| ApiError::not_found("enrolled federation peer not found"))?;
             if old.membership == FederationMembershipState::Revoked {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
@@ -31,10 +39,13 @@ impl AppState {
             }
             // A malformed retained pair cannot be repaired by changing its
             // locator. Validate before deriving any successor configuration.
-            domain.validate().map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+            domain
+                .validate()
+                .map_err(|_| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
             let old = old.clone();
             for placement in domain.placements.values_mut().filter(|placement| {
-                placement.mailbox_only && placement.state != FederationPlacementState::Completed
+                placement.mailbox_only
+                    && placement.state != FederationPlacementState::Completed
                     && placement.identity.host_id == id
             }) {
                 let prior = &placement.peer;
@@ -53,11 +64,16 @@ impl AppState {
                 // Only mailbox locator bookkeeping moves. Old execution
                 // proof, link incarnation and immutable INSTALL intent remain.
                 placement.peer.endpoint.ssh_host = ssh_host.clone();
-                if let Some(intent) = domain.binding_install_intents.get_mut(&placement.admission_key) {
+                if let Some(intent) = domain
+                    .binding_install_intents
+                    .get_mut(&placement.admission_key)
+                {
                     intent.configuration_basis = placement.peer.configuration_basis();
                 }
             }
-            let peer = domain.peers.get_mut(id)
+            let peer = domain
+                .peers
+                .get_mut(id)
                 .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
             peer.endpoint.ssh_host = ssh_host;
             peer.record_generation = federation_next_generation(peer.record_generation)?;
@@ -67,13 +83,16 @@ impl AppState {
         })
     }
 
-    fn enroll_federation_peer(&self, peer: FederationPeerRecord) -> Result<(), ApiError> {
+    pub(crate) fn enroll_federation_peer(
+        &self,
+        peer: FederationPeerRecord,
+    ) -> Result<(), ApiError> {
         self.enroll_federation_peer_with(peer, |_, _| Ok(()))
     }
 
     // The callback edits only this cloned candidate; it cannot perform I/O,
     // re-enter AppState or dispatch a second mutation. Error installs nothing.
-    fn enroll_federation_peer_with(
+    pub(crate) fn enroll_federation_peer_with(
         &self,
         mut peer: FederationPeerRecord,
         configure: impl FnOnce(&mut FederationState, &FederationPeerRecord) -> Result<(), ApiError>,
@@ -117,7 +136,7 @@ impl AppState {
         })
     }
 
-    fn federation_peer_connected(
+    pub(crate) fn federation_peer_connected(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: String,
@@ -127,7 +146,7 @@ impl AppState {
 
     // The installed record receipt survives durability errors for the owning
     // channel's accounting. A runtime link is published only after durability.
-    fn federation_peer_connected_owned(
+    pub(crate) fn federation_peer_connected_owned(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: String,
@@ -141,7 +160,7 @@ impl AppState {
         )
     }
 
-    fn federation_peer_connected_owned_with_clock(
+    pub(crate) fn federation_peer_connected_owned_with_clock(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: String,
@@ -207,7 +226,7 @@ impl AppState {
         Ok(updated)
     }
 
-    fn verify_federation_peer(
+    pub(crate) fn verify_federation_peer(
         &self,
         expected: &FederationPeerSnapshot,
         checks: FederationVerificationChecks,
@@ -217,7 +236,7 @@ impl AppState {
 
     // Report finalization shares the proof's exact candidate and content fence.
     // The callback must preserve its peer/link/proof and Draining admission hold.
-    fn verify_federation_peer_with(
+    pub(crate) fn verify_federation_peer_with(
         &self,
         expected: &FederationPeerSnapshot,
         checks: FederationVerificationChecks,
@@ -258,7 +277,7 @@ impl AppState {
         })
     }
 
-    fn transition_federation_peer(
+    pub(crate) fn transition_federation_peer(
         &self,
         expected: &FederationPeerSnapshot,
         next: FederationMembershipState,

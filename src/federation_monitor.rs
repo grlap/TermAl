@@ -1,7 +1,9 @@
 // Owns bounded central handshakes, health probes and exact SSH cleanup.
 // Does not change enrollment or retry application commands. Split from federation_peer.rs.
 
-async fn federation_central_monitor(
+use super::*;
+
+pub(crate) async fn federation_central_monitor(
     snapshot: &FederationPeerSnapshot,
     client: &FederationRpcClient,
     known_hosts: PathBuf,
@@ -21,7 +23,9 @@ async fn federation_central_monitor(
     let start_channel = client.channel.clone();
     let start_stop = stop.clone();
     let started = tokio::time::Instant::now();
-    if let Some(reporter) = &attempt.reporter { reporter.stage("sshSpawn"); }
+    if let Some(reporter) = &attempt.reporter {
+        reporter.stage("sshSpawn");
+    }
     let mut process = federation_os_operation(
         move |owned| {
             if *start_stop.borrow()
@@ -128,19 +132,17 @@ async fn federation_central_monitor(
         outcome
     }.await;
     client.channel.invalidate();
-    if let Some(reporter) = &attempt.reporter { reporter.stage("sshCleanup"); }
-    if let Err(error) = federation_os_cleanup(
-        process,
-        attempt.os.clone(),
-        io.operation_timeout,
-    )
-    .await
+    if let Some(reporter) = &attempt.reporter {
+        reporter.stage("sshCleanup");
+    }
+    if let Err(error) =
+        federation_os_cleanup(process, attempt.os.clone(), io.operation_timeout).await
     {
         return Err(error);
     }
     outcome
 }
-async fn federation_satellite_monitor(
+pub(crate) async fn federation_satellite_monitor(
     client: &FederationRpcClient,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     retry: &mut FederationBackoff,

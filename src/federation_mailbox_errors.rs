@@ -1,8 +1,10 @@
 // Owns bounded authenticated mailbox error classification and correlation.
 // No remote prose acquires retry authority; transport verification comes first.
+
+use super::*;
 const FEDERATION_MAILBOX_ERROR_BYTES: usize = 4096;
 
-fn federation_mailbox_upgrade_required() -> ApiError {
+pub(crate) fn federation_mailbox_upgrade_required() -> ApiError {
     ApiError::bad_request("upgradeRequired; upgrade both mailbox endpoints before retrying")
         .with_kind(ApiErrorKind::FederationMailboxUpgradeRequired)
 }
@@ -40,67 +42,107 @@ impl FederationMailboxOperation {
     }
 }
 
-fn federation_mailbox_error_response(
-    request: &FederationMailboxRequest, error: ApiError,
+pub(crate) fn federation_mailbox_error_response(
+    request: &FederationMailboxRequest,
+    error: ApiError,
 ) -> Response {
     let (status, class, effect) = match error.kind {
-        Some(ApiErrorKind::FederationMailboxUpgradeRequired) =>
-            (StatusCode::BAD_REQUEST, "upgradeRequired", "notEntered"),
-        Some(ApiErrorKind::FederationMailboxReadExpired) =>
-            (StatusCode::GONE, "read_key_expired", "expired"),
-        Some(ApiErrorKind::FederationMailboxReadConflict) =>
-            (StatusCode::CONFLICT, "read_key_conflict", "unknown"),
-        Some(ApiErrorKind::FederationMailboxReadNotFound) =>
-            (StatusCode::NOT_FOUND, "read_mailbox_not_found", "notEntered"),
-        Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page }) =>
-            (StatusCode::CONFLICT, "participant_retired_during_read", if before_page { "notEntered" } else { "unknown" }),
-        Some(ApiErrorKind::FederationMailboxWriterAdmission) =>
-            (StatusCode::SERVICE_UNAVAILABLE, "writer_admission_timeout", "notCommitted"),
-        Some(ApiErrorKind::FederationMailboxDirectoryFence) =>
-            (StatusCode::SERVICE_UNAVAILABLE, "directory_fence_unavailable", "notEntered"),
-        _ if error.status == StatusCode::CONFLICT =>
-            (StatusCode::CONFLICT, "authority_changed", "unknown"),
-        _ if error.status == StatusCode::BAD_REQUEST =>
-            (StatusCode::BAD_REQUEST, "request_refused", "unknown"),
-        _ if error.status.is_server_error() =>
-            (StatusCode::SERVICE_UNAVAILABLE, "operation_unavailable", "unknown"),
+        Some(ApiErrorKind::FederationMailboxUpgradeRequired) => {
+            (StatusCode::BAD_REQUEST, "upgradeRequired", "notEntered")
+        }
+        Some(ApiErrorKind::FederationMailboxReadExpired) => {
+            (StatusCode::GONE, "read_key_expired", "expired")
+        }
+        Some(ApiErrorKind::FederationMailboxReadConflict) => {
+            (StatusCode::CONFLICT, "read_key_conflict", "unknown")
+        }
+        Some(ApiErrorKind::FederationMailboxReadNotFound) => (
+            StatusCode::NOT_FOUND,
+            "read_mailbox_not_found",
+            "notEntered",
+        ),
+        Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page }) => (
+            StatusCode::CONFLICT,
+            "participant_retired_during_read",
+            if before_page { "notEntered" } else { "unknown" },
+        ),
+        Some(ApiErrorKind::FederationMailboxWriterAdmission) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "writer_admission_timeout",
+            "notCommitted",
+        ),
+        Some(ApiErrorKind::FederationMailboxDirectoryFence) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "directory_fence_unavailable",
+            "notEntered",
+        ),
+        _ if error.status == StatusCode::CONFLICT => {
+            (StatusCode::CONFLICT, "authority_changed", "unknown")
+        }
+        _ if error.status == StatusCode::BAD_REQUEST => {
+            (StatusCode::BAD_REQUEST, "request_refused", "unknown")
+        }
+        _ if error.status.is_server_error() => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "operation_unavailable",
+            "unknown",
+        ),
         _ => return error.into_response(),
     };
     let envelope = FederationMailboxErrorEnvelope {
         mailbox_error: FederationMailboxErrorBody {
-            class: class.to_owned(), effect: effect.to_owned(),
+            class: class.to_owned(),
+            effect: effect.to_owned(),
             operation: request.operation.error_operation().to_owned(),
-            request_digest: sha256_hex(&serde_json::to_vec(request).expect("mailbox request serializes")),
+            request_digest: sha256_hex(
+                &serde_json::to_vec(request).expect("mailbox request serializes"),
+            ),
         },
     };
     (status, Json(envelope)).into_response()
 }
 
-fn federation_mailbox_unknown_response(
-    request: Option<&FederationMailboxRequest>, class: &'static str,
+pub(crate) fn federation_mailbox_unknown_response(
+    request: Option<&FederationMailboxRequest>,
+    class: &'static str,
 ) -> Response {
     let Some(request) = request else {
-        return federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE,
-            "central mailbox request unavailable").into_response();
+        return federation_mailbox_unknown_outcome(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "central mailbox request unavailable",
+        )
+        .into_response();
     };
-    (StatusCode::SERVICE_UNAVAILABLE, Json(FederationMailboxErrorEnvelope {
-        mailbox_error: FederationMailboxErrorBody {
-            class: class.to_owned(), effect: "unknown".to_owned(),
-            operation: request.operation.error_operation().to_owned(),
-            request_digest: sha256_hex(&serde_json::to_vec(request).expect("mailbox request serializes")),
-        },
-    })).into_response()
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(FederationMailboxErrorEnvelope {
+            mailbox_error: FederationMailboxErrorBody {
+                class: class.to_owned(),
+                effect: "unknown".to_owned(),
+                operation: request.operation.error_operation().to_owned(),
+                request_digest: sha256_hex(
+                    &serde_json::to_vec(request).expect("mailbox request serializes"),
+                ),
+            },
+        }),
+    )
+        .into_response()
 }
 
-fn federation_mailbox_verified_error(
-    request: &FederationMailboxRequest, status: StatusCode, bytes: &[u8],
+pub(crate) fn federation_mailbox_verified_error(
+    request: &FederationMailboxRequest,
+    status: StatusCode,
+    bytes: &[u8],
 ) -> ApiError {
     let decode = || -> Option<ApiError> {
-        if bytes.len() > FEDERATION_MAILBOX_ERROR_BYTES { return None; }
+        if bytes.len() > FEDERATION_MAILBOX_ERROR_BYTES {
+            return None;
+        }
         let envelope: FederationMailboxErrorEnvelope = serde_json::from_slice(bytes).ok()?;
         let body = envelope.mailbox_error;
         if body.operation != request.operation.error_operation()
-            || body.request_digest != sha256_hex(&serde_json::to_vec(request).ok()?) {
+            || body.request_digest != sha256_hex(&serde_json::to_vec(request).ok()?)
+        {
             return None;
         }
         match (status, body.class.as_str(), body.effect.as_str()) {
@@ -131,9 +173,18 @@ fn federation_mailbox_verified_error(
     };
     let error = decode().unwrap_or_else(|| {
         // A malformed authenticated envelope is not a no-write certificate.
-        if bytes.windows(b"mailboxError".len()).any(|part| part == b"mailboxError") {
-            federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE, "invalid central mailbox error envelope")
-        } else if matches!(status, StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY) {
+        if bytes
+            .windows(b"mailboxError".len())
+            .any(|part| part == b"mailboxError")
+        {
+            federation_mailbox_unknown_outcome(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "invalid central mailbox error envelope",
+            )
+        } else if matches!(
+            status,
+            StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY
+        ) {
             // A peer without the required v2 refusal envelope is incompatible.
             // Stop at this shared boundary; never resend using an older wire.
             federation_mailbox_upgrade_required()
@@ -144,22 +195,44 @@ fn federation_mailbox_verified_error(
     federation_mailbox_read_advice(request, error)
 }
 
-fn federation_mailbox_read_advice(request: &FederationMailboxRequest, mut error: ApiError) -> ApiError {
+pub(crate) fn federation_mailbox_read_advice(
+    request: &FederationMailboxRequest,
+    mut error: ApiError,
+) -> ApiError {
     if error.message.contains(FEDERATION_MAILBOX_UNKNOWN_OUTCOME) {
         let advice = match &request.operation {
-            FederationMailboxOperation::ReadKeyed { read_key, .. } =>
-                Some(if read_key.len() <= 160 && read_key.bytes().all(|byte|
-                    byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'-')) {
-                    format!("resolve the identical read with readKey {read_key}; pending is not acknowledgement authority")
-                } else { "resolve the identical original readKey; pending is not acknowledgement authority".to_owned() }),
-            FederationMailboxOperation::Read { .. } =>
-                Some("repeat the logical mailbox read; do not acknowledge until a receipt is issued".to_owned()),
+            FederationMailboxOperation::ReadKeyed { read_key, .. } => Some(
+                if read_key.len() <= 160
+                    && read_key
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b':' | b'-'))
+                {
+                    format!(
+                        "resolve the identical read with readKey {read_key}; pending is not acknowledgement authority"
+                    )
+                } else {
+                    "resolve the identical original readKey; pending is not acknowledgement authority".to_owned()
+                },
+            ),
+            FederationMailboxOperation::Read { .. } => Some(
+                "repeat the logical mailbox read; do not acknowledge until a receipt is issued"
+                    .to_owned(),
+            ),
             _ => None,
         };
         if let Some(advice) = advice {
-            error.message = error.message.replace("retry the original request with the same idempotencyKey", &advice);
-            if !error.message.contains("readKey") && matches!(request.operation, FederationMailboxOperation::ReadKeyed { .. }) {
-                error.message.push_str("; "); error.message.push_str(&advice);
+            error.message = error.message.replace(
+                "retry the original request with the same idempotencyKey",
+                &advice,
+            );
+            if !error.message.contains("readKey")
+                && matches!(
+                    request.operation,
+                    FederationMailboxOperation::ReadKeyed { .. }
+                )
+            {
+                error.message.push_str("; ");
+                error.message.push_str(&advice);
             }
         }
     }

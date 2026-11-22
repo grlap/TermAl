@@ -5,6 +5,9 @@
 // not own when a label is captured or the environment fingerprint it feeds
 // (`engram_turn_checks.rs`). Split out of `engram_turn_checks.rs`.
 
+#[cfg(test)]
+use super::*;
+
 /// How long one toolchain command may take, within the checkpoint's shared
 /// budget, before the check goes without a toolchain label.
 #[cfg(test)]
@@ -29,7 +32,9 @@ const ENGRAM_ENVIRONMENT_LABEL_MAX_BYTES: usize = 256;
 ///
 /// A `+` selector counts only as cargo's first argument, as rustup reads it.
 #[cfg(test)]
-fn engram_cargo_toolchain_selector(check: &EngramCheckCommand) -> Option<Option<String>> {
+pub(crate) fn engram_cargo_toolchain_selector(
+    check: &EngramCheckCommand,
+) -> Option<Option<String>> {
     if check.program != "cargo" {
         return None;
     }
@@ -45,7 +50,7 @@ fn engram_cargo_toolchain_selector(check: &EngramCheckCommand) -> Option<Option<
 
 /// Whether `name` can only name an installed toolchain, never a directory:
 /// ASCII letters, digits, `.`, `_` and `-`, starting with a letter or digit.
-fn engram_plain_toolchain_name(name: &str) -> bool {
+pub(crate) fn engram_plain_toolchain_name(name: &str) -> bool {
     name.starts_with(|first: char| first.is_ascii_alphanumeric())
         && name.chars().all(|character| {
             character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
@@ -56,7 +61,7 @@ fn engram_plain_toolchain_name(name: &str) -> bool {
 /// nothing when it is only asked to show or locate a toolchain: 1.28 stopped
 /// `rustup show` from installing and honours `RUSTUP_AUTO_INSTALL`.
 #[cfg(test)]
-fn engram_rustup_never_installs(version: &str) -> bool {
+pub(crate) fn engram_rustup_never_installs(version: &str) -> bool {
     version
         .strip_prefix("rustup ")
         .and_then(|rest| rest.split_whitespace().next())
@@ -71,7 +76,7 @@ fn engram_rustup_never_installs(version: &str) -> bool {
 /// name (`stable-x86_64-pc-windows-msvc (default)`). A toolchain file can
 /// name a directory instead, whose binaries the workspace may hold.
 #[cfg(test)]
-fn engram_rustup_active_toolchain(output: &str) -> Option<String> {
+pub(crate) fn engram_rustup_active_toolchain(output: &str) -> Option<String> {
     let name = output.split_whitespace().next()?;
     engram_plain_toolchain_name(name).then(|| name.to_owned())
 }
@@ -86,7 +91,7 @@ fn engram_rustup_active_toolchain(output: &str) -> Option<String> {
 /// runs; TermAl names only a plain `.exe`, and nothing when a shim comes
 /// first.
 #[cfg(test)]
-fn engram_host_program(
+pub(crate) fn engram_host_program(
     search_path: &std::ffi::OsStr,
     name: &str,
     workspace: &str,
@@ -146,7 +151,7 @@ fn engram_is_executable_file(path: &FsPath) -> bool {
 /// `deadline` passes first, so the check goes without environment evidence
 /// rather than with a guessed one.
 #[cfg(test)]
-fn engram_toolchain_label(
+pub(crate) fn engram_toolchain_label(
     command: &EngramCheckCommand,
     directory: &FsPath,
     deadline: std::time::Instant,
@@ -164,7 +169,7 @@ fn engram_toolchain_label(
 /// Runs a version command: `program` with `args` in a directory, giving the
 /// first line it prints (`engram_probe_output`).
 #[cfg(test)]
-type EngramToolchainProbe<'a> = &'a dyn Fn(&FsPath, &[&str], &FsPath) -> Option<String>;
+pub(crate) type EngramToolchainProbe<'a> = &'a dyn Fn(&FsPath, &[&str], &FsPath) -> Option<String>;
 
 /// The label of the cargo toolchain `selector` names, or with none the one
 /// active in `workdir`, the check's directory. The cargo a check run by name
@@ -178,7 +183,7 @@ type EngramToolchainProbe<'a> = &'a dyn Fn(&FsPath, &[&str], &FsPath) -> Option<
 /// workspace, but for rustup's `show active-toolchain`, which reads the
 /// overrides of the check's directory.
 #[cfg(test)]
-fn engram_cargo_toolchain_label(
+pub(crate) fn engram_cargo_toolchain_label(
     search_path: &std::ffi::OsStr,
     selector: Option<&str>,
     workdir: &FsPath,

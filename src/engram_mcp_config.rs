@@ -7,20 +7,22 @@
 // work-session transport and project settings validation remain in
 // `engram_host_adapter.rs`.
 
-const ENGRAM_MCP_SERVER_NAME: &str = "engram";
-const ENGRAM_HOME_ENV: &str = "ENGRAM_HOME";
-const ENGRAM_ACTOR_ID_ENV: &str = "ENGRAM_ACTOR_ID";
-const ENGRAM_ACTOR_CONTEXT_ENV: &str = "ENGRAM_ACTOR_CONTEXT";
-const ENGRAM_SESSION_ID_ENV: &str = "ENGRAM_SESSION_ID";
-const ENGRAM_AGENT_PROCESS_ENV_NAMES: [&str; 4] = [
+use super::*;
+
+pub(crate) const ENGRAM_MCP_SERVER_NAME: &str = "engram";
+pub(crate) const ENGRAM_HOME_ENV: &str = "ENGRAM_HOME";
+pub(crate) const ENGRAM_ACTOR_ID_ENV: &str = "ENGRAM_ACTOR_ID";
+pub(crate) const ENGRAM_ACTOR_CONTEXT_ENV: &str = "ENGRAM_ACTOR_CONTEXT";
+pub(crate) const ENGRAM_SESSION_ID_ENV: &str = "ENGRAM_SESSION_ID";
+pub(crate) const ENGRAM_AGENT_PROCESS_ENV_NAMES: [&str; 4] = [
     ENGRAM_HOME_ENV,
     ENGRAM_ACTOR_ID_ENV,
     ENGRAM_ACTOR_CONTEXT_ENV,
     ENGRAM_SESSION_ID_ENV,
 ];
-const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
+pub(crate) const ENGRAM_REQUIRED_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
     [ENGRAM_HOME_ENV, ENGRAM_ACTOR_ID_ENV, ENGRAM_SESSION_ID_ENV];
-const ENGRAM_CONTEXT_NUDGE_MAX_BYTES: usize = 32 * 1024;
+pub(crate) const ENGRAM_CONTEXT_NUDGE_MAX_BYTES: usize = 32 * 1024;
 const ENGRAM_CONTEXT_NUDGE_READER_LABEL: &str = "context nudge";
 
 /// The tracker's MCP tools that only read, each with the arguments it may
@@ -35,7 +37,7 @@ const ENGRAM_CONTEXT_NUDGE_READER_LABEL: &str = "context nudge";
 /// `peek: true` (checked in `engram_mcp_tool_call_only_reads`); without it, it
 /// stages delivery and acknowledges the memory position. Every other word
 /// writes.
-const ENGRAM_MCP_READ_TOOLS: &[(&str, &[&str])] = &[
+pub(crate) const ENGRAM_MCP_READ_TOOLS: &[(&str, &[&str])] = &[
     ("next", &["peek", "limit", "verbose"]),
     (
         "ls",
@@ -66,7 +68,7 @@ const ENGRAM_MCP_READ_TOOLS: &[(&str, &[&str])] = &[
 /// of the tracker server's tools (`mcp__engram__<word>`). The qualified name
 /// is the only identity a permission request carries; a bare leaf name never
 /// matches, and neither does a server whose name merely starts the same way.
-fn engram_mcp_tool_word(qualified_tool_name: &str) -> Option<&str> {
+pub(crate) fn engram_mcp_tool_word(qualified_tool_name: &str) -> Option<&str> {
     qualified_tool_name
         .strip_prefix("mcp__")?
         .strip_prefix(ENGRAM_MCP_SERVER_NAME)?
@@ -76,7 +78,7 @@ fn engram_mcp_tool_word(qualified_tool_name: &str) -> Option<&str> {
 
 /// Whether one call of a tracker tool only reads: its word is on the list,
 /// every argument it carries is listed for that word, and `next` peeks.
-fn engram_mcp_tool_call_only_reads(word: &str, input: &Value) -> bool {
+pub(crate) fn engram_mcp_tool_call_only_reads(word: &str, input: &Value) -> bool {
     let Some((_, allowed)) = ENGRAM_MCP_READ_TOOLS.iter().find(|(name, _)| *name == word) else {
         return false;
     };
@@ -101,7 +103,7 @@ fn engram_mcp_tool_call_only_reads(word: &str, input: &Value) -> bool {
 /// session is the running child of a delegation that is not an evaluator, and
 /// the host itself installed the tracker's server on its runtime. An evaluator
 /// is briefed to call no tracker tool and gets none here.
-fn read_only_child_tracker_reads_allowed_locked(
+pub(crate) fn read_only_child_tracker_reads_allowed_locked(
     inner: &StateInner,
     child_session_id: &str,
 ) -> bool {
@@ -122,9 +124,9 @@ fn read_only_child_tracker_reads_allowed_locked(
             })
 }
 
-struct EngramMcpRuntimeConfig {
-    stdio: TermalDelegationMcpStdioConfig,
-    installed: EngramMcpInstalledDescriptor,
+pub(crate) struct EngramMcpRuntimeConfig {
+    pub(crate) stdio: TermalDelegationMcpStdioConfig,
+    pub(crate) installed: EngramMcpInstalledDescriptor,
 }
 
 /// Applies the base-tier identity to a per-session agent process.
@@ -132,7 +134,7 @@ struct EngramMcpRuntimeConfig {
 /// Clear inherited values even when Engram is ineligible. The TermAl server may
 /// itself have `ENGRAM_*` variables (for example during an operator smoke test),
 /// but an undeclared or disabled project must not inherit that unrelated identity.
-fn apply_agent_process_env(
+pub(crate) fn apply_agent_process_env(
     command: &mut Command,
     termal: Option<&BTreeMap<String, String>>,
     engram: Option<&TermalDelegationMcpStdioConfig>,
@@ -167,49 +169,55 @@ fn apply_agent_process_env(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramContextNudgePreparation {
+pub(crate) enum EngramContextNudgePreparation {
     NotApplicable,
     Ready,
     Failed,
 }
 
 #[derive(Clone)]
-struct EngramContextNudgeTarget {
-    host_workdir: PathBuf,
-    command: PathBuf,
-    home: String,
-    project_file: PathBuf,
-    project_root: PathBuf,
-    actor_id: String,
-    actor_context: Option<String>,
-    session_id: String,
-    host_instance_id: String,
-    generation: u64,
+pub(crate) struct EngramContextNudgeTarget {
+    pub(crate) host_workdir: PathBuf,
+    pub(crate) command: PathBuf,
+    pub(crate) home: String,
+    pub(crate) project_file: PathBuf,
+    pub(crate) project_root: PathBuf,
+    pub(crate) actor_id: String,
+    pub(crate) actor_context: Option<String>,
+    pub(crate) session_id: String,
+    pub(crate) host_instance_id: String,
+    pub(crate) generation: u64,
     /// False for a read-only delegation child. With a generation, the
     /// tracker's orientation tells the reader to list memories under it, a
     /// call a read-only child's gate refuses; without one it gives no such
     /// directive, and the child reads its memories with the plain listing,
     /// which a read-only Claude child's gate admits.
-    advertise_context_generation: bool,
-    timeout: Duration,
+    pub(crate) advertise_context_generation: bool,
+    pub(crate) timeout: Duration,
 }
 
 // Own the existing refresh reservation even if shutdown drops the worker
 // before its closure runs, or the read fails before reaching publication.
-struct EngramContextNudgeReadClaim {
-    state: AppState,
-    session_id: String,
-    generation: u64,
-    armed: std::sync::atomic::AtomicBool,
+pub(crate) struct EngramContextNudgeReadClaim {
+    pub(crate) state: AppState,
+    pub(crate) session_id: String,
+    pub(crate) generation: u64,
+    pub(crate) armed: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for EngramContextNudgeReadClaim {
     fn drop(&mut self) {
-        if !self.armed.load(std::sync::atomic::Ordering::Acquire) { return; }
+        if !self.armed.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         // This runs while the worker unwinds, and a second panic there aborts
         // the process. With the mutex poisoned, nothing can read the release.
-        let Ok(mut inner) = self.state.inner.lock() else { return; };
-        let Some(index) = inner.find_session_index(&self.session_id) else { return; };
+        let Ok(mut inner) = self.state.inner.lock() else {
+            return;
+        };
+        let Some(index) = inner.find_session_index(&self.session_id) else {
+            return;
+        };
         let cache = &mut inner.sessions[index].engram;
         if cache.context_nudge_in_progress_generation == Some(self.generation) {
             cache.context_nudge_in_progress = false;
@@ -220,7 +228,7 @@ impl Drop for EngramContextNudgeReadClaim {
 
 impl AppState {
     #[allow(dead_code)]
-    fn engram_mcp_stdio_config_for_session(
+    pub(crate) fn engram_mcp_stdio_config_for_session(
         &self,
         session_id: &str,
     ) -> Option<TermalDelegationMcpStdioConfig> {
@@ -229,7 +237,7 @@ impl AppState {
         engram_mcp_stdio_config_for_session_locked(&inner, session_id)
     }
 
-    fn engram_mcp_stdio_config_for_runtime(
+    pub(crate) fn engram_mcp_stdio_config_for_runtime(
         &self,
         session_id: &str,
         runtime_token: &RuntimeToken,
@@ -251,14 +259,14 @@ impl AppState {
         Some(runtime_config.stdio)
     }
 
-    fn mark_engram_context_nudge_pending(&self, session_id: &str) {
+    pub(crate) fn mark_engram_context_nudge_pending(&self, session_id: &str) {
         self.mark_engram_context_refresh_needed(session_id, None);
     }
 
     /// Compaction is a deferred refresh, not a configuration invalidation.
     /// Preparation retains fetched/in-flight pages until delivery acknowledges
     /// them. Missing ids (including legacy/Claude signals) cannot be deduped.
-    fn mark_engram_context_refresh_needed(
+    pub(crate) fn mark_engram_context_refresh_needed(
         &self,
         session_id: &str,
         compaction_item_id: Option<&str>,
@@ -276,7 +284,10 @@ impl AppState {
 
     /// Refreshes the repository-declaration cache without holding the global
     /// state mutex across the filesystem probe.
-    fn refresh_engram_project_declaration_for_session_off_lock(&self, session_id: &str) -> bool {
+    pub(crate) fn refresh_engram_project_declaration_for_session_off_lock(
+        &self,
+        session_id: &str,
+    ) -> bool {
         let snapshot = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -362,24 +373,40 @@ impl AppState {
     /// Ordinary sends only inspect local state and reserve an advisory read.
     /// Cached context remains available to prompt composition; an absent or
     /// in-flight page never holds provider enqueue.
-    fn schedule_engram_context_nudge(&self, session_id: &str) {
+    pub(crate) fn schedule_engram_context_nudge(&self, session_id: &str) {
         let generation = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             if !inner.sessions[index].is_local_session()
                 || session_is_acceptance_evaluator_child_locked(&inner, session_id)
-            { return; }
-            let Some(project) = engram_project_for_session_locked(&inner, session_id) else { return; };
-            if project.remote_id != LOCAL_REMOTE_ID || inner.engram_project_resets.contains(&project.id)
-                || !project.engram.as_ref().is_some_and(|settings| settings.is_base_enabled()
-                    && settings.binary_path.is_some() && settings.home.is_some())
-            { return; }
+            {
+                return;
+            }
+            let Some(project) = engram_project_for_session_locked(&inner, session_id) else {
+                return;
+            };
+            if project.remote_id != LOCAL_REMOTE_ID
+                || inner.engram_project_resets.contains(&project.id)
+                || !project.engram.as_ref().is_some_and(|settings| {
+                    settings.is_base_enabled()
+                        && settings.binary_path.is_some()
+                        && settings.home.is_some()
+                })
+            {
+                return;
+            }
             let cache = &mut inner.sessions[index].engram;
-            if !cache.context_needs_refresh() || cache.context_nudge_in_progress
-            { return; }
+            if !cache.context_needs_refresh() || cache.context_nudge_in_progress {
+                return;
+            }
             let generation = if cache.context_refresh_needed {
                 cache.context_nudge_generation.saturating_add(1)
-            } else { cache.context_nudge_generation }.max(1);
+            } else {
+                cache.context_nudge_generation
+            }
+            .max(1);
             cache.context_nudge_generation = generation;
             cache.context_nudge_in_progress = true;
             cache.context_nudge_in_progress_generation = Some(generation);
@@ -387,7 +414,9 @@ impl AppState {
             generation
         };
         let claim = Arc::new(EngramContextNudgeReadClaim {
-            state: self.clone(), session_id: session_id.to_owned(), generation,
+            state: self.clone(),
+            session_id: session_id.to_owned(),
+            generation,
             armed: std::sync::atomic::AtomicBool::new(true),
         });
         // Retain a caller reference until spawn returns, so an OS spawn
@@ -395,12 +424,17 @@ impl AppState {
         let worker_claim = claim.clone();
         // The existing CLI read uses its own deadline and child cleanup;
         // it does not register that child for capture shutdown cancellation.
-        if let Err(error) = self.capture_lifetime.spawn_observer("termal-context-nudge", move || {
-            let claim = worker_claim;
-            claim.state.prepare_engram_context_nudge_claiming_off_lock(
-                &claim.session_id, None, Some(&claim),
-            );
-        }) {
+        if let Err(error) =
+            self.capture_lifetime
+                .spawn_observer("termal-context-nudge", move || {
+                    let claim = worker_claim;
+                    claim.state.prepare_engram_context_nudge_claiming_off_lock(
+                        &claim.session_id,
+                        None,
+                        Some(&claim),
+                    );
+                })
+        {
             eprintln!("engram> session={session_id} context refresh worker failed: {error}");
         }
     }
@@ -408,7 +442,7 @@ impl AppState {
     /// Explicit synchronous preparation for context lifecycle fixtures. The
     /// production compact hook calls the same owner with its exact ticket.
     #[cfg(test)]
-    fn prepare_engram_context_nudge_off_lock(
+    pub(crate) fn prepare_engram_context_nudge_off_lock(
         &self,
         session_id: &str,
     ) -> EngramContextNudgePreparation {
@@ -421,7 +455,7 @@ impl AppState {
     /// read nor reuses a page it did not fetch, nor reads again when the
     /// generation moved on meanwhile; each of those ends as `Failed`, and the
     /// next prompt carries the context instead.
-    fn prepare_engram_context_nudge_claiming_off_lock(
+    pub(crate) fn prepare_engram_context_nudge_claiming_off_lock(
         &self,
         session_id: &str,
         compact_hook_generation: Option<u64>,
@@ -500,11 +534,14 @@ impl AppState {
                     else {
                         return EngramContextNudgePreparation::NotApplicable;
                     };
-                    let generation = background_generation.unwrap_or_else(|| if record.engram.context_refresh_needed {
-                        record.engram.context_nudge_generation.saturating_add(1)
-                    } else {
-                        record.engram.context_nudge_generation
-                    }.max(1));
+                    let generation = background_generation.unwrap_or_else(|| {
+                        if record.engram.context_refresh_needed {
+                            record.engram.context_nudge_generation.saturating_add(1)
+                        } else {
+                            record.engram.context_nudge_generation
+                        }
+                        .max(1)
+                    });
                     if compact_hook_generation.is_some_and(|expected| expected != generation) {
                         return EngramContextNudgePreparation::Failed;
                     }
@@ -596,7 +633,9 @@ impl AppState {
                 // Release and disarm together: a retry may reserve this same
                 // context generation as soon as StateInner is unlocked.
                 if let Some(claim) = background_claim {
-                    claim.armed.store(false, std::sync::atomic::Ordering::Release);
+                    claim
+                        .armed
+                        .store(false, std::sync::atomic::Ordering::Release);
                 }
                 record.engram.context_nudge_in_progress = false;
                 record.engram.context_nudge_in_progress_generation = None;
@@ -640,7 +679,7 @@ impl AppState {
     }
 
     // Acknowledges local runtime-channel acceptance, not Engram work delivery.
-    fn acknowledge_engram_context_nudge_delivery(
+    pub(crate) fn acknowledge_engram_context_nudge_delivery(
         &self,
         session_id: &str,
         active_turn_generation: u64,
@@ -671,7 +710,10 @@ impl AppState {
     /// the session's Engram settings identity now. `None` when the session
     /// has no Engram context to give; the request stays recorded, so the next
     /// prompt still asks.
-    fn begin_engram_compact_hook_read(&self, session_id: &str) -> Option<EngramCompactHookTicket> {
+    pub(crate) fn begin_engram_compact_hook_read(
+        &self,
+        session_id: &str,
+    ) -> Option<EngramCompactHookTicket> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(session_id)?;
         inner
@@ -701,7 +743,7 @@ impl AppState {
     /// and not yet sent is a superseded local peek, dropped so the answer is
     /// never an older page under the compaction's new generation. A page a
     /// prompt is carrying right now stays, and the hook answers without it.
-    fn prepare_engram_compact_hook_context_off_lock(
+    pub(crate) fn prepare_engram_compact_hook_context_off_lock(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -720,8 +762,11 @@ impl AppState {
                 record.engram.pending_context_nudge = None;
             }
         }
-        if self.prepare_engram_context_nudge_claiming_off_lock(session_id, Some(ticket.generation), None)
-            != EngramContextNudgePreparation::Ready
+        if self.prepare_engram_context_nudge_claiming_off_lock(
+            session_id,
+            Some(ticket.generation),
+            None,
+        ) != EngramContextNudgePreparation::Ready
         {
             return None;
         }
@@ -743,7 +788,7 @@ impl AppState {
     /// generation moved on (a newer compaction or a settings change), the
     /// settings identity changed, or a prompt carrying the page is in flight.
     /// A later compaction's request for a fresh context stays.
-    fn acknowledge_engram_compact_hook_delivery(
+    pub(crate) fn acknowledge_engram_compact_hook_delivery(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -766,7 +811,7 @@ impl AppState {
     /// Whether the page for `ticket` may still be written to runtime `token`
     /// as the compact hook's answer: the conditions under which its written
     /// answer is acknowledged.
-    fn engram_compact_hook_context_is_current(
+    pub(crate) fn engram_compact_hook_context_is_current(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -782,21 +827,21 @@ impl AppState {
 /// What a compact hook callback's answer is correlated with, taken when the
 /// callback arrives.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramCompactHookTicket {
+pub(crate) struct EngramCompactHookTicket {
     /// The generation the compaction's own context read claims.
-    generation: u64,
-    identity: EngramCompactHookIdentity,
+    pub(crate) generation: u64,
+    pub(crate) identity: EngramCompactHookIdentity,
 }
 
 /// The Engram settings a session's context is read under: its project, the
 /// project's settings, and the actor the read speaks for. A disable, a reset,
 /// a project change or any settings change makes it differ.
 #[derive(Clone, PartialEq, Eq)]
-struct EngramCompactHookIdentity {
-    project_id: String,
-    root_path: String,
-    settings: EngramProjectSettings,
-    actor: (String, Option<String>),
+pub(crate) struct EngramCompactHookIdentity {
+    pub(crate) project_id: String,
+    pub(crate) root_path: String,
+    pub(crate) settings: EngramProjectSettings,
+    pub(crate) actor: (String, Option<String>),
 }
 
 impl std::fmt::Debug for EngramCompactHookIdentity {
@@ -854,7 +899,7 @@ fn compact_hook_page_is_current(
 
 /// The host fence around an Engram work context, as a prompt or a hook's
 /// additional context carries it.
-fn engram_context_fence(context: &str) -> String {
+pub(crate) fn engram_context_fence(context: &str) -> String {
     // The context comes from an external CLI/store. Keep it inside the host
     // fence even if a work item contains the literal closing delimiter.
     let context = context.replace('<', "&lt;");
@@ -862,23 +907,30 @@ fn engram_context_fence(context: &str) -> String {
 }
 
 #[cfg(test)]
-type TestEngramContextRead = Box<dyn FnOnce() -> std::result::Result<String, String> + Send>;
+pub(crate) type TestEngramContextRead =
+    Box<dyn FnOnce() -> std::result::Result<String, String> + Send>;
 
 #[cfg(test)]
-fn engram_test_context_reads() -> &'static Mutex<BTreeMap<PathBuf, TestEngramContextRead>> {
+pub(crate) fn engram_test_context_reads() -> &'static Mutex<BTreeMap<PathBuf, TestEngramContextRead>>
+{
     static READS: std::sync::OnceLock<Mutex<BTreeMap<PathBuf, TestEngramContextRead>>> =
         std::sync::OnceLock::new();
     READS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn run_engram_context_nudge(
+pub(crate) fn run_engram_context_nudge(
     target: &EngramContextNudgeTarget,
 ) -> std::result::Result<String, String> {
     let started = std::time::Instant::now();
     #[cfg(test)]
     {
-        let read = engram_test_context_reads().lock().unwrap().remove(&target.project_root);
-        if let Some(read) = read { return read(); }
+        let read = engram_test_context_reads()
+            .lock()
+            .unwrap()
+            .remove(&target.project_root);
+        if let Some(read) = read {
+            return read();
+        }
     }
     // A fresh host UUID prevents reuse after restore or a crash before persistence.
     // Keep the existing counter for context boundaries within this host run.
@@ -962,11 +1014,20 @@ fn run_engram_context_nudge(
     let stderr_reader = spawn_engram_cli_output_reader(stderr, ENGRAM_CONTEXT_NUDGE_READER_LABEL);
     let timeout = target.timeout;
     let status = wait_engram_cli_command(
-        || process.try_wait(), || started.elapsed(),
-        || std::thread::sleep(Duration::from_millis(5)), timeout,
-        ENGRAM_CALL_WARNING_AFTER, "work next",
-        |elapsed| eprintln!("engram warning> work next still running after {} ms", elapsed.as_millis()),
-    ).map_err(|error| error.message);
+        || process.try_wait(),
+        || started.elapsed(),
+        || std::thread::sleep(Duration::from_millis(5)),
+        timeout,
+        ENGRAM_CALL_WARNING_AFTER,
+        "work next",
+        |elapsed| {
+            eprintln!(
+                "engram warning> work next still running after {} ms",
+                elapsed.as_millis()
+            )
+        },
+    )
+    .map_err(|error| error.message);
     if status.is_err() {
         let _ = process_tree.terminate(&process);
         let _ = process.wait();
@@ -995,7 +1056,7 @@ fn run_engram_context_nudge(
     Ok(value.trim().to_owned())
 }
 
-fn truncate_engram_context_nudge(value: &mut String) -> bool {
+pub(crate) fn truncate_engram_context_nudge(value: &mut String) -> bool {
     if value.len() <= ENGRAM_CONTEXT_NUDGE_MAX_BYTES {
         return false;
     }
@@ -1008,7 +1069,7 @@ fn truncate_engram_context_nudge(value: &mut String) -> bool {
 }
 
 #[allow(dead_code)]
-fn engram_mcp_stdio_config_for_session_locked(
+pub(crate) fn engram_mcp_stdio_config_for_session_locked(
     inner: &StateInner,
     session_id: &str,
 ) -> Option<TermalDelegationMcpStdioConfig> {
@@ -1020,7 +1081,10 @@ fn engram_mcp_stdio_config_for_session_locked(
 /// verdicts through the host's submission tool, so it is given no tracker
 /// server of its own: a tracker call it makes is absent by construction, not
 /// refused by an instruction in its brief.
-fn session_is_acceptance_evaluator_child_locked(inner: &StateInner, session_id: &str) -> bool {
+pub(crate) fn session_is_acceptance_evaluator_child_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> bool {
     inner
         .find_delegation_index_by_child_session_id(session_id)
         .map(|index| &inner.delegations[index])
@@ -1034,7 +1098,10 @@ fn session_is_acceptance_evaluator_child_locked(inner: &StateInner, session_id: 
 /// delegation's status: a follow-up turn to a finished read-only delegation is
 /// dispatched before the delegation is marked running again, and is still
 /// read-only. A child whose delegation record is missing counts as read-only.
-fn session_is_read_only_delegation_child_locked(inner: &StateInner, session_id: &str) -> bool {
+pub(crate) fn session_is_read_only_delegation_child_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> bool {
     let Some(delegation_id) = inner
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))
@@ -1049,7 +1116,7 @@ fn session_is_read_only_delegation_child_locked(inner: &StateInner, session_id: 
         .is_none_or(|delegation| delegation.write_policy == DelegationWritePolicy::ReadOnly)
 }
 
-fn engram_mcp_runtime_config_for_session_locked(
+pub(crate) fn engram_mcp_runtime_config_for_session_locked(
     inner: &StateInner,
     session_id: &str,
 ) -> Option<EngramMcpRuntimeConfig> {

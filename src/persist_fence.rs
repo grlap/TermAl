@@ -5,23 +5,25 @@ persist.rs. This is a new boundary, not a moved implementation. It does not own
 delegation admission, provider delivery, SQL schema, or HTTP response policy.
 */
 
+use super::*;
+
 /// A captured session-row mutation sequence. Its identity survives clones,
 /// but a reload starts a different sequence even if counters repeat.
 #[derive(Clone)]
-struct PersistSessionWriteStamp {
-    incarnation: Arc<()>,
-    mutation_stamp: u64,
+pub(crate) struct PersistSessionWriteStamp {
+    pub(crate) incarnation: Arc<()>,
+    pub(crate) mutation_stamp: u64,
 }
 
 impl PersistSessionWriteStamp {
-    fn capture(record: &SessionRecord) -> Self {
+    pub(crate) fn capture(record: &SessionRecord) -> Self {
         Self {
             incarnation: record.persist_incarnation.clone(),
             mutation_stamp: record.mutation_stamp,
         }
     }
 
-    fn covers(&self, earlier: &Self) -> bool {
+    pub(crate) fn covers(&self, earlier: &Self) -> bool {
         Arc::ptr_eq(&self.incarnation, &earlier.incarnation)
             && self.mutation_stamp >= earlier.mutation_stamp
     }
@@ -31,7 +33,7 @@ impl PersistSessionWriteStamp {
 /// revision or the collector watermark (which can advance past deferred rows).
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
-enum PersistFenceTarget {
+pub(crate) enum PersistFenceTarget {
     Federation(Value),
     FederationBindings(Box<FederationBindingsFence>),
     ProviderCapacityRecovery {
@@ -121,7 +123,7 @@ enum PersistFenceTarget {
 }
 
 impl PersistFenceTarget {
-    fn is_in_delta(&self, delta: &PersistDelta) -> bool {
+    pub(crate) fn is_in_delta(&self, delta: &PersistDelta) -> bool {
         match self {
             Self::Federation(_) | Self::FederationBindings(_) => false,
             Self::EngramWorkAuthority(image) => {
@@ -228,7 +230,7 @@ impl PersistFenceTarget {
     /// not open another connection or treat row existence as proof. The one
     /// exception is a test state's manual write refused as stale, whose cached
     /// connection is already invalidated (`engram_authority_manual_write`).
-    fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
+    pub(crate) fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         let _snapshot = if connection.is_autocommit() {
             Some(rusqlite::Transaction::new_unchecked(
                 connection,
@@ -569,7 +571,7 @@ impl PersistFenceTarget {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum PersistFenceError {
+pub(crate) enum PersistFenceError {
     /// Acceptance is uncertain if the deadline raced an in-flight commit.
     Deadline,
     WriteFailed(String),
@@ -579,13 +581,13 @@ enum PersistFenceError {
     Superseded,
 }
 
-type PersistFenceResult = std::result::Result<(), PersistFenceError>;
+pub(crate) type PersistFenceResult = std::result::Result<(), PersistFenceError>;
 
 /// How far the writer took a fence, so a caller whose deadline passes can
 /// say where the time went. It moves forward with the writer and back to
 /// `InTick` when a later tick takes the fence again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PersistFencePhase {
+pub(crate) enum PersistFencePhase {
     /// Sent, but still in the writer's channel behind whatever it is doing.
     Queued,
     /// Taken by the writer; its next tick has not started.
@@ -597,7 +599,7 @@ enum PersistFencePhase {
 }
 
 impl PersistFencePhase {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Queued => "queued for the writer",
             Self::Accepted => "accepted, awaiting a writer tick",
@@ -610,19 +612,19 @@ impl PersistFencePhase {
 /// What the writer last did with a fence. Diagnostic only: it never
 /// resolves a fence or decides what a caller may do.
 #[derive(Clone, Debug)]
-struct PersistFenceProgress {
-    phase: PersistFencePhase,
+pub(crate) struct PersistFenceProgress {
+    pub(crate) phase: PersistFencePhase,
     /// When the tick now holding the fence started, on the real clock.
     tick_started: Option<std::time::Instant>,
     /// Phase timings of the last tick that finished with the fence.
-    last_tick: Option<PersistTickTimings>,
+    pub(crate) last_tick: Option<PersistTickTimings>,
 }
 
 impl PersistFenceProgress {
     /// The phase and what the writer's time went to, for a deadline report.
     /// The tick's age is real time, as the writer runs on it, even where the
     /// fence's own deadline runs on a scripted budget clock.
-    fn describe(&self) -> String {
+    pub(crate) fn describe(&self) -> String {
         let mut text = self.phase.label().to_owned();
         if let (PersistFencePhase::InTick, Some(started)) = (self.phase, self.tick_started) {
             text.push_str(&format!(" for {} ms", started.elapsed().as_millis()));
@@ -638,16 +640,16 @@ impl PersistFenceProgress {
     }
 }
 
-struct PersistFenceCompletion {
-    result: Mutex<Option<PersistFenceResult>>,
-    changed: Condvar,
-    deadline: std::time::Instant,
-    clock: EngramBudgetClock,
-    progress: Mutex<PersistFenceProgress>,
+pub(crate) struct PersistFenceCompletion {
+    pub(crate) result: Mutex<Option<PersistFenceResult>>,
+    pub(crate) changed: Condvar,
+    pub(crate) deadline: std::time::Instant,
+    pub(crate) clock: EngramBudgetClock,
+    pub(crate) progress: Mutex<PersistFenceProgress>,
 }
 
 impl PersistFenceCompletion {
-    fn progress(&self) -> std::sync::MutexGuard<'_, PersistFenceProgress> {
+    pub(crate) fn progress(&self) -> std::sync::MutexGuard<'_, PersistFenceProgress> {
         self.progress
             .lock()
             .expect("persist fence progress mutex poisoned")
@@ -670,7 +672,7 @@ impl PersistFenceCompletion {
         false
     }
 
-    fn poll_at(&self, now: std::time::Instant) -> Option<PersistFenceResult> {
+    pub(crate) fn poll_at(&self, now: std::time::Instant) -> Option<PersistFenceResult> {
         let mut slot = self.result.lock().expect("persist fence mutex poisoned");
         if slot.is_none() && now >= self.deadline {
             *slot = Some(Err(PersistFenceError::Deadline));
@@ -682,39 +684,42 @@ impl PersistFenceCompletion {
 
 /// Runs once, on the thread that records this fence's successful ACK, after
 /// the completion mutex is released. Never on a failure, Deadline or Drop.
-type PersistFenceAcknowledgement = Box<dyn FnOnce() + Send>;
+pub(crate) type PersistFenceAcknowledgement = Box<dyn FnOnce() + Send>;
 
 /// Runs once, on the thread that resolves the fence, with its final result:
 /// an acknowledgement, a failure, Deadline, or WorkerStopped on drop.
-type PersistFenceResolution = Box<dyn FnOnce(PersistFenceResult) + Send>;
+pub(crate) type PersistFenceResolution = Box<dyn FnOnce(PersistFenceResult) + Send>;
 
-struct PersistFence {
-    target: PersistFenceTarget,
-    observed_created_at: std::time::Instant,
-    completion: Arc<PersistFenceCompletion>,
-    on_acknowledged: Mutex<Option<PersistFenceAcknowledgement>>,
-    on_resolved: Mutex<Option<PersistFenceResolution>>,
+pub(crate) struct PersistFence {
+    pub(crate) target: PersistFenceTarget,
+    pub(crate) observed_created_at: std::time::Instant,
+    pub(crate) completion: Arc<PersistFenceCompletion>,
+    pub(crate) on_acknowledged: Mutex<Option<PersistFenceAcknowledgement>>,
+    pub(crate) on_resolved: Mutex<Option<PersistFenceResolution>>,
     /// The fence acknowledges a retry record, which the retry tick polls,
     /// rather than an admission's own durability, which its dispatch waits
     /// on. The writer treats both alike; a test writer tells them apart by
     /// this, not by the clock both are measured on.
     #[cfg_attr(not(test), allow(dead_code))]
-    retry_acknowledgement: bool,
+    pub(crate) retry_acknowledgement: bool,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone)]
-struct PersistFenceWaiter {
-    completion: Arc<PersistFenceCompletion>,
+pub(crate) struct PersistFenceWaiter {
+    pub(crate) completion: Arc<PersistFenceCompletion>,
 }
 
 impl PersistFence {
     #[cfg_attr(not(test), allow(dead_code))]
-    fn new(target: PersistFenceTarget, deadline: std::time::Instant) -> (Self, PersistFenceWaiter) {
+    pub(crate) fn new(
+        target: PersistFenceTarget,
+        deadline: std::time::Instant,
+    ) -> (Self, PersistFenceWaiter) {
         Self::new_with_clock(target, deadline, EngramBudgetClock::Real)
     }
 
-    fn new_with_clock(
+    pub(crate) fn new_with_clock(
         target: PersistFenceTarget,
         deadline: std::time::Instant,
         clock: EngramBudgetClock,
@@ -745,7 +750,7 @@ impl PersistFence {
 
     /// Marks the fence as a retry record's acknowledgement
     /// (`retry_acknowledgement`).
-    fn retry_acknowledgement(mut self) -> Self {
+    pub(crate) fn retry_acknowledgement(mut self) -> Self {
         self.retry_acknowledgement = true;
         self
     }
@@ -754,7 +759,7 @@ impl PersistFence {
     /// retry: the fence still resolves only by the writer, its deadline or
     /// its drop, and the hook runs only for the writer's exact ACK.
     #[cfg(test)]
-    fn on_acknowledged(self, hook: impl FnOnce() + Send + 'static) -> Self {
+    pub(crate) fn on_acknowledged(self, hook: impl FnOnce() + Send + 'static) -> Self {
         if let Ok(mut slot) = self.on_acknowledged.lock() {
             *slot = Some(Box::new(hook));
         }
@@ -765,14 +770,17 @@ impl PersistFence {
     /// `on_acknowledged` it adds no timer or retry, and it runs at most once,
     /// with the result the fence resolved to.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn on_resolved(self, hook: impl FnOnce(PersistFenceResult) + Send + 'static) -> Self {
+    pub(crate) fn on_resolved(
+        self,
+        hook: impl FnOnce(PersistFenceResult) + Send + 'static,
+    ) -> Self {
         if let Ok(mut slot) = self.on_resolved.lock() {
             *slot = Some(Box::new(hook));
         }
         self
     }
 
-    fn finish(&self, result: PersistFenceResult) {
+    pub(crate) fn finish(&self, result: PersistFenceResult) {
         let acknowledged = self
             .completion
             .resolve_at(result, self.completion.clock.now());
@@ -820,12 +828,12 @@ impl Drop for PersistFence {
 impl PersistFenceWaiter {
     /// Now, on the clock this fence's deadline is measured on: a caller that
     /// polls the fence reads it there, never on another clock.
-    fn now(&self) -> std::time::Instant {
+    pub(crate) fn now(&self) -> std::time::Instant {
         self.completion.clock.now()
     }
 
     /// Blocking boundary: the caller must release StateInner before entering.
-    fn wait(self) -> PersistFenceResult {
+    pub(crate) fn wait(self) -> PersistFenceResult {
         #[cfg(test)]
         if matches!(self.completion.clock, EngramBudgetClock::Scripted(_)) {
             return self
@@ -863,7 +871,7 @@ impl PersistFenceWaiter {
     /// Like `wait`, but no later than `until`: `None` means still unresolved
     /// at that moment. The fence stays live up to its own deadline, so the
     /// caller may look at its state and wait again. Same blocking boundary.
-    fn wait_until(&self, until: std::time::Instant) -> Option<PersistFenceResult> {
+    pub(crate) fn wait_until(&self, until: std::time::Instant) -> Option<PersistFenceResult> {
         #[cfg(test)]
         if matches!(self.completion.clock, EngramBudgetClock::Scripted(_)) {
             return self
@@ -901,13 +909,13 @@ impl PersistFenceWaiter {
     }
 
     /// What the writer last did with this fence, for a deadline report.
-    fn progress(&self) -> PersistFenceProgress {
+    pub(crate) fn progress(&self) -> PersistFenceProgress {
         self.completion.progress().clone()
     }
 
     /// The content this fence names was superseded, so nobody waits for it
     /// any more: resolve it, and the worker stops retrying on its behalf.
-    fn abandon(self) {
+    pub(crate) fn abandon(self) {
         self.completion.resolve_at(
             Err(PersistFenceError::Deadline),
             self.completion.clock.now(),
@@ -917,14 +925,14 @@ impl PersistFenceWaiter {
 }
 
 #[derive(Default)]
-struct PersistFenceBatch {
-    pending: Vec<PersistFence>,
+pub(crate) struct PersistFenceBatch {
+    pub(crate) pending: Vec<PersistFence>,
     observed_accepted: usize,
     observed_age_max_us: u64,
 }
 
 impl PersistFenceBatch {
-    fn accept(&mut self, request: PersistRequest) -> PersistWorkerWaitOutcome {
+    pub(crate) fn accept(&mut self, request: PersistRequest) -> PersistWorkerWaitOutcome {
         match request {
             PersistRequest::Delta => PersistWorkerWaitOutcome::Process,
             PersistRequest::Shutdown => PersistWorkerWaitOutcome::Shutdown,
@@ -942,7 +950,7 @@ impl PersistFenceBatch {
 
     /// A tick starts: every pending fence now waits on it. Marking again
     /// within the same tick keeps the first start, so collection counts.
-    fn mark_in_tick(&self) {
+    pub(crate) fn mark_in_tick(&self) {
         let started = std::time::Instant::now();
         for fence in &self.pending {
             let mut progress = fence.completion.progress();
@@ -963,11 +971,11 @@ impl PersistFenceBatch {
     }
 
     #[cfg(test)]
-    fn drain(&mut self, rx: &mpsc::Receiver<PersistRequest>, shutdown: bool) -> bool {
+    pub(crate) fn drain(&mut self, rx: &mpsc::Receiver<PersistRequest>, shutdown: bool) -> bool {
         self.drain_observed(rx, shutdown).0
     }
 
-    fn drain_observed(
+    pub(crate) fn drain_observed(
         &mut self,
         rx: &mpsc::Receiver<PersistRequest>,
         mut shutdown: bool,
@@ -980,20 +988,20 @@ impl PersistFenceBatch {
         (shutdown, drained)
     }
 
-    fn take_observer_acceptance(&mut self) -> (usize, u64) {
+    pub(crate) fn take_observer_acceptance(&mut self) -> (usize, u64) {
         (
             std::mem::take(&mut self.observed_accepted),
             std::mem::take(&mut self.observed_age_max_us),
         )
     }
 
-    fn fail(&mut self, error: PersistFenceError) {
+    pub(crate) fn fail(&mut self, error: PersistFenceError) {
         for fence in self.pending.drain(..) {
             fence.finish(Err(error.clone()));
         }
     }
 
-    fn expire_resolved(&mut self) {
+    pub(crate) fn expire_resolved(&mut self) {
         self.pending.retain(|fence| {
             fence
                 .completion
@@ -1002,12 +1010,12 @@ impl PersistFenceBatch {
         });
     }
 
-    fn has_pending(&self) -> bool {
+    pub(crate) fn has_pending(&self) -> bool {
         !self.pending.is_empty()
     }
 
     #[cfg(test)]
-    fn finish_write(
+    pub(crate) fn finish_write(
         &mut self,
         delta: &PersistDelta,
         result: &Result<Vec<String>>,
@@ -1090,7 +1098,7 @@ impl PersistFenceBatch {
 
 /// Test-only: the production writer calls `persist_delta_with_fences_timed`.
 #[cfg(test)]
-fn persist_delta_with_fences(
+pub(crate) fn persist_delta_with_fences(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
@@ -1108,7 +1116,7 @@ fn persist_delta_with_fences(
 /// `persist_delta_with_fences`, recording each write phase into `timings`
 /// (whose `collect` the caller measured) and leaving them on the fences
 /// that are still pending afterwards.
-fn persist_delta_with_fences_timed(
+pub(crate) fn persist_delta_with_fences_timed(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
@@ -1142,7 +1150,7 @@ fn persist_delta_with_fences_timed(
 }
 
 #[cfg(test)]
-fn persist_delta_with_fences_using(
+pub(crate) fn persist_delta_with_fences_using(
     delta: &PersistDelta,
     fences: &mut PersistFenceBatch,
     write: impl FnOnce() -> Result<Vec<String>>,
@@ -1154,7 +1162,7 @@ fn persist_delta_with_fences_using(
 
 // Shared capture/readback selectors. Neither a revision nor row existence is a
 // receipt: the writer must contain the exact content selected by the owner.
-fn ordinary_session_row_persisted_content(record: &PersistedSessionRecord) -> Value {
+pub(crate) fn ordinary_session_row_persisted_content(record: &PersistedSessionRecord) -> Value {
     json!({
         "queue": record.queued_prompts,
         "deliveries": record.prompt_deliveries,
@@ -1163,7 +1171,7 @@ fn ordinary_session_row_persisted_content(record: &PersistedSessionRecord) -> Va
     })
 }
 
-fn engram_observation_persisted_content(record: &PersistedSessionRecord) -> Value {
+pub(crate) fn engram_observation_persisted_content(record: &PersistedSessionRecord) -> Value {
     json!({
         "runtimeCheckpoint": record.engram_runtime_checkpoint,
         "activeTurn": record.engram_unadmitted_active_turn,

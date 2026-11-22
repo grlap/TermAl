@@ -2,7 +2,9 @@
 // Owns argument roles and the read-only Git environment supplied at provider
 // execution boundaries. General permission dispatch remains in claude.rs.
 
-fn claude_git_cat_file_is_inspection(args: &[&str]) -> bool {
+use super::*;
+
+pub(crate) fn claude_git_cat_file_is_inspection(args: &[&str]) -> bool {
     match args {
         ["-t" | "-s" | "-e" | "-p", object] => !object.is_empty() && !object.starts_with('-'),
         ["-t" | "-s" | "-e" | "-p", "--", object] => !object.is_empty(),
@@ -10,7 +12,7 @@ fn claude_git_cat_file_is_inspection(args: &[&str]) -> bool {
     }
 }
 
-fn claude_git_merge_base_is_query(args: &[&str]) -> bool {
+pub(crate) fn claude_git_merge_base_is_query(args: &[&str]) -> bool {
     let mut mode = "normal";
     let mut all = false;
     let mut operands = 0;
@@ -178,7 +180,7 @@ fn claude_git_ref_query_state(args: &[&str]) -> Option<(Option<ClaudeGitRefValue
     Some((pending, end_options))
 }
 
-fn claude_git_for_each_ref_is_query(args: &[&str]) -> bool {
+pub(crate) fn claude_git_for_each_ref_is_query(args: &[&str]) -> bool {
     matches!(claude_git_ref_query_state(args), Some((None, _)))
 }
 
@@ -267,7 +269,7 @@ fn claude_git_pretty_selector_is_data(selector: &str) -> bool {
     true
 }
 
-fn claude_git_rev_list_formats_are_data(args: &[&str]) -> bool {
+pub(crate) fn claude_git_rev_list_formats_are_data(args: &[&str]) -> bool {
     args.iter().all(|arg| {
         if let Some(selector) = arg
             .strip_prefix("--pretty=")
@@ -286,7 +288,7 @@ fn claude_git_rev_list_formats_are_data(args: &[&str]) -> bool {
 /// Called only at an unquoted `{`. A Git peel contains no shell expansion:
 /// its exact type is checked by the tokenizer. The prefix must additionally
 /// be in a known revision argument, never a command, format, pattern or path.
-fn claude_git_peel_revision_position(tokens: &[String], prefix: &str) -> bool {
+pub(crate) fn claude_git_peel_revision_position(tokens: &[String], prefix: &str) -> bool {
     if tokens.first().is_none_or(|token| token != "git") {
         return false;
     }
@@ -471,7 +473,7 @@ fn claude_git_peel_follows_revisions(subcommand: &str, args: &[&str]) -> bool {
 }
 /// Read-only object inspection must not fetch missing promisor objects through
 /// a repository-configured transport. Apply after project environment values.
-fn read_only_git_environment(read_only_child: bool) -> BTreeMap<String, String> {
+pub(crate) fn read_only_git_environment(read_only_child: bool) -> BTreeMap<String, String> {
     if read_only_child {
         BTreeMap::from([
             ("GIT_NO_LAZY_FETCH".to_owned(), "1".to_owned()),
@@ -483,13 +485,16 @@ fn read_only_git_environment(read_only_child: bool) -> BTreeMap<String, String> 
     }
 }
 
-fn apply_read_only_git_environment(read_only_child: bool, command: &mut Command) {
+pub(crate) fn apply_read_only_git_environment(read_only_child: bool, command: &mut Command) {
     for (name, value) in read_only_git_environment(read_only_child) {
         command.env(name, value);
     }
 }
 
-fn merge_read_only_git_environment(read_only_child: bool, config: &mut Value) -> Result<()> {
+pub(crate) fn merge_read_only_git_environment(
+    read_only_child: bool,
+    config: &mut Value,
+) -> Result<()> {
     let env = read_only_git_environment(read_only_child);
     if env.is_empty() {
         return Ok(());

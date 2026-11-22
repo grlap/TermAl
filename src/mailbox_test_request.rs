@@ -1,10 +1,12 @@
 // Closed request and custody shapes beside existing mailbox/registration owners.
 // Decoding validates shape only; the host capture owner supplies authority.
 
-const MAILBOX_TEST_REQUEST_MAX_BYTES: usize = 64 * 1024;
-const MAILBOX_TEST_REQUEST_MAX_TARGETS: usize = 16;
+use super::*;
 
-fn mailbox_test_request_input_schema() -> Value {
+pub(crate) const MAILBOX_TEST_REQUEST_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const MAILBOX_TEST_REQUEST_MAX_TARGETS: usize = 16;
+
+pub(crate) fn mailbox_test_request_input_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false,
         "description": "Optional native test request. The host captures target associations; message delivery alone neither starts a test nor grants verification credit.",
@@ -35,27 +37,27 @@ fn mailbox_test_request_input_schema() -> Value {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum MailboxTestMode {
+pub(crate) enum MailboxTestMode {
     Full,
     Focused,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum MailboxTestPurpose {
+pub(crate) enum MailboxTestPurpose {
     Verification,
     LandingGate,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum MailboxTestLandingPurpose {
+pub(crate) enum MailboxTestLandingPurpose {
     LandingGate,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum MailboxTestInputUse {
+pub(crate) enum MailboxTestInputUse {
     CommittedInput {
         expected_commit: String,
         purpose: MailboxTestPurpose,
@@ -69,57 +71,57 @@ enum MailboxTestInputUse {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxTestTarget {
-    work_ref: String,
-    r#use: MailboxTestInputUse,
+pub(crate) struct MailboxTestTarget {
+    pub(crate) work_ref: String,
+    pub(crate) r#use: MailboxTestInputUse,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxTestRequest {
-    mode: MailboxTestMode,
-    targets: Vec<MailboxTestTarget>,
+pub(crate) struct MailboxTestRequest {
+    pub(crate) mode: MailboxTestMode,
+    pub(crate) targets: Vec<MailboxTestTarget>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(try_from = "MailboxTestAssociationWire")]
-struct MailboxTestAssociation {
-    binding: EngramControlWorkBinding,
-    root: EngramVerificationRecordRoot,
+pub(crate) struct MailboxTestAssociation {
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) root: EngramVerificationRecordRoot,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MailboxTestCapturedTarget {
-    target: MailboxTestTarget,
+pub(crate) struct MailboxTestCapturedTarget {
+    pub(crate) target: MailboxTestTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    association: Option<MailboxTestAssociation>,
+    pub(crate) association: Option<MailboxTestAssociation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    uncredited_reason: Option<String>,
+    pub(crate) uncredited_reason: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", try_from = "MailboxTestPayloadWire")]
-struct MailboxTestPayload {
-    schema_version: u16,
-    request_send_key: String,
-    requester: MailboxRelayPrincipal,
+pub(crate) struct MailboxTestPayload {
+    pub(crate) schema_version: u16,
+    pub(crate) request_send_key: String,
+    pub(crate) requester: MailboxRelayPrincipal,
     // None exists only in the host's in-memory capture draft. Wire decoding
     // and every publication boundary require the resolved native recipient.
     #[serde(skip_serializing_if = "Option::is_none")]
-    recipient: Option<MailboxRelayPrincipal>,
-    mode: MailboxTestMode,
-    targets: Vec<MailboxTestCapturedTarget>,
+    pub(crate) recipient: Option<MailboxRelayPrincipal>,
+    pub(crate) mode: MailboxTestMode,
+    pub(crate) targets: Vec<MailboxTestCapturedTarget>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", try_from = "TestRunCausalRequestWire")]
-struct TestRunCausalRequest {
-    request_message_id: String,
-    canonical_message_id: String,
-    request_send_key: String,
-    runner: MailboxRelayPrincipal,
-    payload: MailboxTestPayload,
+pub(crate) struct TestRunCausalRequest {
+    pub(crate) request_message_id: String,
+    pub(crate) canonical_message_id: String,
+    pub(crate) request_send_key: String,
+    pub(crate) runner: MailboxRelayPrincipal,
+    pub(crate) payload: MailboxTestPayload,
 }
 
 // Local closed projections avoid widening the decoding contract of every
@@ -252,7 +254,7 @@ impl TryFrom<TestRunCausalRequestWire> for TestRunCausalRequest {
     }
 }
 
-fn mailbox_test_message_selector_valid(value: &str) -> bool {
+pub(crate) fn mailbox_test_message_selector_valid(value: &str) -> bool {
     if let Some(uuid) = value.strip_prefix("mailbox-message-") {
         return Uuid::parse_str(uuid).is_ok_and(|id| id.to_string() == uuid);
     }
@@ -265,7 +267,7 @@ fn mailbox_test_message_selector_valid(value: &str) -> bool {
     })
 }
 
-fn mailbox_test_hex_id(value: &str) -> bool {
+pub(crate) fn mailbox_test_hex_id(value: &str) -> bool {
     value.len() == 40
         && value
             .bytes()
@@ -314,7 +316,7 @@ fn validate_mailbox_test_target(target: &MailboxTestTarget) -> Result<(), ApiErr
     Ok(())
 }
 
-fn validate_mailbox_test_request(request: &MailboxTestRequest) -> Result<(), ApiError> {
+pub(crate) fn validate_mailbox_test_request(request: &MailboxTestRequest) -> Result<(), ApiError> {
     if request.targets.is_empty() || request.targets.len() > MAILBOX_TEST_REQUEST_MAX_TARGETS {
         return Err(ApiError::bad_request(
             "invalid_request: test request needs 1 to 16 targets",
@@ -332,7 +334,7 @@ fn validate_mailbox_test_request(request: &MailboxTestRequest) -> Result<(), Api
     Ok(())
 }
 
-fn deserialize_mailbox_test_request<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_mailbox_test_request<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<Option<MailboxTestRequest>, D::Error> {
     let request = MailboxTestRequest::deserialize(deserializer)?;
@@ -341,7 +343,7 @@ fn deserialize_mailbox_test_request<'de, D: serde::Deserializer<'de>>(
     Ok(Some(request))
 }
 
-fn validate_mailbox_test_payload(payload: &MailboxTestPayload) -> Result<(), ApiError> {
+pub(crate) fn validate_mailbox_test_payload(payload: &MailboxTestPayload) -> Result<(), ApiError> {
     validate_mailbox_test_payload_draft(payload)?;
     let recipient = payload.recipient.as_ref().ok_or_else(|| {
         ApiError::bad_request("invalid_request: test-request recipient is not pinned")
@@ -355,7 +357,9 @@ fn validate_mailbox_test_payload(payload: &MailboxTestPayload) -> Result<(), Api
     Ok(())
 }
 
-fn validate_mailbox_test_payload_draft(payload: &MailboxTestPayload) -> Result<(), ApiError> {
+pub(crate) fn validate_mailbox_test_payload_draft(
+    payload: &MailboxTestPayload,
+) -> Result<(), ApiError> {
     if payload.schema_version != 1
         || payload.request_send_key.is_empty()
         || payload.request_send_key.len() > 256

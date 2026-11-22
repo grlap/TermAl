@@ -10,132 +10,134 @@ the ordinary AppState persist worker, so mailbox append/read/ack remains usable
 after that worker shuts down.
 */
 
-const MAX_MAILBOX_BODY_BYTES: usize = 256 * 1024;
-const MAX_MAILBOX_METADATA_BYTES: usize = 4 * 1024;
-const MAILBOX_WRITER_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
+use super::*;
+
+pub(crate) const MAX_MAILBOX_BODY_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_MAILBOX_METADATA_BYTES: usize = 4 * 1024;
+pub(crate) const MAILBOX_WRITER_ADMISSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[cfg(test)]
 std::thread_local! {
-    static TEST_MAILBOX_AFTER_PREFIX_OBSERVATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_MAILBOX_AFTER_PREFIX_OBSERVATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxParticipant {
-    session_id: String,
-    display_name: String,
-    processed_through: u64,
+pub(crate) struct MailboxParticipant {
+    pub(crate) session_id: String,
+    pub(crate) display_name: String,
+    pub(crate) processed_through: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    left_at: Option<String>,
+    pub(crate) left_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxSummary {
-    id: String,
-    participants: Vec<MailboxParticipant>,
-    latest_sequence: u64,
-    unread_count: u64,
+pub(crate) struct MailboxSummary {
+    pub(crate) id: String,
+    pub(crate) participants: Vec<MailboxParticipant>,
+    pub(crate) latest_sequence: u64,
+    pub(crate) unread_count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    latest_message_preview: Option<String>,
+    pub(crate) latest_message_preview: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    latest_message_at: Option<String>,
+    pub(crate) latest_message_at: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxMessage {
+pub(crate) struct MailboxMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    test_request: Option<MailboxTestPayload>,
+    pub(crate) test_request: Option<MailboxTestPayload>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    notification_cause: Option<String>,
-    id: String,
-    mailbox_id: String,
-    sequence: u64,
-    sender_session_id: String,
-    sender_name: String,
-    target_session_id: String,
-    target_name: String,
-    created_at: String,
-    class: String,
+    pub(crate) notification_cause: Option<String>,
+    pub(crate) id: String,
+    pub(crate) mailbox_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) sender_session_id: String,
+    pub(crate) sender_name: String,
+    pub(crate) target_session_id: String,
+    pub(crate) target_name: String,
+    pub(crate) created_at: String,
+    pub(crate) class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    topic: Option<String>,
+    pub(crate) topic: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    state_stamp: Option<String>,
-    body: String,
+    pub(crate) state_stamp: Option<String>,
+    pub(crate) body: String,
     #[serde(default, skip_serializing)]
-    idempotency_key: String,
+    pub(crate) idempotency_key: String,
     #[serde(default, skip_serializing)]
-    unread_depth_at_append: u64,
-    notification_state: String,
+    pub(crate) unread_depth_at_append: u64,
+    pub(crate) notification_state: String,
     /// Usually the shared sentence for `notification_state`
     /// (`mailbox_wake_state_sentence`). Remote-target domain exact reads
     /// instead use their existing `notification_cause`; the state remains
     /// the stored disposition. Page and local-target reads keep the state sentence.
     /// Empty from mailbox homes that predate it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    notification_summary: String,
+    pub(crate) notification_summary: String,
     /// The exact-message read's current projection
     /// (`attach_mailbox_message_current_status`); absent on page reads and
     /// from mailbox homes that predate it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    current_status: Option<MailboxMessageCurrentStatus>,
+    pub(crate) current_status: Option<MailboxMessageCurrentStatus>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct MailboxAppendInput {
-    sender_session_id: String,
-    sender_name: String,
-    target_session_id: String,
-    target_name: String,
-    body: String,
-    idempotency_key: String,
-    topic: Option<String>,
-    state_stamp: Option<String>,
+pub(crate) struct MailboxAppendInput {
+    pub(crate) sender_session_id: String,
+    pub(crate) sender_name: String,
+    pub(crate) target_session_id: String,
+    pub(crate) target_name: String,
+    pub(crate) body: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) topic: Option<String>,
+    pub(crate) state_stamp: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct MailboxIdempotencyRecord {
-    test_request: Option<MailboxTestPayload>,
+pub(crate) struct MailboxIdempotencyRecord {
+    pub(crate) test_request: Option<MailboxTestPayload>,
     test_request_scope: Option<MailboxTestSenderScope>,
-    sender_session_id: String,
-    idempotency_key: String,
-    mailbox_id: String,
-    message_id: String,
-    sequence: u64,
-    sender_name: String,
-    target_session_id: String,
-    target_name: String,
-    body: String,
-    topic: Option<String>,
-    state_stamp: Option<String>,
-    unread_depth_at_append: u64,
-    dispatch_outcome: Option<String>,
+    pub(crate) sender_session_id: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) mailbox_id: String,
+    pub(crate) message_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) sender_name: String,
+    pub(crate) target_session_id: String,
+    pub(crate) target_name: String,
+    pub(crate) body: String,
+    pub(crate) topic: Option<String>,
+    pub(crate) state_stamp: Option<String>,
+    pub(crate) unread_depth_at_append: u64,
+    pub(crate) dispatch_outcome: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxAppendReceipt {
+pub(crate) struct MailboxAppendReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    notification_cause: Option<String>,
-    mailbox_id: String,
-    message_id: String,
-    sequence: u64,
-    unread_depth: u64,
-    notification_disposition: String,
-    duplicate: bool,
-    sender_processed_through: u64,
-    sender_cursor_advanced: bool,
+    pub(crate) notification_cause: Option<String>,
+    pub(crate) mailbox_id: String,
+    pub(crate) message_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) unread_depth: u64,
+    pub(crate) notification_disposition: String,
+    pub(crate) duplicate: bool,
+    pub(crate) sender_processed_through: u64,
+    pub(crate) sender_cursor_advanced: bool,
     /// The receipt's plain-language line (`mailbox_send_receipt_note`), set
     /// where the API returns the receipt, after any id rewriting, so it names
     /// the id the caller holds. Never stored with the receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    receipt_note: Option<String>,
+    pub(crate) receipt_note: Option<String>,
 }
 
 impl MailboxAppendReceipt {
     /// This receipt with its line, written for the id it carries now.
-    fn with_receipt_note(mut self) -> Self {
+    pub(crate) fn with_receipt_note(mut self) -> Self {
         self.receipt_note = Some(mailbox_send_receipt_note(
             &self.notification_disposition,
             &self.message_id,
@@ -147,31 +149,31 @@ impl MailboxAppendReceipt {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MailboxReadResponse {
+pub(crate) struct MailboxReadResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    receipt_state: Option<String>,
+    pub(crate) receipt_state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    read_key: Option<String>,
+    pub(crate) read_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    page_id: Option<String>,
+    pub(crate) page_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    cursor_generation: Option<String>,
+    pub(crate) cursor_generation: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    reader_session_id: Option<String>,
-    messages: Vec<MailboxMessage>,
-    after_sequence: u64,
-    processed_through: u64,
+    pub(crate) reader_session_id: Option<String>,
+    pub(crate) messages: Vec<MailboxMessage>,
+    pub(crate) after_sequence: u64,
+    pub(crate) processed_through: u64,
     #[serde(default)]
-    receipt: Option<String>,
+    pub(crate) receipt: Option<String>,
     #[serde(default)]
-    has_more: bool,
+    pub(crate) has_more: bool,
     #[serde(default)]
-    next_after_sequence: Option<u64>,
+    pub(crate) next_after_sequence: Option<u64>,
 }
 
-struct MailboxAppendResult {
-    receipt: MailboxAppendReceipt,
-    finalization: Option<MailboxDispatchFinalizationGuard>,
+pub(crate) struct MailboxAppendResult {
+    pub(crate) receipt: MailboxAppendReceipt,
+    pub(crate) finalization: Option<MailboxDispatchFinalizationGuard>,
 }
 
 impl std::fmt::Debug for MailboxAppendResult {
@@ -193,58 +195,58 @@ impl std::ops::Deref for MailboxAppendResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum MailboxDispatchOutcomeRecord {
+pub(crate) enum MailboxDispatchOutcomeRecord {
     Recorded { state_advanced: bool },
     AlreadyFinalized { dispatch_outcome: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct MailboxUnreadWakeup {
-    mailbox_id: String,
-    message_id: String,
-    sequence: u64,
-    unread_count: u64,
-    sender_session_id: String,
-    sender_name: String,
-    topic: Option<String>,
+pub(crate) struct MailboxUnreadWakeup {
+    pub(crate) mailbox_id: String,
+    pub(crate) message_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) unread_count: u64,
+    pub(crate) sender_session_id: String,
+    pub(crate) sender_name: String,
+    pub(crate) topic: Option<String>,
 }
 
 /// The queue head as dispatch-time revalidation saw it under the state lock.
 #[derive(Clone, Debug)]
-struct FrontMailboxHead {
-    prompt_id: String,
-    mailbox_id: String,
-    message_id: String,
-    sequence: u64,
-    text: String,
-    source: Option<MessageSource>,
+pub(crate) struct FrontMailboxHead {
+    pub(crate) prompt_id: String,
+    pub(crate) mailbox_id: String,
+    pub(crate) message_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) text: String,
+    pub(crate) source: Option<MessageSource>,
 }
 
 /// One optimistic revalidation read: the head snapshot plus what the mailbox
 /// store said about it off the state lock.
 #[derive(Clone, Debug)]
-struct FrontMailboxRevalidation {
-    head: FrontMailboxHead,
-    wakeup: Option<MailboxUnreadWakeup>,
-    boundary: Option<MailboxWakeBoundary>,
+pub(crate) struct FrontMailboxRevalidation {
+    pub(crate) head: FrontMailboxHead,
+    pub(crate) wakeup: Option<MailboxUnreadWakeup>,
+    pub(crate) boundary: Option<MailboxWakeBoundary>,
 }
 
 #[derive(Default)]
-struct MailboxWakeQueueOutcome {
-    accepted: bool,
-    changed: bool,
-    relay_owner: Option<MailboxRelayDrainOwner>,
-    local_head_owner: Option<QueuedTurnOwner>,
+pub(crate) struct MailboxWakeQueueOutcome {
+    pub(crate) accepted: bool,
+    pub(crate) changed: bool,
+    pub(crate) relay_owner: Option<MailboxRelayDrainOwner>,
+    pub(crate) local_head_owner: Option<QueuedTurnOwner>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MailboxWakeupRecovery {
+pub(crate) enum MailboxWakeupRecovery {
     NeverWoken,
     AllUnreadAfterBoot,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MailboxStoreErrorKind {
+pub(crate) enum MailboxStoreErrorKind {
     Validation,
     Conflict,
     NotFound,
@@ -254,9 +256,9 @@ enum MailboxStoreErrorKind {
 }
 
 #[derive(Debug)]
-struct MailboxStoreError {
-    kind: MailboxStoreErrorKind,
-    message: String,
+pub(crate) struct MailboxStoreError {
+    pub(crate) kind: MailboxStoreErrorKind,
+    pub(crate) message: String,
     // Only a lead writer-admission refusal may certify notCommitted. An
     // operation with an earlier commit must never reuse that certificate.
     writer_admission: bool,
@@ -270,7 +272,10 @@ impl std::fmt::Display for MailboxStoreError {
 
 impl std::error::Error for MailboxStoreError {}
 
-fn mailbox_store_error(kind: MailboxStoreErrorKind, message: impl Into<String>) -> anyhow::Error {
+pub(crate) fn mailbox_store_error(
+    kind: MailboxStoreErrorKind,
+    message: impl Into<String>,
+) -> anyhow::Error {
     MailboxStoreError {
         kind,
         message: message.into(),
@@ -281,41 +286,41 @@ fn mailbox_store_error(kind: MailboxStoreErrorKind, message: impl Into<String>) 
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SendMailboxMessageRequest {
-    target_session_id: String,
-    message: String,
-    idempotency_key: String,
+pub(crate) struct SendMailboxMessageRequest {
+    pub(crate) target_session_id: String,
+    pub(crate) message: String,
+    pub(crate) idempotency_key: String,
     #[serde(default)]
-    topic: Option<String>,
+    pub(crate) topic: Option<String>,
     #[serde(default)]
-    state_stamp: Option<String>,
+    pub(crate) state_stamp: Option<String>,
     #[serde(default)]
-    class: Option<String>,
+    pub(crate) class: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReadMailboxRequest {
+pub(crate) struct ReadMailboxRequest {
     #[serde(default)]
-    read_key: Option<String>,
+    pub(crate) read_key: Option<String>,
     // Only the agent MCP/CLI transport opts into durable page issuance.
     // Missing stays preview-safe for existing UI bundles and old bridges.
     #[serde(default)]
-    issue_receipt: bool,
+    pub(crate) issue_receipt: bool,
     #[serde(default)]
-    after_sequence: Option<u64>,
+    pub(crate) after_sequence: Option<u64>,
     #[serde(default = "default_mailbox_read_limit")]
-    limit: u64,
+    pub(crate) limit: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AcknowledgeMailboxRequest {
-    receipt: Option<String>,
-    expected_processed_through: Option<u64>,
-    processed_through: Option<u64>,
+pub(crate) struct AcknowledgeMailboxRequest {
+    pub(crate) receipt: Option<String>,
+    pub(crate) expected_processed_through: Option<u64>,
+    pub(crate) processed_through: Option<u64>,
     #[serde(default)]
-    no_continuation: bool,
+    pub(crate) no_continuation: bool,
 }
 
 fn default_mailbox_read_limit() -> u64 {
@@ -335,50 +340,50 @@ struct MailboxDispatchFinalization {
     changed: Condvar,
 }
 
-struct MailboxStore {
-    path: PathBuf,
-    coordination_store_id: Option<String>,
-    native_route_misses: Mutex<VecDeque<NativeMailboxRouteMiss>>,
-    federation_reads: Mutex<FederationMailboxReadCache>,
-    federation_read_intents: Mutex<HashMap<String, FederationMailboxClientRead>>,
+pub(crate) struct MailboxStore {
+    pub(crate) path: PathBuf,
+    pub(crate) coordination_store_id: Option<String>,
+    pub(crate) native_route_misses: Mutex<VecDeque<NativeMailboxRouteMiss>>,
+    pub(crate) federation_reads: Mutex<FederationMailboxReadCache>,
+    pub(crate) federation_read_intents: Mutex<HashMap<String, FederationMailboxClientRead>>,
     /// Invalidates optimistic zero-unread coverage reads on a new append.
-    continuation_epoch: AtomicU64,
-    connection: Mutex<Option<rusqlite::Connection>>,
-    write_lock: Arc<SqliteStateWriterAdmission>,
-    write_admission_timeout: Duration,
+    pub(crate) continuation_epoch: AtomicU64,
+    pub(crate) connection: Mutex<Option<rusqlite::Connection>>,
+    pub(crate) write_lock: Arc<SqliteStateWriterAdmission>,
+    pub(crate) write_admission_timeout: Duration,
     dispatch_finalization: Arc<MailboxDispatchFinalization>,
     /// Serializes the durable structured-review append with recovery's
     /// read/probe decision. The main AppState mutex is never held across this
     /// coordination-store I/O; a conditional attempt check protects the later
     /// in-memory probe commit from a concurrent delegation rearm.
-    delegation_review_recovery_guard: Mutex<()>,
-    executor_reservations: Mutex<FederationExecutorReservationCache>,
+    pub(crate) delegation_review_recovery_guard: Mutex<()>,
+    pub(crate) executor_reservations: Mutex<FederationExecutorReservationCache>,
     // Live admission evidence bridges primary queue exposure and a failed
     // coordination marker write. Not handoff authority or a boot tombstone.
-    relay_live_queued: Mutex<HashMap<(String, String), u64>>,
+    pub(crate) relay_live_queued: Mutex<HashMap<(String, String), u64>>,
     /// Process-local refusals of home wake obligations, for diagnostics only.
-    relay_home_wake_refusals: MailboxRelayHomeWakeRefusals,
+    pub(crate) relay_home_wake_refusals: MailboxRelayHomeWakeRefusals,
     /// Bounded home-side 5xx metadata; cleared on restart, never persisted.
-    relay_home_rpc_failures: MailboxRelayHomeRpcFailures,
+    pub(crate) relay_home_rpc_failures: MailboxRelayHomeRpcFailures,
     #[cfg(test)]
-    before_native_wake: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    pub(crate) before_native_wake: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
-    before_relay_association_authorize: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    pub(crate) before_relay_association_authorize: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
-    before_relay_read_association: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    pub(crate) before_relay_read_association: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
     internal_writer_waiters: Mutex<usize>,
     #[cfg(test)]
     internal_writer_waiter_changed: Condvar,
 }
 
-struct MailboxConnectionGuard<'a> {
-    guard: std::sync::MutexGuard<'a, Option<rusqlite::Connection>>,
+pub(crate) struct MailboxConnectionGuard<'a> {
+    pub(crate) guard: std::sync::MutexGuard<'a, Option<rusqlite::Connection>>,
 }
 
-struct MailboxDispatchFinalizationGuard {
+pub(crate) struct MailboxDispatchFinalizationGuard {
     dispatch_finalization: Arc<MailboxDispatchFinalization>,
-    message_id: String,
+    pub(crate) message_id: String,
 }
 
 #[cfg(test)]
@@ -433,7 +438,10 @@ impl AppState {
     /// the current in-memory session. The second validation closes the race
     /// with deletion or any other transition that makes the session ineligible;
     /// every failed revalidation restores `left_at`.
-    fn ensure_mailbox_session_active(&self, session_id: &str) -> std::result::Result<(), ApiError> {
+    pub(crate) fn ensure_mailbox_session_active(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<(), ApiError> {
         let validate = || {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -475,7 +483,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn append_mailbox_message_and_notify(
+    pub(crate) fn append_mailbox_message_and_notify(
         &self,
         sender_session_id: &str,
         request: SendMailboxMessageRequest,
@@ -488,7 +496,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn append_native_mailbox_message_and_notify(
+    pub(crate) fn append_native_mailbox_message_and_notify(
         &self,
         sender_session_id: &str,
         request: SendMailboxMessageRequest,
@@ -502,7 +510,7 @@ impl AppState {
         )
     }
 
-    fn append_native_mailbox_message_with_test_custody(
+    pub(crate) fn append_native_mailbox_message_with_test_custody(
         &self,
         sender_session_id: &str,
         request: SendMailboxMessageRequest,
@@ -589,7 +597,10 @@ impl AppState {
     /// A held wake may name an existing provider-capacity recovery, but it
     /// remains unwoken. Other holds keep the ordinary durable-but-not-woken
     /// disposition; stored control history never supplies a retry owner.
-    fn mailbox_held_wake_disposition(&self, target_session_id: &str) -> Option<&'static str> {
+    pub(crate) fn mailbox_held_wake_disposition(
+        &self,
+        target_session_id: &str,
+    ) -> Option<&'static str> {
         let disposition = self.mailbox_queued_wake_disposition(target_session_id);
         (disposition == "waitingForProviderCapacity").then_some(disposition)
     }
@@ -600,7 +611,7 @@ impl AppState {
     /// mailbox turn). Provider-capacity recovery keeps its existing distinct
     /// disposition. Neither stored control history nor acknowledgement
     /// authorizes a queued wake to pass a pause.
-    fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
+    pub(crate) fn mailbox_queued_wake_disposition(&self, target_session_id: &str) -> &'static str {
         let inner = self.inner.lock().expect("state mutex poisoned");
         if inner
             .find_session_index(target_session_id)
@@ -632,7 +643,7 @@ impl AppState {
         }
     }
 
-    fn mailbox_peer_names(
+    pub(crate) fn mailbox_peer_names(
         &self,
         sender_session_id: &str,
         target_session_id: &str,
@@ -674,7 +685,7 @@ impl AppState {
         ))
     }
 
-    fn mailbox_participants_still_active(
+    pub(crate) fn mailbox_participants_still_active(
         &self,
         sender_session_id: &str,
         target_session_id: &str,
@@ -706,14 +717,14 @@ impl AppState {
         self.queue_mailbox_wakeups_for_session(session_id, wakeups, recovery)
     }
 
-    fn requeue_rejected_mailbox_notification(
+    pub(crate) fn requeue_rejected_mailbox_notification(
         &self,
         notification: &MailboxNotificationDelivery,
     ) -> Result<bool> {
         self.requeue_mailbox_notification_with_rejection(notification, false)
     }
 
-    fn requeue_mailbox_notification_with_rejection(
+    pub(crate) fn requeue_mailbox_notification_with_rejection(
         &self,
         notification: &MailboxNotificationDelivery,
         known_rejected: bool,
@@ -753,7 +764,7 @@ impl AppState {
         Ok(outcome.changed)
     }
 
-    fn queue_mailbox_wakeups_for_session(
+    pub(crate) fn queue_mailbox_wakeups_for_session(
         &self,
         session_id: &str,
         wakeups: Vec<MailboxUnreadWakeup>,
@@ -764,7 +775,7 @@ impl AppState {
             .changed)
     }
 
-    fn queue_mailbox_wakeups_for_session_outcome(
+    pub(crate) fn queue_mailbox_wakeups_for_session_outcome(
         &self,
         session_id: &str,
         wakeups: Vec<MailboxUnreadWakeup>,
@@ -780,7 +791,7 @@ impl AppState {
         )
     }
 
-    fn queue_mailbox_wakeups_for_binding_outcome(
+    pub(crate) fn queue_mailbox_wakeups_for_binding_outcome(
         &self,
         session_id: &str,
         wakeups: Vec<MailboxUnreadWakeup>,
@@ -798,7 +809,7 @@ impl AppState {
         )
     }
 
-    fn queue_mailbox_wakeups_for_native_outcome(
+    pub(crate) fn queue_mailbox_wakeups_for_native_outcome(
         &self,
         session_id: &str,
         wakeups: Vec<MailboxUnreadWakeup>,
@@ -1242,7 +1253,7 @@ impl AppState {
         }
     }
 
-    fn reconcile_never_woken_mailbox_notifications_for_session(
+    pub(crate) fn reconcile_never_woken_mailbox_notifications_for_session(
         &self,
         session_id: &str,
     ) -> Result<bool> {
@@ -1259,7 +1270,10 @@ impl AppState {
     /// visible or the row's delivery record shows a handoff already covered
     /// it. Returns `true` when the queue head changed and the caller should
     /// inspect it again.
-    fn revalidate_front_mailbox_wakeup_for_session(&self, session_id: &str) -> Result<bool> {
+    pub(crate) fn revalidate_front_mailbox_wakeup_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<bool> {
         let Some(read) = self.read_front_mailbox_revalidation(session_id)? else {
             return Ok(false);
         };
@@ -1269,7 +1283,7 @@ impl AppState {
     /// Snapshots the queue head under the state lock, then reads its mailbox
     /// off the lock. Never hold the mailbox connection mutex together with
     /// StateInner.
-    fn read_front_mailbox_revalidation(
+    pub(crate) fn read_front_mailbox_revalidation(
         &self,
         session_id: &str,
     ) -> Result<Option<FrontMailboxRevalidation>> {
@@ -1336,7 +1350,7 @@ impl AppState {
     /// acknowledgement that rewrote the head in the meantime keeps the head's
     /// identity and boundary, so identity alone cannot tell; any such change
     /// makes the caller re-inspect instead of writing the older snapshot back.
-    fn apply_front_mailbox_revalidation(
+    pub(crate) fn apply_front_mailbox_revalidation(
         &self,
         session_id: &str,
         read: FrontMailboxRevalidation,
@@ -1453,7 +1467,10 @@ impl AppState {
     ///
     /// Ordinary mailbox failures are best-effort. A relay carrier stays held
     /// on unavailable authority; its typed hold is nonfatal to generic drains.
-    fn revalidate_queued_mailbox_wakeups_before_dispatch(&self, session_id: &str) -> Result<()> {
+    pub(crate) fn revalidate_queued_mailbox_wakeups_before_dispatch(
+        &self,
+        session_id: &str,
+    ) -> Result<()> {
         if let Err(error) = self.settle_covered_mailbox_continuations(session_id, None) {
             eprintln!("mailbox coverage> deferred at drain: {error:#}");
         }
@@ -1481,7 +1498,7 @@ impl AppState {
         }
     }
 
-    fn reconcile_unread_mailbox_wakeups_after_boot(&self) {
+    pub(crate) fn reconcile_unread_mailbox_wakeups_after_boot(&self) {
         let session_ids = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -1510,7 +1527,10 @@ impl AppState {
         }
     }
 
-    fn mark_mailbox_notification_delivered(&self, notification: &MailboxNotificationDelivery) {
+    pub(crate) fn mark_mailbox_notification_delivered(
+        &self,
+        notification: &MailboxNotificationDelivery,
+    ) {
         if matches!(
             MailboxRelayLocator::decode(&notification.mailbox_id, false),
             Ok(Some(_))
@@ -1543,7 +1563,7 @@ impl AppState {
     }
 }
 
-fn mailbox_notification_text(
+pub(crate) fn mailbox_notification_text(
     mailbox_id: &str,
     unread_count: u64,
     sequence: u64,
@@ -1563,7 +1583,7 @@ fn mailbox_notification_text(
     )
 }
 
-async fn send_mailbox_message(
+pub(crate) async fn send_mailbox_message(
     AxumPath(sender_session_id): AxumPath<String>,
     State(state): State<AppState>,
     Json(request): Json<SendMailboxApiRequest>,
@@ -1695,7 +1715,7 @@ async fn send_mailbox_message(
     Ok((StatusCode::ACCEPTED, Json(receipt.with_receipt_note())))
 }
 
-async fn submit_delegation_review_result(
+pub(crate) async fn submit_delegation_review_result(
     AxumPath(child_session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<SubmitDelegationReviewResultRequest>, JsonRejection>,
@@ -1711,7 +1731,7 @@ async fn submit_delegation_review_result(
 }
 
 #[cfg(test)]
-async fn list_mailboxes(
+pub(crate) async fn list_mailboxes(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<MailboxSummary>>, ApiError> {
@@ -1722,7 +1742,7 @@ async fn list_mailboxes(
     ))
 }
 
-async fn list_mailboxes_api(
+pub(crate) async fn list_mailboxes_api(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<HashMap<String, String>>,
@@ -1773,7 +1793,7 @@ async fn list_mailboxes_api(
     Ok(response)
 }
 
-async fn list_mailboxes_with_availability(
+pub(crate) async fn list_mailboxes_with_availability(
     session_id: &str,
     state: &AppState,
 ) -> Result<MailboxRelayListing, ApiError> {
@@ -1859,7 +1879,7 @@ async fn list_mailboxes_with_availability(
     Ok(relays)
 }
 
-async fn read_mailbox(
+pub(crate) async fn read_mailbox(
     AxumPath((session_id, mailbox_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<ReadMailboxRequest>,
@@ -1920,7 +1940,7 @@ async fn read_mailbox(
     Ok(Json(messages))
 }
 
-async fn read_mailbox_message(
+pub(crate) async fn read_mailbox_message(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<MailboxMessage>, ApiError> {
@@ -1959,7 +1979,7 @@ async fn read_mailbox_message(
     Ok(Json(message))
 }
 
-async fn acknowledge_mailbox(
+pub(crate) async fn acknowledge_mailbox(
     AxumPath((session_id, mailbox_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<AcknowledgeMailboxRequest>,
@@ -2075,7 +2095,7 @@ async fn acknowledge_mailbox(
     Ok(Json(summary))
 }
 
-fn mailbox_api_error(err: anyhow::Error) -> ApiError {
+pub(crate) fn mailbox_api_error(err: anyhow::Error) -> ApiError {
     if let Some(mailbox_error) = err.downcast_ref::<MailboxStoreError>() {
         if mailbox_error.writer_admission {
             return ApiError::from_status(
@@ -2107,12 +2127,12 @@ fn mailbox_api_error(err: anyhow::Error) -> ApiError {
 
 impl MailboxStore {
     #[cfg(test)]
-    fn open(path: &FsPath) -> Result<Self> {
+    pub(crate) fn open(path: &FsPath) -> Result<Self> {
         Self::open_with_write_admission_timeout(path, MAILBOX_WRITER_ADMISSION_TIMEOUT)
     }
 
     #[cfg(test)]
-    fn open_with_write_admission_timeout(
+    pub(crate) fn open_with_write_admission_timeout(
         path: &FsPath,
         write_admission_timeout: Duration,
     ) -> Result<Self> {
@@ -2121,7 +2141,7 @@ impl MailboxStore {
         Self::from_validated_connection(path, connection, write_admission_timeout)
     }
 
-    fn from_validated_connection(
+    pub(crate) fn from_validated_connection(
         path: &FsPath,
         connection: rusqlite::Connection,
         write_admission_timeout: Duration,
@@ -2164,7 +2184,7 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn disabled_for_tests() -> Self {
+    pub(crate) fn disabled_for_tests() -> Self {
         Self {
             path: PathBuf::new(),
             coordination_store_id: None,
@@ -2189,11 +2209,11 @@ impl MailboxStore {
         }
     }
 
-    fn lock_writer(&self, operation: &str) -> Result<SqliteStateWriterGuard<'_>> {
+    pub(crate) fn lock_writer(&self, operation: &str) -> Result<SqliteStateWriterGuard<'_>> {
         self.lock_writer_with_budget(operation, self.write_admission_timeout)
     }
 
-    fn lock_writer_with_budget(
+    pub(crate) fn lock_writer_with_budget(
         &self,
         operation: &str,
         budget: Duration,
@@ -2211,7 +2231,7 @@ impl MailboxStore {
             })
     }
 
-    fn append_delegation_review_result(
+    pub(crate) fn append_delegation_review_result(
         &self,
         input: &MailboxAppendInput,
     ) -> Result<MailboxAppendResult> {
@@ -2222,7 +2242,7 @@ impl MailboxStore {
         self.append_with_delivery_policy_inner(input, None, None, || Ok(()), |_, _| Ok(()), true)
     }
 
-    fn read_delegation_review_result_for_recovery(
+    pub(crate) fn read_delegation_review_result_for_recovery(
         &self,
         sender_session_id: &str,
         idempotency_key: &str,
@@ -2281,7 +2301,7 @@ impl MailboxStore {
         self.dispatch_finalization.changed.notify_all();
     }
 
-    fn wait_for_final_dispatch_outcome(&self, message_id: &str) -> Result<String> {
+    pub(crate) fn wait_for_final_dispatch_outcome(&self, message_id: &str) -> Result<String> {
         let mut state = self
             .dispatch_finalization
             .state
@@ -2403,7 +2423,7 @@ impl MailboxStore {
         }
     }
 
-    fn connection_if_enabled(&self) -> Option<MailboxConnectionGuard<'_>> {
+    pub(crate) fn connection_if_enabled(&self) -> Option<MailboxConnectionGuard<'_>> {
         let guard = self
             .connection
             .lock()
@@ -2411,12 +2431,12 @@ impl MailboxStore {
         guard.is_some().then_some(MailboxConnectionGuard { guard })
     }
 
-    fn connection(&self) -> Result<MailboxConnectionGuard<'_>> {
+    pub(crate) fn connection(&self) -> Result<MailboxConnectionGuard<'_>> {
         self.connection_if_enabled()
             .ok_or_else(|| anyhow!("mailbox storage is disabled in this test state"))
     }
 
-    fn read_idempotent_message(
+    pub(crate) fn read_idempotent_message(
         &self,
         sender_session_id: &str,
         idempotency_key: &str,
@@ -2426,12 +2446,12 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendResult> {
+    pub(crate) fn append(&self, input: &MailboxAppendInput) -> Result<MailboxAppendResult> {
         self.append_authorized(input, || Ok(()))
     }
 
     #[cfg(test)]
-    fn append_authorized<G>(
+    pub(crate) fn append_authorized<G>(
         &self,
         input: &MailboxAppendInput,
         authorize: impl FnOnce() -> Result<G>,
@@ -2440,7 +2460,7 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn append_with_delivery<G>(
+    pub(crate) fn append_with_delivery<G>(
         &self,
         input: &MailboxAppendInput,
         delivery: Option<&FederationDelivery>,
@@ -2460,7 +2480,7 @@ impl MailboxStore {
         self.append_with_delivery_policy(input, delivery, relay, authorize, |_, _| Ok(()))
     }
 
-    fn append_with_delivery_policy<G>(
+    pub(crate) fn append_with_delivery_policy<G>(
         &self,
         input: &MailboxAppendInput,
         delivery: Option<&FederationDelivery>,
@@ -2478,7 +2498,7 @@ impl MailboxStore {
         )
     }
 
-    fn append_with_delivery_policy_inner<G>(
+    pub(crate) fn append_with_delivery_policy_inner<G>(
         &self,
         input: &MailboxAppendInput,
         delivery: Option<&FederationDelivery>,
@@ -2499,7 +2519,7 @@ impl MailboxStore {
         )
     }
 
-    fn append_with_test_request_custody<G>(
+    pub(crate) fn append_with_test_request_custody<G>(
         &self,
         input: &MailboxAppendInput,
         payload: Option<&MailboxTestPayload>,
@@ -2776,7 +2796,12 @@ impl MailboxStore {
                 && payload.request_send_key == input.idempotency_key
                 && payload.requester.store_id == mailbox_relay_store_id(&transaction)?
             {
-                create_causal_pending(&transaction, false, &input.sender_session_id, &input.idempotency_key)?;
+                create_causal_pending(
+                    &transaction,
+                    false,
+                    &input.sender_session_id,
+                    &input.idempotency_key,
+                )?;
             }
         }
         // A participant cannot be "unread" on a message it wrote itself, so
@@ -2855,7 +2880,7 @@ impl MailboxStore {
         })
     }
 
-    fn record_initial_dispatch_outcome(
+    pub(crate) fn record_initial_dispatch_outcome(
         &self,
         message_id: &str,
         dispatch_outcome: &str,
@@ -2867,7 +2892,7 @@ impl MailboxStore {
     /// row's wake lifecycle state `durableButNotWoken`, so the never-woken
     /// recovery still covers it: a wake held before hand-off is not woken,
     /// whatever its receipt names as the hold's reason.
-    fn record_held_dispatch_outcome(
+    pub(crate) fn record_held_dispatch_outcome(
         &self,
         message_id: &str,
         dispatch_outcome: &str,
@@ -2953,7 +2978,11 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn set_notification_state(&self, message_id: &str, notification_state: &str) -> Result<()> {
+    pub(crate) fn set_notification_state(
+        &self,
+        message_id: &str,
+        notification_state: &str,
+    ) -> Result<()> {
         let _write_guard = self.lock_writer("updating mailbox notification state")?;
         let connection = self.connection()?;
         let updated = connection
@@ -2970,7 +2999,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn mark_notifications_delivered_through(
+    pub(crate) fn mark_notifications_delivered_through(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3069,7 +3098,7 @@ impl MailboxStore {
             .context("failed to mark the failed mailbox delivery recovered")
     }
 
-    fn mark_session_left(&self, session_id: &str) -> Result<()> {
+    pub(crate) fn mark_session_left(&self, session_id: &str) -> Result<()> {
         let _write_guard = self.lock_internal_writer();
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(());
@@ -3093,7 +3122,10 @@ impl MailboxStore {
 
     /// Clears stale departure markers and returns exactly the rows changed so
     /// a concurrent eligibility failure can restore only those markers.
-    fn reactivate_session_rows(&self, session_id: &str) -> Result<Vec<(String, String)>> {
+    pub(crate) fn reactivate_session_rows(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<(String, String)>> {
         let has_departed_rows = {
             let Some(connection) = self.connection_if_enabled() else {
                 return Ok(Vec::new());
@@ -3183,14 +3215,14 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn list_for_session(&self, session_id: &str) -> Result<Vec<MailboxSummary>> {
+    pub(crate) fn list_for_session(&self, session_id: &str) -> Result<Vec<MailboxSummary>> {
         let Some(connection) = self.connection_if_enabled() else {
             return Ok(Vec::new());
         };
         mailbox_summaries_for_session(&connection, session_id)
     }
 
-    fn unread_wakeup_for_mailbox(
+    pub(crate) fn unread_wakeup_for_mailbox(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3250,7 +3282,7 @@ impl MailboxStore {
     /// Reconstructs only the unread wake covered by one failed delivery.
     /// Newer mailbox rows must not be folded into this recovery because they
     /// may already belong to a successor active or queued turn.
-    fn unread_wakeup_for_mailbox_through(
+    pub(crate) fn unread_wakeup_for_mailbox_through(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3311,7 +3343,7 @@ impl MailboxStore {
         }
     }
 
-    fn wakeups_for_session(
+    pub(crate) fn wakeups_for_session(
         &self,
         session_id: &str,
         recovery: MailboxWakeupRecovery,
@@ -3388,12 +3420,15 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn unread_wakeups_for_session(&self, session_id: &str) -> Result<Vec<MailboxUnreadWakeup>> {
+    pub(crate) fn unread_wakeups_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<MailboxUnreadWakeup>> {
         self.wakeups_for_session(session_id, MailboxWakeupRecovery::NeverWoken)
     }
 
     #[cfg(test)]
-    fn read_range(
+    pub(crate) fn read_range(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3403,7 +3438,7 @@ impl MailboxStore {
         self.read_range_with_issuance(session_id, mailbox_id, after_sequence, limit, true)
     }
 
-    fn read_range_with_issuance(
+    pub(crate) fn read_range_with_issuance(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3421,7 +3456,7 @@ impl MailboxStore {
         )
     }
 
-    fn read_range_authorized<G>(
+    pub(crate) fn read_range_authorized<G>(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3520,7 +3555,11 @@ impl MailboxStore {
         })
     }
 
-    fn read_message(&self, session_id: &str, message_id: &str) -> Result<MailboxMessage> {
+    pub(crate) fn read_message(
+        &self,
+        session_id: &str,
+        message_id: &str,
+    ) -> Result<MailboxMessage> {
         let connection = self.connection()?;
         // One read transaction: the message, the caller's membership and the
         // recipient's cursor come from the same snapshot.
@@ -3558,7 +3597,7 @@ impl MailboxStore {
         Ok(message)
     }
 
-    fn acknowledge(
+    pub(crate) fn acknowledge(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3577,7 +3616,7 @@ impl MailboxStore {
     }
 
     #[cfg(test)]
-    fn acknowledge_page(
+    pub(crate) fn acknowledge_page(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3617,7 +3656,7 @@ impl MailboxStore {
         )
     }
 
-    fn acknowledge_authorized<G>(
+    pub(crate) fn acknowledge_authorized<G>(
         &self,
         session_id: &str,
         mailbox_id: &str,
@@ -3789,15 +3828,16 @@ impl MailboxStore {
                 ));
             }
         }
-        let summary = mailbox_summaries_in_scope(&transaction, session_id, false, Some(mailbox_id))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                mailbox_store_error(
-                    MailboxStoreErrorKind::NotFound,
-                    "mailbox not found while acknowledging",
-                )
-            })?;
+        let summary =
+            mailbox_summaries_in_scope(&transaction, session_id, false, Some(mailbox_id))?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    mailbox_store_error(
+                        MailboxStoreErrorKind::NotFound,
+                        "mailbox not found while acknowledging",
+                    )
+                })?;
         if let (Some(receipt), Some(through), Some(generation)) =
             (receipt, receipt_through, declaration_generation)
         {
@@ -3819,7 +3859,7 @@ impl MailboxStore {
     }
 }
 
-fn begin_mailbox_write<'connection>(
+pub(crate) fn begin_mailbox_write<'connection>(
     connection: &'connection mut rusqlite::Connection,
     operation: &str,
 ) -> Result<rusqlite::Transaction<'connection>> {
@@ -3828,7 +3868,7 @@ fn begin_mailbox_write<'connection>(
         .map_err(|err| mailbox_sqlite_write_error(operation, err))
 }
 
-fn mailbox_sqlite_write_error(operation: &str, err: rusqlite::Error) -> anyhow::Error {
+pub(crate) fn mailbox_sqlite_write_error(operation: &str, err: rusqlite::Error) -> anyhow::Error {
     if matches!(
         err.sqlite_error_code(),
         Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)
@@ -3844,7 +3884,7 @@ fn mailbox_sqlite_write_error(operation: &str, err: rusqlite::Error) -> anyhow::
     anyhow!(err).context(format!("failed while {operation}"))
 }
 
-fn validate_mailbox_append_input(input: &MailboxAppendInput) -> Result<()> {
+pub(crate) fn validate_mailbox_append_input(input: &MailboxAppendInput) -> Result<()> {
     validate_mailbox_append_shape(input)?;
     if reserved_delegation_review_message(input.topic.as_deref(), &input.idempotency_key) {
         return Err(mailbox_store_error(
@@ -3912,13 +3952,13 @@ fn validate_mailbox_append_shape(input: &MailboxAppendInput) -> Result<()> {
     Ok(())
 }
 
-fn mailbox_participant_key(left: &str, right: &str) -> String {
+pub(crate) fn mailbox_participant_key(left: &str, right: &str) -> String {
     let mut participants = [left, right];
     participants.sort_unstable();
     serde_json::to_string(&participants).expect("mailbox participant ids should serialize")
 }
 
-fn upsert_mailbox_participant(
+pub(crate) fn upsert_mailbox_participant(
     transaction: &rusqlite::Transaction<'_>,
     mailbox_id: &str,
     session_id: &str,
@@ -3939,7 +3979,7 @@ fn upsert_mailbox_participant(
     Ok(())
 }
 
-fn mailbox_message_for_idempotency_key(
+pub(crate) fn mailbox_message_for_idempotency_key(
     connection: &rusqlite::Connection,
     sender_session_id: &str,
     idempotency_key: &str,
@@ -3977,7 +4017,9 @@ fn mailbox_message_for_idempotency_key(
     }
 }
 
-fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MailboxMessage> {
+pub(crate) fn mailbox_message_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<MailboxMessage> {
     let notification_state: String = row.get(14)?;
     Ok(MailboxMessage {
         test_request: mailbox_test_payload_from_row(row, 15)?,
@@ -4002,7 +4044,7 @@ fn mailbox_message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Mailbox
     })
 }
 
-fn mailbox_summaries_for_session(
+pub(crate) fn mailbox_summaries_for_session(
     connection: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<Vec<MailboxSummary>> {
@@ -4011,12 +4053,12 @@ fn mailbox_summaries_for_session(
 
 #[cfg(test)]
 thread_local! {
-    static TEST_MAILBOX_SUMMARY_ROW: std::cell::RefCell<Option<Box<dyn FnMut(&str)>>> = const {
+    pub(crate) static TEST_MAILBOX_SUMMARY_ROW: std::cell::RefCell<Option<Box<dyn FnMut(&str)>>> = const {
         std::cell::RefCell::new(None)
     };
 }
 
-fn mailbox_summaries_for_session_with_empty(
+pub(crate) fn mailbox_summaries_for_session_with_empty(
     connection: &rusqlite::Connection,
     session_id: &str,
     include_empty: bool,
@@ -4032,7 +4074,11 @@ fn mailbox_summaries_in_scope(
 ) -> Result<Vec<MailboxSummary>> {
     // An acknowledgement holds the writer and connection. Use the mailbox key
     // in SQL so unread counts, latest messages and participants stay target-only.
-    let mailbox_filter = if mailbox_id.is_some() { "AND m.id = ?4" } else { "" };
+    let mailbox_filter = if mailbox_id.is_some() {
+        "AND m.id = ?4"
+    } else {
+        ""
+    };
     let mut statement = connection
         .prepare(&format!(
             "SELECT m.id, COALESCE(latest.sequence, 0),
@@ -4065,20 +4111,19 @@ fn mailbox_summaries_in_scope(
         &DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN,
         &include_empty,
     ];
-    let params = params.into_iter().chain(mailbox_id.iter().map(|id| id as &dyn rusqlite::ToSql));
+    let params = params
+        .into_iter()
+        .chain(mailbox_id.iter().map(|id| id as &dyn rusqlite::ToSql));
     let rows = statement
-        .query_map(
-            rusqlite::params_from_iter(params),
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, u64>(1)?,
-                    row.get::<_, u64>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<String>>(4)?,
-                ))
-            },
-        )
+        .query_map(rusqlite::params_from_iter(params), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, u64>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })
         .context("failed to query mailbox summaries")?;
     let mut summaries = Vec::new();
     for row in rows {
@@ -4102,7 +4147,7 @@ fn mailbox_summaries_in_scope(
     Ok(summaries)
 }
 
-fn mailbox_participants(
+pub(crate) fn mailbox_participants(
     connection: &rusqlite::Connection,
     mailbox_id: &str,
 ) -> Result<Vec<MailboxParticipant>> {
@@ -4128,14 +4173,14 @@ fn mailbox_participants(
         .collect()
 }
 
-fn mailbox_participant_retired_during_read(before_page: bool) -> ApiError {
+pub(crate) fn mailbox_participant_retired_during_read(before_page: bool) -> ApiError {
     ApiError::conflict(
         "participant_retired_during_read; this mailbox participant is marked as departed; verify current session membership before repeating the identical read",
     )
     .with_kind(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page })
 }
 
-fn require_mailbox_read_participant(
+pub(crate) fn require_mailbox_read_participant(
     connection: &rusqlite::Connection,
     mailbox_id: &str,
     session_id: &str,
@@ -4191,7 +4236,7 @@ fn require_mailbox_participant(
     Ok(())
 }
 
-fn mailbox_processed_through(
+pub(crate) fn mailbox_processed_through(
     connection: &rusqlite::Connection,
     mailbox_id: &str,
     session_id: &str,
@@ -4206,7 +4251,7 @@ fn mailbox_processed_through(
         .context("failed to read mailbox participant cursor")
 }
 
-fn mailbox_preview(body: &str) -> String {
+pub(crate) fn mailbox_preview(body: &str) -> String {
     const MAX_CHARS: usize = 160;
     // Normalize whitespace before dropping controls so line/tab boundaries still
     // separate words. Remove invisible direction/format marks from display only.

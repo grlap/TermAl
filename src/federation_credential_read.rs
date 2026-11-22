@@ -1,18 +1,20 @@
 // Owns one read-only credential lookup through reporting, adoption or discard.
 // SSH start/reap operations retain their separate unknown-outcome fences.
 
-struct FederationCredentialResult {
+use super::*;
+
+pub(crate) struct FederationCredentialResult {
     // Drop the material before releasing the replacement-worker fence.
-    result: Result<FederationTransportCredentials, ApiError>,
-    settlement: FederationBasisSettlement,
+    pub(crate) result: Result<FederationTransportCredentials, ApiError>,
+    pub(crate) settlement: FederationBasisSettlement,
 }
 
-struct FederationCredentialRead {
-    receive: tokio::sync::oneshot::Receiver<FederationCredentialResult>,
+pub(crate) struct FederationCredentialRead {
+    pub(crate) receive: tokio::sync::oneshot::Receiver<FederationCredentialResult>,
 }
 
 impl FederationCredentialRead {
-    fn start(
+    pub(crate) fn start(
         snapshot: FederationPeerSnapshot,
         basis: &Arc<FederationTransportBasis>,
         read: FederationCredentialReader,
@@ -25,7 +27,7 @@ impl FederationCredentialRead {
         })
     }
 
-    fn start_with(
+    pub(crate) fn start_with(
         snapshot: FederationPeerSnapshot,
         basis: &Arc<FederationTransportBasis>,
         read: FederationCredentialReader,
@@ -44,7 +46,7 @@ impl FederationCredentialRead {
         Ok(Self { receive })
     }
 
-    async fn wait(
+    pub(crate) async fn wait(
         mut self,
         stop: &mut tokio::sync::watch::Receiver<bool>,
         reporting_deadline: Duration,
@@ -85,7 +87,7 @@ impl FederationCredentialRead {
     }
 }
 
-fn federation_credential_read_stopped(
+pub(crate) fn federation_credential_read_stopped(
     app: &AppState,
     stop: &tokio::sync::watch::Receiver<bool>,
 ) -> bool {
@@ -95,7 +97,7 @@ fn federation_credential_read_stopped(
         || app.federation_executor_wake_signal.is_stopping()
 }
 
-fn federation_validate_credential_basis(
+pub(crate) fn federation_validate_credential_basis(
     app: &AppState,
     snapshot: &FederationPeerSnapshot,
     basis: &Arc<FederationTransportBasis>,

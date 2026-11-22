@@ -13,48 +13,50 @@
 // where a test is credited (a lost shell credits none), or overlap marking
 // itself (`engram_turn_checks.rs`). New module.
 
+use super::*;
+
 /// The directory changes a line names, as written (`engram_line_changes`),
 /// before TermAl resolves where they lead (`engram_resolve_lost_move`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct EngramLineChanges {
+pub(crate) struct EngramLineChanges {
     /// Each literal target, in the order the line names them.
-    targets: Vec<String>,
+    pub(crate) targets: Vec<String>,
     /// Whether a change may lead where no literal target says
     /// (`engram_line_changes`).
-    hidden: bool,
+    pub(crate) hidden: bool,
 }
 
 /// Where a line's directory changes may take a shell, resolved
 /// (`engram_resolve_lost_move`): the only form a lost shell keeps
 /// (`EngramShellDirectory::lose`) and a command's worktrees take.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct EngramLostMove {
+pub(crate) struct EngramLostMove {
     /// The existing directories the changes lead to.
-    targets: Vec<String>,
+    pub(crate) targets: Vec<String>,
     /// Whether they may lead anywhere, in which case `targets` is empty.
-    computed: bool,
+    pub(crate) computed: bool,
 }
 
 /// Where a command may run and so write (`engram_command_write_places`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramCommandPlaces {
+pub(crate) struct EngramCommandPlaces {
     /// Each directory, `None` for the session's workdir.
-    directories: Vec<Option<String>>,
+    pub(crate) directories: Vec<Option<String>>,
     /// Whether it may also run anywhere: a lost shell moved where TermAl
     /// cannot name.
-    anywhere: bool,
+    pub(crate) anywhere: bool,
     /// Whether these are the places the shell may be in, rather than one
     /// place TermAl knows it in: TermAl lost the shell, or another command's
     /// move is pending. A relative change of the command may then start from
     /// a place TermAl knows only as resolved, not as the shell spells it, and
     /// may lead anywhere.
-    shell_lost: bool,
+    pub(crate) shell_lost: bool,
 }
 
 impl EngramCommandPlaces {
     /// The places of a command whose shell TermAl follows, or whose runtime
     /// reports where it runs.
-    fn at(directories: Vec<Option<String>>) -> Self {
+    pub(crate) fn at(directories: Vec<Option<String>>) -> Self {
         Self {
             directories,
             anywhere: false,
@@ -229,7 +231,7 @@ const ENGRAM_SHELL_KEYWORDS: [&str; 10] = [
 /// after any shell keywords before it. A reading program counts only named
 /// by its bare word: one given by a path or with an extension (`./ls`,
 /// `node_modules/.bin/cat`, `cat.exe`) may be any program.
-fn engram_command_only_reads(words: &[String]) -> bool {
+pub(crate) fn engram_command_only_reads(words: &[String]) -> bool {
     let mut words = words
         .iter()
         .skip_while(|word| ENGRAM_SHELL_KEYWORDS.contains(&word.to_ascii_lowercase().as_str()));
@@ -262,7 +264,7 @@ const ENGRAM_LEADING_WORDS: [&str; 16] = [
 /// this position is read for: the wrappers whose flags take a value (`sudo`,
 /// `env`, `xargs`, `exec`) start another program, so what they run is never
 /// code of the current shell, a definition or a shortcut that could move it.
-fn engram_command_position(words: &[String]) -> Option<usize> {
+pub(crate) fn engram_command_position(words: &[String]) -> Option<usize> {
     words.iter().position(|word| {
         !ENGRAM_LEADING_WORDS.contains(&word.to_ascii_lowercase().as_str())
             && !engram_assignment_word(word)
@@ -274,7 +276,7 @@ fn engram_command_position(words: &[String]) -> Option<usize> {
 /// before a command to set its environment (`FOO=1 . env.sh`). A `cd` or
 /// `chdir` before the `=` is not one: cmd reads `cd=..` as a change of
 /// directory (`engram_directory_shortcut`).
-fn engram_assignment_word(word: &str) -> bool {
+pub(crate) fn engram_assignment_word(word: &str) -> bool {
     word.split_once('=').is_some_and(|(name, _)| {
         !matches!(name.to_ascii_lowercase().as_str(), "cd" | "chdir")
             && name
@@ -409,7 +411,7 @@ fn engram_line_hides_changes(line: &str, commands: &EngramShellCommands) -> bool
 /// than its target (cmd's `cd /d X`, zsh's `cd old new`), one bash reads
 /// otherwise than it is written, and every change on a line that may hide
 /// where they lead (`engram_line_hides_changes`).
-fn engram_line_changes(line: &str) -> EngramLineChanges {
+pub(crate) fn engram_line_changes(line: &str) -> EngramLineChanges {
     let Some(commands) = engram_shell_commands(line) else {
         return EngramLineChanges {
             targets: Vec::new(),
@@ -458,7 +460,7 @@ fn engram_line_changes(line: &str) -> EngramLineChanges {
 /// may be. A move that may lead anywhere names no places, and nothing more
 /// is resolved for it. Resolves on the file system, so never under the state
 /// lock.
-fn engram_resolve_lost_move(
+pub(crate) fn engram_resolve_lost_move(
     bases: &[Option<String>],
     changes: &EngramLineChanges,
 ) -> EngramLostMove {
@@ -498,7 +500,7 @@ fn engram_resolve_lost_move(
 /// another command's move is pending), which only an absolute target places.
 /// `None` for any other. Resolves on the file system, so never under the
 /// state lock.
-fn engram_line_lost_move(
+pub(crate) fn engram_line_lost_move(
     shell_move: &EngramShellMove,
     ran: Option<&str>,
     followed: bool,
@@ -522,7 +524,7 @@ fn engram_line_lost_move(
 /// place the lost shell may be (`EngramShellDirectory::lost_among`); anywhere
 /// as well when a change led where TermAl cannot name, and whenever the lost
 /// shell names no place at all, which no loss leaves but which fails safe.
-fn engram_command_write_places(
+pub(crate) fn engram_command_write_places(
     record: &SessionRecord,
     key: &str,
     cwd: Option<&str>,

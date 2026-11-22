@@ -3,59 +3,59 @@
 // complete histories. Cross-table lookups and planning happen after unlock.
 // This is a candidate plan, not authority: the worker still revalidates each
 // exact root, journal and reader against current state before doing a read.
-struct EngramRootReclamationSnapshot {
-    roots: Vec<EngramWorkSourceRoot>,
-    unpublished: Vec<EngramWorkSourceRoot>,
-    journals: Vec<EngramReclamationJournal>,
-    reader_snapshot: EngramRootReaderSnapshot,
-    evaluations: Vec<(EngramAuthorityStoreKey, String)>,
+pub(crate) struct EngramRootReclamationSnapshot {
+    pub(crate) roots: Vec<EngramWorkSourceRoot>,
+    pub(crate) unpublished: Vec<EngramWorkSourceRoot>,
+    pub(crate) journals: Vec<EngramReclamationJournal>,
+    pub(crate) reader_snapshot: EngramRootReaderSnapshot,
+    pub(crate) evaluations: Vec<(EngramAuthorityStoreKey, String)>,
     pending_releases: Vec<EngramWorkSourceRoot>,
-    quarantined: BTreeSet<String>,
-    last_store: Option<EngramAuthorityStoreKey>,
-    cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
-    deferred: Option<EngramWorkSourceRoot>,
-    refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
+    pub(crate) quarantined: BTreeSet<String>,
+    pub(crate) last_store: Option<EngramAuthorityStoreKey>,
+    pub(crate) cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+    pub(crate) deferred: Option<EngramWorkSourceRoot>,
+    pub(crate) refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
     /// Runs Engram definitively refused (engram_retained_run_settlement.rs):
     /// never read again, and their roots are due for disposition.
-    retired: Vec<(EngramAuthorityStoreKey, EngramControlWorkBinding)>,
-    disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+    pub(crate) retired: Vec<(EngramAuthorityStoreKey, EngramControlWorkBinding)>,
+    pub(crate) disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
 }
 
-struct EngramReclamationJournal {
-    store: EngramAuthorityStoreKey,
-    claim_id: String,
-    binding: Option<EngramControlWorkBinding>,
-    pending: bool,
+pub(crate) struct EngramReclamationJournal {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) claim_id: String,
+    pub(crate) binding: Option<EngramControlWorkBinding>,
+    pub(crate) pending: bool,
 }
 
-struct EngramReclamationSession {
-    id: String,
-    project_id: Option<String>,
+pub(crate) struct EngramReclamationSession {
+    pub(crate) id: String,
+    pub(crate) project_id: Option<String>,
     child_shape: bool,
-    local: bool,
-    enabled: bool,
-    idle: bool,
-    binding: Option<EngramControlWorkBinding>,
+    pub(crate) local: bool,
+    pub(crate) enabled: bool,
+    pub(crate) idle: bool,
+    pub(crate) binding: Option<EngramControlWorkBinding>,
 }
 
-struct EngramReclamationProject {
-    id: String,
-    eligible: bool,
-    store: Option<EngramAuthorityStoreKey>,
+pub(crate) struct EngramReclamationProject {
+    pub(crate) id: String,
+    pub(crate) eligible: bool,
+    pub(crate) store: Option<EngramAuthorityStoreKey>,
 }
 
 // Shared candidate facts for reclamation scheduling and authority recovery.
 // Indexing and reader selection use these owned facts after releasing state;
 // only the existing current-state target builder grants reader authority.
-struct EngramRootReaderSnapshot {
-    sessions: Vec<EngramReclamationSession>,
-    projects: Vec<EngramReclamationProject>,
-    parents: Vec<(String, String)>,
+pub(crate) struct EngramRootReaderSnapshot {
+    pub(crate) sessions: Vec<EngramReclamationSession>,
+    pub(crate) projects: Vec<EngramReclamationProject>,
+    pub(crate) parents: Vec<(String, String)>,
     inventory_available: bool,
 }
 
 impl EngramRootReaderSnapshot {
-    fn capture(inner: &StateInner) -> Self {
+    pub(crate) fn capture(inner: &StateInner) -> Self {
         Self {
             inventory_available: inner.require_delegation_inventory().is_ok(),
             sessions: inner
@@ -157,7 +157,7 @@ impl EngramRootReaderSnapshot {
             .filter(|project| project.eligible)
     }
 
-    fn readers(&self) -> Vec<(&EngramReclamationSession, &EngramAuthorityStoreKey)> {
+    pub(crate) fn readers(&self) -> Vec<(&EngramReclamationSession, &EngramAuthorityStoreKey)> {
         if !self.inventory_available {
             return Vec::new();
         }
@@ -196,7 +196,7 @@ impl EngramRootReaderSnapshot {
 }
 
 impl EngramRootReclamationSnapshot {
-    fn capture(inner: &StateInner) -> Self {
+    pub(crate) fn capture(inner: &StateInner) -> Self {
         let schedule = &inner.engram_root_reclamation;
         Self {
             roots: inner.engram_work_source_roots.clone(),
@@ -266,23 +266,23 @@ impl EngramRootReclamationSnapshot {
         }
     }
 
-    fn retired(&self, store: &EngramAuthorityStoreKey, binding: &EngramControlWorkBinding) -> bool {
+    pub(crate) fn retired(&self, store: &EngramAuthorityStoreKey, binding: &EngramControlWorkBinding) -> bool {
         self.retired
             .iter()
             .any(|(retired_store, retired)| retired_store == store && engram_same_recovery_run(retired, binding))
     }
 
-    fn journal(&self, root: &EngramWorkSourceRoot) -> Option<&EngramReclamationJournal> {
+    pub(crate) fn journal(&self, root: &EngramWorkSourceRoot) -> Option<&EngramReclamationJournal> {
         self.journals
             .iter()
             .find(|journal| journal.store == root.store && journal.claim_id == root.claim_id)
     }
 
-    fn readers(&self) -> Vec<(&EngramReclamationSession, &EngramAuthorityStoreKey)> {
+    pub(crate) fn readers(&self) -> Vec<(&EngramReclamationSession, &EngramAuthorityStoreKey)> {
         self.reader_snapshot.readers()
     }
 
-    fn plan(&self, now: std::time::Instant) -> Vec<EngramRootReclamationTask> {
+    pub(crate) fn plan(&self, now: std::time::Instant) -> Vec<EngramRootReclamationTask> {
         #[cfg(test)]
         engram_root_reclamation_planning_boundary("canonical", &[]);
         let readers = self.readers();
@@ -378,7 +378,7 @@ impl EngramRootReclamationSnapshot {
         plan
     }
 
-    fn disposition_due(&self, now: std::time::Instant) -> bool {
+    pub(crate) fn disposition_due(&self, now: std::time::Instant) -> bool {
         #[cfg(test)]
         engram_root_reclamation_planning_boundary("disposition", &[]);
         self.pending_releases

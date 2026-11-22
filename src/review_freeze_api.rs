@@ -1,29 +1,31 @@
 // New reviewer-only host control-plane entry point. Owns current-child
 // authorization and a real subprocess observer, not shell/interpreter approval.
 
-const TERMAL_REVIEW_FREEZE_TOOL_NAME: &str = "termal_review_freeze_check";
-const TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME: &str =
+use super::*;
+
+pub(crate) const TERMAL_REVIEW_FREEZE_TOOL_NAME: &str = "termal_review_freeze_check";
+pub(crate) const TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_review_freeze_check";
-const TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION: &str = "Independently verify an Engram schema-1 frozen review using TermAl's compiled checker, not repository scripts. Supply the manifest path and the parent's separately recorded SHA-256 literal. The host derives the current review worktree; observes real checker exit status, stdout and stderr separately; and requires exact fingerprint plus LF. Call before and after inspection. Does not allow Node, shell scripts, writes, builds, or tracker access. A mismatch or unsupported input is a failed verification, never a clean review.";
-static REVIEW_FREEZE_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
+pub(crate) const TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION: &str = "Independently verify an Engram schema-1 frozen review using TermAl's compiled checker, not repository scripts. Supply the manifest path and the parent's separately recorded SHA-256 literal. The host derives the current review worktree; observes real checker exit status, stdout and stderr separately; and requires exact fingerprint plus LF. Call before and after inspection. Does not allow Node, shell scripts, writes, builds, or tracker access. A mismatch or unsupported input is a failed verification, never a clean review.";
+pub(crate) static REVIEW_FREEZE_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
 #[derive(Clone)]
-struct ReviewFreezeLimiter(Arc<tokio::sync::Semaphore>);
+pub(crate) struct ReviewFreezeLimiter(pub(crate) Arc<tokio::sync::Semaphore>);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewFreezeResponse {
-    schema_version: u32,
-    algorithm: &'static str,
-    root: String,
-    expected_fingerprint: String,
-    verified: bool,
-    observer: ReviewFreezeObservation,
+pub(crate) struct ReviewFreezeResponse {
+    pub(crate) schema_version: u32,
+    pub(crate) algorithm: &'static str,
+    pub(crate) root: String,
+    pub(crate) expected_fingerprint: String,
+    pub(crate) verified: bool,
+    pub(crate) observer: ReviewFreezeObservation,
 }
 
 // One locked authority boundary for both permission admission and execution.
-fn review_freeze_authority_locked(
+pub(crate) fn review_freeze_authority_locked(
     inner: &StateInner,
     child: &str,
 ) -> Result<(String, String, u32), ApiError> {
@@ -61,7 +63,10 @@ fn review_freeze_authority_locked(
 }
 
 impl AppState {
-    fn review_freeze_child_identity(&self, child: &str) -> Result<(String, String, u32), ApiError> {
+    pub(crate) fn review_freeze_child_identity(
+        &self,
+        child: &str,
+    ) -> Result<(String, String, u32), ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         review_freeze_authority_locked(&inner, child)
     }
@@ -84,7 +89,7 @@ impl AppState {
     // Internal executor boundary permits deterministic transport/identity
     // integration tests. It is not a caller-controlled executable or API field.
     #[cfg(test)]
-    fn verify_review_freeze_with_runner(
+    pub(crate) fn verify_review_freeze_with_runner(
         &self,
         child: &str,
         request: ReviewFreezeRequest,
@@ -138,7 +143,7 @@ impl AppState {
 }
 
 #[cfg(test)]
-fn run_review_freeze_checker(command: &mut Command) -> Result<std::process::Output> {
+pub(crate) fn run_review_freeze_checker(command: &mut Command) -> Result<std::process::Output> {
     run_bounded_read_process(
         command,
         std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE,
@@ -147,7 +152,7 @@ fn run_review_freeze_checker(command: &mut Command) -> Result<std::process::Outp
     )
 }
 
-async fn verify_delegation_review_freeze(
+pub(crate) async fn verify_delegation_review_freeze(
     AxumPath(child): AxumPath<String>,
     State(state): State<AppState>,
     limiter: Option<axum::Extension<ReviewFreezeLimiter>>,
@@ -163,7 +168,7 @@ async fn verify_delegation_review_freeze(
     .await
 }
 
-async fn run_review_freeze_request<V>(
+pub(crate) async fn run_review_freeze_request<V>(
     child: String,
     state: AppState,
     request: Result<Json<ReviewFreezeRequest>, JsonRejection>,

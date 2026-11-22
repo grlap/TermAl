@@ -37,9 +37,11 @@
 // flat `include!()` fragment, so everything here shares the surrounding
 // module's types and imports.
 
+use super::*;
+
 /// Appends the scope's session or project id to a query string list the
 /// caller is building for a forwarded remote request.
-fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, String)>) {
+pub(crate) fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, String)>) {
     if let Some(remote_session_id) = scope.remote_session_id.as_deref() {
         query.push(("sessionId".to_owned(), remote_session_id.to_owned()));
     } else if let Some(remote_project_id) = scope.remote_project_id.as_deref() {
@@ -50,7 +52,7 @@ fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, Str
 /// Merges the scope's session or project id into a JSON request body
 /// destined for a forwarded remote request, creating an empty object if
 /// the caller passed a non-object value.
-fn apply_remote_scope_to_body(scope: &RemoteScope, body: Value) -> Value {
+pub(crate) fn apply_remote_scope_to_body(scope: &RemoteScope, body: Value) -> Value {
     let mut object = match body {
         Value::Object(map) => map,
         _ => serde_json::Map::new(),
@@ -72,7 +74,7 @@ fn apply_remote_scope_to_body(scope: &RemoteScope, body: Value) -> Value {
 /// Reserves a local TCP port from the
 /// `REMOTE_FORWARD_PORT_START..=REMOTE_FORWARD_PORT_END` pool for an
 /// outgoing ssh `-L` forward, wrapping around when the pool is exhausted.
-fn allocate_remote_forward_port() -> u16 {
+pub(crate) fn allocate_remote_forward_port() -> u16 {
     loop {
         let current = NEXT_REMOTE_FORWARD_PORT.fetch_add(1, Ordering::SeqCst);
         if current <= REMOTE_FORWARD_PORT_END {
@@ -86,7 +88,7 @@ fn allocate_remote_forward_port() -> u16 {
 /// id, or (for SSH transport) has a host/user value that would be unsafe
 /// to pass to `ssh`. Gate for every call site that is about to build an
 /// ssh argv or issue a forwarded request.
-fn validate_remote_connection_config(remote: &RemoteConfig) -> Result<(), ApiError> {
+pub(crate) fn validate_remote_connection_config(remote: &RemoteConfig) -> Result<(), ApiError> {
     if !remote.enabled {
         return Err(ApiError::bad_request(format!(
             "remote `{}` is disabled",
@@ -106,7 +108,7 @@ fn validate_remote_connection_config(remote: &RemoteConfig) -> Result<(), ApiErr
 
 /// Builds the validated `<user>@<host>` (or bare `<host>`) string used as
 /// the final positional argument in the `ssh` argv.
-fn remote_ssh_target(remote: &RemoteConfig) -> Result<String, ApiError> {
+pub(crate) fn remote_ssh_target(remote: &RemoteConfig) -> Result<String, ApiError> {
     let host = normalized_remote_ssh_host(remote)?;
     let user = normalized_remote_ssh_user(remote)?;
     Ok(match user {
@@ -122,7 +124,7 @@ fn remote_ssh_target(remote: &RemoteConfig) -> Result<String, ApiError> {
 /// is always inserted so host/user can never be reparsed as ssh options,
 /// even if a future change relaxes the validators — pinned by
 /// `remote_ssh_command_args_insert_double_dash_before_target` in tests.
-fn remote_ssh_command_args(
+pub(crate) fn remote_ssh_command_args(
     remote: &RemoteConfig,
     forwarded_port: u16,
     mode: RemoteProcessMode,
@@ -156,7 +158,7 @@ fn remote_ssh_command_args(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum RemoteActionScript {
+pub(crate) enum RemoteActionScript {
     Posix(String),
     WindowsPowerShell(String),
 }
@@ -174,7 +176,7 @@ impl RemoteActionScript {
 
 /// Assembles a one-shot SSH command that runs a POSIX shell script on the
 /// remote host without allocating a persistent tunnel.
-fn remote_ssh_one_shot_command_args(
+pub(crate) fn remote_ssh_one_shot_command_args(
     remote: &RemoteConfig,
     script: &str,
 ) -> Result<Vec<String>, ApiError> {
@@ -202,7 +204,7 @@ fn remote_ssh_one_shot_command_args(
 
 /// Assembles a one-shot SSH command that runs an encoded PowerShell script on a
 /// Windows remote host without allocating a persistent tunnel.
-fn remote_ssh_powershell_one_shot_command_args(
+pub(crate) fn remote_ssh_powershell_one_shot_command_args(
     remote: &RemoteConfig,
     script: &str,
 ) -> Result<Vec<String>, ApiError> {
@@ -233,12 +235,12 @@ fn remote_ssh_powershell_one_shot_command_args(
 }
 
 /// Quotes one shell word using the POSIX single-quote pattern.
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 /// Quotes one PowerShell single-quoted string literal.
-fn powershell_quote(value: &str) -> String {
+pub(crate) fn powershell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
@@ -254,7 +256,7 @@ fn powershell_encoded_command(script: &str) -> String {
 
 /// Returns the trimmed, validated ssh host for a remote, or a 400 if the
 /// host is missing/empty or would be unsafe to pass through the ssh argv.
-fn normalized_remote_ssh_host(remote: &RemoteConfig) -> Result<String, ApiError> {
+pub(crate) fn normalized_remote_ssh_host(remote: &RemoteConfig) -> Result<String, ApiError> {
     let host = remote
         .host
         .as_deref()
@@ -270,7 +272,9 @@ fn normalized_remote_ssh_host(remote: &RemoteConfig) -> Result<String, ApiError>
 /// Returns the trimmed, validated ssh user for a remote (or `None` when
 /// unset so ssh uses the default), or a 400 if the value would be unsafe
 /// to embed into the `<user>@<host>` target.
-fn normalized_remote_ssh_user(remote: &RemoteConfig) -> Result<Option<String>, ApiError> {
+pub(crate) fn normalized_remote_ssh_user(
+    remote: &RemoteConfig,
+) -> Result<Option<String>, ApiError> {
     let Some(user) = remote
         .user
         .as_deref()
@@ -287,7 +291,7 @@ fn normalized_remote_ssh_user(remote: &RemoteConfig) -> Result<Option<String>, A
 /// `[A-Za-z0-9._\-_]`. Guards against ids being used as filesystem or
 /// URL path components and against shell-metacharacter injection via the
 /// id (pinned by `rejects_remote_settings_with_unsafe_remote_id`).
-fn validate_remote_id_value(id: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_remote_id_value(id: &str) -> Result<(), ApiError> {
     if id.is_empty() {
         return Err(ApiError::bad_request("remote id cannot be empty"));
     }
@@ -362,7 +366,7 @@ fn validate_remote_ssh_user_value(user: &str, remote_name: &str) -> Result<(), A
 /// returns the handle so the caller keeps the live child; on failure the child
 /// is reaped and a human-readable error (with the ssh stderr tail when
 /// available) is returned.
-fn wait_for_remote_health(
+pub(crate) fn wait_for_remote_health(
     client: &BlockingHttpClient,
     base_url: &str,
     mut handle: RemoteProcessHandle,
@@ -400,7 +404,7 @@ fn wait_for_remote_health(
 /// stderr snippets, and port numbers so those transport details do not
 /// bleed into the ui (pinned by
 /// `remote_connection_issue_message_hides_transport_details`).
-fn remote_connection_issue_message(remote_name: &str) -> String {
+pub(crate) fn remote_connection_issue_message(remote_name: &str) -> String {
     format!(
         "Could not connect to remote \"{remote_name}\" over SSH. Check the host, network, and SSH settings, then try again."
     )
@@ -410,7 +414,7 @@ fn remote_connection_issue_message(remote_name: &str) -> String {
 /// binary could not be spawned", nudging the user toward installing
 /// OpenSSH on PATH instead of surfacing raw errno/spawn details (pinned
 /// by `local_ssh_start_issue_message_hides_transport_details`).
-fn local_ssh_start_issue_message(remote_name: &str) -> String {
+pub(crate) fn local_ssh_start_issue_message(remote_name: &str) -> String {
     format!(
         "Could not start the local SSH client for remote \"{remote_name}\". Verify OpenSSH is installed and available on PATH, then try again."
     )
@@ -434,14 +438,14 @@ fn read_process_stderr_suffix(child: &mut Child) -> String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RemoteInstallPlatform {
+pub(crate) enum RemoteInstallPlatform {
     Posix,
     Windows,
 }
 
-const POSIX_METADATA_PLATFORM_SED: &str =
+pub(crate) const POSIX_METADATA_PLATFORM_SED: &str =
     r#"s/.*"platform"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p"#;
-const POSIX_METADATA_SOURCE_PATH_SED: &str =
+pub(crate) const POSIX_METADATA_SOURCE_PATH_SED: &str =
     r#"s/.*"sourcePath"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p"#;
 
 fn looks_like_windows_source_path(source_path: &str) -> bool {
@@ -489,7 +493,7 @@ fn validate_remote_source_path(
     Ok((trimmed.to_owned(), platform))
 }
 
-fn remote_install_metadata_json(
+pub(crate) fn remote_install_metadata_json(
     source_path: &str,
     platform: RemoteInstallPlatform,
 ) -> Result<String, ApiError> {
@@ -504,7 +508,7 @@ fn remote_install_metadata_json(
     .map_err(|err| ApiError::internal(format!("failed to build remote metadata: {err}")))
 }
 
-fn remote_register_script(source_path: &str) -> Result<RemoteActionScript, ApiError> {
+pub(crate) fn remote_register_script(source_path: &str) -> Result<RemoteActionScript, ApiError> {
     let (source_path, platform) = validate_remote_source_path(source_path)?;
     match platform {
         RemoteInstallPlatform::Posix => Ok(RemoteActionScript::Posix(
@@ -595,7 +599,7 @@ Write-Output "remote platform: windows/$env:PROCESSOR_ARCHITECTURE"
     )
 }
 
-fn remote_posix_upgrade_script() -> String {
+pub(crate) fn remote_posix_upgrade_script() -> String {
     r#"set -eu
 META="$HOME/.termal/remote-install.json"
 if [ ! -f "$META" ]; then
@@ -639,7 +643,7 @@ echo "build log: $LOG"
     .replace("@@SOURCE_PATH_SED@@", POSIX_METADATA_SOURCE_PATH_SED)
 }
 
-fn remote_windows_upgrade_script() -> String {
+pub(crate) fn remote_windows_upgrade_script() -> String {
     r#"$ErrorActionPreference = 'Stop'
 $TermalDir = Join-Path $HOME '.termal'
 $Meta = Join-Path $TermalDir 'remote-install.json'
@@ -701,7 +705,7 @@ Write-Output "build log: $Log"
     .to_owned()
 }
 
-fn sanitize_remote_action_output(raw: &[u8]) -> String {
+pub(crate) fn sanitize_remote_action_output(raw: &[u8]) -> String {
     let text = String::from_utf8_lossy(raw);
     let mut sanitized = text
         .chars()
@@ -736,7 +740,7 @@ struct RemoteScriptOutput {
     stderr: Vec<u8>,
 }
 
-fn read_capped_remote_action_stream<R: std::io::Read>(mut reader: R) -> Vec<u8> {
+pub(crate) fn read_capped_remote_action_stream<R: std::io::Read>(mut reader: R) -> Vec<u8> {
     let mut output = Vec::new();
     let mut buffer = [0_u8; 8192];
     loop {
@@ -839,7 +843,7 @@ fn remote_action_error(remote_name: &str, action: &str, output: &RemoteScriptOut
     ApiError::bad_gateway(format!("remote `{remote_name}` {action} failed: {detail}"))
 }
 
-fn run_remote_ssh_script(
+pub(crate) fn run_remote_ssh_script(
     remote: &RemoteConfig,
     action: &str,
     script: &RemoteActionScript,
@@ -868,7 +872,10 @@ fn remote_upgrade_should_try_windows(output: &RemoteScriptOutput) -> bool {
     remote_upgrade_should_try_windows_parts(output.status.code(), &output.stderr)
 }
 
-fn remote_upgrade_should_try_windows_parts(exit_code: Option<i32>, stderr: &[u8]) -> bool {
+pub(crate) fn remote_upgrade_should_try_windows_parts(
+    exit_code: Option<i32>,
+    stderr: &[u8],
+) -> bool {
     if exit_code == Some(127) {
         return true;
     }
@@ -879,7 +886,7 @@ fn remote_upgrade_should_try_windows_parts(exit_code: Option<i32>, stderr: &[u8]
         || stderr.contains("'sh' is not recognized")
 }
 
-fn upgrade_remote_ssh(remote: &RemoteConfig) -> Result<RemoteActionResponse, ApiError> {
+pub(crate) fn upgrade_remote_ssh(remote: &RemoteConfig) -> Result<RemoteActionResponse, ApiError> {
     validate_remote_connection_config(remote)?;
     if remote.transport != RemoteTransport::Ssh {
         return Err(ApiError::bad_request(format!(
@@ -926,7 +933,10 @@ fn upgrade_remote_ssh(remote: &RemoteConfig) -> Result<RemoteActionResponse, Api
 /// returns the decoded `HealthResponse` only if the remote reports
 /// `ok:true`; the short `REMOTE_HEALTH_TIMEOUT` keeps the caller's poll
 /// loop responsive.
-fn remote_healthcheck(client: &BlockingHttpClient, base_url: &str) -> Result<HealthResponse> {
+pub(crate) fn remote_healthcheck(
+    client: &BlockingHttpClient,
+    base_url: &str,
+) -> Result<HealthResponse> {
     let response = client
         .get(format!("{base_url}/api/health"))
         .timeout(REMOTE_HEALTH_TIMEOUT)
@@ -985,7 +995,9 @@ fn sanitize_remote_error_body(raw: &str) -> Option<String> {
 /// remote's own error body (sanitized). Caps the error body read at
 /// `MAX_REMOTE_ERROR_BODY_BYTES` so a pathological remote cannot force
 /// an unbounded allocation on the local side.
-fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Result<T, ApiError> {
+pub(crate) fn decode_remote_json<T: DeserializeOwned>(
+    response: BlockingHttpResponse,
+) -> Result<T, ApiError> {
     let status = response.status();
     if !status.is_success() {
         let mut raw = Vec::new();
@@ -1004,8 +1016,14 @@ fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Re
         if let Ok(value) = serde_json::from_slice::<Value>(&raw)
             && let Some(failure) = output_limit_details(&value)
         {
-            return Err(ApiError::internal("The remote response exceeded the output limit.")
-                .with_kind(ApiErrorKind::OutputLimitExceeded { limit: failure.limit, outcome: failure.outcome }));
+            return Err(
+                ApiError::internal("The remote response exceeded the output limit.").with_kind(
+                    ApiErrorKind::OutputLimitExceeded {
+                        limit: failure.limit,
+                        outcome: failure.outcome,
+                    },
+                ),
+            );
         }
         if let Ok(error) = serde_json::from_slice::<ErrorResponse>(&raw) {
             let message = sanitize_remote_error_body(&error.error).unwrap_or_else(|| {
@@ -1030,7 +1048,7 @@ fn decode_remote_json<T: DeserializeOwned>(response: BlockingHttpResponse) -> Re
 /// does (keeping `A-Za-z0-9-_.~` literal and hex-encoding everything
 /// else) so remote session/project ids can be spliced into paths and
 /// query strings without breaking URL parsing on the remote side.
-fn encode_uri_component(value: &str) -> String {
+pub(crate) fn encode_uri_component(value: &str) -> String {
     use std::fmt::Write as _;
 
     let mut encoded = String::new();
@@ -1047,7 +1065,7 @@ fn encode_uri_component(value: &str) -> String {
 impl RemoteProcessMode {
     /// Human-readable name for the ssh child mode, used when building
     /// startup-failure and timeout error messages.
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::ManagedServer => "managed SSH session",
             Self::TunnelOnly => "SSH tunnel",

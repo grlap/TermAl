@@ -3,28 +3,30 @@
 // preparation. Does not admit a turn, operate on grants or send a request.
 // New fragment beside engram_unadmitted_observation.rs.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramRuntimeObservedCommand {
-    tool_key: String,
-    simple: bool,
+pub(crate) struct EngramRuntimeObservedCommand {
+    pub(crate) tool_key: String,
+    pub(crate) simple: bool,
     // Keep the start's one-call and launcher interpretation through reload;
     // a completion label or exit alone cannot prove which command ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    recognized_command: Option<EngramCheckCommand>,
+    pub(crate) recognized_command: Option<EngramCheckCommand>,
     #[serde(default)]
-    launch_only: bool,
+    pub(crate) launch_only: bool,
     // A launcher invocation can end without proving that its background
     // test finished. Keep these two observed facts distinct.
     #[serde(default)]
-    invocation_ended: bool,
+    pub(crate) invocation_ended: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    declared: Option<EngramDeclaredBinding>,
-    check: EngramObservedCheck,
+    pub(crate) declared: Option<EngramDeclaredBinding>,
+    pub(crate) check: EngramObservedCheck,
 }
 
 // Build and qualified launcher completions require their existing owner;
 // a mismatched command or runner-looking stdout cannot supply the outcome.
-fn runtime_observed_command_needs_completion(command: &EngramCheckCommand) -> bool {
+pub(crate) fn runtime_observed_command_needs_completion(command: &EngramCheckCommand) -> bool {
     command.argv.is_empty()
         || command.kind == EngramVerificationKind::Build
         || engram_is_focused_node_check(command)
@@ -32,23 +34,23 @@ fn runtime_observed_command_needs_completion(command: &EngramCheckCommand) -> bo
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct EngramRuntimeObservedTurn {
-    host_turn_ref: String,
-    adopted_at: String,
-    notice_message_id: String,
-    generation: u64,
-    commands: Vec<EngramRuntimeObservedCommand>,
+pub(crate) struct EngramRuntimeObservedTurn {
+    pub(crate) host_turn_ref: String,
+    pub(crate) adopted_at: String,
+    pub(crate) notice_message_id: String,
+    pub(crate) generation: u64,
+    pub(crate) commands: Vec<EngramRuntimeObservedCommand>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    observed_outcome: Option<EngramObservedTurnOutcome>,
+    pub(crate) observed_outcome: Option<EngramObservedTurnOutcome>,
     #[serde(default)]
-    source_attribution_uncertain: bool,
+    pub(crate) source_attribution_uncertain: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    opening_root: Option<EngramRuntimeOpeningRoot>,
+    pub(crate) opening_root: Option<EngramRuntimeOpeningRoot>,
     #[serde(skip)]
-    opening_prepared: bool,
+    pub(crate) opening_prepared: bool,
     // Process-local opening image; closing jobs persist it in their existing scope.
     #[serde(skip)]
-    opening_scope: Option<EngramRuntimeClosingScope>,
+    pub(crate) opening_scope: Option<EngramRuntimeClosingScope>,
 }
 
 // Equality covers every retained observation fact, not process-local
@@ -69,21 +71,21 @@ impl PartialEq for EngramRuntimeObservedTurn {
 impl Eq for EngramRuntimeObservedTurn {}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramRuntimeOpeningRoot {
-    store: EngramAuthorityStoreKey,
-    binding: EngramControlWorkBinding,
-    provenance: EngramRootCapture,
-    source_root: Option<EngramTurnSourceRoot>,
+pub(crate) struct EngramRuntimeOpeningRoot {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) provenance: EngramRootCapture,
+    pub(crate) source_root: Option<EngramTurnSourceRoot>,
 }
 
 impl EngramRuntimeObservedTurn {
-    fn adopted(notice_message_id: String, generation: u64) -> Self {
+    pub(crate) fn adopted(notice_message_id: String, generation: u64) -> Self {
         Self::started(notice_message_id, generation)
     }
 
     // The existing anchor is an adoption notice for a runtime-started turn,
     // or the actual prompt message for an ordinary host-started turn.
-    fn started(notice_message_id: String, generation: u64) -> Self {
+    pub(crate) fn started(notice_message_id: String, generation: u64) -> Self {
         Self {
             host_turn_ref: format!("runtime-turn-{}", Uuid::new_v4()),
             adopted_at: unadmitted_observation_timestamp(),
@@ -101,12 +103,20 @@ impl EngramRuntimeObservedTurn {
     // This collection is independent of the local diagnostic ring. Neither
     // its number of commands nor the producer's inline-check limit truncates
     // it. Each command gets one immutable identity, including after reload.
-    fn observe(&mut self, observation: &EngramRecorderObservation<'_>) {
-        self.observe_with_facts(observation, None, None, None,
-            matches!(observation, EngramRecorderObservation::CommandStarted { .. }));
+    pub(crate) fn observe(&mut self, observation: &EngramRecorderObservation<'_>) {
+        self.observe_with_facts(
+            observation,
+            None,
+            None,
+            None,
+            matches!(
+                observation,
+                EngramRecorderObservation::CommandStarted { .. }
+            ),
+        );
     }
 
-    fn observe_recognized(
+    pub(crate) fn observe_recognized(
         &mut self,
         observation: &EngramRecorderObservation<'_>,
         recognized: Option<&EngramCheckCommand>,
@@ -116,7 +126,7 @@ impl EngramRuntimeObservedTurn {
         self.observe_with_facts(observation, recognized, declared, None, fresh_start);
     }
 
-    fn observe_with_facts(
+    pub(crate) fn observe_with_facts(
         &mut self,
         observation: &EngramRecorderObservation<'_>,
         recognized: Option<&EngramCheckCommand>,
@@ -128,20 +138,36 @@ impl EngramRuntimeObservedTurn {
         match observation {
             EngramRecorderObservation::CommandStarted { key, ran, .. }
             | EngramRecorderObservation::CommandDescribed { key, ran, .. } => {
-                let Some(command) = recognized.cloned().or_else(|| ran.and_then(engram_check_command)) else {
+                let Some(command) = recognized
+                    .cloned()
+                    .or_else(|| ran.and_then(engram_check_command))
+                else {
                     return;
                 };
-                if let Some(previous) = self.commands.iter().rev().find(|entry| entry.tool_key == *key) {
+                if let Some(previous) = self
+                    .commands
+                    .iter()
+                    .rev()
+                    .find(|entry| entry.tool_key == *key)
+                {
                     // The existing recorder owns fresh starts. A repeated
                     // update cannot reopen a completed invocation or replace
                     // one that still awaits its terminal result.
-                    if (!previous.invocation_ended && previous.check.finished_at.is_none()) || !fresh_start
-                        || !matches!(observation, EngramRecorderObservation::CommandStarted { .. })
+                    if (!previous.invocation_ended && previous.check.finished_at.is_none())
+                        || !fresh_start
+                        || !matches!(
+                            observation,
+                            EngramRecorderObservation::CommandStarted { .. }
+                        )
                     {
                         return;
                     }
                 }
-                let occurrence = self.commands.iter().filter(|entry| entry.tool_key == *key).count() as u64;
+                let occurrence = self
+                    .commands
+                    .iter()
+                    .filter(|entry| entry.tool_key == *key)
+                    .count() as u64;
                 self.commands.push(EngramRuntimeObservedCommand {
                     tool_key: (*key).to_owned(),
                     simple: command.simple,
@@ -155,13 +181,18 @@ impl EngramRuntimeObservedTurn {
                     invocation_ended: false,
                     declared: declared.cloned(),
                     check: EngramObservedCheck {
-                        host_check_id: unadmitted_host_check_occurrence_id(&self.host_turn_ref, key, occurrence),
+                        host_check_id: unadmitted_host_check_occurrence_id(
+                            &self.host_turn_ref,
+                            key,
+                            occurrence,
+                        ),
                         check_kind: command.kind,
                         observed_result: EngramObservedCheckResult::Indeterminate,
-                        started_at: (fresh_start && matches!(
-                            observation,
-                            EngramRecorderObservation::CommandStarted { .. }
-                        ))
+                        started_at: (fresh_start
+                            && matches!(
+                                observation,
+                                EngramRecorderObservation::CommandStarted { .. }
+                            ))
                         .then(|| now.clone()),
                         finished_at: None,
                         observed_at: now,
@@ -202,8 +233,9 @@ impl EngramRuntimeObservedTurn {
                 // the provider's display title and keeps the original owner.
                 let changed_command = entry.declared.is_none()
                     && reported_command.is_some_and(|ran| {
-                        entry.recognized_command.as_ref().is_none_or(|started|
-                            engram_check_command_like(ran, started).as_ref() != Some(started))
+                        entry.recognized_command.as_ref().is_none_or(|started| {
+                            engram_check_command_like(ran, started).as_ref() != Some(started)
+                        })
                     });
                 let outcome = if *runtime_output_cut || entry.launch_only || changed_command {
                     Some(EngramExecutionOutcome::Unknown)
@@ -213,7 +245,9 @@ impl EngramRuntimeObservedTurn {
                     } else {
                         Some(EngramExecutionOutcome::Unknown)
                     }
-                } else if entry.recognized_command.as_ref()
+                } else if entry
+                    .recognized_command
+                    .as_ref()
                     .is_some_and(runtime_observed_command_needs_completion)
                 {
                     artifact_outcome.or(Some(EngramExecutionOutcome::Unknown))
@@ -221,7 +255,9 @@ impl EngramRuntimeObservedTurn {
                     entry.recognized_command.as_ref().and_then(|command| {
                         let lines = engram_check_result_lines(&command.program, output);
                         engram_check_command_outcome(
-                            command, exit.unwrap_or(EngramCommandExit::Unknown), &lines,
+                            command,
+                            exit.unwrap_or(EngramCommandExit::Unknown),
+                            &lines,
                         )
                     })
                 };
@@ -245,9 +281,11 @@ impl EngramRuntimeObservedTurn {
                 // The recorder emits this for a proved denied/declined call,
                 // not merely for a missing end. Launch classification does
                 // not turn a proved denial into an observed invocation.
-                if let Some(position) = self.commands.iter().rposition(|entry|
-                    entry.tool_key == *key && !entry.invocation_ended && entry.check.finished_at.is_none())
-                {
+                if let Some(position) = self.commands.iter().rposition(|entry| {
+                    entry.tool_key == *key
+                        && !entry.invocation_ended
+                        && entry.check.finished_at.is_none()
+                }) {
                     self.commands.remove(position);
                 }
             }
@@ -256,11 +294,11 @@ impl EngramRuntimeObservedTurn {
     }
 }
 
-fn unadmitted_observation_timestamp() -> String {
+pub(crate) fn unadmitted_observation_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-fn unadmitted_host_check_id(turn_ref: &str, tool_key: &str) -> String {
+pub(crate) fn unadmitted_host_check_id(turn_ref: &str, tool_key: &str) -> String {
     let mut hash = Sha256::new();
     hash.update((turn_ref.len() as u64).to_be_bytes());
     hash.update(turn_ref.as_bytes());
@@ -288,20 +326,20 @@ fn unadmitted_host_check_occurrence_id(turn_ref: &str, tool_key: &str, occurrenc
 // A missing or incompatible baseline remains unknown; it is never invented
 // from the current source or re-timestamped to fit the producer window.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramRuntimeCheckpointBasis {
-    binding: EngramControlWorkBinding,
-    endpoint: EngramMeasuredBaseline,
+pub(crate) struct EngramRuntimeCheckpointBasis {
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) endpoint: EngramMeasuredBaseline,
     /// The root image the endpoint was measured in: a named root's generation
     /// and state, or neither for an unnamed workdir. A later sighting compares
     /// only under the same image, so a rebind or renaming starts unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_root_generation: Option<i64>,
+    pub(crate) source_root_generation: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_root_state: Option<EngramSourceRootState>,
+    pub(crate) source_root_state: Option<EngramSourceRootState>,
 }
 
 impl EngramRuntimeCheckpointBasis {
-    fn of_sighting(
+    pub(crate) fn of_sighting(
         binding: EngramControlWorkBinding,
         source_basis: &EngramExecutionSourceBasis,
         observed_at: &str,
@@ -325,7 +363,7 @@ impl EngramRuntimeCheckpointBasis {
 /// Engram accounted as a sighting (an audit-only or other receipt is not), while
 /// no later turn has started and the session still holds the sighting's exact
 /// binding. A refused, failed or unresolved sighting establishes nothing.
-fn engram_recorded_closing_baseline(
+pub(crate) fn engram_recorded_closing_baseline(
     record: &SessionRecord,
     expected: &EngramRuntimeObservationReport,
     next: &EngramRuntimeObservationReport,
@@ -336,7 +374,10 @@ fn engram_recorded_closing_baseline(
     let EngramRuntimeObservationDelivery::Recorded { receipt } = &after.delivery else {
         return None;
     };
-    if !matches!(before.delivery, EngramRuntimeObservationDelivery::Pending { .. }) {
+    if !matches!(
+        before.delivery,
+        EngramRuntimeObservationDelivery::Pending { .. }
+    ) {
         return None;
     }
     let Ok(EngramControlRequest::ExecutionObserve { observation, .. }) =
@@ -344,12 +385,17 @@ fn engram_recorded_closing_baseline(
     else {
         return None;
     };
-    let EngramInterTurnOccurrence::SourceSighting { source_basis, observed_at } = &observation.occurrence
+    let EngramInterTurnOccurrence::SourceSighting {
+        source_basis,
+        observed_at,
+    } = &observation.occurrence
     else {
         return None;
     };
     let accepted = EngramSourceObservationReceipt::from_recorded_result(
-        receipt.clone(), &observation, &next.observing_session,
+        receipt.clone(),
+        &observation,
+        &next.observing_session,
     )
     .is_ok_and(|receipt| receipt.is_sighting());
     // Only the exact turn this process closed last qualifies, identified by
@@ -357,34 +403,39 @@ fn engram_recorded_closing_baseline(
     // with the host): a report from before a restart never does. Any later
     // close replaces that reference, and any later turn start moves the
     // active generation past the report's.
-    let newest = record.engram.runtime_closed_turn_ref.as_deref() == Some(next.host_turn_ref.as_str())
+    let newest = record.engram.runtime_closed_turn_ref.as_deref()
+        == Some(next.host_turn_ref.as_str())
         && record.active_turn_generation == next.generation;
     let bound = record.engram.work_binding.as_ref() == Some(&observation.binding);
     (accepted && newest && bound).then(|| {
-        EngramRuntimeCheckpointBasis::of_sighting(observation.binding.clone(), source_basis, observed_at)
+        EngramRuntimeCheckpointBasis::of_sighting(
+            observation.binding.clone(),
+            source_basis,
+            observed_at,
+        )
     })
 }
 
 // Closing facts wait durably for off-thread measurement/preparation. The
 // original checkpoint is captured before a successor turn can replace it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramRuntimeClosingJob {
-    trace: EngramRuntimeObservedTurn,
-    baseline: Option<EngramRuntimeCheckpointBasis>,
+pub(crate) struct EngramRuntimeClosingJob {
+    pub(crate) trace: EngramRuntimeObservedTurn,
+    pub(crate) baseline: Option<EngramRuntimeCheckpointBasis>,
     // Frozen before trace removal; old jobs conservatively have no fallback.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
-    scope: EngramRuntimeClosingScope,
-    policy: Option<EngramObservationPolicyBasis>,
-    attempts: u32,
-    retry_at: String,
-    last_error: Option<String>,
+    pub(crate) registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
+    pub(crate) scope: EngramRuntimeClosingScope,
+    pub(crate) policy: Option<EngramObservationPolicyBasis>,
+    pub(crate) attempts: u32,
+    pub(crate) retry_at: String,
+    pub(crate) last_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    terminal_failure: Option<String>,
+    pub(crate) terminal_failure: Option<String>,
 }
 
 impl EngramRuntimeClosingJob {
-    fn new(
+    pub(crate) fn new(
         trace: EngramRuntimeObservedTurn,
         baseline: Option<EngramRuntimeCheckpointBasis>,
         scope: EngramRuntimeClosingScope,
@@ -402,13 +453,14 @@ impl EngramRuntimeClosingJob {
         }
     }
 
-    fn failed(&self, session_id: &str, error: &EngramTransportError) -> Self {
+    pub(crate) fn failed(&self, session_id: &str, error: &EngramTransportError) -> Self {
         let mut next = self.clone();
         // Preparation still depends on the current source and binding. Only
         // an already prepared, immutable report can wait for the store.
         next.attempts = next.attempts.saturating_add(1);
-        next.retry_at = (chrono::Utc::now() + runtime_observation_retry_delay(session_id, next.attempts))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        next.retry_at = (chrono::Utc::now()
+            + runtime_observation_retry_delay(session_id, next.attempts))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         next.last_error = Some(error.message.clone());
         next
     }
@@ -417,32 +469,31 @@ impl EngramRuntimeClosingJob {
 // Immutable work association captured under the terminal transition lock.
 // The reporting policy is pinned separately, off-thread, before measurement.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramRuntimeClosingScope {
+pub(crate) struct EngramRuntimeClosingScope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    binding: Option<EngramControlWorkBinding>,
-    store: EngramAuthorityStoreKey,
-    connection: EngramConnectionConfig,
+    pub(crate) binding: Option<EngramControlWorkBinding>,
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) connection: EngramConnectionConfig,
     // Preserve older closing images as data without treating their fields as
     // work-session credentials or current association requirements.
     #[serde(default, flatten)]
-    historical_fields: BTreeMap<String, Value>,
-    root: EngramNamedRootState,
-    workdir: String,
+    pub(crate) historical_fields: BTreeMap<String, Value>,
+    pub(crate) root: EngramNamedRootState,
+    pub(crate) workdir: String,
 }
 
 impl EngramRuntimeClosingScope {
-    fn capture(inner: &StateInner, session_id: &str) -> Result<Self, String> {
+    pub(crate) fn capture(inner: &StateInner, session_id: &str) -> Result<Self, String> {
         Self::capture_with_binding(inner, session_id, None)
     }
 
-    fn capture_with_binding(
+    pub(crate) fn capture_with_binding(
         inner: &StateInner,
         session_id: &str,
         binding: Option<&EngramControlWorkBinding>,
     ) -> Result<Self, String> {
-        let target =
-            AppState::engram_source_root_target_locked(inner, session_id)?
-                .ok_or_else(|| "no configured Engram connection".to_owned())?;
+        let target = AppState::engram_source_root_target_locked(inner, session_id)?
+            .ok_or_else(|| "no configured Engram connection".to_owned())?;
         let binding = binding.cloned().or(target.work_binding);
         let store = target
             .settings
@@ -452,12 +503,14 @@ impl EngramRuntimeClosingScope {
             .find_session_index(session_id)
             .ok_or_else(|| "session disappeared".to_owned())?;
         let record = &inner.sessions[index];
-        let root = if let Some(entry) = binding.as_ref().and_then(|binding| engram_work_source_root_for_claim(
-            &inner.engram_work_source_roots,
-            &store,
-            &binding.work_id,
-            &binding.claim_id,
-        )) {
+        let root = if let Some(entry) = binding.as_ref().and_then(|binding| {
+            engram_work_source_root_for_claim(
+                &inner.engram_work_source_roots,
+                &store,
+                &binding.work_id,
+                &binding.claim_id,
+            )
+        }) {
             EngramNamedRootState::Bound {
                 workspace_id: entry.root.clone(),
                 generation: i64::try_from(entry.generation)
@@ -481,7 +534,7 @@ impl EngramRuntimeClosingScope {
         })
     }
 
-    fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         format!(
             "binding={} root={:?} workdir={}",
             describe_engram_work_binding(self.binding.as_ref()),
@@ -490,25 +543,27 @@ impl EngramRuntimeClosingScope {
         )
     }
 
-    fn require_current(
+    pub(crate) fn require_current(
         &self,
         inner: &StateInner,
         session_id: &str,
     ) -> Result<(), EngramTransportError> {
-        let restored_binding = inner.find_session_index(session_id)
+        let restored_binding = inner
+            .find_session_index(session_id)
             .filter(|&index| inner.sessions[index].engram.work_binding.is_none())
             .and(self.binding.as_ref());
-        let current = Self::capture_with_binding(inner, session_id, restored_binding).map(|mut current| {
-            if self.binding.is_none() {
-                // No claim has been attributed yet. Only connection, store
-                // and workdir are pinned until the worker retains a canonical
-                // work association and its local root image.
-                current.binding = None;
-                current.root = self.root.clone();
-            }
-            current.historical_fields = self.historical_fields.clone();
-            current
-        });
+        let current =
+            Self::capture_with_binding(inner, session_id, restored_binding).map(|mut current| {
+                if self.binding.is_none() {
+                    // No claim has been attributed yet. Only connection, store
+                    // and workdir are pinned until the worker retains a canonical
+                    // work association and its local root image.
+                    current.binding = None;
+                    current.root = self.root.clone();
+                }
+                current.historical_fields = self.historical_fields.clone();
+                current
+            });
         if current.as_ref() == Ok(self) {
             return Ok(());
         }
@@ -525,12 +580,15 @@ impl EngramRuntimeClosingScope {
     }
 }
 
-enum EngramRuntimeClosingOutcome {
+pub(crate) enum EngramRuntimeClosingOutcome {
     BindingRecoveryPending,
     Unclaimed,
     Binding(EngramRuntimeClosingScope),
     Policy(EngramObservationPolicyBasis),
-    FocusChanged { binding: EngramControlWorkBinding, refreshed: bool },
+    FocusChanged {
+        binding: EngramControlWorkBinding,
+        refreshed: bool,
+    },
     Report(EngramRuntimeObservationReport, Option<SourceBasisRefusal>),
     // Process-local prospective work, never part of the persisted report.
     // Install the old report before publishing the successor association.
@@ -546,40 +604,42 @@ enum EngramRuntimeClosingOutcome {
 // An unmeasured closing cut still bounds the observed outcome/check facts.
 // It is never a source sighting, a revision or an assumed source change.
 #[derive(Clone, Debug)]
-enum EngramRuntimeClosingSource {
+pub(crate) enum EngramRuntimeClosingSource {
     Measured(EngramMeasuredSighting),
     UnsupportedGitlinks { observed_at: String },
     Unavailable { observed_at: String },
 }
 
 impl EngramRuntimeClosingSource {
-    fn sighting(&self) -> Option<&EngramMeasuredSighting> {
+    pub(crate) fn sighting(&self) -> Option<&EngramMeasuredSighting> {
         match self {
             Self::Measured(sighting) => Some(sighting),
             Self::UnsupportedGitlinks { .. } | Self::Unavailable { .. } => None,
         }
     }
 
-    fn observed_at(&self) -> &str {
+    pub(crate) fn observed_at(&self) -> &str {
         match self {
             Self::Measured(sighting) => &sighting.observed_at,
-            Self::UnsupportedGitlinks { observed_at } | Self::Unavailable { observed_at } => observed_at,
+            Self::UnsupportedGitlinks { observed_at } | Self::Unavailable { observed_at } => {
+                observed_at
+            }
         }
     }
 }
 
 #[derive(Clone, Debug)]
-struct EngramRuntimeClosingCapture {
-    binding: EngramControlWorkBinding,
-    root_basis: EngramObservationRootBasis,
-    source: EngramRuntimeClosingSource,
-    baseline: Option<EngramRuntimeCheckpointBasis>,
-    registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
-    policy: EngramObservationPolicyBasis,
+pub(crate) struct EngramRuntimeClosingCapture {
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) root_basis: EngramObservationRootBasis,
+    pub(crate) source: EngramRuntimeClosingSource,
+    pub(crate) baseline: Option<EngramRuntimeCheckpointBasis>,
+    pub(crate) registered_check_baselines: Vec<EngramRuntimeCheckpointBasis>,
+    pub(crate) policy: EngramObservationPolicyBasis,
 }
 
 impl EngramRuntimeClosingCapture {
-    fn source_change(&self) -> Option<EngramObservedSourceChange> {
+    pub(crate) fn source_change(&self) -> Option<EngramObservedSourceChange> {
         let sighting = self.source.sighting()?;
         let source = &sighting.source_basis;
         let same_scope = |basis: &EngramRuntimeCheckpointBasis| {
@@ -589,36 +649,47 @@ impl EngramRuntimeClosingCapture {
                 && basis.source_root_state == source.source_root_state
         };
         let mixed = |basis: &EngramRuntimeCheckpointBasis| {
-            same_scope(basis) && basis.endpoint.source_id.as_ref().zip(source.source_id.as_ref())
-                .is_some_and(|(before, after)| !before.same_format(after))
+            same_scope(basis)
+                && basis
+                    .endpoint
+                    .source_id
+                    .as_ref()
+                    .zip(source.source_id.as_ref())
+                    .is_some_and(|(before, after)| !before.same_format(after))
         };
         let comparable = |basis: &EngramRuntimeCheckpointBasis| {
-            same_scope(basis) && engram_observation_source_formats_match(
-                basis.endpoint.source_id.as_ref(), source.source_id.as_ref())
+            same_scope(basis)
+                && engram_observation_source_formats_match(
+                    basis.endpoint.source_id.as_ref(),
+                    source.source_id.as_ref(),
+                )
         };
         let compatible = self.baseline.as_ref().filter(|basis| comparable(basis));
         let closed_at = EngramHost::check_timestamp(&sighting.observed_at);
-        let mut checked = self.registered_check_baselines.iter().filter(|basis| {
-            comparable(basis) && EngramHost::check_timestamp(&basis.endpoint.observed_at)
-                .zip(closed_at).is_some_and(|(before, after)| before <= after)
-        }).peekable();
+        let mut checked = self
+            .registered_check_baselines
+            .iter()
+            .filter(|basis| {
+                comparable(basis)
+                    && EngramHost::check_timestamp(&basis.endpoint.observed_at)
+                        .zip(closed_at)
+                        .is_some_and(|(before, after)| before <= after)
+            })
+            .peekable();
         let has_comparable_check = checked.peek().is_some();
         // Every qualifying check participates, even when the previous
         // checkpoint or the last check equals the close (X -> Y -> X).
-        if let Some(basis) = checked.find(|basis|
-            !engram_observation_same_source(&basis.endpoint, source))
+        if let Some(basis) =
+            checked.find(|basis| !engram_observation_same_source(&basis.endpoint, source))
         {
             return Some(EngramObservedSourceChange::ContentComparison {
                 workspace_id: source.workspace_id.clone(),
-                baseline: basis.endpoint.clone(), sighting: sighting.clone(),
+                baseline: basis.endpoint.clone(),
+                sighting: sighting.clone(),
             });
         }
         match compatible {
-            Some(basis)
-                if engram_observation_same_source(&basis.endpoint, source) =>
-            {
-                None
-            }
+            Some(basis) if engram_observation_same_source(&basis.endpoint, source) => None,
             Some(basis) => Some(EngramObservedSourceChange::ContentComparison {
                 workspace_id: source.workspace_id.clone(),
                 baseline: basis.endpoint.clone(),
@@ -626,7 +697,14 @@ impl EngramRuntimeClosingCapture {
             }),
             None if has_comparable_check => None,
             // A known on-scope baseline in a different wire format is not missing.
-            None if self.baseline.iter().chain(&self.registered_check_baselines).any(mixed) => None,
+            None if self
+                .baseline
+                .iter()
+                .chain(&self.registered_check_baselines)
+                .any(mixed) =>
+            {
+                None
+            }
             None => Some(EngramObservedSourceChange::AssumedMissingBaseline {
                 workspace_id: source.workspace_id.clone(),
                 sighting: sighting.clone(),
@@ -638,7 +716,7 @@ impl EngramRuntimeClosingCapture {
 // Request construction is separate from delivery. Once persisted, each
 // serialized request is replayed exactly; a later policy, root, binding or
 // source read never rewrites an uncertain earlier request.
-fn prepare_runtime_observations(
+pub(crate) fn prepare_runtime_observations(
     trace: &EngramRuntimeObservedTurn,
     capture: EngramRuntimeClosingCapture,
     built_at: chrono::DateTime<chrono::Utc>,
@@ -686,7 +764,9 @@ fn prepare_runtime_observations(
         built_at,
     )?;
     if let EngramControlRequest::ExecutionObserve { observation, .. } = &mut first
-        && let EngramInterTurnOccurrence::UnadmittedTurn { observed_outcome, .. } = &mut observation.occurrence
+        && let EngramInterTurnOccurrence::UnadmittedTurn {
+            observed_outcome, ..
+        } = &mut observation.occurrence
     {
         *observed_outcome = trace.observed_outcome;
     }
@@ -708,13 +788,18 @@ fn prepare_runtime_observations(
             EngramTransportError::protocol(format!("could not serialize observed check: {error}"))
         })?);
     }
-    if !trace.source_attribution_uncertain && let Some(sighting) = capture.source.sighting() {
+    if !trace.source_attribution_uncertain
+        && let Some(sighting) = capture.source.sighting()
+    {
         let request = engram_source_sighting_request(
             basis(format!("termal-source-sighting:{}", trace.host_turn_ref)),
-            sighting.clone(), built_at,
+            sighting.clone(),
+            built_at,
         )?;
         requests.push(serde_json::to_value(request).map_err(|error| {
-            EngramTransportError::protocol(format!("could not serialize measured source sighting: {error}"))
+            EngramTransportError::protocol(format!(
+                "could not serialize measured source sighting: {error}"
+            ))
         })?);
     }
     Ok(requests)

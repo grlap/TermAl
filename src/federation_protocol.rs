@@ -1,16 +1,18 @@
 // Owns federation wire envelopes and their asserted-identity comparisons.
 // Does not select peers or grant authority. Split from federation_link.rs.
 
+use super::*;
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationRequestAuthority {
-    caller: FederationHostIdentity,
-    central: FederationHostIdentity,
-    enrollment_generation: u64,
+pub(crate) struct FederationRequestAuthority {
+    pub(crate) caller: FederationHostIdentity,
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) enrollment_generation: u64,
 }
 
 impl FederationRequestAuthority {
-    fn outgoing(snapshot: &FederationPeerSnapshot) -> Self {
+    pub(crate) fn outgoing(snapshot: &FederationPeerSnapshot) -> Self {
         Self {
             caller: snapshot.local.clone(),
             central: snapshot.central.clone(),
@@ -18,7 +20,10 @@ impl FederationRequestAuthority {
         }
     }
 
-    fn ensure_expected(&self, snapshot: &FederationPeerSnapshot) -> Result<(), ApiError> {
+    pub(crate) fn ensure_expected(
+        &self,
+        snapshot: &FederationPeerSnapshot,
+    ) -> Result<(), ApiError> {
         if self.caller != snapshot.peer
             || self.central != snapshot.central
             || self.enrollment_generation != snapshot.enrollment_generation
@@ -31,10 +36,10 @@ impl FederationRequestAuthority {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationHealth {
-    protocol_version: u16,
-    host_id: String,
-    host_generation: u64,
-    enrollment_generation: u64,
-    link_incarnation: String,
+pub(crate) struct FederationHealth {
+    pub(crate) protocol_version: u16,
+    pub(crate) host_id: String,
+    pub(crate) host_generation: u64,
+    pub(crate) enrollment_generation: u64,
+    pub(crate) link_incarnation: String,
 }

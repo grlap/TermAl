@@ -23,12 +23,14 @@
 // the per-session `codex_thread_state` so the UI's thread indicator
 // updates in sync with the external id.
 
+use super::*;
+
 impl AppState {
     /// Generates the next sequential message id for this `AppState`.
     /// Message ids are monotonic within the app (not per-session) so
     /// deltas that reference a message id are unambiguous across all
     /// SSE streams.
-    fn allocate_message_id(&self) -> String {
+    pub(crate) fn allocate_message_id(&self) -> String {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.next_message_id()
     }
@@ -38,7 +40,11 @@ impl AppState {
     /// discovery paths where no runtime is active yet — live agent
     /// callbacks should use
     /// [`Self::set_external_session_id_if_runtime_matches`] instead.
-    fn set_external_session_id(&self, session_id: &str, external_session_id: String) -> Result<()> {
+    pub(crate) fn set_external_session_id(
+        &self,
+        session_id: &str,
+        external_session_id: String,
+    ) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -66,7 +72,7 @@ impl AppState {
     /// Returns the applied/skipped outcome, or `Err` when commit/persistence
     /// fails after the in-memory mutation has begun. This avoids the TOCTOU gap of a separate
     /// `session_matches_runtime_token` check followed by `set_external_session_id`.
-    fn set_external_session_id_if_runtime_matches(
+    pub(crate) fn set_external_session_id_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -103,7 +109,7 @@ impl AppState {
     /// newly created threads (`thread/start`) that would otherwise be orphaned,
     /// and `false` for resumed pre-existing threads (`thread/resume`) whose
     /// discovery state should be preserved.
-    fn clear_external_session_id_if_runtime_matches(
+    pub(crate) fn clear_external_session_id_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,
@@ -151,7 +157,7 @@ impl AppState {
     /// [`Self::clear_external_session_id_if_runtime_matches`] this does
     /// not look up the session (it may be gone) and only touches the
     /// ignore set.
-    fn suppress_orphaned_codex_thread(&self, thread_id: &str) -> Result<()> {
+    pub(crate) fn suppress_orphaned_codex_thread(&self, thread_id: &str) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.ignore_discovered_codex_thread(Some(thread_id));
         self.commit_locked(&mut inner)?;
@@ -168,7 +174,7 @@ impl AppState {
     /// the thread state owned by the current runtime (see
     /// `shared_codex_mgr.rs` for why the shared runtime can be
     /// replaced mid-flight).
-    fn set_codex_thread_state_if_runtime_matches(
+    pub(crate) fn set_codex_thread_state_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,

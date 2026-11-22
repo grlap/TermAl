@@ -27,8 +27,10 @@
 // `"command started"` / `"command completed"` display strings the
 // session sidebar expects. Called from `codex_app_requests.rs`.
 
+use super::*;
+
 /// Handles Codex command.
-fn codex_command() -> Result<Command> {
+pub(crate) fn codex_command() -> Result<Command> {
     let exe = resolve_codex_executable()?;
 
     // On Windows, .cmd/.bat shims (from npm) must be run through cmd.exe.
@@ -47,14 +49,14 @@ fn codex_command() -> Result<Command> {
 }
 
 /// Resolves Codex executable.
-fn resolve_codex_executable() -> Result<PathBuf> {
+pub(crate) fn resolve_codex_executable() -> Result<PathBuf> {
     let launcher =
         find_command_on_path("codex").ok_or_else(|| anyhow!("`codex` was not found on PATH"))?;
     Ok(resolve_codex_native_binary(&launcher).unwrap_or(launcher))
 }
 
 /// Finds command on path.
-fn find_command_on_path(command: &str) -> Option<PathBuf> {
+pub(crate) fn find_command_on_path(command: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
 
     #[cfg(windows)]
@@ -74,7 +76,7 @@ fn find_command_on_path(command: &str) -> Option<PathBuf> {
     None
 }
 
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         std::env::var_os("USERPROFILE").map(PathBuf::from)
@@ -85,7 +87,7 @@ fn home_dir() -> Option<PathBuf> {
     }
 }
 
-fn display_path_for_user(path: &FsPath) -> String {
+pub(crate) fn display_path_for_user(path: &FsPath) -> String {
     if let Some(home) = home_dir() {
         if let Ok(relative) = path.strip_prefix(&home) {
             return if relative.as_os_str().is_empty() {
@@ -99,7 +101,7 @@ fn display_path_for_user(path: &FsPath) -> String {
 }
 
 /// Resolves Codex native binary.
-fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
+pub(crate) fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
     let launcher = fs::canonicalize(launcher)
         .ok()
         .unwrap_or_else(|| launcher.clone());
@@ -131,7 +133,7 @@ fn resolve_codex_native_binary(launcher: &PathBuf) -> Option<PathBuf> {
 }
 
 /// Handles Codex target triple.
-fn codex_target_triple() -> Option<&'static str> {
+pub(crate) fn codex_target_triple() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
         ("macos", "x86_64") => Some("x86_64-apple-darwin"),
@@ -144,7 +146,7 @@ fn codex_target_triple() -> Option<&'static str> {
 }
 
 /// Describes Codex app server web search command.
-fn describe_codex_app_server_web_search_command(item: &Value) -> String {
+pub(crate) fn describe_codex_app_server_web_search_command(item: &Value) -> String {
     let query = item
         .get("query")
         .and_then(Value::as_str)
@@ -169,7 +171,7 @@ fn describe_codex_app_server_web_search_command(item: &Value) -> String {
 }
 
 /// Summarizes Codex app server web search output.
-fn summarize_codex_app_server_web_search_output(item: &Value) -> String {
+pub(crate) fn summarize_codex_app_server_web_search_output(item: &Value) -> String {
     match item.pointer("/action/type").and_then(Value::as_str) {
         Some("search") => {
             let queries = item

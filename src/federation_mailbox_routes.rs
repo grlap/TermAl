@@ -2,7 +2,9 @@
 // Does not persist mailbox data on a satellite or automatically retry mutations.
 // New routing beside mailboxes.rs; the bridge/CLI still use their own host.
 
-async fn negotiate_federation_mailboxes(
+use super::*;
+
+pub(crate) async fn negotiate_federation_mailboxes(
     AxumPath(session): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<FederationMailboxProtocol>, ApiError> {
@@ -12,7 +14,7 @@ async fn negotiate_federation_mailboxes(
         .map(Json)
 }
 
-async fn join_federation_mailboxes(
+pub(crate) async fn join_federation_mailboxes(
     AxumPath(session): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<FederationMailboxParticipant>, ApiError> {
@@ -21,53 +23,65 @@ async fn join_federation_mailboxes(
         .map(Json)
 }
 
-async fn list_federation_mailbox_participants(
-    AxumPath(session): AxumPath<String>, State(state): State<AppState>,
+pub(crate) async fn list_federation_mailbox_participants(
+    AxumPath(session): AxumPath<String>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<FederationMailboxParticipant>>, ApiError> {
-    state.mailbox_directory_snapshot(&session).await.map(|snapshot| Json(snapshot.participants))
+    state
+        .mailbox_directory_snapshot(&session)
+        .await
+        .map(|snapshot| Json(snapshot.participants))
 }
 
-async fn list_federation_mailbox_directory(
-    AxumPath(session): AxumPath<String>, State(state): State<AppState>,
+pub(crate) async fn list_federation_mailbox_directory(
+    AxumPath(session): AxumPath<String>,
+    State(state): State<AppState>,
 ) -> Result<Json<FederationMailboxDirectorySnapshot>, ApiError> {
     let mut snapshot = state.mailbox_directory_snapshot(&session).await?;
     snapshot.alias_basis = None;
     Ok(Json(snapshot))
 }
 
-async fn list_federation_mailbox_participants_with_basis(
-    AxumPath(session): AxumPath<String>, State(state): State<AppState>,
+pub(crate) async fn list_federation_mailbox_participants_with_basis(
+    AxumPath(session): AxumPath<String>,
+    State(state): State<AppState>,
     Query(query): Query<FederationMailboxDirectoryQuery>,
 ) -> Result<Response, ApiError> {
     if query.alias_basis {
         let directory = state.federation_mailbox_alias_directory(&session).await?;
         Ok(Json(directory).into_response())
     } else {
-        list_federation_mailbox_participants(AxumPath(session), State(state)).await
+        list_federation_mailbox_participants(AxumPath(session), State(state))
+            .await
             .map(IntoResponse::into_response)
     }
 }
 
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationMailboxDirectoryQuery {
+pub(crate) struct FederationMailboxDirectoryQuery {
     #[serde(default)]
-    alias_basis: bool,
+    pub(crate) alias_basis: bool,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateFederationMailboxRequest {
-    target_session_id: String,
+pub(crate) struct CreateFederationMailboxRequest {
+    pub(crate) target_session_id: String,
 }
 
-async fn get_or_create_federation_mailbox(
+pub(crate) async fn get_or_create_federation_mailbox(
     AxumPath(session): AxumPath<String>,
     State(state): State<AppState>,
     Json(request): Json<CreateFederationMailboxRequest>,
 ) -> Result<Json<MailboxSummary>, ApiError> {
-    if !matches!(mailbox_reference_handle(&request.target_session_id), Ok(None)) {
-        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+    if !matches!(
+        mailbox_reference_handle(&request.target_session_id),
+        Ok(None)
+    ) {
+        return Err(ApiError::not_found(
+            "mailbox reference requires explicit resolution",
+        ));
     }
     state
         .federation_mailbox_operation(
@@ -81,98 +95,186 @@ async fn get_or_create_federation_mailbox(
 }
 
 impl AppState {
-    async fn read_federation_mailbox(
-        &self, session: &str, mailbox_id: String, after_sequence: Option<u64>,
-        limit: u64, issue_receipt: bool, read_key: Option<String>,
+    pub(crate) async fn read_federation_mailbox(
+        &self,
+        session: &str,
+        mailbox_id: String,
+        after_sequence: Option<u64>,
+        limit: u64,
+        issue_receipt: bool,
+        read_key: Option<String>,
     ) -> Result<MailboxReadResponse, ApiError> {
-        if read_key.as_ref().is_some_and(|key| key.len() > 160 || !issue_receipt) {
+        if read_key
+            .as_ref()
+            .is_some_and(|key| key.len() > 160 || !issue_receipt)
+        {
             return Err(ApiError::bad_request("invalid keyed receipt read"));
         }
         if !issue_receipt {
-            return self.dispatch_federation_mailbox_operation(session,
-                FederationMailboxOperation::Read { mailbox_id, after_sequence, limit,
-                    issue_receipt: false }).await;
+            return self
+                .dispatch_federation_mailbox_operation(
+                    session,
+                    FederationMailboxOperation::Read {
+                        mailbox_id,
+                        after_sequence,
+                        limit,
+                        issue_receipt: false,
+                    },
+                )
+                .await;
         }
-        let binding = self.federation_mailbox_actor(session)?.ok_or_else(||
-            ApiError::conflict("session has no explicit central mailbox binding"))?.binding;
-        let slot = sha256_hex(&serde_json::to_vec(&(session, &mailbox_id))
-            .expect("read slot serializes"));
-        let input = sha256_hex(&serde_json::to_vec(&(after_sequence, limit.clamp(1, 200), issue_receipt))
-            .expect("read input serializes"));
+        let binding = self
+            .federation_mailbox_actor(session)?
+            .ok_or_else(|| ApiError::conflict("session has no explicit central mailbox binding"))?
+            .binding;
+        let slot =
+            sha256_hex(&serde_json::to_vec(&(session, &mailbox_id)).expect("read slot serializes"));
+        let input = sha256_hex(
+            &serde_json::to_vec(&(after_sequence, limit.clamp(1, 200), issue_receipt))
+                .expect("read input serializes"),
+        );
         let owner = Uuid::new_v4();
         let retained_key = {
-            let mut intents = self.mailbox_store.federation_read_intents.lock()
+            let mut intents = self
+                .mailbox_store
+                .federation_read_intents
+                .lock()
                 .expect("mailbox read intents poisoned");
-            if intents.get(&slot).is_some_and(|intent| !intent.in_flight && intent.accepted.elapsed()
-                >= Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS)) {
+            if intents.get(&slot).is_some_and(|intent| {
+                !intent.in_flight
+                    && intent.accepted.elapsed()
+                        >= Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS)
+            }) {
                 intents.remove(&slot);
                 return Err(federation_mailbox_read_expired());
             }
-            intents.retain(|_, intent| intent.in_flight || intent.accepted.elapsed()
-                < Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS));
+            intents.retain(|_, intent| {
+                intent.in_flight
+                    || intent.accepted.elapsed()
+                        < Duration::from_millis(FEDERATION_MAILBOX_READ_TTL_MS)
+            });
             if let Some(intent) = intents.get_mut(&slot) {
                 if intent.binding != binding {
                     intents.remove(&slot);
                     return Err(ApiError::conflict(format!(
-                        "authority_changed; {FEDERATION_MAILBOX_UNKNOWN_OUTCOME}; reconcile the original read")));
+                        "authority_changed; {FEDERATION_MAILBOX_UNKNOWN_OUTCOME}; reconcile the original read"
+                    )));
                 }
-                if intent.input != input || read_key.as_ref().is_some_and(|key| intent.key.as_ref() != Some(key)) {
-                    return Err(ApiError::conflict("readKey input conflict; finish the identical retained read"));
+                if intent.input != input
+                    || read_key
+                        .as_ref()
+                        .is_some_and(|key| intent.key.as_ref() != Some(key))
+                {
+                    return Err(ApiError::conflict(
+                        "readKey input conflict; finish the identical retained read",
+                    ));
                 }
                 if intent.in_flight {
-                    return Err(ApiError::from_status(StatusCode::TOO_MANY_REQUESTS,
-                        "mailbox read resolution is in flight; repeat the identical read"));
+                    return Err(ApiError::from_status(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "mailbox read resolution is in flight; repeat the identical read",
+                    ));
                 }
                 intent.in_flight = true;
                 intent.owner = owner;
                 intent.key.clone()
             } else {
                 if intents.len() >= FEDERATION_MAILBOX_FROZEN_KEYS {
-                    return Err(ApiError::from_status(StatusCode::TOO_MANY_REQUESTS,
-                        "mailbox read intent capacity reached"));
+                    return Err(ApiError::from_status(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "mailbox read intent capacity reached",
+                    ));
                 }
-                intents.insert(slot.clone(), FederationMailboxClientRead { binding, input,
-                    key: read_key.clone(), accepted: std::time::Instant::now(), in_flight: true, owner });
+                intents.insert(
+                    slot.clone(),
+                    FederationMailboxClientRead {
+                        binding,
+                        input,
+                        key: read_key.clone(),
+                        accepted: std::time::Instant::now(),
+                        in_flight: true,
+                        owner,
+                    },
+                );
                 read_key
             }
         };
         let _flight = FederationMailboxReadFlight {
-            intents: &self.mailbox_store.federation_read_intents, slot: slot.clone(), owner,
+            intents: &self.mailbox_store.federation_read_intents,
+            slot: slot.clone(),
+            owner,
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         let read = async {
             let resolve = retained_key.is_some();
-            let key = if let Some(key) = retained_key { key } else {
-                let protocol: FederationMailboxProtocol = self.dispatch_federation_mailbox_operation(
-                    session, FederationMailboxOperation::Protocol).await?;
+            let key = if let Some(key) = retained_key {
+                key
+            } else {
+                let protocol: FederationMailboxProtocol = self
+                    .dispatch_federation_mailbox_operation(
+                        session,
+                        FederationMailboxOperation::Protocol,
+                    )
+                    .await?;
                 if protocol.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
-                    || protocol.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION {
+                    || protocol.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION
+                {
                     return Err(federation_mailbox_upgrade_required());
                 }
                 protocol.read_key.ok_or_else(|| ApiError::from_status(StatusCode::TOO_MANY_REQUESTS,
                     "mailbox frozen-page capacity reached; resolve a retained pending page first"))?
             };
-            if let Some(intent) = self.mailbox_store.federation_read_intents.lock()
-                .expect("mailbox read intents poisoned").get_mut(&slot).filter(|intent| intent.owner == owner) {
+            if let Some(intent) = self
+                .mailbox_store
+                .federation_read_intents
+                .lock()
+                .expect("mailbox read intents poisoned")
+                .get_mut(&slot)
+                .filter(|intent| intent.owner == owner)
+            {
                 intent.key = Some(key.clone());
             }
             let operation = |resolve| FederationMailboxOperation::ReadKeyed {
-                mailbox_id: mailbox_id.clone(), after_sequence, limit, issue_receipt,
-                read_key: key.clone(), resolve,
+                mailbox_id: mailbox_id.clone(),
+                after_sequence,
+                limit,
+                issue_receipt,
+                read_key: key.clone(),
+                resolve,
             };
-            let first: MailboxReadResponse = self.dispatch_federation_mailbox_operation(
-                session, operation(resolve)).await?;
+            let first: MailboxReadResponse = self
+                .dispatch_federation_mailbox_operation(session, operation(resolve))
+                .await?;
             if first.receipt_state.as_deref() == Some("receiptPending") {
                 // Only a returned pending page licenses automatic resolution.
                 // Transport/authority errors remain explicit UNKNOWN outcomes.
-                let exact_key = first.read_key.clone().ok_or_else(|| ApiError::bad_gateway("pending page omitted readKey"))?;
-                if let Some(intent) = self.mailbox_store.federation_read_intents.lock()
-                    .expect("mailbox read intents poisoned").get_mut(&slot).filter(|intent| intent.owner == owner) {
+                let exact_key = first
+                    .read_key
+                    .clone()
+                    .ok_or_else(|| ApiError::bad_gateway("pending page omitted readKey"))?;
+                if let Some(intent) = self
+                    .mailbox_store
+                    .federation_read_intents
+                    .lock()
+                    .expect("mailbox read intents poisoned")
+                    .get_mut(&slot)
+                    .filter(|intent| intent.owner == owner)
+                {
                     intent.key = Some(exact_key.clone());
                 }
-                let second = self.dispatch_federation_mailbox_operation(session,
-                    FederationMailboxOperation::ReadKeyed { mailbox_id, after_sequence, limit,
-                        issue_receipt, read_key: exact_key, resolve: true }).await;
+                let second = self
+                    .dispatch_federation_mailbox_operation(
+                        session,
+                        FederationMailboxOperation::ReadKeyed {
+                            mailbox_id,
+                            after_sequence,
+                            limit,
+                            issue_receipt,
+                            read_key: exact_key,
+                            resolve: true,
+                        },
+                    )
+                    .await;
                 match second {
                     Ok(page) => return Ok(page),
                     Err(error) => return Err(error),
@@ -183,23 +285,44 @@ impl AppState {
         let result = tokio::time::timeout_at(deadline, read).await
             .map_err(|_| federation_mailbox_unknown_outcome(StatusCode::SERVICE_UNAVAILABLE,
                 "central mailbox read handler_deadline; repeat the identical read to resolve its retained key"))?;
-        let mut intents = self.mailbox_store.federation_read_intents.lock()
+        let mut intents = self
+            .mailbox_store
+            .federation_read_intents
+            .lock()
             .expect("mailbox read intents poisoned");
-        if intents.get(&slot).is_some_and(|intent| intent.owner == owner) {
+        if intents
+            .get(&slot)
+            .is_some_and(|intent| intent.owner == owner)
+        {
             match &result {
-                Ok(page) if page.receipt_state.as_deref() != Some("receiptPending") => { intents.remove(&slot); }
-                Ok(page) => { intents.get_mut(&slot).expect("intent checked").key = page.read_key.clone(); }
-                Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadExpired) => { intents.remove(&slot); }
-                Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadNotFound) => { intents.remove(&slot); }
-                Err(error) if error.kind == Some(ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page: true }) => { intents.remove(&slot); }
-                Err(_) => {},
+                Ok(page) if page.receipt_state.as_deref() != Some("receiptPending") => {
+                    intents.remove(&slot);
+                }
+                Ok(page) => {
+                    intents.get_mut(&slot).expect("intent checked").key = page.read_key.clone();
+                }
+                Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadExpired) => {
+                    intents.remove(&slot);
+                }
+                Err(error) if error.kind == Some(ApiErrorKind::FederationMailboxReadNotFound) => {
+                    intents.remove(&slot);
+                }
+                Err(error)
+                    if error.kind
+                        == Some(ApiErrorKind::MailboxParticipantRetiredDuringRead {
+                            before_page: true,
+                        }) =>
+                {
+                    intents.remove(&slot);
+                }
+                Err(_) => {}
             }
         }
         drop(intents);
         result
     }
 
-    async fn federation_mailbox_operation<T: DeserializeOwned>(
+    pub(crate) async fn federation_mailbox_operation<T: DeserializeOwned>(
         &self,
         session: &str,
         mut operation: FederationMailboxOperation,
@@ -207,78 +330,138 @@ impl AppState {
         if let FederationMailboxOperation::GetOrCreate { target } = &operation {
             require_domain_mailbox_target(target)?;
         }
-        if !matches!(&operation, FederationMailboxOperation::Protocol | FederationMailboxOperation::Register) {
-            self.ensure_automatic_mailbox_participation(session,
-                matches!(&operation, FederationMailboxOperation::Directory { .. })).await?;
+        if !matches!(
+            &operation,
+            FederationMailboxOperation::Protocol | FederationMailboxOperation::Register
+        ) {
+            self.ensure_automatic_mailbox_participation(
+                session,
+                matches!(&operation, FederationMailboxOperation::Directory { .. }),
+            )
+            .await?;
         }
         if let FederationMailboxOperation::GetOrCreate { target } = &mut operation {
-            let role = self.inner.lock().expect("state mutex poisoned").preferences.federation.role;
-            *target = self.resolve_delivery_recipient(session, role, target).await?.session_id;
+            let role = self
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .preferences
+                .federation
+                .role;
+            *target = self
+                .resolve_delivery_recipient(session, role, target)
+                .await?
+                .session_id;
         }
-        if let FederationMailboxOperation::Read { mailbox_id, after_sequence, limit, issue_receipt } = operation {
-            let page = self.read_federation_mailbox(session, mailbox_id, after_sequence,
-                limit, issue_receipt, None).await?;
-            return serde_json::from_value(serde_json::to_value(page)
-                .map_err(|_| ApiError::internal("mailbox page encoding failed"))?)
-                .map_err(|_| ApiError::bad_gateway("invalid mailbox page schema"));
+        if let FederationMailboxOperation::Read {
+            mailbox_id,
+            after_sequence,
+            limit,
+            issue_receipt,
+        } = operation
+        {
+            let page = self
+                .read_federation_mailbox(
+                    session,
+                    mailbox_id,
+                    after_sequence,
+                    limit,
+                    issue_receipt,
+                    None,
+                )
+                .await?;
+            return serde_json::from_value(
+                serde_json::to_value(page)
+                    .map_err(|_| ApiError::internal("mailbox page encoding failed"))?,
+            )
+            .map_err(|_| ApiError::bad_gateway("invalid mailbox page schema"));
         }
         if let FederationMailboxOperation::Send { target, .. }
-            | FederationMailboxOperation::GetOrCreate { target } = &operation
+        | FederationMailboxOperation::GetOrCreate { target } = &operation
         {
             if !matches!(mailbox_reference_handle(target), Ok(None)) {
-                return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+                return Err(ApiError::not_found(
+                    "mailbox reference requires explicit resolution",
+                ));
             }
         }
         if let FederationMailboxOperation::Send { .. } = &operation {
             let delivery = self.prepare_federation_delivery(session, operation).await?;
-            let value = self.send_prepared_federation_delivery(session, delivery).await?;
-            return serde_json::from_value(serde_json::to_value(value)
-                .map_err(|_| ApiError::internal("delivery response encoding failed"))?)
-                .map_err(|_| ApiError::bad_gateway("invalid delivery response schema"));
+            let value = self
+                .send_prepared_federation_delivery(session, delivery)
+                .await?;
+            return serde_json::from_value(
+                serde_json::to_value(value)
+                    .map_err(|_| ApiError::internal("delivery response encoding failed"))?,
+            )
+            .map_err(|_| ApiError::bad_gateway("invalid delivery response schema"));
         }
-        self.dispatch_federation_mailbox_operation(session, operation).await
+        self.dispatch_federation_mailbox_operation(session, operation)
+            .await
     }
 
-    async fn dispatch_federation_mailbox_operation<T: DeserializeOwned>(
+    pub(crate) async fn dispatch_federation_mailbox_operation<T: DeserializeOwned>(
         &self,
         session: &str,
         operation: FederationMailboxOperation,
     ) -> Result<T, ApiError> {
-        if matches!(&operation, FederationMailboxOperation::SendExact { .. }
-            | FederationMailboxOperation::CancelExact { .. }) {
-            let capability = self.negotiate_federation_delivery_capability(session).await?;
+        if matches!(
+            &operation,
+            FederationMailboxOperation::SendExact { .. }
+                | FederationMailboxOperation::CancelExact { .. }
+        ) {
+            let capability = self
+                .negotiate_federation_delivery_capability(session)
+                .await?;
             if !capability.supported {
                 let delivery = match &operation {
                     FederationMailboxOperation::SendExact { delivery }
                     | FederationMailboxOperation::CancelExact { delivery } => delivery,
                     _ => unreachable!("exact operation checked above"),
                 };
-                return Err(self.refuse_unsupported_federation_delivery(session, delivery, capability).await?);
+                return Err(self
+                    .refuse_unsupported_federation_delivery(session, delivery, capability)
+                    .await?);
             }
-            return self.dispatch_federation_delivery_operation(session, operation, &capability).await;
+            return self
+                .dispatch_federation_delivery_operation(session, operation, &capability)
+                .await;
         }
         self.dispatch_federation_mailbox_operation_with_capability(session, operation, None)
-            .await.map(|(value, _)| value)
+            .await
+            .map(|(value, _)| value)
     }
 
     // Return the lease that authenticated this response, rather than selecting
     // a second link when a caller later uses negotiated capability evidence.
-    async fn dispatch_federation_mailbox_operation_with_capability<T: DeserializeOwned>(
+    pub(crate) async fn dispatch_federation_mailbox_operation_with_capability<
+        T: DeserializeOwned,
+    >(
         &self,
         session: &str,
         operation: FederationMailboxOperation,
         capability: Option<&FederationDeliveryCapability>,
     ) -> Result<(T, Option<FederationLinkLease>), ApiError> {
         self.dispatch_federation_mailbox_operation_with_alias_basis(session, operation, capability)
-            .await.map(|(value, lease, _)| (value, lease))
+            .await
+            .map(|(value, lease, _)| (value, lease))
     }
 
-    async fn dispatch_federation_mailbox_operation_with_alias_basis<T: DeserializeOwned>(
+    pub(crate) async fn dispatch_federation_mailbox_operation_with_alias_basis<
+        T: DeserializeOwned,
+    >(
         &self,
         session: &str,
         operation: FederationMailboxOperation,
         capability: Option<&FederationDeliveryCapability>,
-    ) -> Result<(T, Option<FederationLinkLease>, Option<FederationMailboxAliasBasis>), ApiError> {
+    ) -> Result<
+        (
+            T,
+            Option<FederationLinkLease>,
+            Option<FederationMailboxAliasBasis>,
+        ),
+        ApiError,
+    > {
         let (settings, actor) = {
             let actor = self.federation_mailbox_actor(session)?;
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -297,8 +480,10 @@ impl AppState {
         let central = settings
             .central
             .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-        if capability.is_some_and(|proof| proof.central != central
-            || (proof.lease.is_some() != (settings.role == FederationRole::Satellite))) {
+        if capability.is_some_and(|proof| {
+            proof.central != central
+                || (proof.lease.is_some() != (settings.role == FederationRole::Satellite))
+        }) {
             return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
         }
         let expected = actor.as_ref().map(|actor| actor.binding.clone());
@@ -313,30 +498,41 @@ impl AppState {
             actor,
             operation,
         };
-        let (response, lease): (FederationMailboxResponse, _) = if settings.role == FederationRole::Central {
-            let app = self.clone();
-            (run_blocking_api(move || app.execute_federation_mailbox(request, None)).await?, None)
-        } else {
-            let peer = self
-                .federation_peer_handle(&central.host_id)
-                .ok_or_else(federation_mailbox_unavailable)?;
-            let lease = if let Some(proof) = capability {
-                let lease = proof.lease.as_ref()
-                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-                if !Arc::ptr_eq(&lease.channel.state, &peer.channel.state) {
-                    return Err(federation_stale_link());
-                }
-                lease.with_current(self, |_, _| Ok(()))?;
-                lease.clone()
+        let (response, lease): (FederationMailboxResponse, _) =
+            if settings.role == FederationRole::Central {
+                let app = self.clone();
+                (
+                    run_blocking_api(move || app.execute_federation_mailbox(request, None)).await?,
+                    None,
+                )
             } else {
-                peer.channel.current_lease().map_err(|_| federation_mailbox_unavailable())?
+                let peer = self
+                    .federation_peer_handle(&central.host_id)
+                    .ok_or_else(federation_mailbox_unavailable)?;
+                let lease = if let Some(proof) = capability {
+                    let lease = proof
+                        .lease
+                        .as_ref()
+                        .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+                    if !Arc::ptr_eq(&lease.channel.state, &peer.channel.state) {
+                        return Err(federation_stale_link());
+                    }
+                    lease.with_current(self, |_, _| Ok(()))?;
+                    lease.clone()
+                } else {
+                    peer.channel
+                        .current_lease()
+                        .map_err(|_| federation_mailbox_unavailable())?
+                };
+                let response = peer
+                    .rpc
+                    .request(FederationRpcRoute::Mailbox(lease.clone(), request))
+                    .await?;
+                (response, Some(lease))
             };
-            let response = peer.rpc
-                .request(FederationRpcRoute::Mailbox(lease.clone(), request)).await?;
-            (response, Some(lease))
-        };
         if response.protocol_version != FEDERATION_MAILBOX_WIRE_VERSION
-            || response.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION {
+            || response.schema_version != FEDERATION_MAILBOX_SCHEMA_VERSION
+        {
             return Err(federation_mailbox_upgrade_required());
         }
         if response.central != central {
@@ -356,10 +552,15 @@ impl AppState {
         {
             let summary: MailboxSummary = serde_json::from_value(response.value.clone())
                 .map_err(|_| ApiError::bad_gateway("invalid central ACK response"))?;
-            if summary.id != mailbox { return Err(ApiError::conflict("central ACK mailbox mismatch")); }
+            if summary.id != mailbox {
+                return Err(ApiError::conflict("central ACK mailbox mismatch"));
+            }
             let app = self.clone();
             let lease = lease.clone();
-            run_blocking_api(move || app.retain_federation_executor_mailbox_ack(&binding, &summary, &lease)).await?;
+            run_blocking_api(move || {
+                app.retain_federation_executor_mailbox_ack(&binding, &summary, &lease)
+            })
+            .await?;
         }
         serde_json::from_value(response.value)
             .map(|value| (value, lease, response.alias_basis))
@@ -367,7 +568,7 @@ impl AppState {
     }
 }
 
-fn federation_mailbox_routes() -> Router<FederationListenerState> {
+pub(crate) fn federation_mailbox_routes() -> Router<FederationListenerState> {
     Router::new().route(
         "/federation/v1/mailbox",
         post(serve_federation_mailbox)

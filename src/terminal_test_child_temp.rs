@@ -22,10 +22,14 @@
 //
 // New file, not split from another; included from main.rs under cfg(test).
 
+use super::*;
+
 /// The environment a test's terminal shell gets so that its temporary files
 /// stay inside its test root. Empty for a workdir outside the test temp
 /// directory, so nothing is created there.
-fn terminal_test_child_temp_env(workdir: &FsPath) -> Vec<(&'static str, std::ffi::OsString)> {
+pub(crate) fn terminal_test_child_temp_env(
+    workdir: &FsPath,
+) -> Vec<(&'static str, std::ffi::OsString)> {
     let Some(temp) = terminal_test_child_temp(workdir) else {
         return Vec::new();
     };
@@ -39,7 +43,7 @@ fn terminal_test_child_temp_env(workdir: &FsPath) -> Vec<(&'static str, std::ffi
 /// on demand, spelled from test_temp_dir() (so without a verbatim prefix).
 /// None, with nothing created, unless `workdir` lies strictly inside
 /// test_temp_dir().
-fn terminal_test_child_temp(workdir: &FsPath) -> Option<PathBuf> {
+pub(crate) fn terminal_test_child_temp(workdir: &FsPath) -> Option<PathBuf> {
     let base = test_temp_dir();
     let canonical_base = fs::canonicalize(&base).ok()?;
     let canonical_workdir = fs::canonicalize(workdir).ok()?;

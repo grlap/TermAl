@@ -22,30 +22,32 @@ passed through `sanitize_telegram_log_detail` before it is logged or returned.
 Provenance: new module; nothing was moved here from another file.
 */
 
+use super::*;
+
 /// Telegram's caption limit, counted in UTF-16 units as Telegram counts it.
-const TELEGRAM_DOCUMENT_CAPTION_MAX_UTF16_UNITS: usize = 1024;
+pub(crate) const TELEGRAM_DOCUMENT_CAPTION_MAX_UTF16_UNITS: usize = 1024;
 /// Request timeout for one upload: `TelegramApiClient::new` adds 10 seconds.
 const TELEGRAM_DOCUMENT_UPLOAD_TIMEOUT_SECS: u64 = 20;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SendTelegramDocumentRequest {
-    path: String,
+pub(crate) struct SendTelegramDocumentRequest {
+    pub(crate) path: String,
     #[serde(default)]
-    caption: Option<String>,
+    pub(crate) caption: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct SendTelegramDocumentResponse {
-    message_id: i64,
-    file_name: String,
-    path: String,
-    size_bytes: u64,
+pub(crate) struct SendTelegramDocumentResponse {
+    pub(crate) message_id: i64,
+    pub(crate) file_name: String,
+    pub(crate) path: String,
+    pub(crate) size_bytes: u64,
 }
 
 #[derive(Debug)]
-enum TelegramDocumentError {
+pub(crate) enum TelegramDocumentError {
     InvalidRequest(String),
     SessionNotFound,
     SessionRefused {
@@ -69,7 +71,7 @@ enum TelegramDocumentError {
 }
 
 impl TelegramDocumentError {
-    fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::InvalidRequest(_) => "invalid_request",
             Self::SessionNotFound => "session_not_found",
@@ -86,7 +88,7 @@ impl TelegramDocumentError {
         }
     }
 
-    fn status(&self) -> StatusCode {
+    pub(crate) fn status(&self) -> StatusCode {
         match self {
             Self::InvalidRequest(_) | Self::EmptyFile(_) => StatusCode::BAD_REQUEST,
             Self::SessionNotFound | Self::FileNotFound(_) => StatusCode::NOT_FOUND,
@@ -100,7 +102,7 @@ impl TelegramDocumentError {
         }
     }
 
-    fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match self {
             Self::InvalidRequest(message)
             | Self::NotConnected(message)
@@ -163,7 +165,7 @@ impl AppState {
     /// Sends one Markdown file from the session's allowed roots to the linked
     /// Telegram chat. `connect` builds the sender from the saved bot token;
     /// production passes `connect_telegram_document_sender`, tests a fake.
-    fn send_telegram_markdown_document<S: TelegramDocumentSender>(
+    pub(crate) fn send_telegram_markdown_document<S: TelegramDocumentSender>(
         &self,
         session_id: &str,
         request: SendTelegramDocumentRequest,
@@ -179,7 +181,7 @@ impl AppState {
 
     // Admission is a per-call dependency so deterministic filesystem-race tests
     // exercise this same orchestration without a global hook or a real sender.
-    fn send_telegram_markdown_document_with_admission<S: TelegramDocumentSender>(
+    pub(crate) fn send_telegram_markdown_document_with_admission<S: TelegramDocumentSender>(
         &self,
         session_id: &str,
         request: SendTelegramDocumentRequest,
@@ -354,7 +356,7 @@ fn connect_telegram_document_sender(_bot_token: &str) -> Result<TelegramApiClien
     bail!("the real Telegram client is disabled in tests")
 }
 
-async fn send_session_telegram_document(
+pub(crate) async fn send_session_telegram_document(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<SendTelegramDocumentRequest>, JsonRejection>,
@@ -368,7 +370,9 @@ async fn send_session_telegram_document(
     .await
 }
 
-async fn send_session_telegram_document_with_sender<S: TelegramDocumentSender + Send + 'static>(
+pub(crate) async fn send_session_telegram_document_with_sender<
+    S: TelegramDocumentSender + Send + 'static,
+>(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<SendTelegramDocumentRequest>, JsonRejection>,

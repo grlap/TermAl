@@ -1,11 +1,13 @@
 // Bounded, stateless locators for operator journal pages. A cursor never grants
 // authority or retains a database snapshot between requests.
+
+use super::*;
 const FEDERATION_JOURNAL_PAGE_LIMIT: usize = 100;
 const FEDERATION_JOURNAL_CURSOR_LIMIT: usize = 2048;
 
-type FederationJournalResult<T> = std::result::Result<T, FederationJournalError>;
+pub(crate) type FederationJournalResult<T> = std::result::Result<T, FederationJournalError>;
 
-enum FederationJournalError {
+pub(crate) enum FederationJournalError {
     Invalid,
     Restart,
     NonCentral(FederationRole),
@@ -51,13 +53,13 @@ impl axum::response::IntoResponse for FederationJournalError {
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum FederationJournalStream {
+pub(crate) enum FederationJournalStream {
     Operations,
     Wakes,
 }
 
 impl FederationJournalStream {
-    fn table(self) -> &'static str {
+    pub(crate) fn table(self) -> &'static str {
         match self {
             Self::Operations => "federation_executor_operations",
             Self::Wakes => "federation_mailbox_wake_obligations",
@@ -67,14 +69,14 @@ impl FederationJournalStream {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FederationJournalQuery {
-    stream: Option<FederationJournalStream>,
-    limit: Option<usize>,
-    cursor: Option<String>,
+pub(crate) struct FederationJournalQuery {
+    pub(crate) stream: Option<FederationJournalStream>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) cursor: Option<String>,
 }
 
 impl FederationJournalQuery {
-    fn validate(&self) -> FederationJournalResult<(FederationJournalStream, usize)> {
+    pub(crate) fn validate(&self) -> FederationJournalResult<(FederationJournalStream, usize)> {
         let limit = self.limit.unwrap_or(FEDERATION_JOURNAL_PAGE_LIMIT);
         if !(1..=FEDERATION_JOURNAL_PAGE_LIMIT).contains(&limit)
             || self.cursor.as_ref().is_some_and(|cursor| {
@@ -92,13 +94,13 @@ impl FederationJournalQuery {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct FederationJournalAnchor {
-    rowid: i64,
-    identity: String,
+pub(crate) struct FederationJournalAnchor {
+    pub(crate) rowid: i64,
+    pub(crate) identity: String,
 }
 
 impl FederationJournalAnchor {
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.rowid > 0
             && self.identity.len() == 64
             && self
@@ -110,16 +112,16 @@ impl FederationJournalAnchor {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct FederationJournalCursor {
-    version: u8,
-    stream: FederationJournalStream,
-    basis: String,
-    high: FederationJournalAnchor,
-    previous: FederationJournalAnchor,
+pub(crate) struct FederationJournalCursor {
+    pub(crate) version: u8,
+    pub(crate) stream: FederationJournalStream,
+    pub(crate) basis: String,
+    pub(crate) high: FederationJournalAnchor,
+    pub(crate) previous: FederationJournalAnchor,
 }
 
 impl FederationJournalCursor {
-    fn decode(
+    pub(crate) fn decode(
         text: &str,
         stream: FederationJournalStream,
         basis: &str,
@@ -146,7 +148,7 @@ impl FederationJournalCursor {
         Ok(cursor)
     }
 
-    fn encode(&self) -> FederationJournalResult<String> {
+    pub(crate) fn encode(&self) -> FederationJournalResult<String> {
         let bytes = serde_json::to_vec(self).map_err(|_| FederationJournalError::Storage)?;
         let text = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
         if text.len() > FEDERATION_JOURNAL_CURSOR_LIMIT {
@@ -156,11 +158,11 @@ impl FederationJournalCursor {
     }
 }
 
-fn federation_journal_identity(parts: &[&str]) -> String {
+pub(crate) fn federation_journal_identity(parts: &[&str]) -> String {
     sha256_hex(&serde_json::to_vec(parts).expect("journal identity strings serialize"))
 }
 
-fn federation_journal_anchor(
+pub(crate) fn federation_journal_anchor(
     connection: &rusqlite::Connection,
     stream: FederationJournalStream,
     rowid: Option<i64>,
@@ -199,7 +201,7 @@ fn federation_journal_anchor(
         .map_err(|_| FederationJournalError::Storage)
 }
 
-fn federation_journal_validate_anchor(
+pub(crate) fn federation_journal_validate_anchor(
     connection: &rusqlite::Connection,
     stream: FederationJournalStream,
     anchor: &FederationJournalAnchor,

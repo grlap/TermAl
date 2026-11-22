@@ -2,62 +2,64 @@
 // Does not authenticate a caller or accept operator commands from a satellite.
 // New O1 protocol beside federation_protocol.rs; not an executor-proxy split.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationOnboardingIdentity {
-    host: FederationHostIdentity,
-    central: FederationHostIdentity,
-    enrollment_generation: u64,
-    link_incarnation: String,
-    platform: String,
-    arch: String,
-    profile: FederationExecutionProfile,
+pub(crate) struct FederationOnboardingIdentity {
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) enrollment_generation: u64,
+    pub(crate) link_incarnation: String,
+    pub(crate) platform: String,
+    pub(crate) arch: String,
+    pub(crate) profile: FederationExecutionProfile,
     #[serde(default)]
-    running_image: FederationImageObservation,
+    pub(crate) running_image: FederationImageObservation,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationProbeRequest {
+pub(crate) struct FederationProbeRequest {
     // C allocates one fresh identity per explicit verification, never a path,
     // shell command, agent prompt, environment or session supplied by a peer.
-    attempt_id: String,
+    pub(crate) attempt_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationProbeSession {
-    attempt_id: String,
-    session_id: String,
-    expected: FederationPeerSnapshot,
+pub(crate) struct FederationProbeSession {
+    pub(crate) attempt_id: String,
+    pub(crate) session_id: String,
+    pub(crate) expected: FederationPeerSnapshot,
     // Empty only for a pre-upgrade record, retained as unknown evidence.
     #[serde(default)]
-    basis: String,
-    link_incarnation: String,
-    wake: Option<FederationProbeWakeOutcome>,
+    pub(crate) basis: String,
+    pub(crate) link_incarnation: String,
+    pub(crate) wake: Option<FederationProbeWakeOutcome>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationProbeWakeRequest {
-    attempt_id: String,
-    session_id: String,
+pub(crate) struct FederationProbeWakeRequest {
+    pub(crate) attempt_id: String,
+    pub(crate) session_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationProbeWakeOutcome {
-    outcome_id: String,
-    session_id: String,
-    state: FederationProbeWakeState,
+pub(crate) struct FederationProbeWakeOutcome {
+    pub(crate) outcome_id: String,
+    pub(crate) session_id: String,
+    pub(crate) state: FederationProbeWakeState,
     // Observed in this isolated probe session by spawning and reaping a fixed
     // child. A durable acceptance alone is never a delivered wake result.
-    platform: Option<FederationPlatformProbe>,
+    pub(crate) platform: Option<FederationPlatformProbe>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum FederationProbeWakeState {
+pub(crate) enum FederationProbeWakeState {
     Accepted,
     Unknown,
     Delivered,
@@ -66,23 +68,23 @@ enum FederationProbeWakeState {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationPlatformProbe {
-    platform: String,
-    arch: String,
-    shell_dialect: String,
-    paths_resolved: bool,
-    child_spawned_and_reaped: bool,
-    toolchain_identity: String,
+pub(crate) struct FederationPlatformProbe {
+    pub(crate) platform: String,
+    pub(crate) arch: String,
+    pub(crate) shell_dialect: String,
+    pub(crate) paths_resolved: bool,
+    pub(crate) child_spawned_and_reaped: bool,
+    pub(crate) toolchain_identity: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationReverseProbe {
-    identity: FederationOnboardingIdentity,
-    attempt_id: String,
+pub(crate) struct FederationReverseProbe {
+    pub(crate) identity: FederationOnboardingIdentity,
+    pub(crate) attempt_id: String,
 }
 
-enum FederationOnboardingRpc {
+pub(crate) enum FederationOnboardingRpc {
     Identity,
     Reverse(FederationProbeRequest),
     Prepare(FederationProbeRequest),
@@ -91,7 +93,7 @@ enum FederationOnboardingRpc {
 }
 
 impl FederationOnboardingRpc {
-    fn path(&self) -> &'static str {
+    pub(crate) fn path(&self) -> &'static str {
         match self {
             Self::Identity => "/federation/v1/onboarding/identity",
             Self::Reverse(_) => "/federation/v1/onboarding/reverse",
@@ -101,7 +103,7 @@ impl FederationOnboardingRpc {
         }
     }
 
-    fn request(&self, client: &reqwest::Client, url: String) -> reqwest::RequestBuilder {
+    pub(crate) fn request(&self, client: &reqwest::Client, url: String) -> reqwest::RequestBuilder {
         match self {
             Self::Identity | Self::Engram => client.get(url),
             Self::Reverse(body) | Self::Prepare(body) => client.post(url).json(body),

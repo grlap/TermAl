@@ -2,14 +2,16 @@
 // Uses the existing authority owner and canonical reader; does not create
 // producer events, infer claim end from disk state, or adopt session focus.
 
+use super::*;
+
 /// How many roots one pass takes up. Each costs one read, and a root with
 /// something to settle a second, so a pass makes at most twice this many, and
 /// the pass's shared budget and each root's cooldown bound them all.
-const ENGRAM_ROOT_RECLAMATION_READ_LIMIT: usize = 8;
-const ENGRAM_ROOT_RECLAMATION_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+pub(crate) const ENGRAM_ROOT_RECLAMATION_READ_LIMIT: usize = 8;
+pub(crate) const ENGRAM_ROOT_RECLAMATION_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 // Scheduling cadence is independent of the admitted operation's hard limit.
-const ENGRAM_ROOT_RECLAMATION_INTERVAL: Duration = Duration::from_secs(2);
-const ENGRAM_ROOT_RECLAMATION_COOLDOWN: Duration = Duration::from_secs(30);
+pub(crate) const ENGRAM_ROOT_RECLAMATION_INTERVAL: Duration = Duration::from_secs(2);
+pub(crate) const ENGRAM_ROOT_RECLAMATION_COOLDOWN: Duration = Duration::from_secs(30);
 /// The least of a pass's shared budget a planned root's recovery starts
 /// with: its per-root share. A scheduling floor only, not a budget that
 /// suffices for a publication: a slow task can still overrun it.
@@ -17,42 +19,42 @@ const ENGRAM_ROOT_RECLAMATION_TASK_FLOOR: Duration = Duration::from_millis(
     ENGRAM_ROOT_RECLAMATION_BUDGET.as_millis() as u64 / ENGRAM_ROOT_RECLAMATION_READ_LIMIT as u64,
 );
 /// The longest refusal text a recorded pass attempt keeps, in characters.
-const ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS: usize = 160;
+pub(crate) const ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS: usize = 160;
 
 /// Runtime scheduling only. Durable publication obligations stay in the
 /// existing work history; restarting cannot lose a pending retirement.
 #[derive(Default)]
-struct EngramRootReclamationSchedule {
-    flight: Option<String>,
-    last_store: Option<EngramAuthorityStoreKey>,
-    next_due: Option<std::time::Instant>,
-    cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+pub(crate) struct EngramRootReclamationSchedule {
+    pub(crate) flight: Option<String>,
+    pub(crate) last_store: Option<EngramAuthorityStoreKey>,
+    pub(crate) next_due: Option<std::time::Instant>,
+    pub(crate) cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
     /// The one exact selection the last pass reached below its floor and
     /// left untouched: the next plan puts it first while it stays eligible.
-    deferred: Option<EngramWorkSourceRoot>,
+    pub(crate) deferred: Option<EngramWorkSourceRoot>,
     /// The last automatic pass attempt on each retained selection, at most
     /// one each and never more than the named-root capacity: diagnostic only.
-    attempts: Vec<EngramRootPassAttempt>,
+    pub(crate) attempts: Vec<EngramRootPassAttempt>,
     /// Claims whose canonical read Engram refused as no longer their run's
     /// claim (engram_named_root_capacity.rs): runtime only, so a restart
     /// reads them again before any disposition.
-    refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
+    pub(crate) refused_claims: Vec<(EngramAuthorityStoreKey, String)>,
     /// Roots the disposition pass examined and kept, until when it leaves
     /// them alone (engram_named_root_capacity.rs).
-    disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
+    pub(crate) disposition_cooldowns: Vec<(EngramWorkSourceRoot, std::time::Instant)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramRootReclamationRoute {
+pub(crate) enum EngramRootReclamationRoute {
     Unfocused,
     Current(String),
     OwnClear(String),
 }
 
 #[derive(Clone, Debug)]
-struct EngramRootReclamationTask {
-    root: EngramWorkSourceRoot,
-    route: EngramRootReclamationRoute,
+pub(crate) struct EngramRootReclamationTask {
+    pub(crate) root: EngramWorkSourceRoot,
+    pub(crate) route: EngramRootReclamationRoute,
 }
 
 /// The last automatic pass attempt on one exact retained selection. Never
@@ -60,19 +62,22 @@ struct EngramRootReclamationTask {
 /// is runtime state, so it may be absent after a restart, and its absence
 /// is no evidence that a pass is running.
 #[derive(Clone, Debug)]
-struct EngramRootPassAttempt {
-    root: EngramWorkSourceRoot,
-    at: std::time::Instant,
+pub(crate) struct EngramRootPassAttempt {
+    pub(crate) root: EngramWorkSourceRoot,
+    pub(crate) at: std::time::Instant,
     /// `None`: the attempt completed and canonical authority kept the root.
     /// `Some`: it was refused, with its HTTP status and bounded, clean text.
-    refusal: Option<(u16, String)>,
+    pub(crate) refusal: Option<(u16, String)>,
 }
 
 /// Whether `root` is still retained: named, or awaiting its retirement's
 /// publication.
 fn engram_root_reclamation_still_retained(inner: &StateInner, root: &EngramWorkSourceRoot) -> bool {
     inner.engram_work_source_roots.contains(root)
-        || inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
+        || inner
+            .engram_work_naming_history
+            .iter()
+            .flat_map(|history| &history.retirements)
             .any(|notice| notice.selection == *root && !notice.published)
 }
 
@@ -81,7 +86,13 @@ fn engram_root_reclamation_still_retained(inner: &StateInner, root: &EngramWorkS
 fn engram_root_pass_attempt_detail(message: &str) -> String {
     let cleaned = message
         .chars()
-        .map(|character| if character.is_control() { ' ' } else { character })
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -89,7 +100,10 @@ fn engram_root_pass_attempt_detail(message: &str) -> String {
     if cleaned.chars().count() <= ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS {
         return cleaned;
     }
-    let mut cut = cleaned.chars().take(ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS - 1).collect::<String>();
+    let mut cut = cleaned
+        .chars()
+        .take(ENGRAM_ROOT_PASS_ATTEMPT_DETAIL_CHARS - 1)
+        .collect::<String>();
     cut.push('…');
     cut
 }
@@ -105,29 +119,39 @@ fn engram_prune_root_pass_attempts_locked(inner: &mut StateInner) {
 
 /// Record a pass's attempt on `root`, replacing its earlier one. A retired
 /// root keeps none.
-fn engram_record_root_pass_attempt_locked(
+pub(crate) fn engram_record_root_pass_attempt_locked(
     inner: &mut StateInner,
     root: &EngramWorkSourceRoot,
     at: std::time::Instant,
     outcome: &Result<bool, ApiError>,
 ) {
     engram_prune_root_pass_attempts_locked(inner);
-    inner.engram_root_reclamation.attempts.retain(|attempt| attempt.root != *root);
+    inner
+        .engram_root_reclamation
+        .attempts
+        .retain(|attempt| attempt.root != *root);
     if matches!(outcome, Ok(true)) || !engram_root_reclamation_still_retained(inner, root) {
         return;
     }
     let refusal = outcome.as_ref().err().map(|error| {
-        (error.status.as_u16(), engram_root_pass_attempt_detail(&error.message))
+        (
+            error.status.as_u16(),
+            engram_root_pass_attempt_detail(&error.message),
+        )
     });
     let attempts = &mut inner.engram_root_reclamation.attempts;
-    attempts.push(EngramRootPassAttempt { root: root.clone(), at, refusal });
+    attempts.push(EngramRootPassAttempt {
+        root: root.clone(),
+        at,
+        refusal,
+    });
     let excess = attempts.len().saturating_sub(ENGRAM_WORK_SOURCE_ROOT_LIMIT);
     attempts.drain(..excess);
 }
 
 /// The last automatic pass attempt on a retained `root`, as the named-root
 /// status view shows it: a past attempt, not the state of any transition.
-fn engram_root_pass_attempt_text(
+pub(crate) fn engram_root_pass_attempt_text(
     inner: &StateInner,
     root: &EngramWorkSourceRoot,
     now: std::time::Instant,
@@ -135,7 +159,11 @@ fn engram_root_pass_attempt_text(
     if !engram_root_reclamation_still_retained(inner, root) {
         return None;
     }
-    let attempt = inner.engram_root_reclamation.attempts.iter().find(|attempt| attempt.root == *root)?;
+    let attempt = inner
+        .engram_root_reclamation
+        .attempts
+        .iter()
+        .find(|attempt| attempt.root == *root)?;
     let age = now.saturating_duration_since(attempt.at).as_secs();
     Some(match &attempt.refusal {
         None => format!(
@@ -151,13 +179,16 @@ include!("engram_root_reclamation_snapshot.rs");
 
 #[cfg(test)]
 thread_local! {
-    static TEST_ENGRAM_ROOT_RECLAMATION_PLANNING: std::cell::RefCell<
+    pub(crate) static TEST_ENGRAM_ROOT_RECLAMATION_PLANNING: std::cell::RefCell<
         Option<Box<dyn Fn(&str, &[EngramRootReclamationTask])>>,
     > = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-fn engram_root_reclamation_planning_boundary(phase: &str, plan: &[EngramRootReclamationTask]) {
+pub(crate) fn engram_root_reclamation_planning_boundary(
+    phase: &str,
+    plan: &[EngramRootReclamationTask],
+) {
     TEST_ENGRAM_ROOT_RECLAMATION_PLANNING.with(|hook| {
         if let Some(hook) = hook.borrow().as_ref() {
             hook(phase, plan);
@@ -165,9 +196,9 @@ fn engram_root_reclamation_planning_boundary(phase: &str, plan: &[EngramRootRecl
     });
 }
 
-struct EngramRootReclamationFlight {
-    state: AppState,
-    id: String,
+pub(crate) struct EngramRootReclamationFlight {
+    pub(crate) state: AppState,
+    pub(crate) id: String,
 }
 
 impl Drop for EngramRootReclamationFlight {
@@ -184,7 +215,7 @@ impl Drop for EngramRootReclamationFlight {
 // (engram_session_authority.rs), never a full binding target: a target also
 // captures a root read fence cloning every root, journal and project store,
 // and these run under the global lock for every root and session.
-fn engram_root_reclamation_session_is_reader(
+pub(crate) fn engram_root_reclamation_session_is_reader(
     inner: &StateInner,
     session_id: &str,
     store: &EngramAuthorityStoreKey,
@@ -193,52 +224,81 @@ fn engram_root_reclamation_session_is_reader(
         .is_some_and(|view| view.store == Some(store))
 }
 
-fn engram_root_reclamation_reader_exists(inner: &StateInner, store: &EngramAuthorityStoreKey) -> bool {
-    inner.sessions.iter().any(|record|
-        engram_root_reclamation_session_is_reader(inner, &record.session.id, store))
+pub(crate) fn engram_root_reclamation_reader_exists(
+    inner: &StateInner,
+    store: &EngramAuthorityStoreKey,
+) -> bool {
+    inner
+        .sessions
+        .iter()
+        .any(|record| engram_root_reclamation_session_is_reader(inner, &record.session.id, store))
 }
 
-fn engram_named_root_current_owner(inner: &StateInner, root: &EngramWorkSourceRoot) -> Option<String> {
-    let binding = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)?
-        .read_binding.as_ref()?;
+pub(crate) fn engram_named_root_current_owner(
+    inner: &StateInner,
+    root: &EngramWorkSourceRoot,
+) -> Option<String> {
+    let binding = engram_root_journal(
+        &inner.engram_named_root_journal,
+        &root.store,
+        &root.claim_id,
+    )?
+    .read_binding
+    .as_ref()?;
     // A retained local run view is not current store authority. Use this same
     // predicate when planning and when revalidating an off-lock read.
-    inner.sessions.iter().find(|record| record.engram.work_binding.as_ref()
-        .is_some_and(|current| engram_same_recovery_run(current, binding))
-        && engram_root_reclamation_session_is_reader(inner, &record.session.id, &root.store))
+    inner
+        .sessions
+        .iter()
+        .find(|record| {
+            record
+                .engram
+                .work_binding
+                .as_ref()
+                .is_some_and(|current| engram_same_recovery_run(current, binding))
+                && engram_root_reclamation_session_is_reader(inner, &record.session.id, &root.store)
+        })
         .map(|record| record.session.id.clone())
 }
 
-fn engram_named_root_current_binding(inner: &StateInner, root: &EngramWorkSourceRoot) -> bool {
+pub(crate) fn engram_named_root_current_binding(
+    inner: &StateInner,
+    root: &EngramWorkSourceRoot,
+) -> bool {
     engram_named_root_current_owner(inner, root).is_some()
 }
 
-fn engram_root_reclamation_idle_owner(inner: &StateInner, session_id: &str) -> bool {
+pub(crate) fn engram_root_reclamation_idle_owner(inner: &StateInner, session_id: &str) -> bool {
     inner.find_session_index(session_id).is_some_and(|index| {
         let record = &inner.sessions[index];
-        !record.runtime_stop_in_progress && record.engram.source_root_bind_owner.is_none()
+        !record.runtime_stop_in_progress
+            && record.engram.source_root_bind_owner.is_none()
             && !session_resource_reset_in_progress(inner, record)
-            && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error)
+            && matches!(
+                record.session.status,
+                SessionStatus::Idle | SessionStatus::Error
+            )
             && record.unmediated_claude_turn.is_none()
-            && engram_session_reader_view_locked(inner, session_id)
-                .is_some()
+            && engram_session_reader_view_locked(inner, session_id).is_some()
     })
 }
 
-fn engram_root_reclamation_route_current(
+pub(crate) fn engram_root_reclamation_route_current(
     inner: &StateInner,
     root: &EngramWorkSourceRoot,
     route: &EngramRootReclamationRoute,
 ) -> bool {
     match route {
         EngramRootReclamationRoute::Unfocused => !engram_named_root_current_binding(inner, root),
-        EngramRootReclamationRoute::Current(session_id) =>
+        EngramRootReclamationRoute::Current(session_id) => {
             engram_named_root_current_owner(inner, root).as_ref() == Some(session_id)
-                && engram_root_reclamation_idle_owner(inner, session_id),
-        EngramRootReclamationRoute::OwnClear(session_id) =>
+                && engram_root_reclamation_idle_owner(inner, session_id)
+        }
+        EngramRootReclamationRoute::OwnClear(session_id) => {
             &root.named_by_session == session_id
                 && engram_session_reader_view_locked(inner, session_id)
-                    .is_some_and(|view| view.store == Some(&root.store)),
+                    .is_some_and(|view| view.store == Some(&root.store))
+        }
     }
 }
 
@@ -255,18 +315,21 @@ fn engram_work_has_open_evaluation_locked(
         matches!(
             delegation.status,
             DelegationStatus::Queued | DelegationStatus::Running | DelegationStatus::Held
-        ) && delegation.acceptance_evaluation.as_ref().is_some_and(|target| {
-            target.store.as_ref() == Some(store)
-                && matches!(target.submission, AcceptanceEvaluationSubmission::None)
-                && (target
-                    .naming_history
-                    .as_ref()
-                    .is_some_and(|token| token.work_id == work_id)
-                    || target
-                        .source_root
+        ) && delegation
+            .acceptance_evaluation
+            .as_ref()
+            .is_some_and(|target| {
+                target.store.as_ref() == Some(store)
+                    && matches!(target.submission, AcceptanceEvaluationSubmission::None)
+                    && (target
+                        .naming_history
                         .as_ref()
-                        .is_some_and(|root| root.work_id == work_id))
-        })
+                        .is_some_and(|token| token.work_id == work_id)
+                        || target
+                            .source_root
+                            .as_ref()
+                            .is_some_and(|root| root.work_id == work_id))
+            })
     })
 }
 
@@ -276,7 +339,10 @@ fn engram_work_has_open_evaluation_locked(
 /// otherwise ineligible one gets no priority. It goes before the read-limit
 /// cutoff; the other roots keep their order and store rotation.
 fn engram_root_reclamation_deferred_first(
-    stores: &mut BTreeMap<EngramAuthorityStoreKey, std::collections::VecDeque<EngramRootReclamationTask>>,
+    stores: &mut BTreeMap<
+        EngramAuthorityStoreKey,
+        std::collections::VecDeque<EngramRootReclamationTask>,
+    >,
     deferred: Option<&EngramWorkSourceRoot>,
 ) -> Vec<EngramRootReclamationTask> {
     deferred
@@ -292,37 +358,69 @@ fn engram_root_reclamation_deferred_first(
 // Retain the former locked planner as a differential test oracle. Production
 // scheduling uses the narrow owned snapshot, never this state-wide scan.
 #[cfg(test)]
-fn engram_root_reclamation_plan_locked(
+pub(crate) fn engram_root_reclamation_plan_locked(
     inner: &StateInner,
     now: std::time::Instant,
 ) -> Vec<EngramRootReclamationTask> {
     let mut roots = inner.engram_work_source_roots.clone();
-    roots.extend(inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-        .filter(|notice| !notice.published && !inner.engram_work_source_roots.contains(&notice.selection))
-        .map(|notice| notice.selection.clone()));
-    roots.sort_by(|a, b| a.named_at.cmp(&b.named_at).then(a.generation.cmp(&b.generation)));
-    let mut stores: BTreeMap<EngramAuthorityStoreKey, std::collections::VecDeque<EngramRootReclamationTask>> = BTreeMap::new();
+    roots.extend(
+        inner
+            .engram_work_naming_history
+            .iter()
+            .flat_map(|history| &history.retirements)
+            .filter(|notice| {
+                !notice.published && !inner.engram_work_source_roots.contains(&notice.selection)
+            })
+            .map(|notice| notice.selection.clone()),
+    );
+    roots.sort_by(|a, b| {
+        a.named_at
+            .cmp(&b.named_at)
+            .then(a.generation.cmp(&b.generation))
+    });
+    let mut stores: BTreeMap<
+        EngramAuthorityStoreKey,
+        std::collections::VecDeque<EngramRootReclamationTask>,
+    > = BTreeMap::new();
     for root in roots {
         if !engram_root_reclamation_reader_exists(inner, &root.store)
-            || inner.engram_root_reclamation.cooldowns.iter().any(|(selection, until)|
-                selection == &root && now < *until)
-        { continue; }
-        let Some(journal) = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-        else { continue; };
-        if journal.pending.is_some() || journal.read_binding.as_ref().is_none_or(|binding|
-            binding.work_id != root.work_id || binding.claim_id != root.claim_id)
-        { continue; }
+            || inner
+                .engram_root_reclamation
+                .cooldowns
+                .iter()
+                .any(|(selection, until)| selection == &root && now < *until)
+        {
+            continue;
+        }
+        let Some(journal) = engram_root_journal(
+            &inner.engram_named_root_journal,
+            &root.store,
+            &root.claim_id,
+        ) else {
+            continue;
+        };
+        if journal.pending.is_some()
+            || journal.read_binding.as_ref().is_none_or(|binding| {
+                binding.work_id != root.work_id || binding.claim_id != root.claim_id
+            })
+        {
+            continue;
+        }
         // A retired run has nothing to answer, as in the snapshot's plan.
-        if journal.read_binding.as_ref().is_some_and(|binding|
-            engram_run_retired(&inner.engram_work_naming_history, &root.store, binding))
-        { continue; }
+        if journal.read_binding.as_ref().is_some_and(|binding| {
+            engram_run_retired(&inner.engram_work_naming_history, &root.store, binding)
+        }) {
+            continue;
+        }
         let route = match engram_named_root_current_owner(inner, &root) {
             // A pass over a root whose work is being evaluated only re-learns
             // the same binding, and its unpublished window would refuse the
             // evaluator's submission as retryable: leave the root alone
             // until the evaluation is submitted or ends. Retiring an ended
             // claim's root (the Unfocused route) is never held back.
-            Some(_) if engram_work_has_open_evaluation_locked(inner, &root.store, &root.work_id) => {
+            Some(_)
+                if engram_work_has_open_evaluation_locked(inner, &root.store, &root.work_id) =>
+            {
                 continue;
             }
             Some(session_id) if engram_root_reclamation_idle_owner(inner, &session_id) => {
@@ -331,14 +429,22 @@ fn engram_root_reclamation_plan_locked(
             Some(_) => continue,
             None => EngramRootReclamationRoute::Unfocused,
         };
-        stores.entry(root.store.clone()).or_default().push_back(EngramRootReclamationTask { root, route });
+        stores
+            .entry(root.store.clone())
+            .or_default()
+            .push_back(EngramRootReclamationTask { root, route });
     }
     let mut order = stores.keys().cloned().collect::<Vec<_>>();
-    if let Some(last) = &inner.engram_root_reclamation.last_store && !order.is_empty() {
+    if let Some(last) = &inner.engram_root_reclamation.last_store
+        && !order.is_empty()
+    {
         let start = order.partition_point(|store| store <= last) % order.len();
         order.rotate_left(start);
     }
-    let mut plan = engram_root_reclamation_deferred_first(&mut stores, inner.engram_root_reclamation.deferred.as_ref());
+    let mut plan = engram_root_reclamation_deferred_first(
+        &mut stores,
+        inner.engram_root_reclamation.deferred.as_ref(),
+    );
     while plan.len() < ENGRAM_ROOT_RECLAMATION_READ_LIMIT {
         let mut advanced = false;
         for store in &order {
@@ -346,35 +452,39 @@ fn engram_root_reclamation_plan_locked(
                 plan.push(task);
                 advanced = true;
             }
-            if plan.len() == ENGRAM_ROOT_RECLAMATION_READ_LIMIT { break; }
+            if plan.len() == ENGRAM_ROOT_RECLAMATION_READ_LIMIT {
+                break;
+            }
         }
-        if !advanced { break; }
+        if !advanced {
+            break;
+        }
     }
     plan
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramNamedRootRetirementNotice {
-    id: String,
-    selection: EngramWorkSourceRoot,
-    binding: EngramControlWorkBinding,
-    read: EngramNamedRootReadResponse,
-    line: String,
+pub(crate) struct EngramNamedRootRetirementNotice {
+    pub(crate) id: String,
+    pub(crate) selection: EngramWorkSourceRoot,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) read: EngramNamedRootReadResponse,
+    pub(crate) line: String,
     #[serde(default)]
-    published: bool,
+    pub(crate) published: bool,
     #[serde(default)]
-    delivered: bool,
+    pub(crate) delivered: bool,
     /// The authority transition that removed the selection: the only owner
     /// a removal can happen under. An operator's canonical release credits a
     /// retirement to itself only when this is its own transition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    owner: Option<String>,
+    pub(crate) owner: Option<String>,
 }
 
 /// The retirement notice of exactly `root` made under the authority
 /// transition `owner`, if one exists.
-fn engram_named_root_retired_by<'a>(
+pub(crate) fn engram_named_root_retired_by<'a>(
     inner: &'a StateInner,
     root: &EngramWorkSourceRoot,
     owner: &str,
@@ -388,7 +498,7 @@ fn engram_named_root_retired_by<'a>(
 
 /// A completed binding may already have been retired by maintenance. Reading
 /// that exact published result grants no naming or producer-write authority.
-fn engram_completed_own_root_clear_locked(
+pub(crate) fn engram_completed_own_root_clear_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     session_id: &str,
@@ -396,14 +506,17 @@ fn engram_completed_own_root_clear_locked(
 ) -> Option<EngramSourceRootResponse> {
     let history = inner.engram_work_naming_history.iter().find(|history| {
         &history.store == store
-            && (history.work_id == work || history.retirements.iter().any(|notice| {
-                notice.selection.short_ref == work
-            }))
+            && (history.work_id == work
+                || history
+                    .retirements
+                    .iter()
+                    .any(|notice| notice.selection.short_ref == work))
     })?;
     if engram_authority_work_unresolved(inner, store, &history.work_id)
-        || inner.engram_work_source_roots.iter().any(|root| {
-            &root.store == store && root.work_id == history.work_id
-        })
+        || inner
+            .engram_work_source_roots
+            .iter()
+            .any(|root| &root.store == store && root.work_id == history.work_id)
     {
         return None;
     }
@@ -426,15 +539,22 @@ fn engram_completed_own_root_clear_locked(
         return None;
     }
     Some(EngramSourceRootResponse {
-        work_ref: notice.selection.short_ref.clone(), work_id: history.work_id.clone(), root: None,
-        source_basis: None, unmeasured: None, generation: 0, sealed: None,
+        work_ref: notice.selection.short_ref.clone(),
+        work_id: history.work_id.clone(),
+        root: None,
+        source_basis: None,
+        unmeasured: None,
+        generation: 0,
+        sealed: None,
         evaluation_notice: None,
-        notice: format!("`{}`: already ended by completion; no name was changed and no producer event was created.",
-            notice.selection.short_ref),
+        notice: format!(
+            "`{}`: already ended by completion; no name was changed and no producer event was created.",
+            notice.selection.short_ref
+        ),
     })
 }
 
-fn engram_named_root_capacity(inner: &StateInner) -> usize {
+pub(crate) fn engram_named_root_capacity(inner: &StateInner) -> usize {
     inner.engram_work_source_roots.len()
         + inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
             .filter(|notice| !notice.published
@@ -448,13 +568,15 @@ fn engram_named_root_capacity(inner: &StateInner) -> usize {
 /// lines; the caller writes them with `engram_root_reclamation_emit` once it
 /// has released the global guard.
 #[must_use]
-fn engram_publish_root_retirements_locked(
+pub(crate) fn engram_publish_root_retirements_locked(
     inner: &mut StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
 ) -> Vec<String> {
     let mut lines = Vec::new();
-    if let Some(history) = inner.engram_work_naming_history.iter_mut()
+    if let Some(history) = inner
+        .engram_work_naming_history
+        .iter_mut()
         .find(|history| &history.store == store && history.work_id == work)
     {
         for notice in &mut history.retirements {
@@ -476,13 +598,13 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn take_engram_root_reclamation_emitted() -> Vec<String> {
+pub(crate) fn take_engram_root_reclamation_emitted() -> Vec<String> {
     TEST_ENGRAM_RECLAMATION_EMITTED.with(|lines| std::mem::take(&mut *lines.borrow_mut()))
 }
 
 /// Writes one reclamation line to stderr. Never under the global state lock:
 /// a slow or blocked stderr must not extend the guard every session waits on.
-fn engram_root_reclamation_emit(state: &AppState, line: &str) {
+pub(crate) fn engram_root_reclamation_emit(state: &AppState, line: &str) {
     #[cfg(test)]
     {
         assert!(
@@ -496,13 +618,15 @@ fn engram_root_reclamation_emit(state: &AppState, line: &str) {
     eprintln!("{line}");
 }
 
-fn engram_root_retirement_reason(
+pub(crate) fn engram_root_retirement_reason(
     root: &EngramWorkSourceRoot,
     proof: &EngramNamedRootReadResponse,
 ) -> Option<&'static str> {
     // Even terminal facts must not erase a local generation ahead of the
     // canonical event. A missing event is not proof about a named selection.
-    let generation = proof.latest_event.as_ref()
+    let generation = proof
+        .latest_event
+        .as_ref()
         .and_then(|event| u64::try_from(event.generation).ok())?;
     if generation < root.generation {
         return None;
@@ -510,7 +634,13 @@ fn engram_root_retirement_reason(
     match proof.run.state.as_str() {
         "completed" => Some("its run completed"),
         "cancelled" => Some("its run was cancelled"),
-        _ if matches!(proof.named_root, EngramNamedRootState::UnboundByRelease { .. }) => Some("its root was released"),
+        _ if matches!(
+            proof.named_root,
+            EngramNamedRootState::UnboundByRelease { .. }
+        ) =>
+        {
+            Some("its root was released")
+        }
         _ if proof.definitively_unbound() => Some("its canonical binding ended"),
         _ if engram_named_root_read_obsoletes(root, Some(&proof.named_root), generation) => {
             Some("its canonical named-root binding superseded this selection")
@@ -519,7 +649,7 @@ fn engram_root_retirement_reason(
     }
 }
 
-fn engram_retire_exact_root_locked(
+pub(crate) fn engram_retire_exact_root_locked(
     inner: &mut StateInner,
     root: &EngramWorkSourceRoot,
     binding: &EngramControlWorkBinding,
@@ -533,22 +663,45 @@ fn engram_retire_exact_root_locked(
     // its binding cannot be read meanwhile: it counts as holding it, as the
     // disposition and operator routes treat it.
     let claim_held = engram_named_root_claim_holder(inner, root).is_some()
-        || inner.quarantined_persisted_session_ids.contains(&root.named_by_session);
+        || inner
+            .quarantined_persisted_session_ids
+            .contains(&root.named_by_session);
     let run_reason = engram_root_retirement_reason(root, proof);
-    let claim_reason = run_reason.is_none().then(|| {
-        engram_root_claim_retirement_reason(
-            root, proof, chrono::Utc::now(), naming_session_present, claim_held,
-        )
-    }).flatten();
-    let Some(reason) = run_reason.or(claim_reason) else { return; };
-    let Some(index) = inner.engram_work_source_roots.iter().position(|current| current == root)
-    else { return; };
-    let Some(history) = inner.engram_work_naming_history.iter_mut()
+    let claim_reason = run_reason
+        .is_none()
+        .then(|| {
+            engram_root_claim_retirement_reason(
+                root,
+                proof,
+                chrono::Utc::now(),
+                naming_session_present,
+                claim_held,
+            )
+        })
+        .flatten();
+    let Some(reason) = run_reason.or(claim_reason) else {
+        return;
+    };
+    let Some(index) = inner
+        .engram_work_source_roots
+        .iter()
+        .position(|current| current == root)
+    else {
+        return;
+    };
+    let Some(history) = inner
+        .engram_work_naming_history
+        .iter_mut()
         .find(|history| history.store == root.store && history.work_id == root.work_id)
-    else { return; };
+    else {
+        return;
+    };
     // Keep exact proof/history with the removal, before the complete-image
     // fence. No success, capacity release or notice delivery precedes its ACK.
-    let owner = history.transition.as_ref().map(|transition| transition.id.clone());
+    let owner = history
+        .transition
+        .as_ref()
+        .map(|transition| transition.id.clone());
     history.retirements.push(EngramNamedRootRetirementNotice {
         id: Uuid::new_v4().to_string(), selection: root.clone(), binding: binding.clone(),
         read: proof.clone(),
@@ -567,15 +720,18 @@ fn engram_retire_exact_root_locked(
     }
 }
 
-fn acknowledge_engram_root_retirements_locked(
+pub(crate) fn acknowledge_engram_root_retirements_locked(
     inner: &mut StateInner,
     session_id: &str,
     delivered: &[EngramSourceRootNotice],
 ) {
-    for notice in inner.engram_work_naming_history.iter_mut()
+    for notice in inner
+        .engram_work_naming_history
+        .iter_mut()
         .flat_map(|history| &mut history.retirements)
     {
-        if notice.published && notice.selection.named_by_session == session_id
+        if notice.published
+            && notice.selection.named_by_session == session_id
             && delivered.iter().any(|item| item.id == notice.id)
         {
             notice.delivered = true;
@@ -586,7 +742,7 @@ fn acknowledge_engram_root_retirements_locked(
 impl AppState {
     /// Called by the unconditional test-run index tick. A single global flight
     /// also implies single-flight per store. Control reads stay off its thread.
-    fn schedule_engram_root_reclamation(&self, force: bool) -> &'static str {
+    pub(crate) fn schedule_engram_root_reclamation(&self, force: bool) -> &'static str {
         let now = self.engram_budget_clock().now();
         let (id, snapshot) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -596,7 +752,12 @@ impl AppState {
             if inner.engram_root_reclamation.flight.is_some() {
                 return "a bounded reclamation pass is already running";
             }
-            if !force && inner.engram_root_reclamation.next_due.is_some_and(|due| now < due) {
+            if !force
+                && inner
+                    .engram_root_reclamation
+                    .next_due
+                    .is_some_and(|due| now < due)
+            {
                 return "the recurring pass is not due yet";
             }
             let snapshot = EngramRootReclamationSnapshot::capture(&inner);
@@ -611,7 +772,10 @@ impl AppState {
         // Reserve the flight before unlocking: another scheduler or an
         // operator release cannot overtake this planning pass. Every exit,
         // including an empty plan or failed spawn, releases only this flight.
-        let flight = EngramRootReclamationFlight { state: self.clone(), id };
+        let flight = EngramRootReclamationFlight {
+            state: self.clone(),
+            id,
+        };
         let plan = snapshot.plan(now);
         #[cfg(test)]
         engram_root_reclamation_planning_boundary("selected", &plan);
@@ -622,15 +786,15 @@ impl AppState {
         }
         drop(snapshot);
         let state = self.clone();
-        match std::thread::Builder::new().name("engram-root-reclamation".to_owned())
+        match std::thread::Builder::new()
+            .name("engram-root-reclamation".to_owned())
             .spawn(move || {
                 let flight = flight;
                 state.run_engram_root_reclamation_pass(plan);
                 drop(flight);
                 #[cfg(test)]
                 state.test_engram_authority_ack_boundary("after_reclamation_pass");
-            })
-        {
+            }) {
             Ok(_) => "a bounded reclamation pass was scheduled",
             Err(error) => {
                 // Dropping the unstarted closure also drops its flight guard.
@@ -640,7 +804,7 @@ impl AppState {
         }
     }
 
-    fn run_engram_root_reclamation_pass(&self, plan: Vec<EngramRootReclamationTask>) {
+    pub(crate) fn run_engram_root_reclamation_pass(&self, plan: Vec<EngramRootReclamationTask>) {
         let clock = self.engram_budget_clock();
         let started = clock.now();
         let deadline = started + ENGRAM_ROOT_RECLAMATION_BUDGET;
@@ -657,41 +821,65 @@ impl AppState {
             // too little of the shared budget: defer this one root untouched,
             // with no recovery and no cooldown, and end the pass. Its next
             // pass is the ordinary recurring one, never an earlier one.
-            if deadline.saturating_duration_since(clock.now()) < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR {
+            if deadline.saturating_duration_since(clock.now()) < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR
+            {
                 self.defer_engram_root_reclamation(&task);
                 break;
             }
-            self.inner.lock().expect("state mutex poisoned").engram_root_reclamation.last_store = Some(task.root.store.clone());
+            self.inner
+                .lock()
+                .expect("state mutex poisoned")
+                .engram_root_reclamation
+                .last_store = Some(task.root.store.clone());
             attempted += 1;
-            let outcome = match self.engram_root_read_first_leaves_it(&task.root, &task.route, deadline) {
-                Some(outcome) => outcome,
-                None => {
-                    // The read found something to settle, and may have spent
-                    // the share that takes: this root waits, untouched, as
-                    // one the pass never reached does.
-                    if deadline.saturating_duration_since(clock.now()) < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR {
-                        self.defer_engram_root_reclamation(&task);
-                        break;
+            let outcome =
+                match self.engram_root_read_first_leaves_it(&task.root, &task.route, deadline) {
+                    Some(outcome) => outcome,
+                    None => {
+                        // The read found something to settle, and may have spent
+                        // the share that takes: this root waits, untouched, as
+                        // one the pass never reached does.
+                        if deadline.saturating_duration_since(clock.now())
+                            < ENGRAM_ROOT_RECLAMATION_TASK_FLOOR
+                        {
+                            self.defer_engram_root_reclamation(&task);
+                            break;
+                        }
+                        // Current bindings go to the existing canonical recovery
+                        // owner, never a second directory-probe or provider turn.
+                        self.recover_one_engram_root_until(&task.root, &task.route, deadline)
                     }
-                    // Current bindings go to the existing canonical recovery
-                    // owner, never a second directory-probe or provider turn.
-                    self.recover_one_engram_root_until(&task.root, &task.route, deadline)
-                }
-            };
+                };
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let still_retained = engram_root_reclamation_still_retained(&inner, &task.root);
-            inner.engram_root_reclamation.cooldowns.retain(|(root, until)|
-                root != &task.root && *until > clock.now());
+            inner
+                .engram_root_reclamation
+                .cooldowns
+                .retain(|(root, until)| root != &task.root && *until > clock.now());
             if still_retained {
-                inner.engram_root_reclamation.cooldowns.push((task.root.clone(), clock.now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
+                inner.engram_root_reclamation.cooldowns.push((
+                    task.root.clone(),
+                    clock.now() + ENGRAM_ROOT_RECLAMATION_COOLDOWN,
+                ));
             }
             engram_record_root_pass_attempt_locked(&mut inner, &task.root, clock.now(), &outcome);
             drop(inner);
             // Formatted and written after the guard is released.
-            engram_root_reclamation_emit(self, &format!(
-                "engram> named-root reclamation store={} work={} generation={} route={:?} outcome={}",
-                task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
-                match outcome { Ok(true) => "retired".to_owned(), Ok(false) => "retained by canonical authority".to_owned(), Err(error) => format!("retained: {}", error.message) }));
+            engram_root_reclamation_emit(
+                self,
+                &format!(
+                    "engram> named-root reclamation store={} work={} generation={} route={:?} outcome={}",
+                    task.root.store.project_id,
+                    task.root.work_id,
+                    task.root.generation,
+                    task.route,
+                    match outcome {
+                        Ok(true) => "retired".to_owned(),
+                        Ok(false) => "retained by canonical authority".to_owned(),
+                        Err(error) => format!("retained: {}", error.message),
+                    }
+                ),
+            );
         }
         // Inside the same flight: legacy and claim-refused roots by their
         // recorded rule, reading an item's tracker lifecycle through the Work
@@ -701,9 +889,15 @@ impl AppState {
         self.run_engram_named_root_disposition_pass(started, &|root| {
             self.read_engram_named_root_item_lifecycle(root)
         });
-        engram_root_reclamation_emit(self, &format!(
-            "engram> named-root reclamation pass attempted={} limit={} elapsed_ms={}",
-            attempted, ENGRAM_ROOT_RECLAMATION_READ_LIMIT, clock.now().saturating_duration_since(started).as_millis()));
+        engram_root_reclamation_emit(
+            self,
+            &format!(
+                "engram> named-root reclamation pass attempted={} limit={} elapsed_ms={}",
+                attempted,
+                ENGRAM_ROOT_RECLAMATION_READ_LIMIT,
+                clock.now().saturating_duration_since(started).as_millis()
+            ),
+        );
     }
 
     fn defer_engram_root_reclamation(&self, task: &EngramRootReclamationTask) {
@@ -712,10 +906,17 @@ impl AppState {
             inner.engram_root_reclamation.deferred = Some(task.root.clone());
         }
         drop(inner);
-        engram_root_reclamation_emit(self, &format!(
-            "engram> named-root reclamation store={} work={} generation={} route={:?} outcome=deferred: less than {} ms of the pass budget left",
-            task.root.store.project_id, task.root.work_id, task.root.generation, task.route,
-            ENGRAM_ROOT_RECLAMATION_TASK_FLOOR.as_millis()));
+        engram_root_reclamation_emit(
+            self,
+            &format!(
+                "engram> named-root reclamation store={} work={} generation={} route={:?} outcome=deferred: less than {} ms of the pass budget left",
+                task.root.store.project_id,
+                task.root.work_id,
+                task.root.generation,
+                task.route,
+                ENGRAM_ROOT_RECLAMATION_TASK_FLOOR.as_millis()
+            ),
+        );
     }
 
     /// Reads a settled root before anything touches its work's authority:
@@ -741,47 +942,66 @@ impl AppState {
             {
                 return None;
             }
-            engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-                .filter(|journal| journal.pending.is_none())
-                .and_then(|journal| journal.read_binding.clone())
-                .filter(|binding| binding.work_id == root.work_id && binding.claim_id == root.claim_id)?
+            engram_root_journal(
+                &inner.engram_named_root_journal,
+                &root.store,
+                &root.claim_id,
+            )
+            .filter(|journal| journal.pending.is_none())
+            .and_then(|journal| journal.read_binding.clone())
+            .filter(|binding| {
+                binding.work_id == root.work_id && binding.claim_id == root.claim_id
+            })?
         };
         let target = {
-            let snapshot = EngramRootReaderSnapshot::capture(&self.inner.lock().expect("state mutex poisoned"));
+            let snapshot = EngramRootReaderSnapshot::capture(
+                &self.inner.lock().expect("state mutex poisoned"),
+            );
             let readers = snapshot.readers();
             engram_root_recovery_readers(&readers, &root.store, Some(&root.named_by_session))
                 .into_iter()
                 .find_map(|session| {
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    Self::engram_source_root_target_locked(&inner, session).ok().flatten()
-                        .filter(|target| target.settings.authority_store_key.as_ref() == Some(&root.store))
+                    Self::engram_source_root_target_locked(&inner, session)
+                        .ok()
+                        .flatten()
+                        .filter(|target| {
+                            target.settings.authority_store_key.as_ref() == Some(&root.store)
+                        })
                 })?
         };
         #[cfg(test)]
         self.test_engram_authority_ack_boundary("before_recurring_read");
         let clock = self.engram_budget_clock();
         let reserve = deadline.saturating_duration_since(clock.now()) / 4;
-        let read = self.read_engram_authority_fact_classified_until(&target, &binding, deadline - reserve);
-        self.engram_root_read_learns_nothing(root, &binding, &read).then(|| match read {
-            Ok(_) => Ok(false),
-            // Reported as this attempt's outcome. No authority was touched.
-            Err(failure) => Err(failure.into_api()),
-        })
+        let read =
+            self.read_engram_authority_fact_classified_until(&target, &binding, deadline - reserve);
+        self.engram_root_read_learns_nothing(root, &binding, &read)
+            .then(|| match read {
+                Ok(_) => Ok(false),
+                // Reported as this attempt's outcome. No authority was touched.
+                Err(failure) => Err(failure.into_api()),
+            })
     }
 
-    fn engram_root_capacity_refusal(&self) -> ApiError {
+    pub(crate) fn engram_root_capacity_refusal(&self) -> ApiError {
         let scheduled = self.schedule_engram_root_reclamation(true);
         let now = self.engram_budget_clock().now();
         let inner = self.inner.lock().expect("state mutex poisoned");
         // One row per retained root (engram_named_root_release.rs), so an
         // operator can route an own-clear or an audited release.
-        let retained = engram_named_root_status_locked(&inner, now).iter()
-            .map(engram_named_root_status_line).collect::<Vec<_>>().join(" | ");
-        ApiError::conflict(format!("TermAl retains at most {} named source roots globally; {}. No slot release or successful retry is promised. Unacknowledged retirements still reserve capacity. Retained: {}",
-            ENGRAM_WORK_SOURCE_ROOT_LIMIT, scheduled, retained))
+        let retained = engram_named_root_status_locked(&inner, now)
+            .iter()
+            .map(engram_named_root_status_line)
+            .collect::<Vec<_>>()
+            .join(" | ");
+        ApiError::conflict(format!(
+            "TermAl retains at most {} named source roots globally; {}. No slot release or successful retry is promised. Unacknowledged retirements still reserve capacity. Retained: {}",
+            ENGRAM_WORK_SOURCE_ROOT_LIMIT, scheduled, retained
+        ))
     }
 
-    fn recover_one_engram_root_until(
+    pub(crate) fn recover_one_engram_root_until(
         &self,
         root: &EngramWorkSourceRoot,
         route: &EngramRootReclamationRoute,
@@ -793,7 +1013,7 @@ impl AppState {
     /// Explicit releases attach their audit before the prepared-image fence
     /// and resume its retained owner. Maintenance passes no release audit and
     /// keeps the ordinary preparation/publication path.
-    fn recover_one_engram_root_traced_until(
+    pub(crate) fn recover_one_engram_root_traced_until(
         &self,
         root: &EngramWorkSourceRoot,
         route: &EngramRootReclamationRoute,
@@ -803,40 +1023,79 @@ impl AppState {
         let (binding, journal_snapshot, pending_publication) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if !engram_root_reclamation_reader_exists(&inner, &root.store) {
-                return Err(ApiError::conflict("state unknown: no eligible reader in the original store; entry retained"));
+                return Err(ApiError::conflict(
+                    "state unknown: no eligible reader in the original store; entry retained",
+                ));
             }
             match route {
-                EngramRootReclamationRoute::Unfocused if engram_named_root_current_binding(&inner, root) => {
-                    return Err(ApiError::conflict("the entry now has a current binding; its existing owner must reconcile it"));
+                EngramRootReclamationRoute::Unfocused
+                    if engram_named_root_current_binding(&inner, root) =>
+                {
+                    return Err(ApiError::conflict(
+                        "the entry now has a current binding; its existing owner must reconcile it",
+                    ));
                 }
                 EngramRootReclamationRoute::Current(session_id)
-                    if engram_named_root_current_owner(&inner, root).as_ref() != Some(session_id)
-                        || !engram_root_reclamation_idle_owner(&inner, session_id) => {
-                    return Err(ApiError::conflict("the current reconciliation owner changed or is active; entry retained"));
+                    if engram_named_root_current_owner(&inner, root).as_ref()
+                        != Some(session_id)
+                        || !engram_root_reclamation_idle_owner(&inner, session_id) =>
+                {
+                    return Err(ApiError::conflict(
+                        "the current reconciliation owner changed or is active; entry retained",
+                    ));
                 }
-                EngramRootReclamationRoute::OwnClear(session_id) if &root.named_by_session != session_id => {
+                EngramRootReclamationRoute::OwnClear(session_id)
+                    if &root.named_by_session != session_id =>
+                {
                     return Err(ApiError::conflict("not the naming session; entry retained"));
                 }
                 _ => {}
             }
-            let journal = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-                .ok_or_else(|| ApiError::conflict("state unknown: no retained canonical run association; entry retained"))?;
+            let journal = engram_root_journal(
+                &inner.engram_named_root_journal,
+                &root.store,
+                &root.claim_id,
+            )
+            .ok_or_else(|| {
+                ApiError::conflict(
+                    "state unknown: no retained canonical run association; entry retained",
+                )
+            })?;
             if journal.pending.is_some() {
-                return Err(ApiError::conflict("pending producer intent belongs to its existing owner; entry retained"));
+                return Err(ApiError::conflict(
+                    "pending producer intent belongs to its existing owner; entry retained",
+                ));
             }
-            let binding = journal.read_binding.clone()
-                .filter(|binding| binding.work_id == root.work_id && binding.claim_id == root.claim_id)
-                .ok_or_else(|| ApiError::conflict("state unknown: retained run association does not match the entry"))?;
-            let pending_publication = inner.engram_work_naming_history.iter()
+            let binding = journal
+                .read_binding
+                .clone()
+                .filter(|binding| {
+                    binding.work_id == root.work_id && binding.claim_id == root.claim_id
+                })
+                .ok_or_else(|| {
+                    ApiError::conflict(
+                        "state unknown: retained run association does not match the entry",
+                    )
+                })?;
+            let pending_publication = inner
+                .engram_work_naming_history
+                .iter()
                 .find(|history| history.store == root.store && history.work_id == root.work_id)
-                .filter(|history| history.retirements.iter().any(|notice|
-                    notice.selection == *root && notice.binding == binding && !notice.published))
+                .filter(|history| {
+                    history.retirements.iter().any(|notice| {
+                        notice.selection == *root && notice.binding == binding && !notice.published
+                    })
+                })
                 .and_then(|history| history.transition.clone());
-            if !inner.engram_work_source_roots.contains(root) && (pending_publication.is_none()
-                || inner.engram_work_source_roots.iter().any(|current|
-                    current.store == root.store && current.work_id == root.work_id))
+            if !inner.engram_work_source_roots.contains(root)
+                && (pending_publication.is_none()
+                    || inner.engram_work_source_roots.iter().any(|current| {
+                        current.store == root.store && current.work_id == root.work_id
+                    }))
             {
-                return Err(ApiError::conflict("the exact retained selection was replaced; entry retained"));
+                return Err(ApiError::conflict(
+                    "the exact retained selection was replaced; entry retained",
+                ));
             }
             (binding, journal.clone(), pending_publication)
         };
@@ -846,31 +1105,50 @@ impl AppState {
             self.publish_engram_authority_image_until(&root.store, &owner, deadline)?;
         } else {
             let owner = match release_audit {
-                Some(audit) => self.prepare_engram_release_authority_until(
-                    root, &binding, audit, deadline)?,
+                Some(audit) => {
+                    self.prepare_engram_release_authority_until(root, &binding, audit, deadline)?
+                }
                 None => self.prepare_engram_authority_until(&root.store, &binding, deadline)?,
             };
             {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 if !inner.engram_work_source_roots.contains(root)
-                    || engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id) != Some(&journal_snapshot)
+                    || engram_root_journal(
+                        &inner.engram_named_root_journal,
+                        &root.store,
+                        &root.claim_id,
+                    ) != Some(&journal_snapshot)
                 {
-                    return Err(ApiError::conflict("selection or journal changed while the existing authority owner was prepared"));
+                    return Err(ApiError::conflict(
+                        "selection or journal changed while the existing authority owner was prepared",
+                    ));
                 }
             }
-            self.recover_engram_authority_batch_until(&root.store, &owner, deadline, false, Some((root, route)))?;
+            self.recover_engram_authority_batch_until(
+                &root.store,
+                &owner,
+                deadline,
+                false,
+                Some((root, route)),
+            )?;
             self.publish_engram_authority_image_until(&root.store, &owner, deadline)?;
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
-        Ok(inner.engram_work_naming_history.iter()
+        Ok(inner
+            .engram_work_naming_history
+            .iter()
             .filter(|history| history.store == root.store && history.work_id == root.work_id)
             .flat_map(|history| &history.retirements)
-            .any(|notice| notice.selection == *root && notice.binding == binding && notice.published)
-            && !inner.engram_work_source_roots.iter().any(|current|
-                current.store == root.store && current.work_id == root.work_id))
+            .any(|notice| {
+                notice.selection == *root && notice.binding == binding && notice.published
+            })
+            && !inner
+                .engram_work_source_roots
+                .iter()
+                .any(|current| current.store == root.store && current.work_id == root.work_id))
     }
 
-    fn clear_obsolete_own_engram_root_until(
+    pub(crate) fn clear_obsolete_own_engram_root_until(
         &self,
         session_id: &str,
         root: &EngramWorkSourceRoot,
@@ -897,16 +1175,24 @@ impl AppState {
             return Err(ApiError::conflict(format!("retained name was not cleared: {reason}; no obsolete-binding proof was acknowledged. Read the current named-root status and keep the entry until canonical run or claim closure is confirmed")));
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
-        if let Some(completed) = engram_completed_own_root_clear_locked(
-            &inner, &root.store, session_id, &root.work_id,
-        ) {
+        if let Some(completed) =
+            engram_completed_own_root_clear_locked(&inner, &root.store, session_id, &root.work_id)
+        {
             return Ok(completed);
         }
         Ok(EngramSourceRootResponse {
-            work_ref: root.short_ref.clone(), work_id: root.work_id.clone(), root: None,
-            source_basis: None, unmeasured: None, generation: 0, sealed: None,
+            work_ref: root.short_ref.clone(),
+            work_id: root.work_id.clone(),
+            root: None,
+            source_basis: None,
+            unmeasured: None,
+            generation: 0,
+            sealed: None,
             evaluation_notice: None,
-            notice: format!("`{}`: obsolete retained name retired with canonical authority; no producer event was created.", root.short_ref),
+            notice: format!(
+                "`{}`: obsolete retained name retired with canonical authority; no producer event was created.",
+                root.short_ref
+            ),
         })
     }
 }

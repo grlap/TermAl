@@ -1,24 +1,26 @@
 // Owns bounded accepted connections and shutdown cancellation of their IO.
 // Does not authenticate HTTP or change enrollment. Split from federation_peer.rs.
 
-struct FederationSocketListener {
-    listener: TcpListener,
-    stop: tokio::sync::watch::Receiver<bool>,
-    connections: Arc<tokio::sync::Semaphore>,
-    control: Option<FederationChannel>,
+use super::*;
+
+pub(crate) struct FederationSocketListener {
+    pub(crate) listener: TcpListener,
+    pub(crate) stop: tokio::sync::watch::Receiver<bool>,
+    pub(crate) connections: Arc<tokio::sync::Semaphore>,
+    pub(crate) control: Option<FederationChannel>,
 }
 
-struct FederationSocket {
-    stream: tokio::net::TcpStream,
-    closed: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
-    cancelled: bool,
-    _connection: Option<tokio::sync::OwnedSemaphorePermit>,
-    prefix: Vec<u8>,
+pub(crate) struct FederationSocket {
+    pub(crate) stream: tokio::net::TcpStream,
+    pub(crate) closed: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+    pub(crate) cancelled: bool,
+    pub(crate) _connection: Option<tokio::sync::OwnedSemaphorePermit>,
+    pub(crate) prefix: Vec<u8>,
     prefix_offset: usize,
 }
 
 impl FederationSocket {
-    fn cancelled(&mut self, cx: &mut std::task::Context<'_>) -> bool {
+    pub(crate) fn cancelled(&mut self, cx: &mut std::task::Context<'_>) -> bool {
         if !self.cancelled && self.closed.as_mut().poll(cx).is_ready() {
             self.cancelled = true;
         }

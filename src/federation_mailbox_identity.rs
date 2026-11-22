@@ -2,14 +2,17 @@
 // Does not mutate placements, register participants or perform I/O. Split from
 // federation_mailbox_directory.rs for the central mailbox protocol.
 
-fn federation_mailbox_central_locked(
+use super::*;
+
+pub(crate) fn federation_mailbox_central_locked(
     inner: &StateInner,
 ) -> Result<FederationHostIdentity, ApiError> {
     federation_mailbox_central_checked(inner, true)
 }
 
-fn federation_mailbox_central_checked(
-    inner: &StateInner, record_refusal: bool,
+pub(crate) fn federation_mailbox_central_checked(
+    inner: &StateInner,
+    record_refusal: bool,
 ) -> Result<FederationHostIdentity, ApiError> {
     // Idle worker gates and per-row predicates opt out: they have no refused
     // operation and must not rotate actual refusals out of the bounded history.
@@ -34,10 +37,15 @@ fn federation_mailbox_central_checked(
     };
     if let Some(reason) = unavailable {
         if record_refusal {
-            inner.federation_durability_diagnostics.refusal(inner.federation_durable,
+            inner.federation_durability_diagnostics.refusal(
+                inner.federation_durable,
                 if kind == Some(ApiErrorKind::FederationMailboxCentralDurability) {
                     "central_authority_durability"
-                } else { "central_authority_check" }, 409);
+                } else {
+                    "central_authority_check"
+                },
+                409,
+            );
         }
         let mut error = ApiError::conflict(format!("{FEDERATION_STALE_AUTHORITY}: {reason}"));
         error.kind = kind;
@@ -53,16 +61,32 @@ fn federation_mailbox_central_checked(
 impl AppState {
     // Diagnostic context only: a later observation cannot establish which
     // authority check failed earlier, and cannot authorize or repair a binding.
-    fn federation_mailbox_directory_refusal(&self, session: &str, mut error: ApiError) -> ApiError {
-        if error.status != StatusCode::CONFLICT { return error; }
+    pub(crate) fn federation_mailbox_directory_refusal(
+        &self,
+        session: &str,
+        mut error: ApiError,
+    ) -> ApiError {
+        if error.status != StatusCode::CONFLICT {
+            return error;
+        }
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let binding = federation_mailbox_root_locked(&inner, session).ok()
+        let binding = federation_mailbox_root_locked(&inner, session)
+            .ok()
             .and_then(|root| root.mailbox_binding());
         let principal = binding.map(FederationMailboxBinding::participant_key);
         let missing_entry = inner.preferences.federation.role == FederationRole::Central
-            && binding.is_some_and(|binding| inner.federation.mailbox_directory
-                .get(&binding.participant_key()).is_none_or(|row| row.binding != *binding));
-        let central = inner.preferences.federation.central.as_ref()
+            && binding.is_some_and(|binding| {
+                inner
+                    .federation
+                    .mailbox_directory
+                    .get(&binding.participant_key())
+                    .is_none_or(|row| row.binding != *binding)
+            });
+        let central = inner
+            .preferences
+            .federation
+            .central
+            .as_ref()
             .map(|host| format!("{} generation {}", host.host_id, host.host_generation))
             .unwrap_or_else(|| "none".into());
         let observed = if inner.preferences.federation.role == FederationRole::Central {
@@ -72,7 +96,8 @@ impl AppState {
                 Err(current) => format!("current central condition: {}", current.message),
             }
         } else {
-            "the configured central authority's condition is not observed locally on this host".to_owned()
+            "the configured central authority's condition is not observed locally on this host"
+                .to_owned()
         };
         let recovery = if error.kind == Some(ApiErrorKind::FederationMailboxCentralDurability) {
             "wait for the existing federation persistence reconciliation to settle, then retry termal_list_sessions with this same session; no host restart or re-enrollment is needed"
@@ -83,13 +108,14 @@ impl AppState {
         };
         error.message = format!(
             "{}; observed context: caller {session}, mailbox binding {}, configured central {central}; {observed}; recovery: {recovery}",
-            error.message, principal.as_deref().unwrap_or("none"),
+            error.message,
+            principal.as_deref().unwrap_or("none"),
         );
         error
     }
 }
 
-fn federation_mailbox_remote_in_domain(
+pub(crate) fn federation_mailbox_remote_in_domain(
     domain: &FederationState,
     settings: &FederationSettings,
     peer: &FederationPeerSnapshot,
@@ -118,7 +144,7 @@ fn federation_mailbox_remote_in_domain(
         })
 }
 
-fn federation_mailbox_participant_current_locked(
+pub(crate) fn federation_mailbox_participant_current_locked(
     inner: &StateInner,
     participant: &FederationMailboxParticipant,
 ) -> bool {
@@ -129,9 +155,7 @@ fn federation_mailbox_participant_current_locked(
     }
     if participant.binding.identity.host_id == participant.binding.central.host_id {
         return federation_mailbox_root_locked(inner, &participant.binding.identity.session_id)
-            .is_ok_and(|record| {
-                record.mailbox_binding() == Some(&participant.binding)
-            });
+            .is_ok_and(|record| record.mailbox_binding() == Some(&participant.binding));
     }
     federation_snapshot_locked(inner, &participant.binding.identity.host_id).is_ok_and(|peer| {
         federation_mailbox_remote_in_domain(
@@ -143,7 +167,7 @@ fn federation_mailbox_participant_current_locked(
     })
 }
 
-fn current_federation_mailbox_participant_locked(
+pub(crate) fn current_federation_mailbox_participant_locked(
     inner: &StateInner,
     participant: &FederationMailboxParticipant,
 ) -> Option<FederationMailboxParticipant> {
@@ -159,14 +183,16 @@ fn current_federation_mailbox_participant_locked(
     Some(participant)
 }
 
-fn resolve_federation_mailbox_participant_locked(
+pub(crate) fn resolve_federation_mailbox_participant_locked(
     inner: &StateInner,
     reference: &str,
 ) -> Result<FederationMailboxParticipant, ApiError> {
     // Typed reference handles are resolved only by the reference facade, never
     // reinterpreted as display aliases (which are case-insensitive).
     if !matches!(mailbox_reference_handle(reference), Ok(None)) {
-        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+        return Err(ApiError::not_found(
+            "mailbox reference requires explicit resolution",
+        ));
     }
     if let Some(exact) = inner.federation.mailbox_directory.get(reference) {
         return current_federation_mailbox_participant_locked(inner, exact)

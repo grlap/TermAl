@@ -2,8 +2,15 @@
 // Uses the already-read result; no artifact read, lifecycle or wire ownership.
 // Only fixed labels/reason codes and numeric counters may reach the host log.
 
-fn engram_write_declared_diagnostic(log: &mut impl std::io::Write, result: &EngramDeclaredResult) {
-    let format = if result.artifact.is_none() { "unread" } else {
+use super::*;
+
+pub(crate) fn engram_write_declared_diagnostic(
+    log: &mut impl std::io::Write,
+    result: &EngramDeclaredResult,
+) {
+    let format = if result.artifact.is_none() {
+        "unread"
+    } else {
         match result.format {
             EngramDeclaredArtifactFormat::Trx => "trx",
             EngramDeclaredArtifactFormat::DartJson => "dart-json",
@@ -14,12 +21,28 @@ fn engram_write_declared_diagnostic(log: &mut impl std::io::Write, result: &Engr
         EngramTrxVerdict::Fail(reason) => ("FAIL", engram_declared_reason_code(reason)),
         EngramTrxVerdict::Unknown(reason) => ("UNKNOWN", engram_declared_reason_code(reason)),
     };
-    let counters = result.counters.as_ref().map_or_else(|| "unavailable".to_owned(), |counts| {
-        ["total", "executed", "passed", "failed", "error", "notExecuted"].iter()
-            .map(|name| format!("{name}={}", counts.get(name))).collect::<Vec<_>>().join(",")
-    });
+    let counters = result.counters.as_ref().map_or_else(
+        || "unavailable".to_owned(),
+        |counts| {
+            [
+                "total",
+                "executed",
+                "passed",
+                "failed",
+                "error",
+                "notExecuted",
+            ]
+            .iter()
+            .map(|name| format!("{name}={}", counts.get(name)))
+            .collect::<Vec<_>>()
+            .join(",")
+        },
+    );
     // A closed stderr pipe must not interrupt observation or change the verdict.
-    let _ = writeln!(log, "declared-check format={format} verdict={verdict} counters={counters} reason={reason}");
+    let _ = writeln!(
+        log,
+        "declared-check format={format} verdict={verdict} counters={counters} reason={reason}"
+    );
 }
 
 fn engram_declared_reason_code(reason: &str) -> &'static str {
@@ -42,7 +65,9 @@ fn engram_declared_reason_code(reason: &str) -> &'static str {
         "the Dart JSON reporter has an event after done" => "dart_event_after_done",
         "the Dart JSON reporter has a malformed or unknown event" => "dart_invalid_event",
         "the Dart JSON reporter is missing its start event" => "dart_missing_start",
-        "the Dart JSON reporter start or protocol version is unsupported" => "dart_unsupported_start",
+        "the Dart JSON reporter start or protocol version is unsupported" => {
+            "dart_unsupported_start"
+        }
         "the Dart JSON reporter repeats its suite count" => "dart_duplicate_suite_count",
         "the Dart JSON reporter repeats a suite id" => "dart_duplicate_suite",
         "the Dart JSON reporter has an inconsistent group" => "dart_invalid_group",
@@ -55,7 +80,9 @@ fn engram_declared_reason_code(reason: &str) -> &'static str {
         "the Dart JSON reporter has no completed done event" => "dart_missing_done",
         "the Dart JSON reporter stream is incomplete or inconsistent" => "dart_incomplete_stream",
         "the Dart JSON reporter records a failed test, error or run" => "dart_run_failed",
-        "the Dart JSON reporter executed no non-hidden, non-skipped test" => "dart_no_executed_tests",
+        "the Dart JSON reporter executed no non-hidden, non-skipped test" => {
+            "dart_no_executed_tests"
+        }
         "no tests executed" => "trx_no_executed_tests",
         "the TRX run passed no test" => "trx_no_passed_tests",
         "the TRX counters are inconsistent" => "trx_inconsistent_counters",
@@ -72,7 +99,9 @@ fn engram_declared_reason_code(reason: &str) -> &'static str {
         _ if reason.starts_with("environment_missing:") => "environment_missing",
         _ if reason.starts_with("the TRX run outcome is ") => "trx_run_outcome",
         _ if reason.starts_with("the TRX counter ") => "trx_failure_counter",
-        _ if reason.starts_with("a TRX counter TermAl does not interpret ") => "trx_unknown_counter",
+        _ if reason.starts_with("a TRX counter TermAl does not interpret ") => {
+            "trx_unknown_counter"
+        }
         _ => "invalid_result",
     }
 }

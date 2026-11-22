@@ -4,11 +4,36 @@ use super::*;
 fn spawn_preserves_brief(agent: &str) {
     let brief = "BASE aabb COMMIT ccdd TREE eeff manifest C:/fixture/input.json; inspect `git diff --no-index -- before after`";
     for (kind, template, arguments, note) in [
-        (AgentCommandKind::PromptTemplate, "Inspect the supplied input.", brief, None),
-        (AgentCommandKind::PromptTemplate, "Inspect the supplied input.\n", brief, Some("Focus on privacy.")),
-        (AgentCommandKind::PromptTemplate, "Inspect the supplied input.\n\n", brief, None),
-        (AgentCommandKind::PromptTemplate, "Inspect $ARGUMENTS.", brief, None),
-        (AgentCommandKind::PromptTemplate, "Inspect the supplied input.", "", Some("Focus on privacy.")),
+        (
+            AgentCommandKind::PromptTemplate,
+            "Inspect the supplied input.",
+            brief,
+            None,
+        ),
+        (
+            AgentCommandKind::PromptTemplate,
+            "Inspect the supplied input.\n",
+            brief,
+            Some("Focus on privacy."),
+        ),
+        (
+            AgentCommandKind::PromptTemplate,
+            "Inspect the supplied input.\n\n",
+            brief,
+            None,
+        ),
+        (
+            AgentCommandKind::PromptTemplate,
+            "Inspect $ARGUMENTS.",
+            brief,
+            None,
+        ),
+        (
+            AgentCommandKind::PromptTemplate,
+            "Inspect the supplied input.",
+            "",
+            Some("Focus on privacy."),
+        ),
         (AgentCommandKind::NativeSlash, "/review-code", brief, None),
     ] {
         let expected_agent = agent.to_owned();
@@ -60,10 +85,13 @@ fn spawn_preserves_brief(agent: &str) {
                             assert!(prompt.find(arguments).unwrap() < prompt.find(note).unwrap());
                         }
                     }
-                    (200, json!({
-                        "delegation": {"id": "delegation-brief", "status": "running"},
-                        "childSessionId": "session-child"
-                    }))
+                    (
+                        200,
+                        json!({
+                            "delegation": {"id": "delegation-brief", "status": "running"},
+                            "childSessionId": "session-child"
+                        }),
+                    )
                 }
                 other => panic!("unexpected request: {other:?}"),
             }
@@ -73,10 +101,12 @@ fn spawn_preserves_brief(agent: &str) {
             Some(note) => format!("/review-code {arguments} -- {note}"),
             None => format!("/review-code {arguments}"),
         };
-        let response = bridge.tool_spawn_session(json!({
-            "agent": agent, "mode": "reviewer", "writePolicy": {"kind": "readOnly"},
-            "prompt": prompt,
-        })).unwrap();
+        let response = bridge
+            .tool_spawn_session(json!({
+                "agent": agent, "mode": "reviewer", "writePolicy": {"kind": "readOnly"},
+                "prompt": prompt,
+            }))
+            .unwrap();
         assert_eq!(response["childSessionId"], "session-child");
         server.join().unwrap();
         assert_eq!(requests.lock().unwrap().len(), 2);

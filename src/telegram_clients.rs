@@ -5,12 +5,14 @@ The relay only deserializes the fields it consumes from Telegram and TermAl
 responses, keeping transport details separate from update handling.
 */
 
+use super::*;
+
 #[derive(Debug)]
-struct TelegramApiError {
-    method: String,
-    status: StatusCode,
-    error_code: Option<i64>,
-    description: String,
+pub(crate) struct TelegramApiError {
+    pub(crate) method: String,
+    pub(crate) status: StatusCode,
+    pub(crate) error_code: Option<i64>,
+    pub(crate) description: String,
 }
 
 impl std::fmt::Display for TelegramApiError {
@@ -32,7 +34,7 @@ impl std::error::Error for TelegramApiError {}
 /// see whenever the digest re-sync loop tries to edit a message whose
 /// text + reply_markup are byte-identical to what the chat already
 /// shows.
-fn telegram_error_is_message_not_modified(err: &anyhow::Error) -> bool {
+pub(crate) fn telegram_error_is_message_not_modified(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause
             .downcast_ref::<TelegramApiError>()
@@ -44,19 +46,19 @@ fn telegram_error_is_message_not_modified(err: &anyhow::Error) -> bool {
 }
 
 /// Represents Telegram API client.
-struct TelegramApiClient {
-    api_base_url: String,
-    client: BlockingHttpClient,
+pub(crate) struct TelegramApiClient {
+    pub(crate) api_base_url: String,
+    pub(crate) client: BlockingHttpClient,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TelegramTextFormat {
+pub(crate) enum TelegramTextFormat {
     Plain,
     Html,
 }
 
 impl TelegramTextFormat {
-    fn parse_mode(self) -> Option<&'static str> {
+    pub(crate) fn parse_mode(self) -> Option<&'static str> {
         match self {
             Self::Plain => None,
             Self::Html => Some("HTML"),
@@ -66,7 +68,7 @@ impl TelegramTextFormat {
 
 impl TelegramApiClient {
     /// Creates a new instance.
-    fn new(bot_token: &str, poll_timeout_secs: u64) -> Result<Self> {
+    pub(crate) fn new(bot_token: &str, poll_timeout_secs: u64) -> Result<Self> {
         let client = BlockingHttpClient::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(poll_timeout_secs.saturating_add(10)))
@@ -80,7 +82,11 @@ impl TelegramApiClient {
 
     /// Gets updates.
     #[cfg(not(test))]
-    fn get_updates(&self, offset: Option<i64>, timeout_secs: u64) -> Result<Vec<TelegramUpdate>> {
+    pub(crate) fn get_updates(
+        &self,
+        offset: Option<i64>,
+        timeout_secs: u64,
+    ) -> Result<Vec<TelegramUpdate>> {
         let mut body = serde_json::Map::new();
         body.insert("timeout".to_owned(), json!(timeout_secs));
         body.insert("limit".to_owned(), json!(TELEGRAM_GET_UPDATES_LIMIT));
@@ -95,7 +101,7 @@ impl TelegramApiClient {
         self.request_json("getUpdates", Some(Value::Object(body)))
     }
 
-    fn send_message_with_format(
+    pub(crate) fn send_message_with_format(
         &self,
         chat_id: i64,
         text: &str,
@@ -106,7 +112,7 @@ impl TelegramApiClient {
         self.request_json("sendMessage", Some(body))
     }
 
-    fn edit_message_with_format(
+    pub(crate) fn edit_message_with_format(
         &self,
         chat_id: i64,
         message_id: i64,
@@ -134,7 +140,7 @@ impl TelegramApiClient {
         }
     }
 
-    fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()> {
+    pub(crate) fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()> {
         let _: bool = self.request_json(
             "answerCallbackQuery",
             Some(json!({
@@ -146,11 +152,15 @@ impl TelegramApiClient {
         Ok(())
     }
 
-    fn get_me(&self) -> Result<TelegramBotUser> {
+    pub(crate) fn get_me(&self) -> Result<TelegramBotUser> {
         self.request_json("getMe", None)
     }
 
-    fn request_json<T: DeserializeOwned>(&self, method: &str, body: Option<Value>) -> Result<T> {
+    pub(crate) fn request_json<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        body: Option<Value>,
+    ) -> Result<T> {
         let url = format!("{}/{}", self.api_base_url, method);
         let request = match body {
             Some(body) => self.client.post(&url).json(&body),
@@ -166,7 +176,7 @@ impl TelegramApiClient {
 /// Decodes one Telegram Bot API response envelope. Shared by the JSON request
 /// path above and the multipart document upload in
 /// `telegram_document_upload.rs`.
-fn decode_telegram_api_response<T: DeserializeOwned>(
+pub(crate) fn decode_telegram_api_response<T: DeserializeOwned>(
     method: &str,
     response: BlockingHttpResponse,
 ) -> Result<T> {
@@ -194,7 +204,7 @@ fn decode_telegram_api_response<T: DeserializeOwned>(
         .ok_or_else(|| anyhow!("Telegram `{method}` succeeded without returning a result payload"))
 }
 
-fn telegram_send_message_body(
+pub(crate) fn telegram_send_message_body(
     chat_id: i64,
     text: &str,
     reply_markup: Option<&TelegramInlineKeyboardMarkup>,
@@ -209,7 +219,7 @@ fn telegram_send_message_body(
     Ok(body)
 }
 
-fn telegram_edit_message_body(
+pub(crate) fn telegram_edit_message_body(
     chat_id: i64,
     message_id: i64,
     text: &str,
@@ -243,7 +253,7 @@ fn apply_telegram_text_message_options(
     Ok(())
 }
 
-trait TelegramMessageSender {
+pub(crate) trait TelegramMessageSender {
     fn send_message_with_format(
         &self,
         chat_id: i64,
@@ -274,7 +284,7 @@ impl TelegramMessageSender for TelegramApiClient {
     }
 }
 
-trait TelegramDigestMessageSender: TelegramMessageSender {
+pub(crate) trait TelegramDigestMessageSender: TelegramMessageSender {
     fn edit_message_with_format(
         &self,
         chat_id: i64,
@@ -305,7 +315,7 @@ impl TelegramDigestMessageSender for TelegramApiClient {
     }
 }
 
-trait TelegramCallbackResponder: TelegramDigestMessageSender {
+pub(crate) trait TelegramCallbackResponder: TelegramDigestMessageSender {
     fn answer_callback_query(&self, callback_query_id: &str, text: &str) -> Result<()>;
 }
 
@@ -340,7 +350,7 @@ impl std::fmt::Display for TermalApiError {
 
 impl std::error::Error for TermalApiError {}
 
-fn termal_error_is_session_not_found(err: &anyhow::Error, session_id: &str) -> bool {
+pub(crate) fn termal_error_is_session_not_found(err: &anyhow::Error, session_id: &str) -> bool {
     let path = format!("/api/sessions/{}", encode_uri_component(session_id));
     err.downcast_ref::<TermalApiError>().is_some_and(|error| {
         error.status == StatusCode::NOT_FOUND
@@ -349,7 +359,7 @@ fn termal_error_is_session_not_found(err: &anyhow::Error, session_id: &str) -> b
     })
 }
 
-fn decode_termal_api_response<T: DeserializeOwned>(
+pub(crate) fn decode_termal_api_response<T: DeserializeOwned>(
     path: &str,
     status: StatusCode,
     payload: &[u8],
@@ -377,15 +387,15 @@ fn decode_termal_api_response<T: DeserializeOwned>(
 
 /// Represents TermAl API client.
 #[cfg(not(test))]
-struct TermalApiClient {
-    api_base_url: String,
-    client: BlockingHttpClient,
+pub(crate) struct TermalApiClient {
+    pub(crate) api_base_url: String,
+    pub(crate) client: BlockingHttpClient,
 }
 
 #[cfg(not(test))]
 impl TermalApiClient {
     /// Creates a new instance.
-    fn new(api_base_url: &str) -> Result<Self> {
+    pub(crate) fn new(api_base_url: &str) -> Result<Self> {
         let client = BlockingHttpClient::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
@@ -398,7 +408,7 @@ impl TermalApiClient {
     }
 
     /// Gets project digest.
-    fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
+    pub(crate) fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse> {
         self.request_json(
             Method::GET,
             &format!("/api/projects/{}/digest", encode_uri_component(project_id)),
@@ -410,12 +420,12 @@ impl TermalApiClient {
     /// the broad state endpoint intentionally so project and session selection
     /// commands share one consistent snapshot instead of racing separate
     /// project/session list calls.
-    fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
+    pub(crate) fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse> {
         self.request_json(Method::GET, "/api/state", None)
     }
 
     /// Dispatches project action.
-    fn dispatch_project_action(
+    pub(crate) fn dispatch_project_action(
         &self,
         project_id: &str,
         action_id: &str,
@@ -431,7 +441,11 @@ impl TermalApiClient {
         )
     }
 
-    fn send_session_message(&self, session_id: &str, text: &str) -> Result<StateResponse> {
+    pub(crate) fn send_session_message(
+        &self,
+        session_id: &str,
+        text: &str,
+    ) -> Result<StateResponse> {
         self.request_json(
             Method::POST,
             &format!(
@@ -451,7 +465,7 @@ impl TermalApiClient {
     /// narrow subset of the `/api/sessions/{id}` payload — fields
     /// it doesn't care about are ignored by serde's default
     /// "ignore unknown fields" behavior.
-    fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
+    pub(crate) fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse> {
         self.request_json(
             Method::GET,
             &format!("/api/sessions/{}", encode_uri_component(session_id)),
@@ -459,7 +473,7 @@ impl TermalApiClient {
         )
     }
 
-    fn request_json<T: DeserializeOwned>(
+    pub(crate) fn request_json<T: DeserializeOwned>(
         &self,
         method: Method,
         path: &str,
@@ -481,7 +495,7 @@ impl TermalApiClient {
     }
 }
 
-trait TelegramSessionReader {
+pub(crate) trait TelegramSessionReader {
     fn get_session(&self, session_id: &str) -> Result<TelegramSessionFetchResponse>;
 }
 
@@ -496,7 +510,7 @@ impl TelegramSessionReader for TermalApiClient {
 /// bound intentionally colocates the state/digest reads used to choose a
 /// target with the prompt-send write, so `forward_telegram_text_to_project`
 /// can be tested without standing up either HTTP client.
-trait TelegramPromptClient: TelegramSessionReader {
+pub(crate) trait TelegramPromptClient: TelegramSessionReader {
     fn get_project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse>;
     fn get_state_sessions(&self) -> Result<TelegramStateSessionsResponse>;
     /// Only success/failure matters to the relay after sending a prompt; the
@@ -521,7 +535,7 @@ impl TelegramPromptClient for TermalApiClient {
     }
 }
 
-trait TelegramActionClient {
+pub(crate) trait TelegramActionClient {
     fn dispatch_project_action(
         &self,
         project_id: &str,
@@ -542,20 +556,20 @@ impl TelegramActionClient for TermalApiClient {
 
 /// Represents Telegram API envelope.
 #[derive(Deserialize)]
-struct TelegramApiEnvelope<T> {
-    ok: bool,
-    result: Option<T>,
+pub(crate) struct TelegramApiEnvelope<T> {
+    pub(crate) ok: bool,
+    pub(crate) result: Option<T>,
     #[serde(default)]
-    error_code: Option<i64>,
-    description: Option<String>,
+    pub(crate) error_code: Option<i64>,
+    pub(crate) description: Option<String>,
 }
 
 /// Represents Telegram's `getMe` user shape.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramBotUser {
-    first_name: String,
+pub(crate) struct TelegramBotUser {
+    pub(crate) first_name: String,
     #[serde(default)]
-    username: Option<String>,
+    pub(crate) username: Option<String>,
 }
 
 /// Represents Telegram update.
@@ -566,39 +580,39 @@ struct TelegramBotUser {
 /// which Telegram sends — so `getUpdates` failed to decode the moment
 /// any real update arrived.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramUpdate {
-    update_id: i64,
+pub(crate) struct TelegramUpdate {
+    pub(crate) update_id: i64,
     #[serde(default)]
-    callback_query: Option<TelegramCallbackQuery>,
+    pub(crate) callback_query: Option<TelegramCallbackQuery>,
     #[serde(default)]
-    message: Option<TelegramChatMessage>,
+    pub(crate) message: Option<TelegramChatMessage>,
 }
 
 /// Represents Telegram callback query.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramCallbackQuery {
-    id: String,
+pub(crate) struct TelegramCallbackQuery {
+    pub(crate) id: String,
     #[serde(default)]
-    data: Option<String>,
+    pub(crate) data: Option<String>,
     #[serde(default)]
-    message: Option<TelegramChatMessage>,
+    pub(crate) message: Option<TelegramChatMessage>,
 }
 
 /// Represents Telegram chat message.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramChatMessage {
-    message_id: i64,
-    chat: TelegramChat,
+pub(crate) struct TelegramChatMessage {
+    pub(crate) message_id: i64,
+    pub(crate) chat: TelegramChat,
     #[serde(default)]
-    text: Option<String>,
+    pub(crate) text: Option<String>,
 }
 
 /// Represents Telegram chat.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramChat {
-    id: i64,
+pub(crate) struct TelegramChat {
+    pub(crate) id: i64,
     #[serde(rename = "type")]
-    _kind: String,
+    pub(crate) _kind: String,
 }
 
 /// Narrow projection of `/api/state` used by Telegram project/session
@@ -608,38 +622,38 @@ struct TelegramChat {
 /// the camelCase wire contract exposed by the HTTP API.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TelegramStateSessionsResponse {
+pub(crate) struct TelegramStateSessionsResponse {
     #[serde(default)]
-    projects: Vec<TelegramStateProject>,
+    pub(crate) projects: Vec<TelegramStateProject>,
     #[serde(default)]
-    sessions: Vec<TelegramStateSession>,
+    pub(crate) sessions: Vec<TelegramStateSession>,
 }
 
 /// Project entry from the `/api/state` projection used to render Telegram
 /// project labels.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TelegramStateProject {
-    id: String,
-    name: String,
+pub(crate) struct TelegramStateProject {
+    pub(crate) id: String,
+    pub(crate) name: String,
 }
 
 /// Session entry from the `/api/state` projection used to list and select
 /// Telegram prompt targets within a project.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TelegramStateSession {
-    id: String,
-    name: String,
+pub(crate) struct TelegramStateSession {
+    pub(crate) id: String,
+    pub(crate) name: String,
     #[serde(default)]
-    project_id: Option<String>,
-    status: TelegramSessionStatus,
+    pub(crate) project_id: Option<String>,
+    pub(crate) status: TelegramSessionStatus,
     #[serde(default)]
-    message_count: u32,
+    pub(crate) message_count: u32,
     #[serde(default)]
-    session_mutation_stamp: Option<u64>,
+    pub(crate) session_mutation_stamp: Option<u64>,
     #[serde(default)]
-    parent_delegation_id: Option<String>,
+    pub(crate) parent_delegation_id: Option<String>,
 }
 
 /// Narrow projection of `/api/sessions/{id}` used for forwarding
@@ -648,13 +662,13 @@ struct TelegramStateSession {
 /// the session payload (preview, status, model, etc.) is ignored
 /// by serde's default behavior.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramSessionFetchResponse {
-    session: TelegramSessionFetchSession,
+pub(crate) struct TelegramSessionFetchResponse {
+    pub(crate) session: TelegramSessionFetchSession,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-enum TelegramSessionStatus {
+pub(crate) enum TelegramSessionStatus {
     Active,
     Idle,
     Approval,
@@ -676,11 +690,11 @@ impl TelegramSessionStatus {
     /// still be part of the pre-existing local turn when a Telegram prompt is
     /// queued behind it. `Unknown` keeps the boundary open until a known status
     /// arrives, avoiding a premature baseline across future status variants.
-    fn can_forward_settled_assistant_text(&self) -> bool {
+    pub(crate) fn can_forward_settled_assistant_text(&self) -> bool {
         matches!(self, Self::Idle | Self::Approval | Self::Error)
     }
 
-    fn keeps_telegram_prompt_boundary_open(&self) -> bool {
+    pub(crate) fn keeps_telegram_prompt_boundary_open(&self) -> bool {
         matches!(
             self,
             Self::Active | Self::Approval | Self::Stopping | Self::Unknown
@@ -700,11 +714,11 @@ impl TelegramSessionStatus {
 /// statuses are treated as not safe to forward; the next poll can
 /// retry once the backend reports a known settled state.
 #[derive(Clone, Debug, Deserialize)]
-struct TelegramSessionFetchSession {
+pub(crate) struct TelegramSessionFetchSession {
     #[serde(default)]
-    status: TelegramSessionStatus,
+    pub(crate) status: TelegramSessionStatus,
     #[serde(default)]
-    messages: Vec<TelegramSessionFetchMessage>,
+    pub(crate) messages: Vec<TelegramSessionFetchMessage>,
 }
 
 /// Subset of the message variants TermAl emits — only `text`
@@ -717,7 +731,7 @@ struct TelegramSessionFetchSession {
 /// importing the full type.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-enum TelegramSessionFetchMessage {
+pub(crate) enum TelegramSessionFetchMessage {
     Text {
         id: String,
         author: String,
@@ -730,13 +744,13 @@ enum TelegramSessionFetchMessage {
 
 /// Represents Telegram inline keyboard markup.
 #[derive(Clone, Debug, Serialize)]
-struct TelegramInlineKeyboardMarkup {
-    inline_keyboard: Vec<Vec<TelegramInlineKeyboardButton>>,
+pub(crate) struct TelegramInlineKeyboardMarkup {
+    pub(crate) inline_keyboard: Vec<Vec<TelegramInlineKeyboardButton>>,
 }
 
 /// Represents Telegram inline keyboard button.
 #[derive(Clone, Debug, Serialize)]
-struct TelegramInlineKeyboardButton {
-    text: String,
-    callback_data: String,
+pub(crate) struct TelegramInlineKeyboardButton {
+    pub(crate) text: String,
+    pub(crate) callback_data: String,
 }

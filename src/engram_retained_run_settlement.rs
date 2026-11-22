@@ -7,6 +7,8 @@
 // or the recovery batch (engram_root_authority.rs) or the naming history itself
 // (engram_named_root_binding.rs). New module.
 
+use super::*;
+
 /// The Engram error code of a refused named-root read.
 const ENGRAM_NAMED_ROOT_READ_REFUSED_CODE: &str = "named_root_read_refused";
 
@@ -17,13 +19,13 @@ const ENGRAM_INVALID_WORK_PROJECTION: &str = "work projection contains invalid d
 
 /// The prefix of a recovery reason, and of the host log line, that reports a
 /// canonical read showing a damaged store.
-const ENGRAM_STORE_INTEGRITY_ALARM: &str = "store integrity alarm";
+pub(crate) const ENGRAM_STORE_INTEGRITY_ALARM: &str = "store integrity alarm";
 
 /// Why Engram refused a named-root read, as its typed `reason` names it. Each
 /// is definitive for the exact run and claim that was asked for.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramNamedRootReadRefusal {
+pub(crate) enum EngramNamedRootReadRefusal {
     /// No run with this id exists in the store that answered.
     RunUnknown,
     /// The claim is not the claim the run records.
@@ -56,7 +58,7 @@ impl EngramNamedRootReadRefusal {
 /// code with a typed reason, which the wire decoder keeps at the end of the
 /// message as ` (reason: …)`. Anything else, including that code without a
 /// recognised reason, is not definitive.
-fn engram_named_root_read_refusal(
+pub(crate) fn engram_named_root_read_refusal(
     error: &EngramTransportError,
 ) -> Option<EngramNamedRootReadRefusal> {
     if error.kind != EngramTransportErrorKind::Remote
@@ -70,7 +72,7 @@ fn engram_named_root_read_refusal(
 
 /// Whether Engram answered the read with its own report of a damaged work
 /// projection. Its code is the generic `storage_error`, so the message decides.
-fn engram_transport_error_shows_store_damage(error: &EngramTransportError) -> bool {
+pub(crate) fn engram_transport_error_shows_store_damage(error: &EngramTransportError) -> bool {
     error.kind == EngramTransportErrorKind::Remote
         && error.code.as_deref() == Some(ENGRAM_STORAGE_ERROR_CODE)
         && error.message.starts_with(ENGRAM_INVALID_WORK_PROJECTION)
@@ -80,18 +82,18 @@ fn engram_transport_error_shows_store_damage(error: &EngramTransportError) -> bo
 /// confirmation, never earns credit, and stays here for audit.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramRetiredRecoveryRun {
-    binding: EngramControlWorkBinding,
-    refusal: EngramNamedRootReadRefusal,
+pub(crate) struct EngramRetiredRecoveryRun {
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) refusal: EngramNamedRootReadRefusal,
     /// The store whose verified session answered with the refusal.
-    store: EngramAuthorityStoreKey,
+    pub(crate) store: EngramAuthorityStoreKey,
     /// The refusal as Engram worded it.
-    reason: String,
-    retired_at: String,
+    pub(crate) reason: String,
+    pub(crate) retired_at: String,
 }
 
 impl EngramWorkNamingHistory {
-    fn run_is_retired(&self, binding: &EngramControlWorkBinding) -> bool {
+    pub(crate) fn run_is_retired(&self, binding: &EngramControlWorkBinding) -> bool {
         self.retired_runs
             .iter()
             .any(|retired| engram_same_recovery_run(&retired.binding, binding))
@@ -100,7 +102,7 @@ impl EngramWorkNamingHistory {
     /// Retains `binding` for a canonical read, unless it was retired: a
     /// retired run can never be read, so retaining it again would block the
     /// work for good.
-    fn retain_recovery_run(&mut self, binding: &EngramControlWorkBinding) {
+    pub(crate) fn retain_recovery_run(&mut self, binding: &EngramControlWorkBinding) {
         if !self.run_is_retired(binding) {
             engram_retain_recovery_run(&mut self.unresolved_runs, binding);
         }
@@ -109,7 +111,7 @@ impl EngramWorkNamingHistory {
     /// Records why `binding` stays retained, as a store-integrity alarm when
     /// the read showed damage. Returns whether the reason is new, so the
     /// console reports it once instead of on every pass.
-    fn note_unresolved_run(
+    pub(crate) fn note_unresolved_run(
         &mut self,
         binding: &EngramControlWorkBinding,
         message: &str,
@@ -117,8 +119,13 @@ impl EngramWorkNamingHistory {
     ) -> bool {
         let reason = format!(
             "{}retained run {} / claim {} remains unresolved: {message}",
-            if damaged { format!("{ENGRAM_STORE_INTEGRITY_ALARM}: ") } else { String::new() },
-            binding.run_id, binding.claim_id,
+            if damaged {
+                format!("{ENGRAM_STORE_INTEGRITY_ALARM}: ")
+            } else {
+                String::new()
+            },
+            binding.run_id,
+            binding.claim_id,
         );
         let new = self.recovery_reason.as_deref() != Some(reason.as_str());
         self.recovery_reason = Some(reason);
@@ -127,7 +134,7 @@ impl EngramWorkNamingHistory {
 
     /// Settles a run Engram definitively refused under a verified reader of
     /// `store`: it leaves the retained runs and is recorded as retired.
-    fn retire_recovery_run(
+    pub(crate) fn retire_recovery_run(
         &mut self,
         binding: &EngramControlWorkBinding,
         refusal: EngramNamedRootReadRefusal,
@@ -142,8 +149,7 @@ impl EngramWorkNamingHistory {
                 refusal,
                 store: store.clone(),
                 reason: reason.to_owned(),
-                retired_at: chrono::Utc::now()
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                retired_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             });
         }
         if self.unresolved_runs.is_empty() {
@@ -154,7 +160,7 @@ impl EngramWorkNamingHistory {
 
 /// Whether the run `binding` reads in `store` was retired: its journal is
 /// settled with it and must not reopen.
-fn engram_run_retired(
+pub(crate) fn engram_run_retired(
     histories: &[EngramWorkNamingHistory],
     store: &EngramAuthorityStoreKey,
     binding: &EngramControlWorkBinding,
@@ -182,7 +188,7 @@ fn engram_journal_reads_run(
 /// pending intent only when its reporter abandoned it before the read and is
 /// still gone now, under this lock, and no unsettled reconciliation. A live
 /// reporter's intent keeps the run retained.
-fn engram_refused_run_journals_settle_locked(
+pub(crate) fn engram_refused_run_journals_settle_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     binding: &EngramControlWorkBinding,
@@ -194,8 +200,12 @@ fn engram_refused_run_journals_settle_locked(
         .filter(|journal| engram_journal_reads_run(journal, store, binding))
         .all(|journal| {
             journal.pending.as_ref().is_none_or(|intent| {
-                abandoned.contains(intent) && !AppState::engram_root_reporter_available(inner, intent)
-            }) && journal.reconciliation.as_ref().is_none_or(|read| read.settled)
+                abandoned.contains(intent)
+                    && !AppState::engram_root_reporter_available(inner, intent)
+            }) && journal
+                .reconciliation
+                .as_ref()
+                .is_none_or(|read| read.settled)
         })
 }
 
@@ -209,7 +219,10 @@ fn engram_refused_run_journals_settle_locked(
 /// This never runs on a turn's path. A turn keeps its opening capture for its
 /// whole length, so a turn that opens before this pass finishes stays unconfirmed
 /// and loses its own evidence, and an ordinary turn opening after it is confirmed.
-fn engram_history_needs_recovery_locked(inner: &StateInner, history: &EngramWorkNamingHistory) -> bool {
+pub(crate) fn engram_history_needs_recovery_locked(
+    inner: &StateInner,
+    history: &EngramWorkNamingHistory,
+) -> bool {
     !history.unresolved_runs.is_empty()
         || history.transition.as_ref().is_some_and(|owner| {
             owner.phase == EngramAuthorityPhase::Candidate
@@ -228,23 +241,30 @@ fn engram_history_needs_recovery_locked(inner: &StateInner, history: &EngramWork
 /// Settles, without a read, the root journals of runs already retired that
 /// some path reopened: a retired run is never read again, so nothing else
 /// could. A live reporter's pending intent is left as it is.
-fn engram_settle_reopened_retired_journals_locked(inner: &mut StateInner) -> bool {
+pub(crate) fn engram_settle_reopened_retired_journals_locked(inner: &mut StateInner) -> bool {
     let shared: &StateInner = inner;
     let reopened = shared
         .engram_named_root_journal
         .iter()
         .filter(|journal| journal.requires_reconciliation())
         .filter(|journal| {
-            journal.pending.as_ref().is_none_or(|intent| {
-                !AppState::engram_root_reporter_available(shared, intent)
-            }) && journal.reconciliation.as_ref().is_none_or(|read| read.settled)
+            journal
+                .pending
+                .as_ref()
+                .is_none_or(|intent| !AppState::engram_root_reporter_available(shared, intent))
+                && journal
+                    .reconciliation
+                    .as_ref()
+                    .is_none_or(|read| read.settled)
         })
         .filter_map(|journal| {
             let binding = journal.read_binding.as_ref()?;
             shared
                 .engram_work_naming_history
                 .iter()
-                .filter(|history| history.store == journal.store && history.work_id == binding.work_id)
+                .filter(|history| {
+                    history.store == journal.store && history.work_id == binding.work_id
+                })
                 .flat_map(|history| &history.retired_runs)
                 .find(|retired| engram_same_recovery_run(&retired.binding, binding))
                 .map(|retired| (journal.store.clone(), binding.clone(), retired.refusal))
@@ -252,7 +272,13 @@ fn engram_settle_reopened_retired_journals_locked(inner: &mut StateInner) -> boo
         .collect::<Vec<_>>();
     let settled = !reopened.is_empty();
     for (store, binding, refusal) in reopened {
-        engram_settle_refused_run_journals_locked(inner, &store, &binding, refusal, "retired-run-settlement");
+        engram_settle_refused_run_journals_locked(
+            inner,
+            &store,
+            &binding,
+            refusal,
+            "retired-run-settlement",
+        );
     }
     settled
 }
@@ -260,7 +286,7 @@ fn engram_settle_reopened_retired_journals_locked(inner: &mut StateInner) -> boo
 /// Settles the root journals of a retired run: an abandoned intent is kept
 /// as settled readback, never a receipt, and each journal that still needs
 /// reconciliation retires the way the refusal says.
-fn engram_settle_refused_run_journals_locked(
+pub(crate) fn engram_settle_refused_run_journals_locked(
     inner: &mut StateInner,
     store: &EngramAuthorityStoreKey,
     binding: &EngramControlWorkBinding,
@@ -296,7 +322,7 @@ const ENGRAM_RETAINED_RUNS_NOTICE: &str = "Earlier runs of this work are still u
 /// What a naming reports when `work` still retains unread runs after the
 /// naming's own reads: its turns stay unconfirmed until they are read back.
 /// None when nothing is retained.
-fn engram_retained_runs_notice_locked(
+pub(crate) fn engram_retained_runs_notice_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
@@ -322,7 +348,10 @@ fn engram_retained_runs_notice_locked(
 /// Whether a session currently holds `binding` as its work binding. Such a run
 /// is never retired: a refusal of a binding still in use stays unresolved, so
 /// that session's evidence stays withheld instead of being credited.
-fn engram_recovery_run_held_locked(inner: &StateInner, binding: &EngramControlWorkBinding) -> bool {
+pub(crate) fn engram_recovery_run_held_locked(
+    inner: &StateInner,
+    binding: &EngramControlWorkBinding,
+) -> bool {
     inner.sessions.iter().any(|record| {
         record
             .engram
@@ -341,15 +370,15 @@ fn engram_recovery_run_held_locked(inner: &StateInner, binding: &EngramControlWo
 /// The bounded background reads of retained runs. Not persisted: a restarted
 /// host reads again.
 #[derive(Clone, Debug, Default)]
-struct EngramRetainedRunReads {
+pub(crate) struct EngramRetainedRunReads {
     /// Stores whose startup work has each had a bounded recovery attempt.
-    startup_read: BTreeSet<EngramAuthorityStoreKey>,
+    pub(crate) startup_read: BTreeSet<EngramAuthorityStoreKey>,
     /// The initial work inventory still owed an attempt. A pass's time or
     /// candidate limit leaves its tail here for later ticks. Failed attempts
     /// are not retried by startup; a later work opening owns those retries.
     startup_pending_work: BTreeMap<EngramAuthorityStoreKey, BTreeSet<String>>,
     /// Stores with a read running; at most one per store.
-    in_flight: BTreeSet<EngramAuthorityStoreKey>,
+    pub(crate) in_flight: BTreeSet<EngramAuthorityStoreKey>,
 }
 
 /// The store a session's work belongs to and that work, when it has both.
@@ -358,7 +387,12 @@ fn engram_session_store_and_work_locked(
     session_id: &str,
 ) -> Option<(EngramAuthorityStoreKey, String)> {
     let index = inner.find_session_index(session_id)?;
-    let work = inner.sessions[index].engram.work_binding.as_ref()?.work_id.clone();
+    let work = inner.sessions[index]
+        .engram
+        .work_binding
+        .as_ref()?
+        .work_id
+        .clone();
     let store = engram_project_for_session_locked(inner, session_id)?
         .engram
         .as_ref()?
@@ -376,7 +410,10 @@ struct EngramRetainedRunReadFlight {
 impl Drop for EngramRetainedRunReadFlight {
     fn drop(&mut self) {
         if let Ok(mut inner) = self.state.inner.lock() {
-            inner.engram_retained_run_reads.in_flight.remove(&self.store);
+            inner
+                .engram_retained_run_reads
+                .in_flight
+                .remove(&self.store);
         }
     }
 }
@@ -389,7 +426,7 @@ impl AppState {
     /// is running. A reclamation or release that starts during a read is not
     /// held back: owner fencing makes one of them a superseded owner, which
     /// fails closed.
-    fn schedule_engram_retained_run_reads(&self, session_id: Option<&str>) {
+    pub(crate) fn schedule_engram_retained_run_reads(&self, session_id: Option<&str>) {
         #[cfg(test)]
         if !TEST_ENGRAM_RETAINED_RUN_READS_ENABLED.with(std::cell::Cell::get) {
             return;
@@ -403,7 +440,8 @@ impl AppState {
             }
             match session_id {
                 Some(session_id) => {
-                    let Some((store, work)) = engram_session_store_and_work_locked(&inner, session_id)
+                    let Some((store, work)) =
+                        engram_session_store_and_work_locked(&inner, session_id)
                     else {
                         return;
                     };
@@ -425,9 +463,14 @@ impl AppState {
                         .projects
                         .iter()
                         .filter_map(|project| {
-                            project.engram.as_ref().and_then(|settings| settings.authority_store_key.clone())
+                            project
+                                .engram
+                                .as_ref()
+                                .and_then(|settings| settings.authority_store_key.clone())
                         })
-                        .filter(|store| !inner.engram_retained_run_reads.startup_read.contains(store))
+                        .filter(|store| {
+                            !inner.engram_retained_run_reads.startup_read.contains(store)
+                        })
                         .collect::<BTreeSet<_>>();
                     if owed.is_empty() {
                         return;
@@ -460,20 +503,32 @@ impl AppState {
                     // A store with nothing to recover at startup is done; a
                     // run retained later is read when its turn opens.
                     for store in owed.difference(&stores) {
-                        inner.engram_retained_run_reads.startup_read.insert(store.clone());
-                        inner.engram_retained_run_reads.startup_pending_work.remove(store);
+                        inner
+                            .engram_retained_run_reads
+                            .startup_read
+                            .insert(store.clone());
+                        inner
+                            .engram_retained_run_reads
+                            .startup_pending_work
+                            .remove(store);
                     }
                     if stores.is_empty() {
                         return;
                     }
                     (
-                        stores.into_iter().map(|store| (store, None, None)).collect(),
+                        stores
+                            .into_iter()
+                            .map(|store| (store, None, None))
+                            .collect(),
                         Some(EngramRootReaderSnapshot::capture(&inner)),
                     )
                 }
             }
         };
-        let readers = snapshot.as_ref().map(EngramRootReaderSnapshot::readers).unwrap_or_default();
+        let readers = snapshot
+            .as_ref()
+            .map(EngramRootReaderSnapshot::readers)
+            .unwrap_or_default();
         let chosen = wanted
             .into_iter()
             .filter_map(|(store, session, work)| {
@@ -492,10 +547,18 @@ impl AppState {
             }
             let mut reads = Vec::new();
             for (store, reader, work) in chosen {
-                if inner.engram_retained_run_reads.in_flight.insert(store.clone()) {
+                if inner
+                    .engram_retained_run_reads
+                    .in_flight
+                    .insert(store.clone())
+                {
                     let remaining = work.is_none().then(|| {
-                        inner.engram_retained_run_reads.startup_pending_work
-                            .get(&store).cloned().unwrap_or_default()
+                        inner
+                            .engram_retained_run_reads
+                            .startup_pending_work
+                            .get(&store)
+                            .cloned()
+                            .unwrap_or_default()
                     });
                     reads.push((store, reader, work, remaining));
                 }
@@ -504,7 +567,10 @@ impl AppState {
         };
         for (store, reader, work, remaining) in reads {
             let state = self.clone();
-            let flight = EngramRetainedRunReadFlight { state: self.clone(), store: store.clone() };
+            let flight = EngramRetainedRunReadFlight {
+                state: self.clone(),
+                store: store.clone(),
+            };
             let spawned = std::thread::Builder::new()
                 .name("engram-retained-run-read".to_owned())
                 .spawn(move || {
@@ -518,12 +584,17 @@ impl AppState {
                     );
                     if remaining.is_some() {
                         let mut inner = state.inner.lock().expect("state mutex poisoned");
-                        if let Some(pending) = inner.engram_retained_run_reads
-                            .startup_pending_work.get_mut(&store)
+                        if let Some(pending) = inner
+                            .engram_retained_run_reads
+                            .startup_pending_work
+                            .get_mut(&store)
                         {
                             pending.retain(|work| !attempted.contains(work));
                             if pending.is_empty() {
-                                inner.engram_retained_run_reads.startup_pending_work.remove(&store);
+                                inner
+                                    .engram_retained_run_reads
+                                    .startup_pending_work
+                                    .remove(&store);
                                 inner.engram_retained_run_reads.startup_read.insert(store);
                             }
                         }
@@ -546,9 +617,9 @@ impl AppState {
 /// Console lines a recovery batch collects under the state lock. They are
 /// written when the batch ends, however it ends: the batch's state guard is
 /// always released before this guard drops.
-struct EngramRetainedRunConsole<'a> {
-    state: &'a AppState,
-    lines: Vec<String>,
+pub(crate) struct EngramRetainedRunConsole<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) lines: Vec<String>,
 }
 
 impl Drop for EngramRetainedRunConsole<'_> {
@@ -566,8 +637,10 @@ impl Drop for EngramRetainedRunConsole<'_> {
 fn engram_retained_run_log(state: &AppState, line: String) {
     #[cfg(test)]
     {
-        assert!(state.inner.is_not_held_by_current_thread_for_test(),
-            "retained-run console lines are written off the state lock");
+        assert!(
+            state.inner.is_not_held_by_current_thread_for_test(),
+            "retained-run console lines are written off the state lock"
+        );
         TEST_ENGRAM_RETAINED_RUN_LOG.with(|log| log.borrow_mut().push(line.clone()));
     }
     #[cfg(not(test))]
@@ -577,13 +650,13 @@ fn engram_retained_run_log(state: &AppState, line: String) {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_ENGRAM_RETAINED_RUN_LOG: std::cell::RefCell<Vec<String>> =
+    pub(crate) static TEST_ENGRAM_RETAINED_RUN_LOG: std::cell::RefCell<Vec<String>> =
         const { std::cell::RefCell::new(Vec::new()) };
     /// The background reads this test thread started, for the test to join.
-    static TEST_ENGRAM_RETAINED_RUN_READS: std::cell::RefCell<Vec<std::thread::JoinHandle<()>>> =
+    pub(crate) static TEST_ENGRAM_RETAINED_RUN_READS: std::cell::RefCell<Vec<std::thread::JoinHandle<()>>> =
         const { std::cell::RefCell::new(Vec::new()) };
     /// Background reads start in a test only when it opts in, so no other
     /// test gains an unjoined reader thread.
-    static TEST_ENGRAM_RETAINED_RUN_READS_ENABLED: std::cell::Cell<bool> =
+    pub(crate) static TEST_ENGRAM_RETAINED_RUN_READS_ENABLED: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }

@@ -3,41 +3,44 @@
 // original attempt's cursors and actual-I/O quota; it is not tracker authority.
 // Lost runtime state closes recovery rather than minting another allowance.
 
-const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME: &str = "termal_read_acceptance_evidence";
-const TERMAL_READ_ACCEPTANCE_EVIDENCE_QUALIFIED_TOOL_NAME: &str =
+use super::*;
+
+pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME: &str =
+    "termal_read_acceptance_evidence";
+pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_read_acceptance_evidence";
-const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION: &str = "When your current brief enables evidence recovery, read omitted evidence before judging. An attempt without recovery keeps its missing-evidence verdict route; this tool refuses such a call without ending that attempt. Supply your exact attemptKey and a new readKey for each logical read. action catalog continues the captured notes catalog: omit cursor for its original boundary, then use only a cursor this tool returned. action records reads whole records named by your brief or a recovered catalog page; supply locators. The host derives the store, work, run and cut. Repeating the same readKey and arguments returns its original result without another read or budget charge; reusing it for different arguments refuses. All reads share one attempt allowance. An unfinished result recorded no verdict and ends this attempt: finish and report it so the parent can request a fresh evaluation. A stale result means the item's evidence changed after the captured cut; it also ends this attempt and is retryable: report it so the parent requests a fresh evaluation. When recovery is enabled, do not submit insufficient-evidence merely because discovery stopped before older proof was read.";
+pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION: &str = "When your current brief enables evidence recovery, read omitted evidence before judging. An attempt without recovery keeps its missing-evidence verdict route; this tool refuses such a call without ending that attempt. Supply your exact attemptKey and a new readKey for each logical read. action catalog continues the captured notes catalog: omit cursor for its original boundary, then use only a cursor this tool returned. action records reads whole records named by your brief or a recovered catalog page; supply locators. The host derives the store, work, run and cut. Repeating the same readKey and arguments returns its original result without another read or budget charge; reusing it for different arguments refuses. All reads share one attempt allowance. An unfinished result recorded no verdict and ends this attempt: finish and report it so the parent can request a fresh evaluation. A stale result means the item's evidence changed after the captured cut; it also ends this attempt and is retryable: report it so the parent requests a fresh evaluation. When recovery is enabled, do not submit insufficient-evidence merely because discovery stopped before older proof was read.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceEvidenceRecoveryManifest {
-    identity: AcceptanceEvidenceIdentity,
-    basis: AcceptanceAgentEvidenceBasis,
-    window: AcceptanceNotesWindow,
-    seen: BTreeSet<String>,
-    catalog: Vec<Value>,
+pub(crate) struct AcceptanceEvidenceRecoveryManifest {
+    pub(crate) identity: AcceptanceEvidenceIdentity,
+    pub(crate) basis: AcceptanceAgentEvidenceBasis,
+    pub(crate) window: AcceptanceNotesWindow,
+    pub(crate) seen: BTreeSet<String>,
+    pub(crate) catalog: Vec<Value>,
     /// Exact selected records are readable before they appear in catalog paging.
-    indexed: BTreeSet<String>,
+    pub(crate) indexed: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceUnfinishedEvidenceRead {
-    attempt_key: String,
-    read_key: String,
+pub(crate) struct AcceptanceUnfinishedEvidenceRead {
+    pub(crate) attempt_key: String,
+    pub(crate) read_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    intent_digest: Option<String>,
-    reason: String,
+    pub(crate) intent_digest: Option<String>,
+    pub(crate) reason: String,
     captured_cut: Option<Value>,
     /// The item's evidence changed after the captured cut, so Engram refused
     /// to continue the captured notes window. Retryable by a fresh evaluation.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    stale_basis: bool,
+    pub(crate) stale_basis: bool,
     /// This is local attempt history, never an Engram evaluation receipt.
     #[serde(skip_deserializing)]
-    recorded: bool,
+    pub(crate) recorded: bool,
     /// Runtime acknowledgement only. A loaded row already came from storage.
     #[serde(skip, default = "acceptance_evidence_loaded_durable")]
-    persistence_confirmed: bool,
+    pub(crate) persistence_confirmed: bool,
 }
 
 fn acceptance_evidence_loaded_durable() -> bool {
@@ -46,18 +49,18 @@ fn acceptance_evidence_loaded_durable() -> bool {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReadAcceptanceEvidenceRequest {
-    attempt_key: String,
-    read_key: String,
-    action: String,
+pub(crate) struct ReadAcceptanceEvidenceRequest {
+    pub(crate) attempt_key: String,
+    pub(crate) read_key: String,
+    pub(crate) action: String,
     #[serde(default)]
-    cursor: Option<String>,
+    pub(crate) cursor: Option<String>,
     #[serde(default)]
-    locators: Vec<String>,
+    pub(crate) locators: Vec<String>,
 }
 
 impl ReadAcceptanceEvidenceRequest {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if self.attempt_key.is_empty()
             || self.attempt_key.len() > 256
             || self.read_key.is_empty()
@@ -95,26 +98,26 @@ impl ReadAcceptanceEvidenceRequest {
         }
     }
 
-    fn intent(&self) -> String {
+    pub(crate) fn intent(&self) -> String {
         // Field order is fixed by this host type, not by caller JSON order.
         serde_json::to_string(self).expect("evidence read request is serializable")
     }
 }
 
 #[derive(Debug)]
-struct AcceptanceEvidenceRecovery {
-    manifest: AcceptanceEvidenceRecoveryManifest,
-    target: DelegationAcceptanceEvaluation,
-    remaining: Duration,
+pub(crate) struct AcceptanceEvidenceRecovery {
+    pub(crate) manifest: AcceptanceEvidenceRecoveryManifest,
+    pub(crate) target: DelegationAcceptanceEvaluation,
+    pub(crate) remaining: Duration,
     initial_cursor: Option<String>,
-    cursors: HashMap<String, AcceptanceNotesWindow>,
-    known: BTreeMap<String, Value>,
+    pub(crate) cursors: HashMap<String, AcceptanceNotesWindow>,
+    pub(crate) known: BTreeMap<String, Value>,
     catalog_seen: BTreeSet<String>,
-    seen: BTreeSet<String>,
-    pages: HashMap<String, Value>,
-    replies: HashMap<String, (String, Value)>,
+    pub(crate) seen: BTreeSet<String>,
+    pub(crate) pages: HashMap<String, Value>,
+    pub(crate) replies: HashMap<String, (String, Value)>,
     /// Set when a read failed because the captured window went stale.
-    stale_basis: Option<String>,
+    pub(crate) stale_basis: Option<String>,
 }
 
 /// Engram refused to continue the captured notes window because a record was
@@ -129,7 +132,7 @@ fn acceptance_evidence_window_changed(error: &EngramTransportError) -> bool {
 }
 
 impl AcceptanceEvidenceRecovery {
-    fn new(
+    pub(crate) fn new(
         manifest: AcceptanceEvidenceRecoveryManifest,
         target: DelegationAcceptanceEvaluation,
     ) -> Self {
@@ -171,7 +174,7 @@ impl AcceptanceEvidenceRecovery {
         }
     }
 
-    fn same_scope(&self, target: &DelegationAcceptanceEvaluation) -> bool {
+    pub(crate) fn same_scope(&self, target: &DelegationAcceptanceEvaluation) -> bool {
         let old = &self.target;
         let history_scope = |target: &DelegationAcceptanceEvaluation| {
             target.attempt_history.as_ref().map(|h| {
@@ -202,7 +205,7 @@ impl AcceptanceEvidenceRecovery {
             && history_scope(old) == history_scope(target)
     }
 
-    fn call(
+    pub(crate) fn call(
         &mut self,
         connection: &EngramConnectionConfig,
         args: &[String],
@@ -239,7 +242,7 @@ impl AcceptanceEvidenceRecovery {
         }
     }
 
-    fn inspect(
+    pub(crate) fn inspect(
         &mut self,
         connection: &EngramConnectionConfig,
         read: &impl Fn(
@@ -265,7 +268,7 @@ impl AcceptanceEvidenceRecovery {
         Ok(())
     }
 
-    fn execute(
+    pub(crate) fn execute(
         &mut self,
         request: &ReadAcceptanceEvidenceRequest,
         connection: &EngramConnectionConfig,
@@ -407,7 +410,7 @@ impl AcceptanceEvidenceRecovery {
     }
 }
 
-fn acceptance_evidence_unfinished(
+pub(crate) fn acceptance_evidence_unfinished(
     target: &DelegationAcceptanceEvaluation,
 ) -> Option<&AcceptanceUnfinishedEvidenceRead> {
     target
@@ -417,7 +420,7 @@ fn acceptance_evidence_unfinished(
         .as_ref()
 }
 
-fn acceptance_unfinished_evidence_notice_locked(
+pub(crate) fn acceptance_unfinished_evidence_notice_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
@@ -443,7 +446,7 @@ fn acceptance_unfinished_evidence_notice_locked(
         .unwrap_or_default()
 }
 
-fn acceptance_evidence_read_tool_definition() -> Value {
+pub(crate) fn acceptance_evidence_read_tool_definition() -> Value {
     json!({"name":TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME,
         "description":TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION,
         "annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false},
@@ -615,7 +618,7 @@ impl AppState {
         )
     }
 
-    fn read_acceptance_evidence_with_io(
+    pub(crate) fn read_acceptance_evidence_with_io(
         &self,
         child: &str,
         request: ReadAcceptanceEvidenceRequest,
@@ -827,7 +830,7 @@ impl AppState {
     }
 }
 
-async fn read_session_acceptance_evidence(
+pub(crate) async fn read_session_acceptance_evidence(
     AxumPath(child): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<ReadAcceptanceEvidenceRequest>, JsonRejection>,

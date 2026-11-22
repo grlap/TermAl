@@ -5,7 +5,12 @@
 // by following them could itself escape the sandbox. Restricted modes refuse
 // those grants without filesystem I/O; Codex owns ordinary sandboxed writes.
 
-fn codex_native_approval_policy(policy: CodexApprovalPolicy, sandbox: CodexSandboxMode) -> Value {
+use super::*;
+
+pub(crate) fn codex_native_approval_policy(
+    policy: CodexApprovalPolicy,
+    sandbox: CodexSandboxMode,
+) -> Value {
     if policy == CodexApprovalPolicy::AutoApprove && sandbox != CodexSandboxMode::DangerFullAccess {
         // Reject native sandbox escalation without suppressing MCP tool asks
         // and genuine elicitations, which keep their existing host owner.
@@ -22,16 +27,16 @@ fn codex_native_approval_policy(policy: CodexApprovalPolicy, sandbox: CodexSandb
 }
 
 #[derive(PartialEq, Eq)]
-struct CodexApprovalSandbox {
-    mode: Option<CodexSandboxMode>,
-    approval_policy: Option<CodexApprovalPolicy>,
-    workdir: String,
-    generation: u64,
-    runtime: Option<RuntimeToken>,
+pub(crate) struct CodexApprovalSandbox {
+    pub(crate) mode: Option<CodexSandboxMode>,
+    pub(crate) approval_policy: Option<CodexApprovalPolicy>,
+    pub(crate) workdir: String,
+    pub(crate) generation: u64,
+    pub(crate) runtime: Option<RuntimeToken>,
 }
 
 impl CodexApprovalSandbox {
-    fn capture(record: &SessionRecord) -> Self {
+    pub(crate) fn capture(record: &SessionRecord) -> Self {
         Self {
             mode: record.active_codex_sandbox_mode,
             approval_policy: record.active_codex_approval_policy,
@@ -49,7 +54,7 @@ impl CodexApprovalSandbox {
             )
     }
 
-    fn refusal(&self, method: &str, params: &Value) -> Option<String> {
+    pub(crate) fn refusal(&self, method: &str, params: &Value) -> Option<String> {
         if self.mode == Some(CodexSandboxMode::DangerFullAccess) {
             return None;
         }
@@ -206,7 +211,7 @@ impl CodexApprovalSandbox {
     }
 }
 
-fn note_codex_sandbox_refusal_locked(
+pub(crate) fn note_codex_sandbox_refusal_locked(
     state: &AppState,
     inner: &mut StateInner,
     index: usize,

@@ -52,6 +52,8 @@
 // pin the wire shape; `src/tests/session_settings.rs` and
 // `src/tests/codex_threads.rs` cover the behaviour.
 
+use super::*;
+
 impl AppState {
     /// Applies a user-initiated settings change to a live session.
     ///
@@ -77,7 +79,7 @@ impl AppState {
     ///   revalidated/acknowledged before every prompt; `auto` clears the request
     ///   without requiring a catalog, leaving the CLI's current effort alone.
     /// Remote-hosted sessions proxy the entire call unchanged.
-    fn update_session_settings(
+    pub(crate) fn update_session_settings(
         &self,
         session_id: &str,
         request: UpdateSessionSettingsRequest,
@@ -98,13 +100,21 @@ impl AppState {
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         if request.model.is_some()
-            && inner.sessions[index].session.parent_delegation_id.as_deref().is_some_and(|id| {
-                inner.acceptance_evaluation_submissions_in_flight.contains_key(id)
-                    || inner.delegation_followup_admissions.contains_key(id)
-                    || inner.find_delegation_index(id).and_then(|i| inner.delegations[i].acceptance_evaluation.as_ref())
-                        .and_then(|target| target.attempt_history.as_ref())
-                        .is_some_and(|history| history.prepared_brief.is_some())
-            })
+            && inner.sessions[index]
+                .session
+                .parent_delegation_id
+                .as_deref()
+                .is_some_and(|id| {
+                    inner
+                        .acceptance_evaluation_submissions_in_flight
+                        .contains_key(id)
+                        || inner.delegation_followup_admissions.contains_key(id)
+                        || inner
+                            .find_delegation_index(id)
+                            .and_then(|i| inner.delegations[i].acceptance_evaluation.as_ref())
+                            .and_then(|target| target.attempt_history.as_ref())
+                            .is_some_and(|history| history.prepared_brief.is_some())
+                })
         {
             return Err(ApiError::conflict(
                 "the evaluator model is reserved by an evaluation submission or retained host brief",
@@ -913,7 +923,7 @@ impl AppState {
     /// proxy the entire call unchanged. Local sessions return `409 Conflict`
     /// while Active/Approval/Stopping or while a Stop/revocation owner holds
     /// the runtime fence, preventing replacement during teardown.
-    fn refresh_session_model_options(
+    pub(crate) fn refresh_session_model_options(
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
@@ -922,16 +932,24 @@ impl AppState {
         }
         self.refresh_engram_project_declaration_for_session_off_lock(session_id);
         self.prepare_dedicated_runtime_reset_off_lock(session_id, true)
-            .map_err(|error| ApiError::conflict(format!("failed preparing dedicated model refresh: {error:#}")))?;
+            .map_err(|error| {
+                ApiError::conflict(format!(
+                    "failed preparing dedicated model refresh: {error:#}"
+                ))
+            })?;
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         if let Some(detail) = inner.sessions[index].runtime.dedicated_cleanup_failure() {
-            return Err(ApiError::conflict(format!("{detail}; Stop or Delete must finish cleanup before model refresh")));
+            return Err(ApiError::conflict(format!(
+                "{detail}; Stop or Delete must finish cleanup before model refresh"
+            )));
         }
         if inner.sessions[index].dedicated_predecessor_pending() {
-            return Err(ApiError::conflict("previous runtime cleanup remains pending"));
+            return Err(ApiError::conflict(
+                "previous runtime cleanup remains pending",
+            ));
         }
         if inner.sessions[index].runtime_stop_in_progress
             || matches!(

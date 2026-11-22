@@ -4,11 +4,13 @@
 // owner. Callers retain their existing link -> state/effect guards; these pure
 // checks neither acquire authority nor install bindings or schedule work.
 
+use super::*;
+
 // A creation-key replay is committed history, not fresh execution authority.
 // Its local issuer and immutable inputs must match even when consent, native
 // placement or the remote transport is no longer current.
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_creation_replay(
+pub(crate) fn federation_prompt_creation_replay(
     domain: &FederationState,
     settings: &FederationSettings,
     kind: FederationPromptPermissionKind,
@@ -17,18 +19,19 @@ fn federation_prompt_creation_replay(
     consent: Option<&FederationPromptPermissionIdentity>,
 ) -> Result<Option<FederationPromptPermission>, ApiError> {
     let (issuer, role) = match kind {
-        FederationPromptPermissionKind::CallerGrant =>
-            (&scope.source_host, FederationRole::Central),
-        FederationPromptPermissionKind::DestinationConsent =>
-            (&scope.target_host, FederationRole::Satellite),
+        FederationPromptPermissionKind::CallerGrant => {
+            (&scope.source_host, FederationRole::Central)
+        }
+        FederationPromptPermissionKind::DestinationConsent => {
+            (&scope.target_host, FederationRole::Satellite)
+        }
     };
     if domain.local.as_ref() != Some(issuer) || settings.role != role {
         return Err(federation_stale_link());
     }
     let existing = domain.prompt_permissions.as_ref().and_then(|policy| {
         policy.records.iter().find(|record| {
-            record.kind == kind && &record.issuer == issuer
-                && record.creation_key == creation_key
+            record.kind == kind && &record.issuer == issuer && record.creation_key == creation_key
         })
     });
     if let Some(record) = existing {
@@ -44,7 +47,7 @@ fn federation_prompt_creation_replay(
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
-    fn read_federation_prompt_creation_replay(
+    pub(crate) fn read_federation_prompt_creation_replay(
         &self,
         kind: FederationPromptPermissionKind,
         creation_key: &str,
@@ -53,22 +56,28 @@ impl AppState {
     ) -> Result<Option<FederationPromptPermission>, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let retained = federation_prompt_creation_replay(
-            &inner.federation, &inner.preferences.federation,
-            kind, creation_key, scope, consent,
+            &inner.federation,
+            &inner.preferences.federation,
+            kind,
+            creation_key,
+            scope,
+            consent,
         )?;
         if retained.is_some() {
             if inner.federation_continuity_lost {
                 return Err(ApiError::conflict(FEDERATION_STALE_AUTHORITY));
             }
             if !inner.federation_durable {
-                return Err(ApiError::from_status(StatusCode::LOCKED,
-                    "federation persistence is settling; retry"));
+                return Err(ApiError::from_status(
+                    StatusCode::LOCKED,
+                    "federation persistence is settling; retry",
+                ));
             }
         }
         Ok(retained)
     }
 
-    async fn read_federation_prompt_grant_replay(
+    pub(crate) async fn read_federation_prompt_grant_replay(
         &self,
         creation_key: &str,
         scope: &FederationPromptScope,
@@ -78,25 +87,31 @@ impl AppState {
         let key = creation_key.to_owned();
         let scope = scope.clone();
         let consent = consent.clone();
-        run_blocking_api(move || app.read_federation_prompt_creation_replay(
-            FederationPromptPermissionKind::CallerGrant, &key, &scope, Some(&consent),
-        )).await
+        run_blocking_api(move || {
+            app.read_federation_prompt_creation_replay(
+                FederationPromptPermissionKind::CallerGrant,
+                &key,
+                &scope,
+                Some(&consent),
+            )
+        })
+        .await
     }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationPromptPolicyReply {
-    fn freshness(&self) -> Result<FederationPromptFreshness, ApiError> {
+    pub(crate) fn freshness(&self) -> Result<FederationPromptFreshness, ApiError> {
         Ok(FederationPromptFreshness {
             deadline: self.observed_until.ok_or_else(federation_stale_link)?,
         })
     }
 
-    fn ensure_fresh_at(&self, now: std::time::Instant) -> Result<(), ApiError> {
+    pub(crate) fn ensure_fresh_at(&self, now: std::time::Instant) -> Result<(), ApiError> {
         self.freshness()?.ensure_fresh_at(now)
     }
 
-    fn observe(
+    pub(crate) fn observe(
         mut self,
         request_id: &str,
         incarnation: &str,
@@ -125,13 +140,13 @@ impl FederationPromptPolicyReply {
 // and transport cuts can recheck it. It grants no authority and is not stored.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct FederationPromptFreshness {
-    deadline: std::time::Instant,
+pub(crate) struct FederationPromptFreshness {
+    pub(crate) deadline: std::time::Instant,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl FederationPromptFreshness {
-    fn ensure_fresh_at(&self, now: std::time::Instant) -> Result<(), ApiError> {
+    pub(crate) fn ensure_fresh_at(&self, now: std::time::Instant) -> Result<(), ApiError> {
         if now >= self.deadline {
             return Err(federation_stale_link());
         }
@@ -143,7 +158,7 @@ impl FederationPromptFreshness {
 // per-channel fixture hook can expire time between a reply and its mutation;
 // it does not replace policy, leases or the immutable observation deadline.
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_observation_now(
+pub(crate) fn federation_prompt_observation_now(
     lease: &FederationLinkLease,
     phase: &'static str,
 ) -> std::time::Instant {
@@ -155,7 +170,7 @@ fn federation_prompt_observation_now(
 impl AppState {
     // Reuse the existing link -> StateInner owner on the blocking pool. Only
     // an owned result crosses await; neither mutex guard reaches the reactor.
-    async fn read_federation_prompt_current<T, F>(
+    pub(crate) async fn read_federation_prompt_current<T, F>(
         &self,
         lease: &FederationLinkLease,
         read: F,
@@ -171,7 +186,7 @@ impl AppState {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_link_scope(
+pub(crate) fn federation_prompt_link_scope(
     lease: &FederationLinkLease,
     scope: &FederationPromptScope,
     role: FederationRole,
@@ -193,7 +208,7 @@ fn federation_prompt_link_scope(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_target_placement_locked(
+pub(crate) fn federation_prompt_target_placement_locked(
     inner: &StateInner,
     scope: &FederationPromptScope,
 ) -> Result<(), ApiError> {
@@ -239,7 +254,7 @@ fn federation_prompt_source_placement_locked(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_scope_current_locked(
+pub(crate) fn federation_prompt_scope_current_locked(
     inner: &StateInner,
     scope: &FederationPromptScope,
     role: FederationRole,
@@ -267,12 +282,15 @@ fn federation_prompt_scope_current_locked(
         .get(&remote.host_id)
         .ok_or_else(federation_stale_link)?;
     let peer_current = match role {
-        FederationRole::Central => &peer.identity == remote
-            && peer.enrollment_generation == scope.enrollment_generation
-            && peer.membership == FederationMembershipState::Active
-            && peer.verified_on(inner.federation.links.get(&remote.host_id)),
-        FederationRole::Satellite => federation_satellite_central_current_locked(
-            inner, central, scope.enrollment_generation),
+        FederationRole::Central => {
+            &peer.identity == remote
+                && peer.enrollment_generation == scope.enrollment_generation
+                && peer.membership == FederationMembershipState::Active
+                && peer.verified_on(inner.federation.links.get(&remote.host_id))
+        }
+        FederationRole::Satellite => {
+            federation_satellite_central_current_locked(inner, central, scope.enrollment_generation)
+        }
         FederationRole::Standalone => false,
     };
     if !peer_current {
@@ -291,7 +309,7 @@ fn federation_prompt_scope_current_locked(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_permission_current_locked<'a>(
+pub(crate) fn federation_prompt_permission_current_locked<'a>(
     inner: &'a StateInner,
     kind: FederationPromptPermissionKind,
     identity: &FederationPromptPermissionIdentity,
@@ -323,7 +341,7 @@ fn federation_prompt_permission_current_locked<'a>(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_dispatch_policy_locked(
+pub(crate) fn federation_prompt_dispatch_policy_locked(
     inner: &StateInner,
     scope: &FederationPromptScope,
     grant: &FederationPromptPermissionIdentity,
@@ -350,7 +368,7 @@ fn federation_prompt_dispatch_policy_locked(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_scope_from_basis(
+pub(crate) fn federation_prompt_scope_from_basis(
     basis: &remote_prompt_authority::AuthorityBasis,
 ) -> FederationPromptScope {
     let (source_host, source_epoch, source_session, source_creation) = basis.source.components();
@@ -380,7 +398,7 @@ fn federation_prompt_scope_from_basis(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_identity_from_value(
+pub(crate) fn federation_prompt_identity_from_value(
     identity: &remote_prompt_authority::DecisionIdentity,
 ) -> FederationPromptPermissionIdentity {
     let (id, generation) = identity.components();
@@ -391,7 +409,7 @@ fn federation_prompt_identity_from_value(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_intent_policy_locked(
+pub(crate) fn federation_prompt_intent_policy_locked(
     inner: &StateInner,
     intent: &remote_prompt_authority::Intent,
     role: FederationRole,

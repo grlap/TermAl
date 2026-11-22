@@ -19,8 +19,10 @@
 // review backend via `run_blocking_api` so disk I/O doesn't block
 // the async runtime.
 
+use super::*;
+
 /// Gets review.
-async fn get_review(
+pub(crate) async fn get_review(
     AxumPath(change_set_id): AxumPath<String>,
     query: Result<Query<ReviewQuery>, QueryRejection>,
     State(state): State<AppState>,
@@ -61,7 +63,7 @@ async fn get_review(
 }
 
 /// Stores review.
-async fn put_review(
+pub(crate) async fn put_review(
     AxumPath(change_set_id): AxumPath<String>,
     query: Result<Query<ReviewQuery>, QueryRejection>,
     State(state): State<AppState>,
@@ -128,7 +130,7 @@ async fn put_review(
 }
 
 /// Gets review summary.
-async fn get_review_summary(
+pub(crate) async fn get_review_summary(
     AxumPath(change_set_id): AxumPath<String>,
     query: Result<Query<ReviewQuery>, QueryRejection>,
     State(state): State<AppState>,

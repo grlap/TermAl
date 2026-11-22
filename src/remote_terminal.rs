@@ -17,6 +17,8 @@
 // Extracted from remote.rs into its own `include!()` fragment so remote.rs
 // stays focused on SSH transport + connection lifecycle.
 
+use super::*;
+
 /// Live-forwarding accounting for a remote terminal stream. Tracks per-stream
 /// byte budgets so the truncation semantics applied to intermediate `output`
 /// events match the per-stream semantics applied to the final `complete`
@@ -25,14 +27,14 @@
 /// budget, and then fold that spurious truncation into the completion via
 /// [`RemoteTerminalForwardState::output_truncated`], marking responses that
 /// `cap_terminal_response_output` did not actually truncate.
-struct RemoteTerminalForwardState {
+pub(crate) struct RemoteTerminalForwardState {
     forwarded_stdout_bytes: usize,
     forwarded_stderr_bytes: usize,
-    output_truncated: bool,
+    pub(crate) output_truncated: bool,
 }
 
 impl RemoteTerminalForwardState {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             forwarded_stdout_bytes: 0,
             forwarded_stderr_bytes: 0,
@@ -62,7 +64,7 @@ impl std::fmt::Display for RemoteAuthorityIoError {
 
 impl std::error::Error for RemoteAuthorityIoError {}
 
-fn remote_authority_io_error(error: ApiError) -> io::Error {
+pub(crate) fn remote_authority_io_error(error: ApiError) -> io::Error {
     io::Error::new(
         io::ErrorKind::ConnectionAborted,
         RemoteAuthorityIoError {
@@ -85,7 +87,7 @@ fn remote_stream_read_api_error(error: io::Error, cancellation: &Arc<AtomicBool>
     ApiError::bad_gateway(format!("failed to read remote stream: {error}"))
 }
 
-fn forward_remote_terminal_stream_response(
+pub(crate) fn forward_remote_terminal_stream_response(
     response: RemoteStreamingResponse,
     event_tx: &TerminalCommandStreamSender,
     cancellation: &Arc<AtomicBool>,
@@ -126,7 +128,7 @@ fn forward_remote_terminal_stream_response(
 /// in-memory [`std::io::Read`] (e.g. a `Cursor`) instead of a live HTTP
 /// response.
 #[cfg(test)]
-fn forward_remote_terminal_stream_reader<R: std::io::Read>(
+pub(crate) fn forward_remote_terminal_stream_reader<R: std::io::Read>(
     reader: &mut R,
     event_tx: &TerminalCommandStreamSender,
     cancellation: &Arc<AtomicBool>,
@@ -140,7 +142,7 @@ fn forward_remote_terminal_stream_reader<R: std::io::Read>(
     )
 }
 
-fn forward_remote_terminal_stream_reader_with_authority<R: std::io::Read>(
+pub(crate) fn forward_remote_terminal_stream_reader_with_authority<R: std::io::Read>(
     reader: &mut R,
     event_tx: &TerminalCommandStreamSender,
     cancellation: &Arc<AtomicBool>,
@@ -160,7 +162,7 @@ fn forward_remote_terminal_stream_reader_with_authority<R: std::io::Read>(
 /// tests can pass a smaller cap to exercise the rejection path without
 /// pushing megabytes of bytes through the reader.
 #[cfg(test)]
-fn forward_remote_terminal_stream_reader_capped<R: std::io::Read>(
+pub(crate) fn forward_remote_terminal_stream_reader_capped<R: std::io::Read>(
     reader: &mut R,
     event_tx: &TerminalCommandStreamSender,
     cancellation: &Arc<AtomicBool>,
@@ -248,7 +250,7 @@ fn forward_remote_terminal_stream_reader_capped_with_authority<R: std::io::Read>
 }
 
 #[cfg(test)]
-fn handle_remote_terminal_sse_frame(
+pub(crate) fn handle_remote_terminal_sse_frame(
     frame: &str,
     event_tx: &TerminalCommandStreamSender,
     forward_state: &mut RemoteTerminalForwardState,
@@ -279,7 +281,7 @@ fn prefer_remote_terminal_authority<T>(
     }
 }
 
-fn send_remote_terminal_stream_event(
+pub(crate) fn send_remote_terminal_stream_event(
     event_tx: &TerminalCommandStreamSender,
     mut event: TerminalCommandStreamEvent,
     cancellation: Option<&Arc<AtomicBool>>,
@@ -402,10 +404,16 @@ fn handle_remote_terminal_sse_frame_with_authority(
                 }
                 None => format!("remote terminal stream error: {}", payload.error),
             };
-            let result = if let Some(limit) = output_limit_details(&Value::Object(payload.details)) {
-                Err(ApiError::from_status(StatusCode::INTERNAL_SERVER_ERROR, detail).with_kind(
-                    ApiErrorKind::OutputLimitExceeded { limit: limit.limit, outcome: limit.outcome },
-                ))
+            let result = if let Some(limit) = output_limit_details(&Value::Object(payload.details))
+            {
+                Err(
+                    ApiError::from_status(StatusCode::INTERNAL_SERVER_ERROR, detail).with_kind(
+                        ApiErrorKind::OutputLimitExceeded {
+                            limit: limit.limit,
+                            outcome: limit.outcome,
+                        },
+                    ),
+                )
             } else if payload.status == Some(StatusCode::TOO_MANY_REQUESTS.as_u16()) {
                 Err(ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, detail))
             } else {
@@ -417,12 +425,12 @@ fn handle_remote_terminal_sse_frame_with_authority(
     }
 }
 
-struct InterruptibleRemoteStreamReader {
-    rx: std::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
-    cancellation: Arc<AtomicBool>,
-    authority: Option<RemoteStreamingAuthority>,
-    buffered: Vec<u8>,
-    offset: usize,
+pub(crate) struct InterruptibleRemoteStreamReader {
+    pub(crate) rx: std::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
+    pub(crate) cancellation: Arc<AtomicBool>,
+    pub(crate) authority: Option<RemoteStreamingAuthority>,
+    pub(crate) buffered: Vec<u8>,
+    pub(crate) offset: usize,
 }
 
 impl InterruptibleRemoteStreamReader {
@@ -434,14 +442,14 @@ impl InterruptibleRemoteStreamReader {
     /// [`BlockingHttpResponse`]; production callers pass the reqwest
     /// blocking body directly.
     #[cfg(test)]
-    fn spawn<R>(source: R, cancellation: Arc<AtomicBool>) -> Self
+    pub(crate) fn spawn<R>(source: R, cancellation: Arc<AtomicBool>) -> Self
     where
         R: std::io::Read + Send + 'static,
     {
         Self::spawn_inner(source, cancellation, None)
     }
 
-    fn spawn_with_authority<R>(
+    pub(crate) fn spawn_with_authority<R>(
         source: R,
         cancellation: Arc<AtomicBool>,
         authority: RemoteStreamingAuthority,
@@ -467,7 +475,7 @@ impl InterruptibleRemoteStreamReader {
     }
 
     #[cfg(test)]
-    fn new(
+    pub(crate) fn new(
         rx: std::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
         cancellation: Arc<AtomicBool>,
     ) -> Self {
@@ -475,7 +483,7 @@ impl InterruptibleRemoteStreamReader {
     }
 
     #[cfg(test)]
-    fn new_with_authority(
+    pub(crate) fn new_with_authority(
         rx: std::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
         cancellation: Arc<AtomicBool>,
         authority: RemoteStreamingAuthority,
@@ -621,7 +629,7 @@ fn remote_response_is_event_stream(response: &BlockingHttpResponse) -> bool {
         })
 }
 
-fn cap_terminal_response_output(response: &mut TerminalCommandResponse) -> bool {
+pub(crate) fn cap_terminal_response_output(response: &mut TerminalCommandResponse) -> bool {
     let (stdout, stdout_truncated) =
         truncate_string_to_byte_limit(&response.stdout, TERMINAL_OUTPUT_MAX_BYTES);
     let (stderr, stderr_truncated) =
@@ -646,7 +654,7 @@ fn truncate_string_to_byte_limit(value: &str, max_bytes: usize) -> (String, bool
     (value[..end].to_owned(), true)
 }
 
-fn parse_terminal_sse_frame(frame: &str) -> Option<(String, String)> {
+pub(crate) fn parse_terminal_sse_frame(frame: &str) -> Option<(String, String)> {
     let mut event_name = "message".to_owned();
     let mut data_lines = Vec::new();
     let mut saw_field = false;
@@ -674,7 +682,7 @@ fn parse_terminal_sse_frame(frame: &str) -> Option<(String, String)> {
     saw_field.then(|| (event_name, data_lines.join("\n")))
 }
 
-fn find_sse_frame_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
+pub(crate) fn find_sse_frame_delimiter(bytes: &[u8]) -> Option<(usize, usize)> {
     let lf = bytes
         .windows(2)
         .position(|window| window == b"\n\n")

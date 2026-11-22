@@ -26,6 +26,8 @@
 //
 // New file, not split from another; included from main.rs under cfg(test).
 
+use super::*;
+
 static TEST_STAGED_ENGRAM_READINESS_HOMES: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
@@ -34,9 +36,9 @@ static TEST_EXPIRED_ENGRAM_DIAGNOSTIC_HOMES: LazyLock<Mutex<HashSet<PathBuf>>> =
 
 /// Registration of Engram homes with the readiness seam, removed on drop.
 #[must_use = "the seam registration ends when this guard is dropped"]
-struct TestEngramReadinessSeam {
-    homes: Vec<PathBuf>,
-    staged: bool,
+pub(crate) struct TestEngramReadinessSeam {
+    pub(crate) homes: Vec<PathBuf>,
+    pub(crate) staged: bool,
 }
 
 impl Drop for TestEngramReadinessSeam {
@@ -62,7 +64,7 @@ impl Drop for TestEngramReadinessSeam {
 /// The key a home is registered and looked up by. Homes exist when a test
 /// registers them and when readiness runs, so canonical paths make the
 /// lookup independent of how the settings spelled the home.
-fn test_engram_readiness_seam_key(home: &FsPath) -> PathBuf {
+pub(crate) fn test_engram_readiness_seam_key(home: &FsPath) -> PathBuf {
     fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf())
 }
 
@@ -101,20 +103,22 @@ fn register_test_engram_readiness_seam(homes: &[&FsPath], staged: bool) -> TestE
 }
 
 /// Every real diagnostic launch for these homes outlasts its budget at once.
-fn expire_test_engram_diagnostic_launches(homes: &[&FsPath]) -> TestEngramReadinessSeam {
+pub(crate) fn expire_test_engram_diagnostic_launches(homes: &[&FsPath]) -> TestEngramReadinessSeam {
     register_test_engram_readiness_seam(homes, false)
 }
 
 /// Readiness for these homes is answered without a process, and any real
 /// diagnostic launch for them would outlast its budget at once.
-fn stage_test_engram_readiness_without_launch(homes: &[&FsPath]) -> TestEngramReadinessSeam {
+pub(crate) fn stage_test_engram_readiness_without_launch(
+    homes: &[&FsPath],
+) -> TestEngramReadinessSeam {
     register_test_engram_readiness_seam(homes, true)
 }
 
 /// Whether a diagnostic launch for `home` has outlasted its budget the moment
 /// its process resumes. The caller then takes its expiry branch whether or not
 /// the child has already exited.
-fn test_engram_diagnostic_launch_expired(home: &FsPath) -> bool {
+pub(crate) fn test_engram_diagnostic_launch_expired(home: &FsPath) -> bool {
     TEST_EXPIRED_ENGRAM_DIAGNOSTIC_HOMES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -126,7 +130,7 @@ fn test_engram_diagnostic_launch_expired(home: &FsPath) -> bool {
 /// directory included) when the test removes the root. The real expiry branch
 /// reaps in the background instead; this wait is test-only and bounded, a
 /// guard against a hang rather than a timing assertion.
-fn wait_for_test_engram_expired_child(process: &SharedChild) {
+pub(crate) fn wait_for_test_engram_expired_child(process: &SharedChild) {
     let guard = std::time::Instant::now() + Duration::from_secs(30);
     while matches!(process.try_wait(), Ok(None)) && std::time::Instant::now() < guard {
         std::thread::sleep(Duration::from_millis(5));
@@ -135,7 +139,7 @@ fn wait_for_test_engram_expired_child(process: &SharedChild) {
 
 /// The staged readiness output for a registered home, or None to launch the
 /// real process.
-fn staged_test_engram_readiness_output(
+pub(crate) fn staged_test_engram_readiness_output(
     marker: &FsPath,
     home: &FsPath,
 ) -> Option<std::result::Result<std::process::Output, ApiError>> {
@@ -149,7 +153,7 @@ fn staged_test_engram_readiness_output(
 /// The receipt src/tests/fixtures/engram-control-fixture.ps1 (and .sh) prints
 /// for `readiness` under the `fixture-ready` declaration, including the store
 /// file it creates under the home.
-fn staged_test_engram_readiness_receipt(
+pub(crate) fn staged_test_engram_readiness_receipt(
     marker: &FsPath,
     home: &FsPath,
 ) -> std::result::Result<std::process::Output, ApiError> {

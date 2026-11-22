@@ -9,28 +9,30 @@
 // Engram still decides when the evaluation is recorded. The read is a
 // prerequisite check only: a present sighting is not a verdict.
 
+use super::*;
+
 /// Engram's answer to `named_root_sighting_read`, schema version 1. Its shape
 /// is closed: serde does not refuse unknown fields inside internally tagged
 /// variants, so an answer is accepted only when it serializes back to exactly
 /// what Engram sent (`parse_engram_named_root_sighting_read`).
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct EngramNamedRootSightingRead {
-    schema_version: i64,
-    project_id: String,
-    work_id: String,
-    run_id: String,
-    read_cut: i64,
-    head_cut: i64,
-    current_binding: Option<String>,
-    binding_changed: bool,
-    root: EngramSightingRoot,
+pub(crate) struct EngramNamedRootSightingRead {
+    pub(crate) schema_version: i64,
+    pub(crate) project_id: String,
+    pub(crate) work_id: String,
+    pub(crate) run_id: String,
+    pub(crate) read_cut: i64,
+    pub(crate) head_cut: i64,
+    pub(crate) current_binding: Option<String>,
+    pub(crate) binding_changed: bool,
+    pub(crate) root: EngramSightingRoot,
 }
 
 /// Whether a root is bound at the read cut and, when it is, its sighting.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
-enum EngramSightingRoot {
+pub(crate) enum EngramSightingRoot {
     None,
     Bound {
         workspace_id: String,
@@ -44,7 +46,7 @@ enum EngramSightingRoot {
 /// Whether the bound root has a sighting at or before the read cut.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
-enum EngramRootSighting {
+pub(crate) enum EngramRootSighting {
     Absent,
     Present {
         record: String,
@@ -61,13 +63,13 @@ enum EngramRootSighting {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceSightingSourceSummary {
-    commit: String,
-    tree: String,
-    changes: usize,
-    submodules: usize,
+pub(crate) struct AcceptanceSightingSourceSummary {
+    pub(crate) commit: String,
+    pub(crate) tree: String,
+    pub(crate) changes: usize,
+    pub(crate) submodules: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    git_delta_dirty: Option<bool>,
+    pub(crate) git_delta_dirty: Option<bool>,
 }
 
 impl<'de> Deserialize<'de> for EngramRootSighting {
@@ -135,18 +137,18 @@ const ENGRAM_NAMED_ROOT_SIGHTING_READ_MAX_BYTES: usize = 16 * 1024;
 /// What the read was for: the evaluated work and run, the cut it was taken
 /// at, and the local root the evaluation reads (`None`: no root is named
 /// locally and the evaluation reads the session's workdir).
-struct AcceptanceSightingQuery<'a> {
-    work_ref: &'a str,
-    project_id: &'a str,
-    work_id: &'a str,
-    run_id: &'a str,
-    cut: i64,
-    root: Option<&'a AcceptanceEvaluationSourceRoot>,
+pub(crate) struct AcceptanceSightingQuery<'a> {
+    pub(crate) work_ref: &'a str,
+    pub(crate) project_id: &'a str,
+    pub(crate) work_id: &'a str,
+    pub(crate) run_id: &'a str,
+    pub(crate) cut: i64,
+    pub(crate) root: Option<&'a AcceptanceEvaluationSourceRoot>,
 }
 
 impl AcceptanceSightingQuery<'_> {
     /// The local root as a refusal names it.
-    fn local_root(&self) -> String {
+    pub(crate) fn local_root(&self) -> String {
         self.root.map_or_else(
             || "no named source root (it reads the session's workdir)".to_owned(),
             |root| {
@@ -161,7 +163,7 @@ impl AcceptanceSightingQuery<'_> {
 
 impl EngramNamedRootSightingRead {
     /// Why this answer does not describe `query` coherently, if it does not.
-    fn incoherence(&self, query: &AcceptanceSightingQuery<'_>) -> Option<String> {
+    pub(crate) fn incoherence(&self, query: &AcceptanceSightingQuery<'_>) -> Option<String> {
         if self.schema_version != ENGRAM_NAMED_ROOT_SIGHTING_READ_SCHEMA_VERSION {
             return Some(format!(
                 "unsupported schema version {}",
@@ -204,7 +206,7 @@ impl EngramNamedRootSightingRead {
 
 /// `value` as a version-1 sighting answer, or why it is not one: a missing,
 /// mistyped or unknown field anywhere in it.
-fn parse_engram_named_root_sighting_read(
+pub(crate) fn parse_engram_named_root_sighting_read(
     value: Value,
 ) -> std::result::Result<EngramNamedRootSightingRead, String> {
     let read: EngramNamedRootSightingRead = serde_json::from_value(value.clone())
@@ -231,7 +233,7 @@ fn acceptance_sighting_unknown(query: &AcceptanceSightingQuery<'_>, why: &str) -
 /// or when Engram binds the local root, at its generation, with a current
 /// source-identity sighting at the cut. Revision-only sightings remain readable
 /// history, but cannot satisfy this precondition.
-fn acceptance_sighting_decision(
+pub(crate) fn acceptance_sighting_decision(
     read: &EngramNamedRootSightingRead,
     query: &AcceptanceSightingQuery<'_>,
     evaluation_notice: Option<EngramSourceRootEvaluationNotice>,
@@ -322,11 +324,11 @@ fn acceptance_sighting_decision(
 /// A name its session gave during a turn: the name, and the grant of the turn
 /// it was given in (`engram_source_roots.rs`). In memory only.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramRootNamedInTurn {
-    store: EngramAuthorityStoreKey,
-    claim_id: String,
-    generation: u64,
-    host_turn_ref: String,
+pub(crate) struct EngramRootNamedInTurn {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) claim_id: String,
+    pub(crate) generation: u64,
+    pub(crate) host_turn_ref: String,
 }
 
 /// Records a named-root transition of the naming session on its marks. Each
@@ -336,7 +338,7 @@ struct EngramRootNamedInTurn {
 /// current observed host turn's identity. The naming path captures that
 /// identity as it installs the selection under the same state lock; other
 /// callers must still identify that same running turn.
-fn record_engram_root_named_in_turn(
+pub(crate) fn record_engram_root_named_in_turn(
     engram: &mut EngramSessionState,
     store: &EngramAuthorityStoreKey,
     event: &EngramNamedRootEvent,
@@ -439,7 +441,7 @@ impl AppState {
     /// checked again afterwards: a rename during the read refuses too. A failed,
     /// refused, unsupported or malformed read is unknown, never taken as absent
     /// or present.
-    fn require_acceptance_named_root_sighting(
+    pub(crate) fn require_acceptance_named_root_sighting(
         &self,
         parent_session_id: &str,
         reader: &EngramConnectionConfig,

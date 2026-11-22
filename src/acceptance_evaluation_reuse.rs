@@ -1,13 +1,15 @@
 // Explicit evaluator reuse: reserves the existing submission/follow-up boundary
 // before reads, then transfers a fully prepared target after its durable ACK.
-struct AcceptanceEvaluationReuseReservation {
-    previous: DelegationRecord,
-    _guard: AcceptanceEvaluationSubmissionInFlight,
-    automatic: bool,
+
+use super::*;
+pub(crate) struct AcceptanceEvaluationReuseReservation {
+    pub(crate) previous: DelegationRecord,
+    pub(crate) _guard: AcceptanceEvaluationSubmissionInFlight,
+    pub(crate) automatic: bool,
 }
 
 impl AppState {
-    fn reserve_acceptance_evaluation_reuse(
+    pub(crate) fn reserve_acceptance_evaluation_reuse(
         &self,
         parent: &str,
         request: &RequestAcceptanceEvaluationRequest,
@@ -75,7 +77,7 @@ impl AppState {
         }))
     }
 
-    fn acceptance_evaluation_reuse_reason(
+    pub(crate) fn acceptance_evaluation_reuse_reason(
         &self,
         reservation: &AcceptanceEvaluationReuseReservation,
         seed: &AcceptanceEvaluationTargetSeed,
@@ -103,7 +105,9 @@ impl AppState {
             return Some("Engram refused this evaluator's independence".to_owned());
         }
         if history.unfinished_evidence.is_some() {
-            return Some("the preceding evidence read ended unfinished; select a fresh evaluator".to_owned());
+            return Some(
+                "the preceding evidence read ended unfinished; select a fresh evaluator".to_owned(),
+            );
         }
         if !policy_known || seed.mode != AcceptanceEvaluationMode::IndependentSession {
             return Some(
@@ -145,12 +149,15 @@ impl AppState {
         if child.session.agent != previous.agent
             || previous.model.as_deref() != Some(child.session.model.as_str())
         {
-            return Some("the live evaluator agent or model differs from its persisted spawn configuration".to_owned());
+            return Some(
+                "the live evaluator agent or model differs from its persisted spawn configuration"
+                    .to_owned(),
+            );
         }
         None
     }
 
-    fn install_reused_acceptance_evaluation(
+    pub(crate) fn install_reused_acceptance_evaluation(
         &self,
         reservation: &AcceptanceEvaluationReuseReservation,
         seed: AcceptanceEvaluationTargetSeed,
@@ -222,16 +229,21 @@ impl AppState {
                     "evaluator changed during fresh-attempt preparation",
                 ));
             }
-            let child = inner.find_visible_session_index(&previous.child_session_id)
+            let child = inner
+                .find_visible_session_index(&previous.child_session_id)
                 .map(|i| &inner.sessions[i])
-                .ok_or_else(|| ApiError::conflict("the evaluator disappeared during preparation"))?;
+                .ok_or_else(|| {
+                    ApiError::conflict("the evaluator disappeared during preparation")
+                })?;
             if !child.is_local_session()
                 || child.session.parent_delegation_id.as_deref() != Some(previous.id.as_str())
                 || child.session.agent != previous.agent
                 || previous.model.as_deref() != Some(child.session.model.as_str())
                 || !child.queued_prompts.is_empty()
             {
-                return Err(ApiError::conflict("the evaluator configuration or delivery changed during preparation"));
+                return Err(ApiError::conflict(
+                    "the evaluator configuration or delivery changed during preparation",
+                ));
             }
             acceptance_evaluation_target_admission_locked(
                 &inner,
@@ -245,8 +257,13 @@ impl AppState {
             target.attempt_history = Some(history);
             inner.acceptance_evidence_recovery.remove(&old.attempt_key);
             if let Some(manifest) = recovery {
-                inner.acceptance_evidence_recovery.insert(target.attempt_key.clone(),
-                    Arc::new(Mutex::new(AcceptanceEvidenceRecovery::new(manifest, target.clone()))));
+                inner.acceptance_evidence_recovery.insert(
+                    target.attempt_key.clone(),
+                    Arc::new(Mutex::new(AcceptanceEvidenceRecovery::new(
+                        manifest,
+                        target.clone(),
+                    ))),
+                );
             }
             inner.delegations[index].acceptance_evaluation = Some(target);
             inner.mark_delegation_mutated(index);

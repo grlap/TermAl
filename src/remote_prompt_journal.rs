@@ -4,13 +4,15 @@
 // Recovered selectively from the retained direct-prompt journal component.
 // These bounds exercise the unmounted foundation, not a production retention
 // policy. Production needs compact identity owned by the real delivery path.
+
+use super::*;
 const REMOTE_PROMPT_FOUNDATION_SENDER_COUNT: u64 = 1000;
 const REMOTE_PROMPT_FOUNDATION_RECEIVER_COUNT: u64 = 65_536;
 const REMOTE_PROMPT_FOUNDATION_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(test), allow(dead_code))]
-enum RemotePromptJournalWriteMode {
+pub(crate) enum RemotePromptJournalWriteMode {
     Production,
     #[cfg(test)]
     Fixture,
@@ -31,14 +33,14 @@ impl RemotePromptJournalWriteMode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(not(test), allow(dead_code))]
-enum RemotePromptJournalSide {
+pub(crate) enum RemotePromptJournalSide {
     Sender,
     Receiver,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptJournalSide {
-    fn table(self) -> &'static str {
+    pub(crate) fn table(self) -> &'static str {
         match self {
             Self::Sender => "remote_prompt_intents",
             Self::Receiver => "remote_prompt_receives",
@@ -48,48 +50,48 @@ impl RemotePromptJournalSide {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptJournalRecord {
-    operation_id: Uuid,
-    side: RemotePromptJournalSide,
-    intent: remote_prompt_authority::Intent,
-    evidence: RemotePromptJournalEvidence,
+pub(crate) struct RemotePromptJournalRecord {
+    pub(crate) operation_id: Uuid,
+    pub(crate) side: RemotePromptJournalSide,
+    pub(crate) intent: remote_prompt_authority::Intent,
+    pub(crate) evidence: RemotePromptJournalEvidence,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptQueueAcknowledgement {
+pub(crate) struct RemotePromptQueueAcknowledgement {
     #[serde(deserialize_with = "remote_prompt_projection_uuid")]
     entry_id: Uuid,
     #[serde(deserialize_with = "remote_prompt_projection_uuid")]
-    write_ahead: Uuid,
+    pub(crate) write_ahead: Uuid,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptJournalEvidence {
-    schema_version: u8,
+pub(crate) struct RemotePromptJournalEvidence {
+    pub(crate) schema_version: u8,
     // Source write-ahead before any possible network entry. Never reset by a
     // timeout, reconnect, absent status or duplicate. Not a send instruction.
-    may_have_entered: bool,
+    pub(crate) may_have_entered: bool,
     // Projection only, recorded after the exact primary queue-content fence.
     // This is not a handoff/attempt or permission to recreate a missing queue.
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    queue: Option<RemotePromptQueueAcknowledgement>,
+    pub(crate) queue: Option<RemotePromptQueueAcknowledgement>,
 }
 
 #[derive(Debug)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptJournalAdmission {
-    record: RemotePromptJournalRecord,
+pub(crate) struct RemotePromptJournalAdmission {
+    pub(crate) record: RemotePromptJournalRecord,
     // Only the actual first receive may capture same-boot scheduling intent.
     // Duplicates, reloads and read-only reconciliation do not own activation.
-    inserted: bool,
+    pub(crate) inserted: bool,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_invalid_record() -> anyhow::Error {
+pub(crate) fn remote_prompt_invalid_record() -> anyhow::Error {
     mailbox_store_error(
         MailboxStoreErrorKind::Validation,
         "invalid or unsupported retained direct-prompt record",
@@ -97,7 +99,7 @@ fn remote_prompt_invalid_record() -> anyhow::Error {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_journal_conflict() -> anyhow::Error {
+pub(crate) fn remote_prompt_journal_conflict() -> anyhow::Error {
     mailbox_store_error(
         MailboxStoreErrorKind::Conflict,
         "direct-prompt identity or retained evidence conflicts",
@@ -125,7 +127,7 @@ fn remote_prompt_operation_id(intent: &remote_prompt_authority::Intent) -> Uuid 
     remote_prompt_operation_id_for_source(&basis.source, key)
 }
 
-fn remote_prompt_operation_id_for_source(
+pub(crate) fn remote_prompt_operation_id_for_source(
     source: &remote_prompt_authority::NativeRoot,
     key: &str,
 ) -> Uuid {
@@ -143,7 +145,7 @@ fn remote_prompt_operation_id_for_source(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_intent_digest(intent: &remote_prompt_authority::Intent) -> String {
+pub(crate) fn remote_prompt_intent_digest(intent: &remote_prompt_authority::Intent) -> String {
     intent
         .digest()
         .iter()
@@ -151,17 +153,17 @@ fn remote_prompt_intent_digest(intent: &remote_prompt_authority::Intent) -> Stri
         .collect()
 }
 
-fn remote_prompt_queue_id(operation: Uuid) -> Uuid {
+pub(crate) fn remote_prompt_queue_id(operation: Uuid) -> Uuid {
     remote_prompt_stable_id(b"termal.direct-prompt.queue.v1", &[operation.as_bytes()])
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptJournalRecord {
-    fn prompt_id(&self) -> Uuid {
+    pub(crate) fn prompt_id(&self) -> Uuid {
         remote_prompt_queue_id(self.operation_id)
     }
 
-    fn evidence_json(&self) -> Result<String> {
+    pub(crate) fn evidence_json(&self) -> Result<String> {
         let bytes =
             serde_json::to_string(&self.evidence).map_err(|_| remote_prompt_invalid_record())?;
         if bytes.len() > remote_prompt_protocol::RESPONSE_BYTES {
@@ -170,7 +172,10 @@ impl RemotePromptJournalRecord {
         Ok(bytes)
     }
 
-    fn new(side: RemotePromptJournalSide, intent: remote_prompt_authority::Intent) -> Self {
+    pub(crate) fn new(
+        side: RemotePromptJournalSide,
+        intent: remote_prompt_authority::Intent,
+    ) -> Self {
         Self {
             operation_id: remote_prompt_operation_id(&intent),
             side,
@@ -183,7 +188,7 @@ impl RemotePromptJournalRecord {
         }
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.operation_id != remote_prompt_operation_id(&self.intent)
             || self.evidence.schema_version != 1
             || (self.side == RemotePromptJournalSide::Sender && self.evidence.queue.is_some())
@@ -215,7 +220,7 @@ impl RemotePromptJournalRecord {
 // Charge all serialized retained columns, with bounded future evidence already
 // reserved at admission. This is not a claim about SQLite page/OS overhead.
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_retained_bytes(
+pub(crate) fn remote_prompt_retained_bytes(
     intent: &remote_prompt_authority::Intent,
     encoded: &str,
     evidence: &str,
@@ -226,7 +231,7 @@ fn remote_prompt_retained_bytes(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_retained_usage(
+pub(crate) fn remote_prompt_retained_usage(
     connection: &rusqlite::Connection,
     side: RemotePromptJournalSide,
 ) -> Result<(u64, u64)> {
@@ -249,7 +254,7 @@ fn remote_prompt_retained_usage(
 // Boot admission validates retained data without creating permission, scheduling
 // a receive or reconstructing a primary queue. Read one bounded row at a time.
 #[cfg_attr(not(test), allow(dead_code))]
-fn validate_remote_prompt_journals(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn validate_remote_prompt_journals(connection: &rusqlite::Connection) -> Result<()> {
     for side in [
         RemotePromptJournalSide::Sender,
         RemotePromptJournalSide::Receiver,
@@ -304,7 +309,7 @@ fn validate_remote_prompt_journals(connection: &rusqlite::Connection) -> Result<
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_read_row(
+pub(crate) fn remote_prompt_read_row(
     connection: &rusqlite::Connection,
     side: RemotePromptJournalSide,
     source: &remote_prompt_authority::NativeRoot,
@@ -352,7 +357,7 @@ fn remote_prompt_read_row(
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl MailboxStore {
-    fn admit_remote_prompt_journal<G>(
+    pub(crate) fn admit_remote_prompt_journal<G>(
         &self,
         mode: RemotePromptJournalWriteMode,
         side: RemotePromptJournalSide,
@@ -369,7 +374,7 @@ impl MailboxStore {
         )
     }
 
-    fn admit_remote_prompt_journal_while_running<G>(
+    pub(crate) fn admit_remote_prompt_journal_while_running<G>(
         &self,
         mode: RemotePromptJournalWriteMode,
         side: RemotePromptJournalSide,
@@ -462,7 +467,7 @@ impl MailboxStore {
         })
     }
 
-    fn read_remote_prompt_journal<G>(
+    pub(crate) fn read_remote_prompt_journal<G>(
         &self,
         side: RemotePromptJournalSide,
         source: &remote_prompt_authority::NativeRoot,
@@ -476,7 +481,7 @@ impl MailboxStore {
     }
 
     // CAS of admission/projection evidence only; no provider/lifecycle owner.
-    fn mark_remote_prompt_possible_entry<G>(
+    pub(crate) fn mark_remote_prompt_possible_entry<G>(
         &self,
         mode: RemotePromptJournalWriteMode,
         expected: &RemotePromptJournalRecord,
@@ -491,7 +496,7 @@ impl MailboxStore {
     }
 
     // The queue owner adapter is added with the actual primary queue seam.
-    fn record_remote_prompt_journal_evidence<G>(
+    pub(crate) fn record_remote_prompt_journal_evidence<G>(
         &self,
         mode: RemotePromptJournalWriteMode,
         expected: &RemotePromptJournalRecord,

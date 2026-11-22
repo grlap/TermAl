@@ -3,7 +3,7 @@
 
 // Off-lock only. Rebuild the ordinary native record from the same bytes the
 // terminal disk read identified, without freezing or sending another record.
-fn registered_closing_clean_input(registration: &TestRunRegistration, disk: &TestRunDisk) -> bool {
+pub(crate) fn registered_closing_clean_input(registration: &TestRunRegistration, disk: &TestRunDisk) -> bool {
     let directory = FsPath::new(&registration.run_directory);
     let TestRunJson::Parsed(request, _, _) = test_run_read_json(&directory.join("request.json"))
     else {
@@ -61,7 +61,7 @@ fn registered_closing_clean_input(registration: &TestRunRegistration, disk: &Tes
 // The caller is already under the terminal transition lock. Every command
 // must have one original, current association; truncated rings or ambiguous
 // keys therefore leave the prefix unknown rather than selecting a last check.
-fn registered_closing_baselines_locked(
+pub(crate) fn registered_closing_baselines_locked(
     inner: &StateInner,
     index: usize,
     prepared: &[RegisteredCheckNotice],

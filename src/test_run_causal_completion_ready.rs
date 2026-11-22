@@ -1,20 +1,22 @@
 // Completion-ready hints over the existing authenticated mailbox relay.
 // Owns bounded disposable scheduling and diagnostics, not results, receipts,
 // original pending membership or admission. New owner, not a source split.
-const CAUSAL_READY_QUEUE_LIMIT: usize = 64;
+
+use super::*;
+pub(crate) const CAUSAL_READY_QUEUE_LIMIT: usize = 64;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CausalTestCompletionReadyHint {
-    requester: MailboxRelayPrincipal,
-    runner: MailboxRelayPrincipal,
-    request_send_key: String,
-    canonical_message_id: String,
-    run_id: String,
+pub(crate) struct CausalTestCompletionReadyHint {
+    pub(crate) requester: MailboxRelayPrincipal,
+    pub(crate) runner: MailboxRelayPrincipal,
+    pub(crate) request_send_key: String,
+    pub(crate) canonical_message_id: String,
+    pub(crate) run_id: String,
 }
 
 impl CausalTestCompletionReadyHint {
-    fn key(&self) -> TestRunCausalKey {
+    pub(crate) fn key(&self) -> TestRunCausalKey {
         (
             self.requester.participant_key(),
             self.request_send_key.clone(),
@@ -22,7 +24,7 @@ impl CausalTestCompletionReadyHint {
         )
     }
 
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.requester.validate()?;
         self.runner.validate()?;
         if self.request_send_key.is_empty()
@@ -43,7 +45,7 @@ impl CausalTestCompletionReadyHint {
         Ok(())
     }
 
-    fn matches(&self, plan: &CausalTestCompletionPlan) -> bool {
+    pub(crate) fn matches(&self, plan: &CausalTestCompletionPlan) -> bool {
         plan.selector.key() == self.key()
             && plan.selector.payload.requester == self.requester
             && plan
@@ -54,26 +56,26 @@ impl CausalTestCompletionReadyHint {
 }
 
 #[derive(Default)]
-struct CausalCompletionReadyQueue {
-    pending: BTreeMap<TestRunCausalKey, CausalTestCompletionReadyHint>,
-    decisions: BTreeMap<&'static str, u64>,
-    notifications: BTreeMap<TestRunCausalKey, CausalReadyNotification>,
+pub(crate) struct CausalCompletionReadyQueue {
+    pub(crate) pending: BTreeMap<TestRunCausalKey, CausalTestCompletionReadyHint>,
+    pub(crate) decisions: BTreeMap<&'static str, u64>,
+    pub(crate) notifications: BTreeMap<TestRunCausalKey, CausalReadyNotification>,
 }
 
 impl CausalCompletionReadyQueue {
-    fn record(&mut self, reason: &'static str) {
+    pub(crate) fn record(&mut self, reason: &'static str) {
         let count = self.decisions.entry(reason).or_default();
         *count = count.saturating_add(1);
         eprintln!("causal completion ready: {reason}");
     }
 
-    fn diagnostic(&self) -> Value {
+    pub(crate) fn diagnostic(&self) -> Value {
         json!({"queued":self.pending.len(),"notifications":self.notifications.len(),"decisions":self.decisions,"resetOnRestart":true})
     }
 }
 
 impl AppState {
-    fn record_causal_ready(&self, reason: &'static str) {
+    pub(crate) fn record_causal_ready(&self, reason: &'static str) {
         self.federation_executor_wake_signal
             .causal_ready
             .lock()
@@ -81,7 +83,7 @@ impl AppState {
             .record(reason);
     }
 
-    fn receive_causal_test_completion_ready(
+    pub(crate) fn receive_causal_test_completion_ready(
         &self,
         hint: CausalTestCompletionReadyHint,
         lease: &FederationLinkLease,
@@ -200,7 +202,7 @@ impl AppState {
         Ok(plans)
     }
 
-    async fn read_ready_causal_test_completions(
+    pub(crate) async fn read_ready_causal_test_completions(
         &self,
         fallback: bool,
     ) -> Result<Vec<CausalTestCompletionDelivery>, ApiError> {

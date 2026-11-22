@@ -15,26 +15,28 @@
 // (`engram_turn_checks.rs`). New module: the declared route is kept apart
 // from the built-in recognition rather than growing it.
 
+use super::*;
+
 /// The declaration's file name, at the root of the worktree a check runs in.
-const ENGRAM_DECLARATION_FILE: &str = "termal-tests.toml";
+pub(crate) const ENGRAM_DECLARATION_FILE: &str = "termal-tests.toml";
 /// A larger declaration is disabled whole.
-const ENGRAM_DECLARATION_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const ENGRAM_DECLARATION_MAX_BYTES: usize = 64 * 1024;
 /// A declaration with more entries is disabled whole.
-const ENGRAM_DECLARATION_MAX_ENTRIES: usize = 64;
+pub(crate) const ENGRAM_DECLARATION_MAX_ENTRIES: usize = 64;
 
 /// One `[[test]]` entry of the declaration, as written.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramDeclaredEntry {
-    command: String,
-    cwd: String,
-    artifact: String,
+pub(crate) struct EngramDeclaredEntry {
+    pub(crate) command: String,
+    pub(crate) cwd: String,
+    pub(crate) artifact: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    env: Vec<String>,
+    pub(crate) env: Vec<String>,
 }
 
 /// What the worktree's declaration says, read at one moment.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramDeclaration {
+pub(crate) enum EngramDeclaration {
     /// No `termal-tests.toml` at the root.
     Absent,
     /// A file that breaks a load rule: no entry of it counts.
@@ -66,7 +68,7 @@ struct EngramRawDeclaredEntry {
 /// The declaration at `root`, read once within its cap. Only the file read
 /// fails as `Disabled` without a hash (`sha256` empty) when it cannot be read
 /// at all; every other refusal carries the hash of the bytes it judged.
-fn engram_load_declaration(root: &FsPath) -> EngramDeclaration {
+pub(crate) fn engram_load_declaration(root: &FsPath) -> EngramDeclaration {
     let path = root.join(ENGRAM_DECLARATION_FILE);
     let disabled = |sha256: String, reason: &str| EngramDeclaration::Disabled {
         sha256,
@@ -97,7 +99,7 @@ fn engram_load_declaration(root: &FsPath) -> EngramDeclaration {
 }
 
 /// The whole file at `path`, or `None` when it is larger than `max` bytes.
-fn engram_read_bounded(path: &FsPath, max: usize) -> io::Result<Option<Vec<u8>>> {
+pub(crate) fn engram_read_bounded(path: &FsPath, max: usize) -> io::Result<Option<Vec<u8>>> {
     use std::io::Read;
     let mut bytes = Vec::new();
     fs::File::open(path)?
@@ -129,8 +131,10 @@ fn engram_parse_declaration(
             .ok_or("an entry is missing `artifact`")?;
         let cwd = raw.cwd.unwrap_or_else(|| ".".to_owned());
         let names: BTreeSet<_> = raw.env.iter().collect();
-        if raw.env.len() > 64 || names.len() != raw.env.len()
-            || raw.env.iter().any(|name| !project_environment_name(name)) {
+        if raw.env.len() > 64
+            || names.len() != raw.env.len()
+            || raw.env.iter().any(|name| !project_environment_name(name))
+        {
             return Err("an entry has invalid or duplicate environment names");
         }
         engram_declared_words(&command)?;
@@ -158,9 +162,10 @@ fn engram_declared_path_inside(root: &FsPath, relative: &str, directory: bool) -
     let path = FsPath::new(relative);
     // Declaration paths name neither a drive nor a network root, even when
     // the current host would interpret Windows spelling as a relative path.
-    let drive = relative.as_bytes().get(..2).is_some_and(|prefix| {
-        prefix[0].is_ascii_alphabetic() && prefix[1] == b':'
-    });
+    let drive = relative
+        .as_bytes()
+        .get(..2)
+        .is_some_and(|prefix| prefix[0].is_ascii_alphabetic() && prefix[1] == b':');
     if relative.is_empty()
         || relative.contains(['\0', '\n', '\r'])
         || relative.starts_with('\\')
@@ -205,7 +210,7 @@ fn engram_declared_path_inside(root: &FsPath, relative: &str, directory: bool) -
 ///   same rule a wrapper's shell word passes.
 /// Everything else (shell operators, redirection, substitution, globbing,
 /// commas, mixed quoting) is refused. Not a shell evaluator.
-fn engram_declared_words(line: &str) -> Result<Vec<String>, &'static str> {
+pub(crate) fn engram_declared_words(line: &str) -> Result<Vec<String>, &'static str> {
     const REFUSED: &str = "a command uses shell syntax the declared route does not take";
     // bash reads a backslash as an escape and PowerShell as a path separator.
     if line.contains('\\') {
@@ -308,7 +313,9 @@ fn engram_declared_program_word(raw: &str) -> bool {
 /// native arguments. A wrapper is read from its raw bytes alone
 /// (`engram_declared_wrapper_script`). Asked only of a line the built-in
 /// recognition took no test from.
-fn engram_declared_candidate(command: &str) -> Option<(EngramCheckCommand, Vec<String>)> {
+pub(crate) fn engram_declared_candidate(
+    command: &str,
+) -> Option<(EngramCheckCommand, Vec<String>)> {
     if !command
         .bytes()
         .all(|byte| matches!(byte, b'\t' | b' '..=b'~'))
@@ -449,51 +456,66 @@ fn engram_declared_wrapper_script(line: &str) -> Option<&str> {
 
 /// The artifact as a declared check's start found it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-enum EngramArtifactStart {
+pub(crate) enum EngramArtifactStart {
     Absent,
-    Present { sha256: String },
+    Present {
+        sha256: String,
+    },
     /// The start inspection itself failed: not the same as absent.
     Failed,
 }
 
 /// What a declared check keeps from its start, verified again at its end.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramDeclaredBinding {
+pub(crate) struct EngramDeclaredBinding {
     /// The worktree root the declaration was read in.
-    root: PathBuf,
-    entry: EngramDeclaredEntry,
+    pub(crate) root: PathBuf,
+    pub(crate) entry: EngramDeclaredEntry,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    environment_missing: Option<String>,
-    declaration_sha256: String,
-    declaration_bytes: u64,
-    artifact_start: EngramArtifactStart,
+    pub(crate) environment_missing: Option<String>,
+    pub(crate) declaration_sha256: String,
+    pub(crate) declaration_bytes: u64,
+    pub(crate) artifact_start: EngramArtifactStart,
     /// Where the declared artifact path led at the start, its links
     /// resolved (`engram_canonical_path`, which resolves the part that
     /// exists): the end must find the artifact at exactly this path, so a
     /// link retargeted during the run cannot bring in another file.
-    artifact_canonical: String,
+    pub(crate) artifact_canonical: String,
     /// Taken before the artifact's start image, so a file the run writes
     /// after it is never older than this.
-    started: std::time::SystemTime,
+    pub(crate) started: std::time::SystemTime,
 }
 
 // Reader fixtures only: generic launcher registrations cannot select native credit.
 #[cfg(test)]
-fn test_run_declared_binding(request: &Value, root: &FsPath) -> Option<EngramDeclaredBinding> {
+pub(crate) fn test_run_declared_binding(
+    request: &Value,
+    root: &FsPath,
+) -> Option<EngramDeclaredBinding> {
     if request.get("full").and_then(Value::as_bool) != Some(false)
-        || request.get("liveEngram").is_some_and(|value| !value.is_null())
+        || request
+            .get("liveEngram")
+            .is_some_and(|value| !value.is_null())
     {
         return None;
     }
     let stages = request.get("stages")?.as_array()?;
-    let [stage] = stages.as_slice() else { return None };
-    if stage.get("name")?.as_str()? != "focused" { return None; }
+    let [stage] = stages.as_slice() else {
+        return None;
+    };
+    if stage.get("name")?.as_str()? != "focused" {
+        return None;
+    }
     let mut words = vec![stage.get("command")?.as_str()?.to_owned()];
     words.extend(test_run_argv(stage.get("args"))?);
     let cwd = stage.get("cwd").and_then(Value::as_str).unwrap_or(".");
-    if !engram_declared_path_inside(root, cwd, true) { return None; }
+    if !engram_declared_path_inside(root, cwd, true) {
+        return None;
+    }
     let target = EngramCheckTarget {
-        root: root.to_path_buf(), directory: root.join(cwd), common_dir_key: None,
+        root: root.to_path_buf(),
+        directory: root.join(cwd),
+        common_dir_key: None,
     };
     engram_declared_bind(&words, &target).0
 }
@@ -503,14 +525,17 @@ fn test_run_declared_binding(request: &Value, root: &FsPath) -> Option<EngramDec
 /// the host line to give when the declaration there is disabled; or neither.
 /// A candidate whose words match no entry, or two, is no check. Reads the
 /// file system, so it runs off the state lock.
-fn engram_declared_bind(
+pub(crate) fn engram_declared_bind(
     words: &[String],
     target: &EngramCheckTarget,
 ) -> (Option<EngramDeclaredBinding>, Option<(String, String)>) {
     let (sha256, bytes, entries) = match engram_load_declaration(&target.root) {
         EngramDeclaration::Absent => return (None, None),
         EngramDeclaration::Disabled { sha256, reason } => {
-            return (None, Some((sha256, engram_declaration_disabled_line(target, &reason))));
+            return (
+                None,
+                Some((sha256, engram_declaration_disabled_line(target, &reason))),
+            );
         }
         EngramDeclaration::Loaded {
             sha256,
@@ -554,7 +579,7 @@ fn engram_declared_bind(
 /// there (`engram_declared_bind`); and, apart from that, the declaration
 /// hash and host line of a disabled declaration where it runs. Only a
 /// worktree holding a declaration is read past that file's presence.
-fn engram_declared_start(
+pub(crate) fn engram_declared_start(
     ran: Option<&str>,
     workdir: &FsPath,
     places: Option<&[Option<String>]>,
@@ -566,9 +591,10 @@ fn engram_declared_start(
     let Some((command, words)) = ran.and_then(engram_declared_candidate) else {
         return (None, None);
     };
-    let root = credit_root.map_or_else(|| engram_worktree_root_path(workdir), |(root, _)| {
-        root.to_path_buf()
-    });
+    let root = credit_root.map_or_else(
+        || engram_worktree_root_path(workdir),
+        |(root, _)| root.to_path_buf(),
+    );
     if fs::symlink_metadata(root.join(ENGRAM_DECLARATION_FILE)).is_err() {
         return (None, None);
     }
@@ -581,7 +607,7 @@ fn engram_declared_start(
 
 /// Whether the declaration at the binding's root still has the hash and the
 /// entry the check started with.
-fn engram_declaration_unchanged(binding: &EngramDeclaredBinding) -> bool {
+pub(crate) fn engram_declaration_unchanged(binding: &EngramDeclaredBinding) -> bool {
     match engram_load_declaration(&binding.root) {
         EngramDeclaration::Loaded {
             sha256, entries, ..

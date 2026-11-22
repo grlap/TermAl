@@ -1,11 +1,16 @@
 // Owns targeted registration-path admission, independent of history size.
 // Does not discover runs, index artifacts, or grant verification credit.
 // Split from test_run_registration.rs's global allowed-directory scan.
-fn test_run_registration_target(common: &FsPath, run: &FsPath) -> bool {
+
+use super::*;
+pub(crate) fn test_run_registration_target(common: &FsPath, run: &FsPath) -> bool {
     let Ok(common) = fs::canonicalize(common) else {
         return false;
     };
-    let Some(parent) = run.parent().and_then(|parent| fs::canonicalize(parent).ok()) else {
+    let Some(parent) = run
+        .parent()
+        .and_then(|parent| fs::canonicalize(parent).ok())
+    else {
         return false;
     };
     // Check the resolved shape before reconstructing it: canonicalizing an
@@ -18,7 +23,10 @@ fn test_run_registration_target(common: &FsPath, run: &FsPath) -> bool {
 
 // Pure native-component guard; it also covers non-UTF8 path representations on
 // systems whose filesystems cannot create such names (for example APFS).
-fn test_run_registration_relative_parent<'a>(common: &FsPath, parent: &'a FsPath) -> Option<&'a FsPath> {
+pub(crate) fn test_run_registration_relative_parent<'a>(
+    common: &FsPath,
+    parent: &'a FsPath,
+) -> Option<&'a FsPath> {
     let relative = parent.strip_prefix(common).ok()?;
     use std::path::Component::Normal;
     let components: Vec<_> = relative.components().collect();

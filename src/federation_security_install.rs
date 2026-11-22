@@ -1,11 +1,13 @@
 // Owns cancellation-independent durable context installation and exact teardown.
 // Does not perform network IO or grant admission. New A1/M1 ownership seam.
 
-struct FederationControlGuard {
-    channel: FederationChannel,
-    owner: u64,
-    incarnation: String,
-    cancelled: Arc<AtomicBool>,
+use super::*;
+
+pub(crate) struct FederationControlGuard {
+    pub(crate) channel: FederationChannel,
+    pub(crate) owner: u64,
+    pub(crate) incarnation: String,
+    pub(crate) cancelled: Arc<AtomicBool>,
 }
 
 impl Drop for FederationControlGuard {
@@ -16,7 +18,7 @@ impl Drop for FederationControlGuard {
 }
 
 impl FederationChannel {
-    fn next_security_owner(&self) -> Result<u64, ApiError> {
+    pub(crate) fn next_security_owner(&self) -> Result<u64, ApiError> {
         self.current_authority()?;
         let mut state = self.state.lock().expect("federation link mutex poisoned");
         state.next_owner = state
@@ -31,13 +33,14 @@ impl FederationChannel {
         Ok(owner)
     }
 
-    async fn install_security(
+    pub(crate) async fn install_security(
         &self,
         context: Arc<FederationSecurityContext>,
     ) -> Result<FederationControlGuard, ApiError> {
         let attempt = self.transport_basis();
-        let _ = context.diagnostic_attempt_basis.set((
-            attempt.enrollment_generation, attempt.transport_generation));
+        let _ = context
+            .diagnostic_attempt_basis
+            .set((attempt.enrollment_generation, attempt.transport_generation));
         let guard = FederationControlGuard {
             channel: self.clone(),
             owner: context.owner,
@@ -80,8 +83,11 @@ impl FederationChannel {
                     tokio::task::spawn_blocking(move || {
                         let mut installed = None;
                         #[cfg(not(test))]
-                        let result =
-                            app.federation_peer_connected_owned(&expected, incarnation, &mut installed);
+                        let result = app.federation_peer_connected_owned(
+                            &expected,
+                            incarnation,
+                            &mut installed,
+                        );
                         #[cfg(test)]
                         let result = app.federation_peer_connected_owned_with_clock(
                             &expected,
@@ -108,8 +114,9 @@ impl FederationChannel {
                 // Freeze the exact installed receipt for historical diagnostics,
                 // including an installation whose durability subsequently failed.
                 if let Some(receipt) = &installed {
-                    let _ = context.diagnostic_basis.set((
-                        receipt.enrollment_generation, receipt.transport_generation));
+                    let _ = context
+                        .diagnostic_basis
+                        .set((receipt.enrollment_generation, receipt.transport_generation));
                 }
                 if same_basis {
                     if let Some(receipt) = &installed {
@@ -155,7 +162,8 @@ impl FederationChannel {
                 drop(state);
                 channel.observe_attestation(Some(context.owner));
                 Ok(())
-            }.await;
+            }
+            .await;
             if let Err(error) = &result {
                 channel.retain_install_diagnostic(&context, error.status);
             }

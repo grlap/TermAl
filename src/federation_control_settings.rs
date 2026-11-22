@@ -1,15 +1,17 @@
 // Owns immutable control timing and test phase notifications per channel.
 // Does not own global Tokio time or persistence. Split from federation_runtime_io.rs.
 
+use super::*;
+
 #[derive(Clone)]
-struct FederationControlSettings {
-    interval: Duration,
-    timeout: Duration,
-    link_startup_timeout: Duration,
-    attest_timeout: Duration,
-    clock: FederationControlClock,
+pub(crate) struct FederationControlSettings {
+    pub(crate) interval: Duration,
+    pub(crate) timeout: Duration,
+    pub(crate) link_startup_timeout: Duration,
+    pub(crate) attest_timeout: Duration,
+    pub(crate) clock: FederationControlClock,
     #[cfg(test)]
-    observed: Arc<dyn Fn(&'static str, u64) + Send + Sync>,
+    pub(crate) observed: Arc<dyn Fn(&'static str, u64) + Send + Sync>,
 }
 
 impl Default for FederationControlSettings {
@@ -27,7 +29,7 @@ impl Default for FederationControlSettings {
 }
 
 impl FederationControlSettings {
-    fn from_io(io: &FederationRuntimeIo) -> Self {
+    pub(crate) fn from_io(io: &FederationRuntimeIo) -> Self {
         Self {
             interval: io.control_interval,
             timeout: io.control_timeout,
@@ -39,7 +41,7 @@ impl FederationControlSettings {
         }
     }
 
-    fn observe(&self, event: &'static str, sequence: u64) {
+    pub(crate) fn observe(&self, event: &'static str, sequence: u64) {
         #[cfg(test)]
         (self.observed)(event, sequence);
         #[cfg(not(test))]
@@ -49,19 +51,21 @@ impl FederationControlSettings {
 
 // Observation only: publish the terminal phase before the owned security guard
 // withdraws this context. Keep the fixture's sequence notification as well.
-struct FederationControlEnd<'a> {
-    channel: &'a FederationChannel,
-    context: &'a FederationSecurityContext,
-    reason: &'static str,
-    io_kind: Option<&'static str>,
-    sequence: u64,
+pub(crate) struct FederationControlEnd<'a> {
+    pub(crate) channel: &'a FederationChannel,
+    pub(crate) context: &'a FederationSecurityContext,
+    pub(crate) reason: &'static str,
+    pub(crate) io_kind: Option<&'static str>,
+    pub(crate) sequence: u64,
 }
 
 impl Drop for FederationControlEnd<'_> {
     fn drop(&mut self) {
         // Like FederationWorkerReporter, diagnostics must not hide the first
         // failure. The owning security guard still performs exact revocation.
-        if std::thread::panicking() { return; }
+        if std::thread::panicking() {
+            return;
+        }
         self.channel
             .observe_terminal_detail(self.context, "control", self.reason, self.io_kind);
         self.channel.control.observe(self.reason, self.sequence);
@@ -69,7 +73,7 @@ impl Drop for FederationControlEnd<'_> {
 }
 
 impl FederationControlEnd<'_> {
-    fn frame_failure(&mut self, failure: FederationControlFrameFailure) -> ApiError {
+    pub(crate) fn frame_failure(&mut self, failure: FederationControlFrameFailure) -> ApiError {
         self.reason = failure.reason;
         self.io_kind = failure.io_kind;
         failure.error

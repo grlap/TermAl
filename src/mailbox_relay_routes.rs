@@ -1,41 +1,43 @@
 // Public routine-mail routing into the authenticated, immutable native home.
 // Explicit native locators reuse this facade; it never invokes a provider or joins a domain.
 
+use super::*;
+
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MailboxRelayListing {
-    mailboxes: Vec<MailboxSummary>,
-    unavailable_relay_homes: Vec<MailboxRelayUnavailableHome>,
+pub(crate) struct MailboxRelayListing {
+    pub(crate) mailboxes: Vec<MailboxSummary>,
+    pub(crate) unavailable_relay_homes: Vec<MailboxRelayUnavailableHome>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    unavailable_central_domain: Option<MailboxRelayUnavailableDomain>,
+    pub(crate) unavailable_central_domain: Option<MailboxRelayUnavailableDomain>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    unavailable_prior_domains: Vec<MailboxUnavailablePriorDomain>,
+    pub(crate) unavailable_prior_domains: Vec<MailboxUnavailablePriorDomain>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MailboxUnavailablePriorDomain {
-    central: FederationHostIdentity,
-    participant_id: String,
-    reason: &'static str,
+pub(crate) struct MailboxUnavailablePriorDomain {
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) participant_id: String,
+    pub(crate) reason: &'static str,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MailboxRelayUnavailableDomain {
-    central: FederationHostIdentity,
-    availability: &'static str,
-    status: u16,
-    error: String,
+pub(crate) struct MailboxRelayUnavailableDomain {
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) availability: &'static str,
+    pub(crate) status: u16,
+    pub(crate) error: String,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MailboxRelayUnavailableHome {
-    home: MailboxRelayHome,
-    availability: &'static str,
-    status: u16,
-    error: String,
+pub(crate) struct MailboxRelayUnavailableHome {
+    pub(crate) home: MailboxRelayHome,
+    pub(crate) availability: &'static str,
+    pub(crate) status: u16,
+    pub(crate) error: String,
 }
 
 fn public_mailbox_relay_summary(
@@ -55,7 +57,7 @@ fn public_mailbox_relay_message(
     Ok(message)
 }
 
-const NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE: &str =
+pub(crate) const NATIVE_MAILBOX_RELAY_PEER_UNAVAILABLE: &str =
     "native mailbox relay requires an enrolled authenticated peer with relay support";
 const NATIVE_MAILBOX_RELAY_RECOVERY_PEER_UNAVAILABLE: &str = "native mailbox has no saved association for this caller and mailbox (home=remote, peer_handle=absent)";
 
@@ -75,7 +77,7 @@ fn mailbox_relay_home_unavailable(error: &ApiError) -> bool {
 /// down or changed, no relay peer handle is held, or the transport gave no
 /// usable answer. It reads as 503 current status unavailable; any other
 /// error, such as a membership or enrollment change, is left as it was.
-fn mailbox_relay_current_status_unavailable(error: ApiError) -> ApiError {
+pub(crate) fn mailbox_relay_current_status_unavailable(error: ApiError) -> ApiError {
     if mailbox_relay_home_unavailable(&error) {
         return mailbox_current_status_unavailable(ApiError::from_status(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -136,7 +138,7 @@ impl AppState {
         Ok(())
     }
 
-    fn mailbox_relay_peer(
+    pub(crate) fn mailbox_relay_peer(
         &self,
         actor: &MailboxRelayPrincipal,
         conversation: &MailboxRelayConversation,
@@ -177,7 +179,7 @@ impl AppState {
         Ok((handle, lease, peer))
     }
 
-    async fn call_native_mailbox_home<T: DeserializeOwned>(
+    pub(crate) async fn call_native_mailbox_home<T: DeserializeOwned>(
         &self,
         actor: &MailboxRelayPrincipal,
         conversation: &MailboxRelayConversation,
@@ -298,7 +300,7 @@ impl AppState {
         )))
     }
 
-    async fn send_native_mailbox_relay(
+    pub(crate) async fn send_native_mailbox_relay(
         &self,
         session: &str,
         request: &SendMailboxMessageRequest,
@@ -307,7 +309,7 @@ impl AppState {
             .await
     }
 
-    async fn send_native_mailbox_relay_with_test_custody(
+    pub(crate) async fn send_native_mailbox_relay_with_test_custody(
         &self,
         session: &str,
         request: &SendMailboxMessageRequest,
@@ -580,7 +582,7 @@ impl AppState {
         )?))
     }
 
-    async fn list_native_mailbox_relays(
+    pub(crate) async fn list_native_mailbox_relays(
         &self,
         session: &str,
     ) -> Result<MailboxRelayListing, ApiError> {
@@ -658,7 +660,7 @@ impl AppState {
         })
     }
 
-    async fn recover_native_mailbox_relay_association(
+    pub(crate) async fn recover_native_mailbox_relay_association(
         &self,
         actor: &MailboxRelayPrincipal,
         locator: &MailboxRelayLocator,
@@ -751,7 +753,7 @@ impl AppState {
         .await?;
         Ok(conversation)
     }
-    async fn read_native_mailbox_relay(
+    pub(crate) async fn read_native_mailbox_relay(
         &self,
         session: &str,
         locator: MailboxRelayLocator,
@@ -810,7 +812,7 @@ impl AppState {
         Ok(page)
     }
 
-    async fn read_native_mailbox_relay_message(
+    pub(crate) async fn read_native_mailbox_relay_message(
         &self,
         session: &str,
         locator: MailboxRelayLocator,
@@ -867,7 +869,7 @@ impl AppState {
         public_mailbox_relay_message(&locator.home, message)
     }
 
-    async fn acknowledge_native_mailbox_relay(
+    pub(crate) async fn acknowledge_native_mailbox_relay(
         &self,
         session: &str,
         locator: MailboxRelayLocator,

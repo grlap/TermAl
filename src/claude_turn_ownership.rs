@@ -41,29 +41,31 @@
 //   of such frames that no attempt or unowned turn took part in may still be
 //   taken up by a waiting prompt's own `started` or result, as mixed.
 
+use super::*;
+
 /// A prompt TermAl wrote to the runtime whose own turn has not ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeHostPromptOwner {
+pub(crate) struct ClaudeHostPromptOwner {
     /// The session turn generation the prompt was dispatched under.
-    turn_generation: u64,
+    pub(crate) turn_generation: u64,
     /// The replay generation of the written prompt (`ClaudePromptCommand`):
     /// one immutable identity for the logical prompt, retries included.
-    replay_generation: String,
+    pub(crate) replay_generation: String,
     /// The `uuid` this attempt of the prompt is written with, which the
     /// runtime's lifecycle frames and result name: the replay generation for
     /// the first attempt, a fresh one for each retry, so a late frame of an
     /// earlier attempt never names the next one.
-    attempt_uuid: String,
+    pub(crate) attempt_uuid: String,
     /// 0 for the first attempt, then one more for each automatic retry.
-    attempt: u32,
+    pub(crate) attempt: u32,
     /// The exact `message.content` written, which a runtime without the
     /// lifecycle capability echoes back.
-    content: Value,
+    pub(crate) content: Value,
 }
 
 /// Why a turn belongs to no prompt TermAl wrote.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeUnownedCause {
+pub(crate) enum ClaudeUnownedCause {
     /// Claude Code started it after a background-task notice.
     TaskNotice,
     /// Claude Code started it while no prompt of TermAl's was waiting.
@@ -76,17 +78,17 @@ enum ClaudeUnownedCause {
 
 /// A turn that belongs to no prompt TermAl wrote.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeRuntimeTurnOwner {
-    cause: ClaudeUnownedCause,
+pub(crate) struct ClaudeRuntimeTurnOwner {
+    pub(crate) cause: ClaudeUnownedCause,
     /// The session turn generation the host adopted it under; `None` while it
     /// is not adopted (not yet, the session was busy with another turn, or it
     /// is unassigned).
-    adopted_generation: Option<u64>,
+    pub(crate) adopted_generation: Option<u64>,
 }
 
 /// Whether the runtime reports message lifecycle identities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum ClaudeLifecycleSupport {
+pub(crate) enum ClaudeLifecycleSupport {
     /// Not yet said: no `init` and no lifecycle frame seen.
     #[default]
     Unknown,
@@ -98,7 +100,7 @@ enum ClaudeLifecycleSupport {
 
 /// The turn a runtime is running now.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeOpenTurn {
+pub(crate) enum ClaudeOpenTurn {
     Host(ClaudeHostPromptOwner),
     /// A turn no prompt owned took up a waiting prompt part-way (its
     /// `started` arrived inside the turn).
@@ -143,7 +145,7 @@ struct ClaudeTurnClose {
 
 /// What one frame did to the runtime's turns.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeFrameOwnership {
+pub(crate) enum ClaudeFrameOwnership {
     /// The frame belongs to the open turn or to no turn.
     Unchanged,
     /// The frame opened the turn of a prompt TermAl wrote.
@@ -159,7 +161,7 @@ enum ClaudeFrameOwnership {
 
 /// The turn a `result` ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeResultOwner {
+pub(crate) enum ClaudeResultOwner {
     Host(ClaudeHostPromptOwner),
     /// A turn that began with no owner and took up this prompt part-way: the
     /// prompt is settled, and its grant's attribution is mixed.
@@ -167,7 +169,9 @@ enum ClaudeResultOwner {
     Runtime(ClaudeRuntimeTurnOwner),
     /// No turn was open and the result names no prompt: it finalizes nothing.
     /// `prompt_waiting` says a prompt of TermAl's still waits for its turn.
-    Uncorrelated { prompt_waiting: bool },
+    Uncorrelated {
+        prompt_waiting: bool,
+    },
     /// The result names only attempts that have already ended: a late
     /// duplicate. It ends no turn and finalizes nothing.
     Stale,
@@ -191,38 +195,38 @@ enum ClaudeResultOwner {
 /// writer may write it only while it is still the one pending
 /// (`claude_frame_router.rs`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeRetryTicket {
-    replay_generation: String,
+pub(crate) struct ClaudeRetryTicket {
+    pub(crate) replay_generation: String,
     /// The session turn generation the prompt was dispatched under.
-    turn_generation: u64,
+    pub(crate) turn_generation: u64,
     /// The attempt the retry writes: 1 for the first retry.
-    attempt: u32,
+    pub(crate) attempt: u32,
 }
 
 /// At most this many ended attempts are remembered as retired.
 const CLAUDE_RETIRED_ATTEMPT_LIMIT: usize = 32;
 
 #[derive(Debug, Default)]
-struct ClaudeTurnOwnershipState {
+pub(crate) struct ClaudeTurnOwnershipState {
     /// Prompts written (or being written), oldest first, whose turn has not
     /// opened yet.
-    outstanding: VecDeque<ClaudeHostPromptOwner>,
-    open: Option<ClaudeOpenTurn>,
-    notice_since_result: bool,
-    lifecycle: ClaudeLifecycleSupport,
+    pub(crate) outstanding: VecDeque<ClaudeHostPromptOwner>,
+    pub(crate) open: Option<ClaudeOpenTurn>,
+    pub(crate) notice_since_result: bool,
+    pub(crate) lifecycle: ClaudeLifecycleSupport,
     /// The uuids of attempts that have ended, newest last.
-    retired: VecDeque<String>,
+    pub(crate) retired: VecDeque<String>,
     /// The automatic retry scheduled and not yet written, if any.
-    pending_retry: Option<ClaudeRetryTicket>,
+    pub(crate) pending_retry: Option<ClaudeRetryTicket>,
 }
 
-type ClaudeTurnOwnership = Arc<Mutex<ClaudeTurnOwnershipState>>;
+pub(crate) type ClaudeTurnOwnership = Arc<Mutex<ClaudeTurnOwnershipState>>;
 
-fn new_claude_turn_ownership() -> ClaudeTurnOwnership {
+pub(crate) fn new_claude_turn_ownership() -> ClaudeTurnOwnership {
     Arc::new(Mutex::new(ClaudeTurnOwnershipState::default()))
 }
 
-fn lock_claude_turn_ownership(
+pub(crate) fn lock_claude_turn_ownership(
     ownership: &ClaudeTurnOwnership,
 ) -> std::sync::MutexGuard<'_, ClaudeTurnOwnershipState> {
     ownership
@@ -231,7 +235,7 @@ fn lock_claude_turn_ownership(
 }
 
 /// The exact `message.content` TermAl writes for a prompt.
-fn claude_prompt_content(prompt: &ClaudePromptCommand) -> Value {
+pub(crate) fn claude_prompt_content(prompt: &ClaudePromptCommand) -> Value {
     let mut content = Vec::new();
     if !prompt.text.trim().is_empty() {
         content.push(json!({
@@ -254,12 +258,12 @@ fn claude_prompt_content(prompt: &ClaudePromptCommand) -> Value {
 
 /// The owner of a prompt's first attempt, written with its replay generation
 /// as its uuid.
-fn claude_host_prompt_owner(prompt: &ClaudePromptCommand) -> ClaudeHostPromptOwner {
+pub(crate) fn claude_host_prompt_owner(prompt: &ClaudePromptCommand) -> ClaudeHostPromptOwner {
     claude_host_prompt_attempt_owner(prompt, 0, prompt.replay_generation.clone())
 }
 
 /// The owner of attempt `attempt` of a prompt, written with `attempt_uuid`.
-fn claude_host_prompt_attempt_owner(
+pub(crate) fn claude_host_prompt_attempt_owner(
     prompt: &ClaudePromptCommand,
     attempt: u32,
     attempt_uuid: String,
@@ -292,7 +296,7 @@ fn claude_user_frame_is_task_notice(message: &Value) -> bool {
 /// Whether a frame is turn output: the frames that open a turn when none is
 /// open. Init, status, hook and task bookkeeping frames, telemetry and
 /// `result` are not.
-fn claude_frame_is_turn_output(message: &Value) -> bool {
+pub(crate) fn claude_frame_is_turn_output(message: &Value) -> bool {
     matches!(
         message.get("type").and_then(Value::as_str),
         Some("assistant" | "stream_event" | "control_request")
@@ -301,10 +305,8 @@ fn claude_frame_is_turn_output(message: &Value) -> bool {
 
 /// Whether a frame belongs to the top-level conversation: a subagent's frames
 /// carry the tool use they belong to, and neither open nor end a turn.
-fn claude_frame_is_top_level(message: &Value) -> bool {
-    message
-        .get("parent_tool_use_id")
-        .is_none_or(Value::is_null)
+pub(crate) fn claude_frame_is_top_level(message: &Value) -> bool {
+    message.get("parent_tool_use_id").is_none_or(Value::is_null)
 }
 
 /// The host message identities a frame names (`user_message_uuid` and
@@ -327,7 +329,10 @@ fn claude_frame_message_uuids(message: &Value) -> std::result::Result<Vec<String
     match message.get("user_message_uuid") {
         None | Some(Value::Null) => {}
         Some(Value::String(uuid)) => {
-            if message.get("user_message_uuids").is_some_and(|plural| !plural.is_null()) {
+            if message
+                .get("user_message_uuids")
+                .is_some_and(|plural| !plural.is_null())
+            {
                 if !uuids.iter().any(|known| known == uuid) {
                     return Err(());
                 }
@@ -345,7 +350,7 @@ impl ClaudeTurnOwnershipState {
     /// same prompt again under a fresh uuid: its reservation replaces any
     /// still waiting for that prompt, so one logical prompt is reserved once.
     /// A prompt's first attempt supersedes any retry still pending.
-    fn reserve(&mut self, owner: ClaudeHostPromptOwner) {
+    pub(crate) fn reserve(&mut self, owner: ClaudeHostPromptOwner) {
         self.outstanding
             .retain(|waiting| waiting.replay_generation != owner.replay_generation);
         if owner.attempt == 0 {
@@ -355,7 +360,7 @@ impl ClaudeTurnOwnershipState {
     }
 
     /// The write of the attempt with `attempt_uuid` failed: it has no turn.
-    fn release(&mut self, attempt_uuid: &str) {
+    pub(crate) fn release(&mut self, attempt_uuid: &str) {
         if let Some(position) = self
             .outstanding
             .iter()
@@ -366,17 +371,17 @@ impl ClaudeTurnOwnershipState {
     }
 
     /// Whether a turn is open.
-    fn turn_is_open(&self) -> bool {
+    pub(crate) fn turn_is_open(&self) -> bool {
         self.open.is_some()
     }
 
     /// Whether a written prompt still waits for its turn.
-    fn prompt_is_waiting(&self) -> bool {
+    pub(crate) fn prompt_is_waiting(&self) -> bool {
         !self.outstanding.is_empty()
     }
 
     /// Whether the runtime reports message lifecycles (`msg_lifecycle_v1`).
-    fn reports_lifecycles(&self) -> bool {
+    pub(crate) fn reports_lifecycles(&self) -> bool {
         self.lifecycle == ClaudeLifecycleSupport::Supported
     }
 
@@ -384,10 +389,12 @@ impl ClaudeTurnOwnershipState {
     /// a prompt still waiting for its turn. It proves nothing about
     /// ownership (`observe` decides that); it only says the frame is that
     /// prompt's echo and not some other user content.
-    fn is_exact_echo_of_waiting_prompt(&self, message: &Value) -> bool {
+    pub(crate) fn is_exact_echo_of_waiting_prompt(&self, message: &Value) -> bool {
         message.get("type").and_then(Value::as_str) == Some("user")
             && message.pointer("/message/content").is_some_and(|content| {
-                self.outstanding.iter().any(|owner| &owner.content == content)
+                self.outstanding
+                    .iter()
+                    .any(|owner| &owner.content == content)
             })
     }
 
@@ -409,23 +416,23 @@ impl ClaudeTurnOwnershipState {
 
     /// Whether `frame` names at least one attempt, and only attempts that
     /// have ended.
-    fn names_only_retired(&self, frame: &Value) -> bool {
+    pub(crate) fn names_only_retired(&self, frame: &Value) -> bool {
         claude_frame_message_uuids(frame)
             .is_ok_and(|uuids| !uuids.is_empty() && uuids.iter().all(|uuid| self.is_retired(uuid)))
     }
 
     /// The reader scheduled `ticket`: the writer may write it while it stays
     /// the one pending.
-    fn schedule_retry(&mut self, ticket: ClaudeRetryTicket) {
+    pub(crate) fn schedule_retry(&mut self, ticket: ClaudeRetryTicket) {
         self.pending_retry = Some(ticket);
     }
 
-    fn retry_is_pending(&self, ticket: &ClaudeRetryTicket) -> bool {
+    pub(crate) fn retry_is_pending(&self, ticket: &ClaudeRetryTicket) -> bool {
         self.pending_retry.as_ref() == Some(ticket)
     }
 
     /// Takes `ticket` if it is still the retry pending.
-    fn take_pending_retry(&mut self, ticket: &ClaudeRetryTicket) -> bool {
+    pub(crate) fn take_pending_retry(&mut self, ticket: &ClaudeRetryTicket) -> bool {
         let pending = self.retry_is_pending(ticket);
         if pending {
             self.pending_retry = None;
@@ -441,7 +448,11 @@ impl ClaudeTurnOwnershipState {
         self.outstanding.remove(position)
     }
 
-    fn open_turn(&mut self, turn: ClaudeOpenTurn, ownership: ClaudeFrameOwnership) -> ClaudeFrameOwnership {
+    fn open_turn(
+        &mut self,
+        turn: ClaudeOpenTurn,
+        ownership: ClaudeFrameOwnership,
+    ) -> ClaudeFrameOwnership {
         self.open = Some(turn);
         ownership
     }
@@ -482,7 +493,7 @@ impl ClaudeTurnOwnershipState {
 
     /// The prompt attempt whose own turn is open now, if any: a turn taken up
     /// part-way, an unowned or an unresolved turn is none.
-    fn open_host_owner(&self) -> Option<&ClaudeHostPromptOwner> {
+    pub(crate) fn open_host_owner(&self) -> Option<&ClaudeHostPromptOwner> {
         match &self.open {
             Some(ClaudeOpenTurn::Host(owner)) => Some(owner),
             _ => None,
@@ -501,7 +512,7 @@ impl ClaudeTurnOwnershipState {
     /// may end (`ClaudeResultOwner::Unresolved::adopted_interval`): one the
     /// host adopted (with its generation) for a turn Claude Code started by
     /// itself, with no prompt's attempt part of it and none waiting.
-    fn adopted_interval(
+    pub(crate) fn adopted_interval(
         &self,
         unowned: Option<ClaudeRuntimeTurnOwner>,
         participants: &[String],
@@ -526,7 +537,7 @@ impl ClaudeTurnOwnershipState {
 
     /// Records what `message` does to the runtime's turns. `result` frames
     /// are closed by `close_for_result`, not here.
-    fn observe(&mut self, message: &Value) -> ClaudeFrameOwnership {
+    pub(crate) fn observe(&mut self, message: &Value) -> ClaudeFrameOwnership {
         // A subagent's frames (lifecycle, system and output alike) carry the
         // tool use they belong to; they neither open nor end nor contradict
         // the root turn.
@@ -741,7 +752,7 @@ impl ClaudeTurnOwnershipState {
     }
 
     /// The host adopted the open runtime-started turn under `generation`.
-    fn note_runtime_adoption(&mut self, generation: Option<u64>) {
+    pub(crate) fn note_runtime_adoption(&mut self, generation: Option<u64>) {
         if let Some(ClaudeOpenTurn::Runtime(owner)) = &mut self.open {
             owner.adopted_generation = generation;
         }
@@ -749,7 +760,7 @@ impl ClaudeTurnOwnershipState {
 
     /// A proven open root runtime turn, excluding contradictory/unresolved
     /// identities and host prompts that joined an unowned interval.
-    fn open_adopted_runtime_generation(&self) -> Option<u64> {
+    pub(crate) fn open_adopted_runtime_generation(&self) -> Option<u64> {
         match &self.open {
             Some(ClaudeOpenTurn::Runtime(owner)) => owner.adopted_generation,
             _ => None,
@@ -763,13 +774,16 @@ impl ClaudeTurnOwnershipState {
     /// their prompt as success results do (`error_max_turns`, and
     /// `error_during_execution` after an interrupt).
     #[cfg(test)]
-    fn close_for_result(&mut self, result: &Value) -> ClaudeResultOwner {
+    pub(crate) fn close_for_result(&mut self, result: &Value) -> ClaudeResultOwner {
         self.close_for_result_with_opening(result).0
     }
 
     /// `close_for_result`, also saying whether the result alone opened the
     /// attempt it settles (`ClaudeTurnClose::opened_by_result`).
-    fn close_for_result_with_opening(&mut self, result: &Value) -> (ClaudeResultOwner, bool) {
+    pub(crate) fn close_for_result_with_opening(
+        &mut self,
+        result: &Value,
+    ) -> (ClaudeResultOwner, bool) {
         // A late result of an attempt that has ended (a duplicate terminal)
         // ends nothing, the turn open now included.
         if self.names_only_retired(result) {

@@ -1,12 +1,14 @@
 // Non-blocking verification writers. These services never admit a turn,
 // retry a control operation, or hold ordinary dispatch and queue progression.
 
+use super::*;
+
 #[cfg(not(test))]
 const ENGRAM_VERIFICATION_TICK_INTERVAL: Duration = Duration::from_secs(2);
 
 impl AppState {
     #[cfg(not(test))]
-    fn spawn_engram_verification_ticks(&self) {
+    pub(crate) fn spawn_engram_verification_ticks(&self) {
         let state = self.clone();
         let shutdown = self.subscribe_shutdown_signal();
         let spawned = std::thread::Builder::new()

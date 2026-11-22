@@ -3,17 +3,17 @@
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunWaitObservationLabel {
-    execution_id: String,
-    runtime_identity: Option<String>,
-    tool_identity: String,
-    command_fingerprint: String,
-    turn_generation: u64,
-    project_id: Option<String>,
+pub(crate) struct TestRunWaitObservationLabel {
+    pub(crate) execution_id: String,
+    pub(crate) runtime_identity: Option<String>,
+    pub(crate) tool_identity: String,
+    pub(crate) command_fingerprint: String,
+    pub(crate) turn_generation: u64,
+    pub(crate) project_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TestRunWaitObservationUnknownReason {
+pub(crate) enum TestRunWaitObservationUnknownReason {
     Terminal,
     Interrupted,
     Unavailable,

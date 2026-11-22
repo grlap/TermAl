@@ -3,18 +3,20 @@
 // transfers credit into a successor trace. Registered native verification has
 // its own exact registration, producer receipt and source checks.
 
+use super::*;
+
 /// At most this many carried checks per session; a new launch past it drops
 /// the oldest, whose holder is told.
-const ENGRAM_CARRIED_CHECK_LIMIT: usize = 4;
+pub(crate) const ENGRAM_CARRIED_CHECK_LIMIT: usize = 4;
 
 /// A carried check whose run never settles in this long is dropped, and its
 /// holder told: its launch failed, or its run was removed.
-const ENGRAM_CARRIED_CHECK_TTL_SECONDS: i64 = 6 * 60 * 60;
+pub(crate) const ENGRAM_CARRIED_CHECK_TTL_SECONDS: i64 = 6 * 60 * 60;
 
 /// At most this many distinct directories of one watcher batch are placed in
 /// their worktrees for the carried fence; a batch touching more fences every
 /// carried check, since one of them may be its worktree.
-const ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT: usize = 256;
+pub(crate) const ENGRAM_CARRIED_WATCH_DIRECTORY_LIMIT: usize = 256;
 
 /// The largest launcher record read, so a malformed or hostile file cannot
 /// exhaust memory. A real terminal record of a full gate is a few KiB.
@@ -35,84 +37,84 @@ const ENGRAM_CARRIED_CONSUMED_RUN_LIMIT: usize = 16;
 /// taken the command's start under its lock, which can lag the launcher's
 /// own start by a contended lock or a runtime that reports late. The owner
 /// match and the fence keep another run out of that window.
-const ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS: i64 = 10;
+pub(crate) const ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS: i64 = 10;
 
 /// How every host line about a check's credit begins: a check withheld, a
 /// background gate refused, dropped or not carried, or one lost to a restart.
 /// Such lines merge with each other
 /// (`EngramSessionState::set_pending_source_root_line`) rather than pushing
 /// a bind or name line out of the pending lines.
-const ENGRAM_CHECK_CREDIT_LINE_PREFIX: &str = "[TermAl] Check credit:";
+pub(crate) const ENGRAM_CHECK_CREDIT_LINE_PREFIX: &str = "[TermAl] Check credit:";
 
 /// The longest merged line about checks' credit. The merge keeps the newest
 /// and cuts from the front; every such line is logged as it is set, so what
 /// it cuts is still in the host log.
-const ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES: usize = 1600;
+pub(crate) const ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES: usize = 1600;
 
 /// A launcher full gate whose result marked only its launch, kept past the
 /// turn that launched it until the run settles.
 #[derive(Clone, Debug)]
-struct EngramCarriedCheck {
+pub(crate) struct EngramCarriedCheck {
     /// The check as its launch recorded it: grant, command, root, start time
     /// and start source basis. It has no end.
-    check: EngramTurnCheck,
+    pub(crate) check: EngramTurnCheck,
     /// A Codex test still running when its turn closed
     /// (`engram_reported_ends.rs`): it ends by the end its runtime reports for
     /// it (`check.end`), not by a launcher run's terminal record, so it has no
     /// run to find. `false` for a launcher full gate.
-    ends_by_report: bool,
+    pub(crate) ends_by_report: bool,
     /// For such a test: the runtime it ran under, whose exit closes it
     /// (`engram_close_reported_end_carries`), since no end can come from a
     /// runtime that is gone. `None` for a launcher full gate, which outlives
     /// the runtime that launched it.
-    runtime: Option<RuntimeToken>,
+    pub(crate) runtime: Option<RuntimeToken>,
     /// The claimed work the launching turn was bound to.
     #[cfg(test)]
-    work_id: String,
+    pub(crate) work_id: String,
     #[cfg(test)]
-    claim_id: String,
+    pub(crate) claim_id: String,
     /// Authority at launch. Live renewal keeps this fence; recovery after a
     /// lapse advances it even if the claim id and root naming survive.
     #[cfg(test)]
-    claim_fence: i64,
+    pub(crate) claim_fence: i64,
     /// The generation of the named source root the check ran in.
     #[cfg(test)]
-    root_generation: u64,
+    pub(crate) root_generation: u64,
     /// The run's directory, once found (`engram_find_carried_run`).
-    run_directory: Option<PathBuf>,
+    pub(crate) run_directory: Option<PathBuf>,
     /// The SHA-256 of the run's terminal record, from the first read that
     /// found it terminal; settlement refuses a record that differs.
-    terminal_digest: Option<String>,
+    pub(crate) terminal_digest: Option<String>,
     /// The run has no terminal record and the process responsible for it is
     /// provably gone (`engram_carried_run_launcher_gone`): it will never end.
-    launcher_gone: bool,
+    pub(crate) launcher_gone: bool,
     /// No run directory appeared within `ENGRAM_CARRIED_RUN_SEARCH_SECONDS`
     /// of the launch: the launch started no run.
-    run_missing: bool,
+    pub(crate) run_missing: bool,
     /// Two reads that each found the run terminal saw different records
     /// (polls run on the run index's tick and before checkpoints, and read
     /// off the lock): the first terminal read cannot be told, so the check is
     /// refused.
-    terminal_conflict: bool,
+    pub(crate) terminal_conflict: bool,
     /// Another launch of the session in the same worktree had no run matched
     /// to it when this one was carried (a launch fenced before a poll found
     /// its run, one that left unmatched, or a compound launch that was
     /// dropped): a run found now could be either's, so this one is refused.
-    ambiguous: bool,
+    pub(crate) ambiguous: bool,
     /// Run directories already read that can never be this launch's run (of
     /// another root or mode, or started before it), so later searches skip
     /// them rather than read every run again on every tick.
-    ruled_out_runs: std::collections::BTreeSet<PathBuf>,
+    pub(crate) ruled_out_runs: std::collections::BTreeSet<PathBuf>,
     /// What wrote into its worktree while it was carried, if anything did;
     /// such a check is refused and its holder told.
-    fence: Option<String>,
+    pub(crate) fence: Option<String>,
     /// When the host first read its run as terminal, on the interference
     /// clock (`engram_claude_interference.rs`).
-    terminal_at: Option<u64>,
+    pub(crate) terminal_at: Option<u64>,
     /// Wall clock when a terminal digest was first retained. A launch
     /// observed later cannot own this already-finished run (allowing the
     /// same bounded stamp lag used by run matching).
-    terminal_observed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub(crate) terminal_observed_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Claude work that may have written in its worktree after its run was
     /// read as terminal (`engram_claude_interference.rs`): the earliest such
     /// registration on the interference clock, with its cause. It is kept,
@@ -120,35 +122,35 @@ struct EngramCarriedCheck {
     /// since a settlement taken later may record what that work wrote. Each
     /// settlement candidate is judged against it by that candidate's own
     /// closure (`engram_carried_candidate_closure`).
-    potential: Option<(u64, ClaudeHazardCause)>,
+    pub(crate) potential: Option<(u64, ClaudeHazardCause)>,
     /// The other items of a batch this gate's passed record is bound to
     /// (`engram_verification_bind.rs`), as its launch recorded them. Empty
     /// for a single-item gate and for a carried Codex test.
     /// Each with the fence its claim had at the gate's launch, read then.
-    bind_targets: Vec<EngramBindTarget>,
+    pub(crate) bind_targets: Vec<EngramBindTarget>,
 }
 
 /// What survives a host restart of a carried check: enough to tell its
 /// holder that the run lost its credit.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramCarriedLaunchMarker {
-    root: String,
-    launched_at: String,
-    fingerprint: String,
+pub(crate) struct EngramCarriedLaunchMarker {
+    pub(crate) root: String,
+    pub(crate) launched_at: String,
+    pub(crate) fingerprint: String,
     /// For a carried Codex test (`EngramCarriedCheck::ends_by_report`): the
     /// line its holder gets, closing it with outcome Unknown, since its end
     /// can no longer be reported to the host. Absent for a launcher full gate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    unknown_line: Option<String>,
+    pub(crate) unknown_line: Option<String>,
     /// For a batch gate: its other members' references, each told at load
     /// that the gate's record was not bound to it (`engram_batch_binds.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    bind_members: Vec<String>,
+    pub(crate) bind_members: Vec<String>,
 }
 
 impl EngramCarriedCheck {
-    fn marker(&self) -> EngramCarriedLaunchMarker {
+    pub(crate) fn marker(&self) -> EngramCarriedLaunchMarker {
         EngramCarriedLaunchMarker {
             root: self.check.target.root.to_string_lossy().into_owned(),
             launched_at: self.check.started_at.clone(),
@@ -169,7 +171,7 @@ impl EngramCarriedCheck {
     /// until its end is reported, that end with its closing snapshot taken and
     /// a declared check's artifact read (`EngramTurnCheck::open_to_writes`).
     /// Until then it stays fenced, as a check in its turn is.
-    fn ended(&self) -> bool {
+    pub(crate) fn ended(&self) -> bool {
         if self.ends_by_report {
             !self.check.open_to_writes()
         } else {
@@ -180,7 +182,7 @@ impl EngramCarriedCheck {
     /// For a Codex test carried until its end is reported: whether that end
     /// was reported, whatever its captures. A test whose end came is never
     /// closed for want of one; it is settled.
-    fn end_reported(&self) -> bool {
+    pub(crate) fn end_reported(&self) -> bool {
         self.check.end.is_some()
     }
 
@@ -190,7 +192,7 @@ impl EngramCarriedCheck {
     /// does not end its process, which still overlaps later checks in its
     /// worktree (`EngramRunningCodexTest`), so the line says so and how to
     /// end the wait.
-    fn refusal_line(&self, why: &str) -> String {
+    pub(crate) fn refusal_line(&self, why: &str) -> String {
         let (what, again) = if !self.ends_by_report {
             ("background full gate", "Run the gate again")
         } else if self.end_reported() {
@@ -207,7 +209,8 @@ impl EngramCarriedCheck {
             Some(advice) if self.ends_by_report && !self.end_reported() => format!(
                 "It is still running, and later checks in its worktree are overlapped until it \
                  ends; ending its process, or Stopping the session (whose runtime exit closes \
-                 it), ends the wait. {advice}"),
+                 it), ends the wait. {advice}"
+            ),
             Some(advice) => advice.to_owned(),
             None => again.to_owned(),
         };
@@ -223,8 +226,12 @@ impl EngramCarriedCheck {
     /// The line its holder gets when a project settings change ends its
     /// session's claim association and the carried check with it. Names the
     /// gate by fingerprint and root, never by its command line.
-    fn association_reset_line(&self, why: &str) -> String {
-        let what = if self.ends_by_report { "Codex test" } else { "background full gate" };
+    pub(crate) fn association_reset_line(&self, why: &str) -> String {
+        let what = if self.ends_by_report {
+            "Codex test"
+        } else {
+            "background full gate"
+        };
         format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the {what} launched at {} in {} (check {}) is no \
              longer followed: {why}. What was already observed stays as reported; {}.",
@@ -239,7 +246,10 @@ impl EngramCarriedCheck {
 
 /// The lines the holders of `record`'s carried checks get when a project
 /// settings change ends the session's claim association.
-fn engram_carried_checks_association_reset_lines(record: &SessionRecord, why: &str) -> Vec<String> {
+pub(crate) fn engram_carried_checks_association_reset_lines(
+    record: &SessionRecord,
+    why: &str,
+) -> Vec<String> {
     record
         .engram
         .carried_checks
@@ -249,7 +259,7 @@ fn engram_carried_checks_association_reset_lines(record: &SessionRecord, why: &s
 }
 
 /// The line the holder of a check the host carried when it restarted gets.
-fn engram_carried_lost_to_restart_line(marker: &EngramCarriedLaunchMarker) -> String {
+pub(crate) fn engram_carried_lost_to_restart_line(marker: &EngramCarriedLaunchMarker) -> String {
     if let Some(line) = &marker.unknown_line {
         return line.clone();
     }
@@ -266,7 +276,7 @@ fn engram_carried_lost_to_restart_line(marker: &EngramCarriedLaunchMarker) -> St
 }
 
 /// The words of `check`'s test, when it is the test launcher.
-fn engram_launcher_words(check: &EngramCheckCommand) -> Option<Vec<String>> {
+pub(crate) fn engram_launcher_words(check: &EngramCheckCommand) -> Option<Vec<String>> {
     if check.program != "node" {
         return None;
     }
@@ -280,7 +290,7 @@ fn engram_launcher_words(check: &EngramCheckCommand) -> Option<Vec<String>> {
 /// What becomes of a check whose command just ended
 /// (`note_engram_command_finished`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramLaunchDisposition {
+pub(crate) enum EngramLaunchDisposition {
     /// Not a gate's launch: the check ends as any check does.
     Ordinary,
     /// A full gate's launch the host carries until its run settles.
@@ -307,22 +317,26 @@ const ENGRAM_LAUNCH_DROP_COMPOUND: &str = concat!(
 const ENGRAM_LAUNCH_DROP_FAILED: &str = "its detached launch failed, so no run started";
 
 /// Generic full-run stages do not validate a qualified invocation's argv.
-const ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE: &str = concat!(
+pub(crate) const ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE: &str = concat!(
     "its qualified pipe argv has no full-gate validator; launch the gate without ",
     "a pipe argument, two minutes or more after this launch"
 );
 
 /// A reused command key cannot transfer a different invocation's start.
-const ENGRAM_LAUNCH_DROP_ASSOCIATION: &str = concat!(
+pub(crate) const ENGRAM_LAUNCH_DROP_ASSOCIATION: &str = concat!(
     "its completion does not match the command that started, so its run cannot ",
     "be associated; launch the gate again two minutes or more after this launch"
 );
 
 /// These refusals do not prove that no run started. Keep their launch window
 /// so a later ordinary gate cannot borrow a refused invocation's run.
-fn engram_dropped_launch_may_have_run(why: &str) -> bool {
-    matches!(why, ENGRAM_LAUNCH_DROP_COMPOUND | ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE
-        | ENGRAM_LAUNCH_DROP_ASSOCIATION)
+pub(crate) fn engram_dropped_launch_may_have_run(why: &str) -> bool {
+    matches!(
+        why,
+        ENGRAM_LAUNCH_DROP_COMPOUND
+            | ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE
+            | ENGRAM_LAUNCH_DROP_ASSOCIATION
+    )
 }
 
 /// How long after a launch with no run matched to it a later launch in the
@@ -331,13 +345,13 @@ fn engram_dropped_launch_may_have_run(why: &str) -> bool {
 /// an earlier launch's run can be confused with a later launch only when it
 /// started that late; this bounds the launcher's start lag, generously. The
 /// refusal lines name this wait ("two minutes").
-const ENGRAM_CARRIED_AMBIGUITY_SECONDS: i64 = 120;
+pub(crate) const ENGRAM_CARRIED_AMBIGUITY_SECONDS: i64 = 120;
 
 /// At most this many unmatched launches are kept per session
 /// (`carried_unmatched_launches`).
-const ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT: usize = 16;
+pub(crate) const ENGRAM_CARRIED_UNMATCHED_LAUNCH_LIMIT: usize = 16;
 
-fn engram_launch_disposition(
+pub(crate) fn engram_launch_disposition(
     check: &EngramCheckCommand,
     exit: EngramCommandExit,
 ) -> EngramLaunchDisposition {
@@ -379,7 +393,7 @@ fn engram_launch_disposition(
 }
 
 /// The line the holder of a dropped launch gets (`EngramLaunchDisposition::Drop`).
-fn engram_dropped_launch_line(check: &EngramCheckCommand, why: &str) -> String {
+pub(crate) fn engram_dropped_launch_line(check: &EngramCheckCommand, why: &str) -> String {
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a background full gate (check {}) earned no credit \
          and was not recorded: {why}.",
@@ -395,7 +409,7 @@ fn engram_dropped_launch_line(check: &EngramCheckCommand, why: &str) -> String {
 /// does a command whose line TermAl was not told. The cause names the command
 /// by its program and a fingerprint of its line, never the line itself, which
 /// can carry a secret.
-fn engram_fence_carried_for_own_command(
+pub(crate) fn engram_fence_carried_for_own_command(
     record: &mut SessionRecord,
     worktrees: &[Option<String>],
     ran: Option<&str>,
@@ -416,7 +430,7 @@ fn engram_fence_carried_for_own_command(
 }
 
 /// How a fence names the holder's command `ran` (`engram_command_name`).
-fn engram_own_command_cause(ran: &str) -> String {
+pub(crate) fn engram_own_command_cause(ran: &str) -> String {
     let (command, line) = engram_command_name(ran);
     format!("this session ran {command} there {line}")
 }
@@ -452,7 +466,7 @@ fn engram_command_name(ran: &str) -> (String, String) {
 /// written fences it; an ordinary check of a turn, open for one command,
 /// keeps the wider rule (`engram_mark_checks_overlapped_by`).
 #[derive(Clone, Copy, Debug)]
-enum EngramWriterAct<'a> {
+pub(crate) enum EngramWriterAct<'a> {
     /// It started a turn, or its turn's named source root became known, or a
     /// command whose start it reported ended: nothing here says it wrote, so
     /// no carried check is fenced. What it then runs or edits is reported as
@@ -481,15 +495,13 @@ enum EngramWriterAct<'a> {
 impl EngramWriterAct<'_> {
     /// What the writer did, as the line about an overlapped check tells it.
     /// A command's line is not told: it can carry a secret.
-    fn describe(&self) -> &'static str {
+    pub(crate) fn describe(&self) -> &'static str {
         match self {
             EngramWriterAct::Presence => {
                 "was in a turn (it started one, its named root became known or a command ended)"
             }
             EngramWriterAct::Command { .. } => "reported a command",
-            EngramWriterAct::UnreportedCommand => {
-                "ended a command whose start TermAl was not told"
-            }
+            EngramWriterAct::UnreportedCommand => "ended a command whose start TermAl was not told",
             EngramWriterAct::Edit => "reported an edit",
         }
     }
@@ -508,7 +520,7 @@ impl EngramWriterAct<'_> {
 /// the digest of its line (`engram_command_name`), and says whether it was
 /// placed in the check's worktree or could not be placed and may have run
 /// there.
-fn engram_fence_carried_for_other_session(
+pub(crate) fn engram_fence_carried_for_other_session(
     inner: &mut StateInner,
     writer: usize,
     writer_worktrees: &[Option<String>],
@@ -516,13 +528,13 @@ fn engram_fence_carried_for_other_session(
 ) {
     // Most commands run while no other session carries a gate that a write
     // could still reach: nothing is read or formatted for them.
-    let open = |carried: &EngramCarriedCheck| {
-        carried.fence.is_none() && !carried.ended()
-    };
+    let open = |carried: &EngramCarriedCheck| carried.fence.is_none() && !carried.ended();
     if matches!(act, EngramWriterAct::Presence)
-        || !inner.sessions.iter().enumerate().any(|(other, record)| {
-            other != writer && record.engram.carried_checks.iter().any(open)
-        })
+        || !inner
+            .sessions
+            .iter()
+            .enumerate()
+            .any(|(other, record)| other != writer && record.engram.carried_checks.iter().any(open))
     {
         return;
     }
@@ -596,7 +608,7 @@ fn engram_fence_carried_for_other_session(
 /// allows without the object-query families that need a guarded execution
 /// environment (`claude_bash_command_preserves_carried_checks`). The
 /// one-call form's `pushd "DIR" &&` is read as running the rest in `DIR`.
-fn engram_command_reads_only(ran: &str, workdir: &str) -> bool {
+pub(crate) fn engram_command_reads_only(ran: &str, workdir: &str) -> bool {
     let (cwd, line) = match engram_one_call_prefix(ran.trim()) {
         Some((directory, rest)) => (directory, rest.trim().to_owned()),
         None => (workdir.to_owned(), ran.trim().to_owned()),
@@ -634,7 +646,7 @@ fn engram_is_launcher_summary(line: &str, cwd: &str) -> bool {
 /// Where the launcher keeps the runs of the worktree at `root`: its Git
 /// directory's `review-runs` (`git rev-parse --git-path review-runs`). A
 /// linked worktree's `.git` is a file naming its Git directory.
-fn engram_git_run_directory(root: &FsPath) -> Option<PathBuf> {
+pub(crate) fn engram_git_run_directory(root: &FsPath) -> Option<PathBuf> {
     let dot_git = root.join(".git");
     let metadata = fs::metadata(&dot_git).ok()?;
     if metadata.is_dir() {
@@ -655,7 +667,7 @@ fn engram_git_run_directory(root: &FsPath) -> Option<PathBuf> {
 }
 
 /// Reads a launcher record, bounded (`ENGRAM_CARRIED_RECORD_MAX_BYTES`).
-fn engram_read_launcher_record(path: &FsPath) -> Option<Vec<u8>> {
+pub(crate) fn engram_read_launcher_record(path: &FsPath) -> Option<Vec<u8>> {
     use std::io::Read;
     let file = fs::File::open(path).ok()?;
     let mut bytes = Vec::new();
@@ -666,7 +678,7 @@ fn engram_read_launcher_record(path: &FsPath) -> Option<Vec<u8>> {
 }
 
 /// Parses an RFC 3339 time as the launcher and the host write it.
-fn engram_parse_time(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn engram_parse_time(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|time| time.with_timezone(&chrono::Utc))
@@ -685,7 +697,7 @@ fn engram_parse_time(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 /// returns the runs read that can never be this launch's, and, for a run
 /// found whose record this search already read as terminal, that record's
 /// digest: the first terminal read, which the caller pins.
-fn engram_find_carried_run(
+pub(crate) fn engram_find_carried_run(
     session_id: &str,
     root: &FsPath,
     launched_at: &str,
@@ -790,7 +802,7 @@ fn engram_find_carried_run(
 /// is: a run stopped or interrupted has ended too, however a launcher settled
 /// it, and is then refused
 /// (`engram_read_carried_run`) rather than carried until it expires.
-fn engram_terminal_record_digest(directory: &FsPath) -> Option<String> {
+pub(crate) fn engram_terminal_record_digest(directory: &FsPath) -> Option<String> {
     let bytes = engram_read_launcher_record(&directory.join("results.json"))?;
     engram_terminal_digest_of(&bytes)
 }
@@ -834,7 +846,7 @@ const ENGRAM_CARRIED_LIVENESS_CHECKS_MAX: usize = 3;
 /// record (`engram_terminal_record_digest`), or none and whether the process
 /// responsible for it is provably gone, by the run index's own test
 /// (`test_run_process_writer_may_be_alive`), which counts only proof.
-fn engram_carried_run_progress(directory: &FsPath) -> (Option<String>, bool) {
+pub(crate) fn engram_carried_run_progress(directory: &FsPath) -> (Option<String>, bool) {
     engram_carried_run_progress_with(directory, test_run_process_writer_may_be_alive)
 }
 
@@ -846,7 +858,7 @@ fn engram_carried_run_progress(directory: &FsPath) -> (Option<String>, bool) {
 /// process (a detached run's creator handing over to its worker) was made
 /// before that process's check, so it is judged the same way again. A run
 /// with no recorded pid is never judged gone.
-fn engram_carried_run_progress_with(
+pub(crate) fn engram_carried_run_progress_with(
     directory: &FsPath,
     may_be_alive: impl Fn(u32, Option<std::time::SystemTime>) -> bool,
 ) -> (Option<String>, bool) {
@@ -874,7 +886,7 @@ fn engram_carried_run_progress_with(
 
 /// Why a run that ended neither passed nor failed is refused.
 #[cfg(test)]
-const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
+pub(crate) const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
     "its run ended neither passed nor failed (it was stopped or interrupted), ",
     "so it is neither credited nor recorded"
 );
@@ -883,7 +895,7 @@ const ENGRAM_CARRIED_RUN_NEITHER: &str = concat!(
 /// (`engram_launcher_record_ran_no_stage`): refused before its first stage,
 /// it tested nothing, so its failure is no test's.
 #[cfg(test)]
-const ENGRAM_CARRIED_RUN_NO_STAGE_RAN: &str = concat!(
+pub(crate) const ENGRAM_CARRIED_RUN_NO_STAGE_RAN: &str = concat!(
     "its run failed before its first stage (its terminal record has every stage unrun), ",
     "so it tested nothing and is neither credited nor recorded"
 );
@@ -891,7 +903,7 @@ const ENGRAM_CARRIED_RUN_NO_STAGE_RAN: &str = concat!(
 /// Why a passed run with no test stage is refused
 /// (`engram_launcher_test_stages`).
 #[cfg(test)]
-const ENGRAM_CARRIED_RUN_NO_TEST_STAGE: &str = concat!(
+pub(crate) const ENGRAM_CARRIED_RUN_NO_TEST_STAGE: &str = concat!(
     "its run requested no test stage: its request record marks no stage `kind` `test`, ",
     "or, giving no kinds, names neither `rust-tests` nor `vitest`"
 );
@@ -899,18 +911,18 @@ const ENGRAM_CARRIED_RUN_NO_TEST_STAGE: &str = concat!(
 /// What a settled run says, when the host may credit it.
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
-struct EngramCarriedRunVerdict {
-    passed: bool,
-    exit_code: i64,
-    ended: String,
-    run_id: String,
-    source_id: EngramSourceId,
-    stages: Vec<String>,
+pub(crate) struct EngramCarriedRunVerdict {
+    pub(crate) passed: bool,
+    pub(crate) exit_code: i64,
+    pub(crate) ended: String,
+    pub(crate) run_id: String,
+    pub(crate) source_id: EngramSourceId,
+    pub(crate) stages: Vec<String>,
     /// Each stage of the terminal record in the launcher's own line,
     /// `NAME: STATE exit=CODE`, which the host reads as the launcher's
     /// result lines (`engram_is_result_line`), so the run's exit is its
     /// stages' own even for the one-call form.
-    stage_lines: Vec<String>,
+    pub(crate) stage_lines: Vec<String>,
 }
 
 /// Reads the run's terminal record at `directory`, which must have the
@@ -922,7 +934,7 @@ struct EngramCarriedRunVerdict {
 /// stage at all (`ENGRAM_CARRIED_RUN_NO_STAGE_RAN`). Either way the
 /// launcher's admitted, before and after complete source_id objects must agree.
 #[cfg(test)]
-fn engram_read_carried_run(
+pub(crate) fn engram_read_carried_run(
     directory: &FsPath,
     digest: &str,
 ) -> Result<EngramCarriedRunVerdict, &'static str> {
@@ -1040,7 +1052,10 @@ fn engram_read_carried_run(
 /// holder to launch again names the ambiguity window's wait
 /// (`ENGRAM_CARRIED_AMBIGUITY_SECONDS`), since this launch is recorded as
 /// unmatched.
-fn engram_carry_refusal(record: &SessionRecord, launched: &EngramTurnCheck) -> Option<String> {
+pub(crate) fn engram_carry_refusal(
+    record: &SessionRecord,
+    launched: &EngramTurnCheck,
+) -> Option<String> {
     let engram = &record.engram;
     let fingerprint = engram_check_fingerprint(&launched.command);
     // A delegated session is measured in its workdir and names no root, so a
@@ -1096,7 +1111,7 @@ fn engram_carry_refusal(record: &SessionRecord, launched: &EngramTurnCheck) -> O
 /// named root it ran in. Past the limit the oldest carried check is dropped
 /// and its holder told. Returns the line for the holder when it is not
 /// carried.
-fn engram_carry_check(
+pub(crate) fn engram_carry_check(
     record: &mut SessionRecord,
     launched: EngramTurnCheck,
     bind_targets: Vec<EngramBindTarget>,
@@ -1112,7 +1127,10 @@ fn engram_carry_check(
         return None;
     }
     #[cfg(test)]
-    let binding = engram.work_binding.as_ref().expect("carried launch has its original binding");
+    let binding = engram
+        .work_binding
+        .as_ref()
+        .expect("carried launch has its original binding");
     #[cfg(test)]
     let root_generation = engram
         .observed_source_root()
@@ -1156,11 +1174,9 @@ fn engram_carry_check(
 /// named-root generation `root_generation`, unfenced and with no run found
 /// yet. With `reported_by`, the runtime it ran under, it ends by the end that
 /// runtime reports for it; without, it is a launcher gate's launch.
-fn engram_new_carried_check(
-    #[cfg(test)]
-    binding: &EngramControlWorkBinding,
-    #[cfg(test)]
-    root_generation: u64,
+pub(crate) fn engram_new_carried_check(
+    #[cfg(test)] binding: &EngramControlWorkBinding,
+    #[cfg(test)] root_generation: u64,
     check: EngramTurnCheck,
     reported_by: Option<RuntimeToken>,
 ) -> EngramCarriedCheck {
@@ -1195,7 +1211,7 @@ fn engram_new_carried_check(
 /// carried check is dropped, and the line telling its holder is returned; a
 /// dropped gate leaves its run used or its launch unmatched, a dropped Codex
 /// test neither, since it has no run.
-fn engram_push_carried_check(
+pub(crate) fn engram_push_carried_check(
     record: &mut SessionRecord,
     carried: EngramCarriedCheck,
 ) -> Option<String> {
@@ -1243,11 +1259,18 @@ fn engram_note_consumed_runs(record: &mut SessionRecord, used: Vec<PathBuf>) {
 
 // Repeated provider frames keep one original location/time exclusion. They
 // neither refresh its start nor add entries to the existing bounded window.
-fn engram_note_observed_launch_location(record: &mut SessionRecord, root: &FsPath, started_at: &str) {
+pub(crate) fn engram_note_observed_launch_location(
+    record: &mut SessionRecord,
+    root: &FsPath,
+    started_at: &str,
+) {
     let root_key = engram_path_key(root);
-    if !record.engram.carried_unmatched_launches.iter().any(|(known, at)| {
-        *known == root_key && at == started_at
-    }) {
+    if !record
+        .engram
+        .carried_unmatched_launches
+        .iter()
+        .any(|(known, at)| *known == root_key && at == started_at)
+    {
         engram_note_unmatched_launch(record, root, started_at);
     }
 }
@@ -1256,7 +1279,11 @@ fn engram_note_observed_launch_location(record: &mut SessionRecord, root: &FsPat
 /// launched at `launched_at`, that left without a run found for it, so a
 /// later launch there within the run search time is refused as ambiguous
 /// rather than taking that run (`engram_carry_check`).
-fn engram_note_unmatched_launch(record: &mut SessionRecord, root: &FsPath, launched_at: &str) {
+pub(crate) fn engram_note_unmatched_launch(
+    record: &mut SessionRecord,
+    root: &FsPath,
+    launched_at: &str,
+) {
     let root_key = engram_path_key(root);
     // A location observation or retirement can arrive after another carry was constructed,
     // or even after it matched this run. Revoke eligibility before any later
@@ -1296,7 +1323,10 @@ fn engram_retired_launch_may_own_run(carried: &EngramCarriedCheck, retired_at: &
 }
 
 fn engram_launch_window_is_recent(unmatched_at: &str, launched_at: &str) -> bool {
-    match (engram_parse_time(unmatched_at), engram_parse_time(launched_at)) {
+    match (
+        engram_parse_time(unmatched_at),
+        engram_parse_time(launched_at),
+    ) {
         (Some(unmatched), Some(launched)) => {
             (launched - unmatched).num_seconds() <= ENGRAM_CARRIED_AMBIGUITY_SECONDS
         }
@@ -1309,10 +1339,13 @@ fn engram_launch_window_is_recent(unmatched_at: &str, launched_at: &str) -> bool
 /// later launches even though this check can no longer supply verification.
 /// Its holder is told why an immediate relaunch may be ambiguous. Ordinary
 /// checks leave no full-run ambiguity window or launch-retirement notice.
-fn engram_retire_changed_check(record: &mut SessionRecord, key: &str, sequence: usize) {
-    while let Some(position) = record.engram.active_turn_checks.iter().position(|check| {
-        check.key == key && check.sequence == sequence && check.end.is_none()
-    }) {
+pub(crate) fn engram_retire_changed_check(record: &mut SessionRecord, key: &str, sequence: usize) {
+    while let Some(position) = record
+        .engram
+        .active_turn_checks
+        .iter()
+        .position(|check| check.key == key && check.sequence == sequence && check.end.is_none())
+    {
         let retired = record.engram.active_turn_checks.remove(position);
         if engram_check_is_launcher_full(&retired.command) {
             engram_note_unmatched_launch(record, &retired.target.root, &retired.started_at);
@@ -1332,7 +1365,7 @@ fn engram_retire_changed_check(record: &mut SessionRecord, key: &str, sequence: 
 
 /// Whether `command` is the test launcher's full gate, whose launch may be
 /// carried (`engram_launch_disposition`).
-fn engram_check_is_launcher_full(command: &EngramCheckCommand) -> bool {
+pub(crate) fn engram_check_is_launcher_full(command: &EngramCheckCommand) -> bool {
     engram_launcher_words(command).is_some_and(|words| {
         words.get(2).is_some_and(|mode| {
             mode.split([';', '&', '|', '<', '>', '(', ')']).next() == Some("full")
@@ -1346,7 +1379,7 @@ fn engram_check_is_launcher_full(command: &EngramCheckCommand) -> bool {
 /// already read as terminal is left alone: a write after the run ended cannot
 /// reach what it tested, and one still there at settlement changes the
 /// source basis, which settlement compares.
-fn engram_fence_carried_checks(
+pub(crate) fn engram_fence_carried_checks(
     record: &mut SessionRecord,
     worktrees: &[Option<String>],
     cause: &str,
@@ -1368,7 +1401,7 @@ fn engram_fence_carried_checks(
 /// launcher (`node scripts/test-launcher.mjs full …`, one call, nothing
 /// joined to it): the only launch whose own outstanding Claude work does not
 /// fence the check and the carried run it starts (`claude_outstanding_work.rs`).
-fn engram_is_simple_full_launcher(command: &EngramCheckCommand) -> bool {
+pub(crate) fn engram_is_simple_full_launcher(command: &EngramCheckCommand) -> bool {
     command.simple
         && engram_launcher_words(command)
             .is_some_and(|words| words.get(2).map(String::as_str) == Some("full"))
@@ -1378,7 +1411,10 @@ fn engram_is_simple_full_launcher(command: &EngramCheckCommand) -> bool {
 /// reported. The edit is not placed: `target`, the file its tool named, only
 /// names it in the refusal, shown as the tool gave it, and a check already
 /// fenced keeps its first cause.
-fn engram_fence_carried_checks_for_edit(record: &mut SessionRecord, target: Option<&str>) {
+pub(crate) fn engram_fence_carried_checks_for_edit(
+    record: &mut SessionRecord,
+    target: Option<&str>,
+) {
     let cause = match target.filter(|target| !target.trim().is_empty()) {
         Some(target) => format!(
             "this session reported a file edit (tool-reported target: \"{}\")",
@@ -1401,7 +1437,7 @@ const ENGRAM_REPORTED_TARGET_TAIL_CHARS: usize = 120;
 /// `target` as a refusal shows it: each control, bidirectional or invisible
 /// formatting character and each quote escaped, and the middle of a long one
 /// cut. No path is resolved.
-fn engram_display_reported_target(target: &str) -> String {
+pub(crate) fn engram_display_reported_target(target: &str) -> String {
     let pieces: Vec<String> = target
         .chars()
         .map(|character| match character {
@@ -1450,7 +1486,7 @@ fn engram_display_reported_target(target: &str) -> String {
 
 /// Whether `carried` is past `ENGRAM_CARRIED_CHECK_TTL_SECONDS` at `now`
 /// (or its launch time cannot be read).
-fn engram_carried_check_expired(
+pub(crate) fn engram_carried_check_expired(
     carried: &EngramCarriedCheck,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
@@ -1461,7 +1497,7 @@ fn engram_carried_check_expired(
 /// Local launcher custody ends independently of registered verification.
 /// Keep its run reserved against later launches, but neither grant credit nor
 /// tell the holder to repeat a run whose terminal artifact was already found.
-fn engram_retire_launcher_checks(
+pub(crate) fn engram_retire_launcher_checks(
     record: &mut SessionRecord,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
@@ -1495,7 +1531,7 @@ fn engram_retire_launcher_checks(
 /// waiting for a prompt, as one line within
 /// `ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES`. The newest is kept: past the bound,
 /// the front of what came before is cut, and the line says so.
-fn engram_merge_credit_lines(earlier: &str, later: &str) -> String {
+pub(crate) fn engram_merge_credit_lines(earlier: &str, later: &str) -> String {
     let later = later
         .strip_prefix(ENGRAM_CHECK_CREDIT_LINE_PREFIX)
         .unwrap_or(later)
@@ -1522,7 +1558,7 @@ fn engram_merge_credit_lines(earlier: &str, later: &str) -> String {
 /// credited (a fence, a launcher gone, a run never found, its six hours
 /// over, or its launch ambiguous), so another read can't change that, and it
 /// finds no run.
-fn engram_carried_check_polls(
+pub(crate) fn engram_carried_check_polls(
     carried: &EngramCarriedCheck,
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
@@ -1545,7 +1581,7 @@ fn engram_carried_check_polls(
 /// later one that read another record marks a conflict, which refuses the
 /// check (`engram_settle_carried_check`): polls read off the lock, so the one
 /// that stores first need not be the one that read first.
-fn engram_note_carried_run_read(
+pub(crate) fn engram_note_carried_run_read(
     carried: &mut EngramCarriedCheck,
     found: Option<PathBuf>,
     digest: Option<String>,
@@ -1596,7 +1632,11 @@ const ENGRAM_WORKTREE_SCRATCH_DIRECTORY: &str = ".tmp";
 /// exactly: an exemption must never widen by case folding, since on a
 /// case-sensitive volume `.TMP` is another directory, which Git does not
 /// ignore and which may hold source.
-fn engram_is_worktree_scratch(worktree: &str, directory_key: &str, name: Option<&str>) -> bool {
+pub(crate) fn engram_is_worktree_scratch(
+    worktree: &str,
+    directory_key: &str,
+    name: Option<&str>,
+) -> bool {
     let worktree = worktree.trim_end_matches('/');
     let scratch = format!("{worktree}/{ENGRAM_WORKTREE_SCRATCH_DIRECTORY}");
     directory_key == scratch
@@ -1634,15 +1674,15 @@ fn engram_is_cargo_target_sibling(worktree: &str, directory_key: &str, name: Opt
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramCargoTargetCandidate {
-    root: String,
-    path: String,
+pub(crate) struct EngramCargoTargetCandidate {
+    pub(crate) root: String,
+    pub(crate) path: String,
     /// On a check: its notification arrived before that check's launch stamp
     /// (`engram_watcher_change_may_follow_launch`). Such a candidate that
     /// reaches a gate while its settlement runs off the lock defers that
     /// settlement rather than refusing it; it is judged by `target/` at the
     /// next one, like any candidate. False for every other arrival.
-    before_launch: bool,
+    pub(crate) before_launch: bool,
 }
 
 /// Same bound as the watcher's directory batch, applied across notifications
@@ -1670,7 +1710,7 @@ fn engram_note_cargo_target_candidate(
 /// judged it by (`engram_is_worktree_scratch`), the worktree key it was
 /// routed to (`routed`), the exact keys of its worktree root and of its
 /// directory, and whether that directory existed when they were resolved.
-fn engram_scratch_fence_detail(
+pub(crate) fn engram_scratch_fence_detail(
     path: &str,
     routed: &str,
     root_exact: &str,
@@ -1686,7 +1726,11 @@ fn engram_scratch_fence_detail(
 
 // Called only for the first event that actually fences this check. There is
 // no additional event history, durable state, or filesystem access here.
-fn engram_watcher_fence_diagnostic(cause: &str, facts: &str, check: &EngramTurnCheck) -> String {
+pub(crate) fn engram_watcher_fence_diagnostic(
+    cause: &str,
+    facts: &str,
+    check: &EngramTurnCheck,
+) -> String {
     format!(
         "watcher provenance: {} cause_sha256={} check_key_sha256={} host_turn_ref_sha256={} check_sequence={} check_started={} fenced={}",
         engram_truncate_utf8(facts, 900),
@@ -1703,14 +1747,14 @@ impl AppState {
     /// As `note_engram_observed_workspace_file_changes`, with no diagnostic
     /// observation and an unknown arrival: it fences as any change.
     #[cfg(test)]
-    fn note_engram_workspace_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
+    pub(crate) fn note_engram_workspace_file_changes(&self, changes: &[WorkspaceFileChangeEvent]) {
         self.note_engram_workspace_file_changes_observed(changes, None);
     }
 
     /// As `note_engram_observed_workspace_file_changes`, with no diagnostic
     /// observation, for a notification that arrived at `arrival`.
     #[cfg(test)]
-    fn note_engram_workspace_file_changes_observed(
+    pub(crate) fn note_engram_workspace_file_changes_observed(
         &self,
         changes: &[WorkspaceFileChangeEvent],
         arrival: Option<EngramWatcherArrival>,
@@ -1736,7 +1780,7 @@ impl AppState {
     /// directory, and only while some carried check is unfenced. A fence
     /// records the bounded watcher `observation` as its provenance
     /// (`engram_watcher_fence_diagnostic`); the observation decides nothing.
-    fn note_engram_observed_workspace_file_changes(
+    pub(crate) fn note_engram_observed_workspace_file_changes(
         &self,
         changes: &[WorkspaceFileChangeEvent],
         observation: &str,
@@ -1843,7 +1887,11 @@ impl AppState {
                     marker_root = if engram_network_path(&change.path) {
                         engram_path_key(path)
                     } else {
-                        engram_path_key(&engram_worktree_root_path(if marker_is_root { path } else { directory }))
+                        engram_path_key(&engram_worktree_root_path(if marker_is_root {
+                            path
+                        } else {
+                            directory
+                        }))
                     };
                     &marker_root
                 } else {
@@ -1859,7 +1907,10 @@ impl AppState {
                         .to_str()
                         .is_some_and(engram_is_cargo_target_sibling_name)
                 });
-                if !marker_is_root && (names_scratch || names_cargo_sibling) && !engram_network_path(&change.path) {
+                if !marker_is_root
+                    && (names_scratch || names_cargo_sibling)
+                    && !engram_network_path(&change.path)
+                {
                     if !exact.iter().any(|(known, ..)| known == directory) {
                         let existed = directory.is_dir();
                         let canonical = engram_canonical_path(directory);
@@ -1927,8 +1978,12 @@ impl AppState {
         // and exemptions above. Independently it reaches any check rooted
         // *under* the marker, including a nested root inside parent's scratch.
         // An ancestor fact must not be erased by the parent's exemption.
-        placed.extend(changes.iter().filter(|change| change.kind == WorkspaceFileChangeKind::Subtree)
-            .map(|change| (None, change.path.clone(), change.mtime_ms, true)));
+        placed.extend(
+            changes
+                .iter()
+                .filter(|change| change.kind == WorkspaceFileChangeKind::Subtree)
+                .map(|change| (None, change.path.clone(), change.mtime_ms, true)),
+        );
         if placed.is_empty() && cargo_candidates.is_empty() {
             return;
         }
@@ -2015,7 +2070,9 @@ impl AppState {
                 // change is kept as exempted and judged again at settlement.
                 // Only a change that fences records its watcher provenance.
                 for carried in &mut record.engram.carried_checks {
-                    if *ancestor_only && !workspace_subtree_contains(path, &carried.check.target.root) {
+                    if *ancestor_only
+                        && !workspace_subtree_contains(path, &carried.check.target.root)
+                    {
                         continue;
                     }
                     if carried.fence.is_none()
@@ -2032,9 +2089,8 @@ impl AppState {
                                 carried.check.started_order,
                             )
                         {
-                            let diagnostic = engram_watcher_fence_diagnostic(
-                                &cause, facts, &carried.check,
-                            );
+                            let diagnostic =
+                                engram_watcher_fence_diagnostic(&cause, facts, &carried.check);
                             carried.check.watcher_provenance = Some(diagnostic.clone());
                             diagnostics.push(diagnostic);
                             carried.fence = Some(cause.clone());
@@ -2085,7 +2141,7 @@ impl AppState {
     /// keeps the digest of its terminal record from the first read that finds
     /// it terminal. Disk reads happen off the state lock. Called on the run
     /// index's tick and before each checkpoint settles carried checks.
-    fn poll_engram_carried_runs(&self) {
+    pub(crate) fn poll_engram_carried_runs(&self) {
         // One poll at a time: a read made off the state lock is stored
         // before any other poll reads, and so before a checkpoint that polls
         // first can settle the check it read.
@@ -2227,7 +2283,7 @@ fn test_engram_carried_poll_key(state: &AppState) -> usize {
 /// Makes the next carried-run poll of `state` pause after its reads: the
 /// first receiver hears when it paused, and sending on the sender releases it.
 #[cfg(test)]
-fn install_test_engram_carried_poll_pause(
+pub(crate) fn install_test_engram_carried_poll_pause(
     state: &AppState,
 ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
     let (paused_tx, paused_rx) = std::sync::mpsc::channel();
@@ -2244,7 +2300,9 @@ fn install_test_engram_carried_poll_pause(
 /// The receiver hears when the next carried-run poll of `state` finds the
 /// poll lock held.
 #[cfg(test)]
-fn install_test_engram_carried_poll_waiting(state: &AppState) -> std::sync::mpsc::Receiver<()> {
+pub(crate) fn install_test_engram_carried_poll_waiting(
+    state: &AppState,
+) -> std::sync::mpsc::Receiver<()> {
     let (waiting_tx, waiting_rx) = std::sync::mpsc::channel();
     TEST_ENGRAM_CARRIED_POLL_HOOKS
         .lock()

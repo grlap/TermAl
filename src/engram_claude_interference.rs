@@ -30,6 +30,8 @@
 // `engram_turn_checks.rs` and `engram_carried_checks.rs` each did at their own
 // entry points.
 
+use super::*;
+
 /// Orders hazard registrations against the ends of the records they may
 /// overlap. Process-wide and monotone (one SeqCst counter). It is advanced
 /// under the state lock for registrations and off it when a capture
@@ -39,15 +41,18 @@ static ENGRAM_INTERFERENCE_CLOCK: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(1);
 
 /// The next instant of the interference clock.
-fn engram_interference_tick() -> u64 {
+pub(crate) fn engram_interference_tick() -> u64 {
     ENGRAM_INTERFERENCE_CLOCK.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Whose work a hazard is.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramHazardOwner {
+pub(crate) enum EngramHazardOwner {
     /// A live session, by index, and what another session is told of it.
-    Session { index: usize, cause: ClaudeHazardCause },
+    Session {
+        index: usize,
+        cause: ClaudeHazardCause,
+    },
     /// A deleted session's work, kept on the host.
     Deleted { cause: ClaudeHazardCause },
 }
@@ -59,41 +64,41 @@ enum EngramHazardOwner {
 /// commands mark what it may write under, and it becomes one when its turn
 /// or runtime is gone.
 #[derive(Clone, Debug)]
-struct EngramClaudeHazard {
-    owner: EngramHazardOwner,
+pub(crate) struct EngramClaudeHazard {
+    pub(crate) owner: EngramHazardOwner,
     /// Its tool-use id; `None` for work kept only as unknown.
-    key: Option<String>,
+    pub(crate) key: Option<String>,
     /// A top-level call of a recognised simple full gate.
-    self_gate: bool,
-    nested: bool,
+    pub(crate) self_gate: bool,
+    pub(crate) nested: bool,
     /// Its session may write; a deleted session's work counts as writing.
     owner_writes: bool,
     /// Where it may write; `None` is a worktree TermAl could not name.
-    locations: Vec<Option<String>>,
+    pub(crate) locations: Vec<Option<String>>,
     /// When it was first registered: it may have written from then on.
-    registered_at: u64,
+    pub(crate) registered_at: u64,
 }
 
 /// One unpublished verification record of the session at `session`.
-struct EngramInterferenceSubject<'a> {
-    session: usize,
-    key: &'a str,
+pub(crate) struct EngramInterferenceSubject<'a> {
+    pub(crate) session: usize,
+    pub(crate) key: &'a str,
     /// The path key of the worktree it tested.
-    root: String,
+    pub(crate) root: String,
     /// When its evidence interval closed: for a turn check, after its command
     /// ended and both its snapshots were taken (`EngramTurnCheck::interference_end`);
     /// `None` while it may still be reached. A carried run is always open here,
     /// since any later settlement may record what work wrote; each of its
     /// candidates is judged by its own closure when it is consumed
     /// (`engram_carried_candidate_closure`).
-    ended_at: Option<u64>,
+    pub(crate) ended_at: Option<u64>,
     /// Its command is a recognised simple full gate.
-    simple_full_gate: bool,
+    pub(crate) simple_full_gate: bool,
 }
 
 /// The hazards of `work`, owned by `owner`, whose session runs `current` at
 /// turn `turn_generation`; only those of `keys` when given.
-fn engram_hazards_of_work(
+pub(crate) fn engram_hazards_of_work(
     owner: &EngramHazardOwner,
     work: &ClaudeOutstandingWork,
     current: Option<&RuntimeToken>,
@@ -158,7 +163,10 @@ fn engram_session_hazards(
 }
 
 /// The hazards the deleted session `session_id` left on the host.
-fn engram_orphaned_hazards(inner: &StateInner, session_id: Option<&str>) -> Vec<EngramClaudeHazard> {
+fn engram_orphaned_hazards(
+    inner: &StateInner,
+    session_id: Option<&str>,
+) -> Vec<EngramClaudeHazard> {
     inner
         .claude_orphaned_work
         .iter()
@@ -191,7 +199,7 @@ fn engram_claude_hazards(inner: &StateInner) -> Vec<EngramClaudeHazard> {
 /// provenance unresolved whatever workspace it measures. The only exception is
 /// relational: the exact call of a recognised simple full gate does not fence
 /// the record of the run it launched itself; it fences everything else.
-fn engram_claude_interference(
+pub(crate) fn engram_claude_interference(
     hazard: &EngramClaudeHazard,
     subject: &EngramInterferenceSubject<'_>,
 ) -> Option<ClaudeHazardCause> {
@@ -236,13 +244,21 @@ fn engram_observation_interference_cause(
     root: Option<&str>,
 ) -> Option<ClaudeHazardCause> {
     if let Some(root) = root {
-        return engram_claude_interference_cause(hazards, &EngramInterferenceSubject {
-            session, key: "", root: root.to_owned(), ended_at: None, simple_full_gate: false,
-        });
+        return engram_claude_interference_cause(
+            hazards,
+            &EngramInterferenceSubject {
+                session,
+                key: "",
+                root: root.to_owned(),
+                ended_at: None,
+                simple_full_gate: false,
+            },
+        );
     }
     hazards.iter().find_map(|hazard| match &hazard.owner {
-        EngramHazardOwner::Session { index, .. } if *index == session =>
-            Some(ClaudeHazardCause::OwnSession),
+        EngramHazardOwner::Session { index, .. } if *index == session => {
+            Some(ClaudeHazardCause::OwnSession)
+        }
         EngramHazardOwner::Session { cause, .. } if hazard.owner_writes => Some(cause.clone()),
         EngramHazardOwner::Deleted { cause } => Some(cause.clone()),
         _ => None,
@@ -326,11 +342,19 @@ fn engram_apply_claude_hazards(
             }
         }
         let worktree = engram_session_worktree(record);
-        let mixes_source = record.engram.unadmitted_active_turn.as_ref()
-            .filter(|trace| trace.generation == record.active_turn_generation
-                && !trace.source_attribution_uncertain)
+        let mixes_source = record
+            .engram
+            .unadmitted_active_turn
+            .as_ref()
+            .filter(|trace| {
+                trace.generation == record.active_turn_generation
+                    && !trace.source_attribution_uncertain
+            })
             .is_some_and(|trace| {
-                let root = trace.opening_root.as_ref().and_then(|opening| opening.source_root.as_ref())
+                let root = trace
+                    .opening_root
+                    .as_ref()
+                    .and_then(|opening| opening.source_root.as_ref())
                     .map(|named| engram_path_key(FsPath::new(&named.root)))
                     .or_else(|| worktree.clone());
                 engram_observation_interference_cause(hazards, index, root.as_deref()).is_some()
@@ -340,10 +364,13 @@ fn engram_apply_claude_hazards(
         }
         let mut changed = mixes_source;
         for job in &mut record.engram.unadmitted_closing_jobs {
-            if job.trace.source_attribution_uncertain { continue; }
+            if job.trace.source_attribution_uncertain {
+                continue;
+            }
             let root = match &job.scope.root {
-                EngramNamedRootState::Bound { workspace_id, .. } =>
-                    Some(engram_path_key(FsPath::new(workspace_id))),
+                EngramNamedRootState::Bound { workspace_id, .. } => {
+                    Some(engram_path_key(FsPath::new(workspace_id)))
+                }
                 _ if job.scope.workdir == record.session.workdir => worktree.clone(),
                 _ => None,
             };
@@ -352,7 +379,9 @@ fn engram_apply_claude_hazards(
                 changed = true;
             }
         }
-        if changed { changed_sources.push(index); }
+        if changed {
+            changed_sources.push(index);
+        }
     }
     for index in changed_sources {
         inner.stamp_session_at_index(index);
@@ -362,14 +391,14 @@ fn engram_apply_claude_hazards(
 /// Direction one: the work `keys` of the session at `owner` was registered,
 /// promoted or placed further, so every unpublished record and live grant it
 /// may overlap is reconciled with it, back to when it was registered.
-fn engram_reconcile_claude_work(inner: &mut StateInner, owner: usize, keys: &[String]) {
+pub(crate) fn engram_reconcile_claude_work(inner: &mut StateInner, owner: usize, keys: &[String]) {
     let hazards = engram_session_hazards(inner, owner, Some(keys));
     engram_apply_claude_hazards(inner, &hazards, None);
 }
 
 /// Direction one: the deleted session `session_id` left its work on the
 /// host, which now counts wherever it may write.
-fn engram_reconcile_orphaned_claude_work(inner: &mut StateInner, session_id: &str) {
+pub(crate) fn engram_reconcile_orphaned_claude_work(inner: &mut StateInner, session_id: &str) {
     let hazards = engram_orphaned_hazards(inner, Some(session_id));
     engram_apply_claude_hazards(inner, &hazards, None);
 }
@@ -377,7 +406,7 @@ fn engram_reconcile_orphaned_claude_work(inner: &mut StateInner, session_id: &st
 /// Direction two: a record of the session at `consumer` started, was
 /// carried or is about to be published, so its unpublished records and its
 /// live grant are reconciled with every retained hazard.
-fn engram_reconcile_claude_consumer(inner: &mut StateInner, consumer: usize) {
+pub(crate) fn engram_reconcile_claude_consumer(inner: &mut StateInner, consumer: usize) {
     let hazards = engram_claude_hazards(inner);
     engram_apply_claude_hazards(inner, &hazards, Some(consumer));
 }
@@ -385,7 +414,7 @@ fn engram_reconcile_claude_consumer(inner: &mut StateInner, consumer: usize) {
 /// The cause a check of the session at `index`, starting now as the call
 /// `key` running `command` in the worktree with path key `root`, is fenced
 /// by: direction two at its start.
-fn engram_claude_start_cause(
+pub(crate) fn engram_claude_start_cause(
     inner: &StateInner,
     index: usize,
     key: &str,
@@ -406,7 +435,7 @@ fn engram_claude_start_cause(
 /// a check of the session at `index` (or of no session), starting now in the
 /// worktree with path key `root`, would be fenced by work of any other
 /// session or a deleted one. Differs from a stored fence once that work ends.
-fn engram_claude_current_restriction(
+pub(crate) fn engram_claude_current_restriction(
     inner: &StateInner,
     index: Option<usize>,
     root: &str,

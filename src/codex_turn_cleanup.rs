@@ -36,11 +36,13 @@
 //   event dispatcher can silently drop them when a session has been
 //   torn down mid-flight.
 
+use super::*;
+
 /// Resets the per-turn scratch state so nothing leaks into the next
 /// turn: current agent-message id, streamed text/item-id caches,
 /// buffered subagent results, the assistant-output-started flag, and
 /// the visible-assistant-message anchor.
-fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
+pub(crate) fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
     turn_state.launcher_output.clear();
     turn_state.remote_compaction_progressed = false;
     turn_state.current_agent_message_id = None;
@@ -52,7 +54,7 @@ fn clear_codex_turn_state(turn_state: &mut CodexTurnState) {
 }
 
 /// Clears shared Codex recorder state that should not leak across turns.
-fn clear_shared_codex_turn_recorder_state(recorder_state: &mut SessionRecorderState) {
+pub(crate) fn clear_shared_codex_turn_recorder_state(recorder_state: &mut SessionRecorderState) {
     reset_recorder_state_fields(recorder_state);
 }
 
@@ -60,7 +62,7 @@ fn clear_shared_codex_turn_recorder_state(recorder_state: &mut SessionRecorderSt
 /// and clears completed-turn state once their due time passes. Holds
 /// only a weak reference to the session map so the worker exits cleanly
 /// when the runtime is torn down.
-fn spawn_shared_codex_completed_turn_cleanup_worker(
+pub(crate) fn spawn_shared_codex_completed_turn_cleanup_worker(
     sessions: &SharedCodexSessionMap,
     cleanup_rx: mpsc::Receiver<SharedCodexCompletedTurnCleanup>,
 ) {
@@ -104,7 +106,7 @@ fn spawn_shared_codex_completed_turn_cleanup_worker(
 /// the associated session's completed-turn fields unless a new turn has
 /// started in the meantime. Returns `false` when the session map has
 /// been dropped so the worker loop can exit.
-fn run_due_shared_codex_completed_turn_cleanups(
+pub(crate) fn run_due_shared_codex_completed_turn_cleanups(
     weak_sessions: &std::sync::Weak<SharedCodexSessions>,
     pending: &mut Vec<SharedCodexCompletedTurnCleanup>,
 ) -> bool {
@@ -150,7 +152,7 @@ fn run_due_shared_codex_completed_turn_cleanups(
 /// reported via stderr rather than torn down, because legitimate
 /// payloads (e.g. large `aggregatedOutput` from long command runs) can
 /// exceed the cap but should not crash the runtime.
-fn read_capped_child_stdout_line(
+pub(crate) fn read_capped_child_stdout_line(
     reader: &mut impl BufRead,
     line_buf: &mut Vec<u8>,
     max_bytes: usize,
@@ -211,7 +213,7 @@ fn read_capped_child_stdout_line(
 /// Truncates a child-stdout line to `max_chars` characters, appending
 /// an ellipsis if the limit was hit. Used when echoing stdout to the
 /// TermAl log so oversized lines do not flood the console.
-fn truncate_child_stdout_log_line(line: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_child_stdout_log_line(line: &str, max_chars: usize) -> String {
     let mut truncated = String::new();
     for (index, ch) in line.chars().enumerate() {
         if index == max_chars {
@@ -228,7 +230,7 @@ fn truncate_child_stdout_log_line(line: &str, max_chars: usize) -> String {
 /// Returns `None` below the threshold so a single bad line does not
 /// fail the runtime. The raw line is deliberately omitted since it is
 /// already logged per-line to stderr.
-fn shared_codex_bad_json_streak_failure_detail(
+pub(crate) fn shared_codex_bad_json_streak_failure_detail(
     consecutive_bad_json_lines: usize,
     _line: &str,
 ) -> Option<String> {
@@ -291,7 +293,7 @@ fn clear_shared_codex_completed_turn_state_fields(
 /// parked prompt AND leave the in-flight setup's waiter to see `Superseded` and
 /// suppress the session's own LIVE thread — the exact failure this whole change
 /// exists to eliminate. If you cannot justify it, take the setup out first.
-fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
+pub(crate) fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionState) {
     session_state.pending_thread_setup = None;
     session_state.pending_turn_start_request_id = None;
     if let Some(cancel_tx) = session_state.turn_started_watchdog_cancel_tx.take() {
@@ -313,7 +315,7 @@ fn clear_shared_codex_turn_session_state(session_state: &mut SharedCodexSessionS
 
 /// Queues a completed-turn cleanup entry so the background worker can
 /// clear the turn state after a short grace period.
-fn schedule_shared_codex_completed_turn_cleanup(
+pub(crate) fn schedule_shared_codex_completed_turn_cleanup(
     sessions: &SharedCodexSessionMap,
     owner: SharedCodexTerminalIdentity,
     completed_turn_id: &str,
@@ -325,7 +327,7 @@ fn schedule_shared_codex_completed_turn_cleanup(
 /// found` message — signalling that the session has already been torn
 /// down so the dispatch failure is benign and should not surface as a
 /// runtime error.
-fn shared_codex_app_server_error_is_stale_session(err: &anyhow::Error) -> bool {
+pub(crate) fn shared_codex_app_server_error_is_stale_session(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let message = cause.to_string();
         let Some(session_id) = message

@@ -3,15 +3,17 @@
 // Split from the federation operator adapter; the shared operation-view helper
 // owns journal reading and the exact recipient snapshot.
 
+use super::*;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationExecutorObservationQuery {
-    central_host_id: String,
-    operation_key: String,
+pub(crate) struct FederationExecutorObservationQuery {
+    pub(crate) central_host_id: String,
+    pub(crate) operation_key: String,
 }
 
 impl FederationExecutorObservationQuery {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         for (text, limit) in [(&self.central_host_id, 256), (&self.operation_key, 1024)] {
             if text.trim().is_empty() || text.len() > limit || text.contains('\0') {
                 return Err(ApiError::bad_request("invalid executor observation query"));
@@ -21,7 +23,7 @@ impl FederationExecutorObservationQuery {
     }
 }
 
-async fn get_federation_executor_operation(
+pub(crate) async fn get_federation_executor_operation(
     State(state): State<AppState>,
     query: Result<Query<FederationExecutorObservationQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {

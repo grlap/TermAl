@@ -38,33 +38,35 @@
 // `proxy_remote_cancel_queued_prompt`, `proxy_remote_stop_session` in
 // `src/remote.rs`) and never touches a local runtime.
 
-#[cfg(test)]
-const TEST_PHASE_DEADLOCK_GUARD: Duration = Duration::from_secs(60);
+use super::*;
 
 #[cfg(test)]
-struct TestStopFenceGate {
-    claimed_tx: std::sync::mpsc::Sender<()>,
-    release_rx: std::sync::mpsc::Receiver<()>,
+pub(crate) const TEST_PHASE_DEADLOCK_GUARD: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
+pub(crate) struct TestStopFenceGate {
+    pub(crate) claimed_tx: std::sync::mpsc::Sender<()>,
+    pub(crate) release_rx: std::sync::mpsc::Receiver<()>,
 }
 
 #[cfg(test)]
-type TestStopFenceGateKey = (usize, String);
+pub(crate) type TestStopFenceGateKey = (usize, String);
 
 #[cfg(test)]
-static TEST_STOP_FENCE_GATES: std::sync::LazyLock<
+pub(crate) static TEST_STOP_FENCE_GATES: std::sync::LazyLock<
     std::sync::Mutex<HashMap<TestStopFenceGateKey, TestStopFenceGate>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 #[cfg(test)]
-struct TestStopFenceGateControl {
-    key: TestStopFenceGateKey,
-    claimed_rx: std::sync::mpsc::Receiver<()>,
-    release_tx: std::sync::mpsc::Sender<()>,
+pub(crate) struct TestStopFenceGateControl {
+    pub(crate) key: TestStopFenceGateKey,
+    pub(crate) claimed_rx: std::sync::mpsc::Receiver<()>,
+    pub(crate) release_tx: std::sync::mpsc::Sender<()>,
 }
 
 #[cfg(test)]
 impl TestStopFenceGateControl {
-    fn wait_until_claimed(&self) {
+    pub(crate) fn wait_until_claimed(&self) {
         let started = std::time::Instant::now();
         self.claimed_rx
             .recv_timeout(TEST_PHASE_DEADLOCK_GUARD)
@@ -77,7 +79,7 @@ impl TestStopFenceGateControl {
             });
     }
 
-    fn release(&self) {
+    pub(crate) fn release(&self) {
         self.release_tx
             .send(())
             .expect("Stop gate should remain connected");
@@ -103,7 +105,10 @@ fn test_stop_fence_gate_key(state: &AppState, session_id: &str) -> TestStopFence
 }
 
 #[cfg(test)]
-fn install_test_stop_fence_gate(state: &AppState, session_id: &str) -> TestStopFenceGateControl {
+pub(crate) fn install_test_stop_fence_gate(
+    state: &AppState,
+    session_id: &str,
+) -> TestStopFenceGateControl {
     let (claimed_tx, claimed_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let key = test_stop_fence_gate_key(state, session_id);
@@ -125,7 +130,7 @@ fn install_test_stop_fence_gate(state: &AppState, session_id: &str) -> TestStopF
 }
 
 #[cfg(test)]
-fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
+pub(crate) fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
     let gate = TEST_STOP_FENCE_GATES
         .lock()
         .expect("test Stop fence gate mutex poisoned")
@@ -140,23 +145,26 @@ fn wait_at_test_stop_fence_gate(state: &AppState, session_id: &str) {
 }
 
 #[derive(Clone)]
-struct RequestedStopClaim {
-    runtime_token: Option<RuntimeToken>,
-    owner_generation: u64,
-    active_turn_generation: u64,
+pub(crate) struct RequestedStopClaim {
+    pub(crate) runtime_token: Option<RuntimeToken>,
+    pub(crate) owner_generation: u64,
+    pub(crate) active_turn_generation: u64,
     was_active: bool,
     delivery_owner: Option<QueuedTurnOwner>,
     receipt_owner: Option<PromotedPromptReceiptOwner>,
 }
 
 impl RequestedStopClaim {
-    fn owns_stop(&self, record: &SessionRecord) -> bool {
+    pub(crate) fn owns_stop(&self, record: &SessionRecord) -> bool {
         let owns_stop = match self.runtime_token.as_ref() {
             Some(token) => record.runtime_stop_is_owned_by(
-                RuntimeStopOwnerKind::UserStop, token, self.owner_generation,
+                RuntimeStopOwnerKind::UserStop,
+                token,
+                self.owner_generation,
             ),
             None => record.missing_runtime_stop_is_owned_by(
-                RuntimeStopOwnerKind::UserStop, self.owner_generation,
+                RuntimeStopOwnerKind::UserStop,
+                self.owner_generation,
             ),
         };
         owns_stop
@@ -174,17 +182,22 @@ impl AppState {
     /// of detached Codex threads, and persists the new state. No undo. Triggered
     /// from the UI trash icon. Proxied to the remote backend when
     /// `session.remote_target` is set.
-    fn kill_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+    pub(crate) fn kill_session(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_kill_session(session_id);
         }
         let federation_creation = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            federation_mailbox_root_locked(&inner, session_id).ok()
+            federation_mailbox_root_locked(&inner, session_id)
+                .ok()
                 .filter(|record| record.mailbox_binding().is_some())
                 .map(|record| record.federation_native_creation_id.clone())
         };
-        let engram_session_ids_to_terminate = self.prepare_source_observation_delete(session_id, true)?;
+        let engram_session_ids_to_terminate =
+            self.prepare_source_observation_delete(session_id, true)?;
         for terminating_session_id in &engram_session_ids_to_terminate {
             let has_engram_resource = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
@@ -193,12 +206,16 @@ impl AppState {
                     .is_some_and(|settings| {
                         settings.binary_path.is_some() && settings.home.is_some()
                     })
-                    || inner.find_session_index(terminating_session_id).is_some_and(|index| {
-                        let record = &inner.sessions[index];
-                        record.engram_mcp_installed.is_some()
-                            || record.engram_mcp_runtime_quarantined
-                    })
-                    || inner.engram_host_adapter.transport
+                    || inner
+                        .find_session_index(terminating_session_id)
+                        .is_some_and(|index| {
+                            let record = &inner.sessions[index];
+                            record.engram_mcp_installed.is_some()
+                                || record.engram_mcp_runtime_quarantined
+                        })
+                    || inner
+                        .engram_host_adapter
+                        .transport
                         .has_live_child(terminating_session_id)
             };
             if has_engram_resource {
@@ -226,7 +243,8 @@ impl AppState {
                         "Session retained; source tracking persistence is uncertain: {error:#}"
                     ))
                 })?;
-                if let Some(notice) = source_observation_terminal_removal_notice(&inner, &sessions) {
+                if let Some(notice) = source_observation_terminal_removal_notice(&inner, &sessions)
+                {
                     return Err(ApiError::conflict(notice));
                 }
                 return Err(ApiError::conflict(format!(
@@ -285,7 +303,10 @@ impl AppState {
         };
 
         if let Some(creation) = federation_creation {
-            if let Err(error) = self.mailbox_store.retire_federation_intent_owner(session_id, &creation) {
+            if let Err(error) = self
+                .mailbox_store
+                .retire_federation_intent_owner(session_id, &creation)
+            {
                 eprintln!("mailbox cleanup> sender namespace retirement pending: {error:#}");
             }
         }
@@ -331,7 +352,7 @@ impl AppState {
     /// queued prompt with that id exists on the session. Used when the user
     /// has queued multiple prompts and wants to cancel one specific entry.
     /// Proxied to the remote backend when `session.remote_target` is set.
-    fn cancel_queued_prompt(
+    pub(crate) fn cancel_queued_prompt(
         &self,
         session_id: &str,
         prompt_id: &str,
@@ -446,7 +467,7 @@ impl AppState {
     /// once it is, unless a Stop, pause or Cancel came since; the pause stays
     /// until the turn starts. Idempotent on an unpaused session. Remote sessions
     /// forward to their owning server so the latch stays authoritative there.
-    fn resume_session_queue(
+    pub(crate) fn resume_session_queue(
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
@@ -457,20 +478,25 @@ impl AppState {
         }
         self.cancel_observation_delete_for_resume(session_id)?;
         self.cancel_provider_capacity_retry(session_id);
-        match self.start_human_queued_turn(session_id, true)
-            .map_err(|error| ApiError::internal(format!("failed to resume human prompt: {error:#}")))?
-        {
+        match self
+            .start_human_queued_turn(session_id, true)
+            .map_err(|error| {
+                ApiError::internal(format!("failed to resume human prompt: {error:#}"))
+            })? {
             HumanPromptDrain::Started(started) => {
                 deliver_turn_dispatch(self, started.dispatch).into_public_result()?;
                 return Ok(self.snapshot());
             }
             HumanPromptDrain::Held => {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                if inner.find_visible_session_index(session_id).is_some_and(|index| {
-                    let record = &inner.sessions[index];
-                    !record.orchestrator_auto_dispatch_blocked
-                        && queued_head_durability_resume_refusal(record).is_none()
-                }) {
+                if inner
+                    .find_visible_session_index(session_id)
+                    .is_some_and(|index| {
+                        let record = &inner.sessions[index];
+                        !record.orchestrator_auto_dispatch_blocked
+                            && queued_head_durability_resume_refusal(record).is_none()
+                    })
+                {
                     drop(inner);
                     return Ok(self.snapshot());
                 }
@@ -500,7 +526,7 @@ impl AppState {
     /// superseded outcome instead of reading one off the session. With
     /// `owner`, only that exact head may be resumed: a caller that checked a
     /// held prompt never admits a successor exposed meanwhile.
-    fn resume_local_session_queue(
+    pub(crate) fn resume_local_session_queue(
         &self,
         session_id: &str,
         owner: Option<QueuedTurnOwner>,
@@ -509,16 +535,21 @@ impl AppState {
         self.resume_local_session_queue_inner(session_id, owner, None)
     }
 
-    fn resume_local_session_queue_inner(
+    pub(crate) fn resume_local_session_queue_inner(
         &self,
         session_id: &str,
         owner: Option<QueuedTurnOwner>,
         capacity_nonce: Option<&str>,
     ) -> std::result::Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
-        self.resume_local_session_queue_inner_with_selection(session_id, owner, capacity_nonce, None)
+        self.resume_local_session_queue_inner_with_selection(
+            session_id,
+            owner,
+            capacity_nonce,
+            None,
+        )
     }
 
-    fn resume_local_session_queue_inner_with_selection(
+    pub(crate) fn resume_local_session_queue_inner_with_selection(
         &self,
         session_id: &str,
         mut owner: Option<QueuedTurnOwner>,
@@ -527,7 +558,8 @@ impl AppState {
     ) -> Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
         let (checked_head, receipted) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_visible_session_index(session_id)
+            let index = inner
+                .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &inner.sessions[index];
             if ordinary_selection.is_some_and(|selection| {
@@ -535,7 +567,9 @@ impl AppState {
                     || !selected_ordinary_resume_matches(&inner, record, selection)
                     || owner.as_ref().is_some_and(|owner| !owner.matches(record))
             }) {
-                return Err(ApiError::conflict("the selected queued prompt changed; refresh before resuming"));
+                return Err(ApiError::conflict(
+                    "the selected queued prompt changed; refresh before resuming",
+                ));
             }
             if owner.as_ref().is_some_and(|owner| !owner.matches(record)) {
                 return Ok(capacity_nonce.map(|_| TurnDispatchDeliveryOutcome::Superseded));
@@ -546,9 +580,11 @@ impl AppState {
                 && clear_provider_capacity_retry(&mut inner.sessions[index])
             {
                 inner.stamp_session_at_index(index);
-                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!(
-                    "failed persisting selected Resume capacity cancellation: {error:#}"
-                )))?;
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!(
+                        "failed persisting selected Resume capacity cancellation: {error:#}"
+                    ))
+                })?;
             }
             if capacity_nonce.is_none() {
                 self.cancel_observation_delete_for_resume_locked(&mut inner, index)?;
@@ -560,62 +596,89 @@ impl AppState {
             let engram_queue = record.is_local_session()
                 && engram_project_for_session_locked(&inner, session_id).is_some_and(|project| {
                     project.remote_id == LOCAL_REMOTE_ID
-                        && project.engram.as_ref().is_some_and(EngramProjectSettings::is_base_enabled)
+                        && project
+                            .engram
+                            .as_ref()
+                            .is_some_and(EngramProjectSettings::is_base_enabled)
                 });
             // Engram queues keep their busy-first Resume contract. Plain
             // sessions retain the unpaused local no-op after identity checks.
             if engram_queue
-                && (record.runtime_stop_in_progress || session_resource_reset_in_progress(&inner, record)
-                    || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping))
+                && (record.runtime_stop_in_progress
+                    || session_resource_reset_in_progress(&inner, record)
+                    || matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                    ))
             {
                 return Err(ApiError::conflict("session is busy, resetting or stopping"));
             }
-            if record.codex_terminal_identity_unresolved || record_has_archived_codex_thread(record) {
-                return Err(ApiError::conflict("session runtime identity is unavailable"));
+            if record.codex_terminal_identity_unresolved || record_has_archived_codex_thread(record)
+            {
+                return Err(ApiError::conflict(
+                    "session runtime identity is unavailable",
+                ));
             }
             if !engram_queue && !record.orchestrator_auto_dispatch_blocked {
                 return Ok(None);
             }
             if let Some(position) = ordinary_queue_position(record)
-                && let Some(reason) = queued_prompt_durability_resume_refusal(record, &record.queued_prompts[position])
+                && let Some(reason) = queued_prompt_durability_resume_refusal(
+                    record,
+                    &record.queued_prompts[position],
+                )
             {
                 return Err(ApiError::conflict(reason));
             }
             if ordinary_queue_position(record).is_none() {
                 if record.orchestrator_auto_dispatch_blocked {
                     let before = record.clone();
-                    inner.session_mut_by_index(index).expect("session index should be valid")
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
                         .set_auto_dispatch_blocked(false);
                     if let Err(error) = self.commit_session_locked(&mut inner, session_id) {
                         inner.sessions[index] = before;
-                        return Err(ApiError::internal(format!("failed persisting Resume: {error:#}")));
+                        return Err(ApiError::internal(format!(
+                            "failed persisting Resume: {error:#}"
+                        )));
                     }
                 }
                 return Ok(None);
             }
             // Capture the exact head under the original selection lock. A
             // cancellation cannot lend this Resume to the exposed successor.
-            if owner.is_none() { owner = QueuedTurnOwner::capture(record); }
-            if let Some(owner) = &mut owner { owner.capacity_nonce = capacity_nonce.map(str::to_owned); }
+            if owner.is_none() {
+                owner = QueuedTurnOwner::capture(record);
+            }
+            if let Some(owner) = &mut owner {
+                owner.capacity_nonce = capacity_nonce.map(str::to_owned);
+            }
             let record = &inner.sessions[index];
             let receipted = receipted_resume_identity(record, owner.as_ref());
-            (owner.as_ref().map(|owner| owner.prompt_id.clone()), receipted)
+            (
+                owner.as_ref().map(|owner| owner.prompt_id.clone()),
+                receipted,
+            )
         };
         if let Some(receipted) = receipted {
             match self.resume_receipted_head(session_id, owner.as_ref(), &receipted) {
-                ReceiptedResume::NotReceipted => {},
-                ReceiptedResume::Preparing => return Ok(Some(TurnDispatchDeliveryOutcome::Scheduled)),
+                ReceiptedResume::NotReceipted => {}
+                ReceiptedResume::Preparing => {
+                    return Ok(Some(TurnDispatchDeliveryOutcome::Scheduled));
+                }
                 ReceiptedResume::Refused(reason) => return Err(ApiError::conflict(reason)),
             }
         }
         let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
-        let dispatch = self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
+        let dispatch =
+            self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
         Ok(dispatch.map(|started| self.deliver_queued_turn_dispatch(started)))
     }
 
     /// One drain of a resumed queue: bound to `owner` when given, otherwise
     /// to the head the drain finds first.
-    fn drain_resumed_queue(
+    pub(crate) fn drain_resumed_queue(
         &self,
         session_id: &str,
         owner: Option<QueuedTurnOwner>,
@@ -625,7 +688,9 @@ impl AppState {
             None => self.dispatch_next_queued_turn_with_prompt(session_id, true),
         }
         .map_err(|err| {
-            ApiError::internal(format!("failed to dispatch the resumed queue head: {err:#}"))
+            ApiError::internal(format!(
+                "failed to dispatch the resumed queue head: {err:#}"
+            ))
         })
     }
 
@@ -635,7 +700,10 @@ impl AppState {
     /// (leave queued work paused on success, not part of an orchestrator
     /// cleanup wave).
     #[cfg_attr(not(test), allow(dead_code))]
-    fn stop_session(&self, session_id: &str) -> std::result::Result<StateResponse, ApiError> {
+    pub(crate) fn stop_session(
+        &self,
+        session_id: &str,
+    ) -> std::result::Result<StateResponse, ApiError> {
         self.stop_session_with_options(session_id, StopSessionOptions::default())
     }
 
@@ -644,14 +712,15 @@ impl AppState {
     /// state becomes visible, so runtime callbacks are deferred throughout the
     /// handoff to the background worker. Repeated requests while that claim is
     /// active are idempotent.
-    fn request_stop_session(
+    pub(crate) fn request_stop_session(
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_stop_session(session_id);
         }
-        self.retry_retained_dedicated_cleanup(session_id).map_err(|error| ApiError::conflict(format!("{error:#}")))?;
+        self.retry_retained_dedicated_cleanup(session_id)
+            .map_err(|error| ApiError::conflict(format!("{error:#}")))?;
         // An Idle session waiting for delegations or test runs has no turn
         // to interrupt, but Stop still has to keep that work from resuming it.
         if let Some(response) = self.stop_idle_waiting_session(session_id)? {
@@ -667,8 +736,13 @@ impl AppState {
         Ok(response)
     }
 
-    fn spawn_requested_stop_session(&self, session_id: &str, options: StopSessionOptions,
-        claim: RequestedStopClaim, slot: Option<RuntimeRetrySlot>) -> Result<(), ApiError> {
+    fn spawn_requested_stop_session(
+        &self,
+        session_id: &str,
+        options: StopSessionOptions,
+        claim: RequestedStopClaim,
+        slot: Option<RuntimeRetrySlot>,
+    ) -> Result<(), ApiError> {
         let state = self.clone();
         let worker_session_id = session_id.to_owned();
         let worker_claim = claim.clone();
@@ -698,7 +772,7 @@ impl AppState {
         Ok(())
     }
 
-    fn begin_requested_stop_session(
+    pub(crate) fn begin_requested_stop_session(
         &self,
         session_id: &str,
         options: &StopSessionOptions,
@@ -709,8 +783,10 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found("session not found"))?;
 
         if inner.sessions[index].provider_capacity_retry.is_some()
-            && !matches!(inner.sessions[index].session.status,
-                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+            && !matches!(
+                inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
         {
             let record = &mut inner.sessions[index];
             clear_provider_capacity_retry(record);
@@ -733,7 +809,9 @@ impl AppState {
                 record.set_auto_dispatch_blocked(true);
                 record.engram.operator_paused = true;
                 inner.stamp_session_at_index(index);
-                self.commit_locked(&mut inner).map_err(|error| ApiError::internal(format!("failed to persist operator pause: {error:#}")))?;
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!("failed to persist operator pause: {error:#}"))
+                })?;
             }
             return Ok((self.snapshot_from_inner(&inner), None));
         }
@@ -744,8 +822,11 @@ impl AppState {
             inner.sessions[index].session.status,
             SessionStatus::Active | SessionStatus::Approval
         ) && !(inner.sessions[index].session.status == SessionStatus::Error
-            && (inner.sessions[index].runtime.dedicated_cleanup_failure().is_some()
-)) {
+            && (inner.sessions[index]
+                .runtime
+                .dedicated_cleanup_failure()
+                .is_some()))
+        {
             return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
         }
 
@@ -870,7 +951,10 @@ impl AppState {
                     .runtime_token
                     .as_ref()
                     .is_some_and(|token| record.runtime.matches_runtime_token(token))
-                && (claim.receipt_owner.as_ref().is_some_and(|owner| owner.matches(record))
+                && (claim
+                    .receipt_owner
+                    .as_ref()
+                    .is_some_and(|owner| owner.matches(record))
                     || claim.delivery_owner.as_ref().is_some_and(|owner| {
                         owner.matches(record)
                             && handing_off_head(record).is_some_and(|(prompt_id, generation)| {
@@ -944,7 +1028,7 @@ impl AppState {
     ///   scheduling skips the session while cleanup is in flight (the
     ///   session id is appended to `stopped_session_ids_during_stop` on
     ///   the instance).
-    fn stop_session_with_options(
+    pub(crate) fn stop_session_with_options(
         &self,
         session_id: &str,
         options: StopSessionOptions,
@@ -955,7 +1039,7 @@ impl AppState {
         self.stop_local_session_with_options(session_id, options, None)
     }
 
-    fn stop_local_session_with_options(
+    pub(crate) fn stop_local_session_with_options(
         &self,
         session_id: &str,
         options: StopSessionOptions,
@@ -991,7 +1075,8 @@ impl AppState {
                     record.session.status,
                     SessionStatus::Active | SessionStatus::Approval
                 ) && !(record.session.status == SessionStatus::Error
-                    && record.runtime.dedicated_cleanup_failure().is_some()) {
+                    && record.runtime.dedicated_cleanup_failure().is_some())
+                {
                     return Err(ApiError::conflict(SESSION_NOT_RUNNING_CONFLICT_MESSAGE));
                 }
             }
@@ -1205,13 +1290,25 @@ impl AppState {
                 .is_some_and(|owner| owner.matches(record))
             {
                 let owner = delivery_owner.as_ref().expect("matched delivery owner");
-                let position = record.queued_prompts.iter().position(|queued| queued.pending_prompt.id == owner.prompt_id)
+                let position = record
+                    .queued_prompts
+                    .iter()
+                    .position(|queued| queued.pending_prompt.id == owner.prompt_id)
                     .expect("owned prompt exists");
-                let removed = record.queued_prompts.remove(position).expect("owned prompt exists");
-                let removed_delivery = record.prompt_deliveries.get(&removed.pending_prompt.id)
+                let removed = record
+                    .queued_prompts
+                    .remove(position)
+                    .expect("owned prompt exists");
+                let removed_delivery = record
+                    .prompt_deliveries
+                    .get(&removed.pending_prompt.id)
                     .and_then(|delivery| delivery.turn_generation)
                     .map(|generation| (removed.pending_prompt.id, generation));
-                settle_removed_handing_off_head(record, removed_delivery, QUEUE_REMOVAL_UNSENT_REASON);
+                settle_removed_handing_off_head(
+                    record,
+                    removed_delivery,
+                    QUEUE_REMOVAL_UNSENT_REASON,
+                );
                 sync_pending_prompts(record);
                 // This retirement has its own delta wake after off-lock
                 // shutdown; a preceding or later stamp cannot cover its cut.
@@ -1236,8 +1333,7 @@ impl AppState {
         let mut receipted_successor = None;
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let transition = {
-            let Some(_observation_install) =
-                self.runtime_observation_lifetime.enter("terminal")
+            let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
                 return Ok(self.snapshot());
             };
@@ -1261,7 +1357,10 @@ impl AppState {
                 return Ok(self.snapshot());
             }
             self.queue_runtime_observation_close_with_notices_locked(
-                &mut inner, index, EngramObservedTurnOutcome::Cancelled, &registered_check_notices,
+                &mut inner,
+                index,
+                EngramObservedTurnOutcome::Cancelled,
+                &registered_check_notices,
             );
             let message_id = inner.next_message_id();
             let file_change_message_id =
@@ -1608,9 +1707,13 @@ impl AppState {
 }
 
 impl AppState {
-    fn cancel_observation_delete_for_resume(&self, session_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn cancel_observation_delete_for_resume(
+        &self,
+        session_id: &str,
+    ) -> Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_visible_session_index(session_id)
+        let index = inner
+            .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
         self.cancel_observation_delete_for_resume_locked(&mut inner, index)
     }
@@ -1625,7 +1728,9 @@ impl AppState {
         }
         let before = inner.sessions[index].clone();
         let retained_notice = runtime_observation_terminal_removal_notice(&before);
-        let record = inner.session_mut_by_index(index).expect("session index should be valid");
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
         record.engram.observation_delete_requested = false;
         // Replace the Delete presentation, while preserving any newer runtime
         // preview. The retained observation facts themselves stay untouched.
@@ -1633,13 +1738,19 @@ impl AppState {
             || record.session.preview == SOURCE_OBSERVATION_ACTIVE_DELETE_RETAINED
             || retained_notice.as_deref() == Some(record.session.preview.as_str())
         {
-            record.session.preview = record.session.messages.iter().rev()
+            record.session.preview = record
+                .session
+                .messages
+                .iter()
+                .rev()
                 .find_map(Message::preview_text)
                 .unwrap_or_else(|| "Ready for a prompt.".to_owned());
         }
         if let Err(error) = self.commit_session_locked(inner, &before.session.id) {
             inner.sessions[index] = before;
-            return Err(ApiError::internal(format!("failed to cancel pending Delete: {error:#}")));
+            return Err(ApiError::internal(format!(
+                "failed to cancel pending Delete: {error:#}"
+            )));
         }
         Ok(())
     }

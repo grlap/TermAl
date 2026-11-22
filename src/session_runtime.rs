@@ -16,26 +16,28 @@
 // Extracted from state.rs into its own `include!()` fragment so state.rs
 // can stay focused on the StateInner state model and its impls.
 
+use super::*;
+
 /// Represents Codex thread action context.
-struct CodexThreadActionContext {
-    approval_policy: CodexApprovalPolicy,
-    fast_mode: bool,
-    model: String,
-    model_options: Vec<SessionModelOption>,
-    name: String,
-    project_id: Option<String>,
-    reasoning_effort: CodexReasoningEffort,
-    sandbox_mode: CodexSandboxMode,
+pub(crate) struct CodexThreadActionContext {
+    pub(crate) approval_policy: CodexApprovalPolicy,
+    pub(crate) fast_mode: bool,
+    pub(crate) model: String,
+    pub(crate) model_options: Vec<SessionModelOption>,
+    pub(crate) name: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) reasoning_effort: CodexReasoningEffort,
+    pub(crate) sandbox_mode: CodexSandboxMode,
     /// The app-server that holds this session's thread.
-    shared_codex_profile: SharedCodexProfile,
-    thread_id: String,
-    thread_state: Option<CodexThreadState>,
-    workdir: String,
+    pub(crate) shared_codex_profile: SharedCodexProfile,
+    pub(crate) thread_id: String,
+    pub(crate) thread_state: Option<CodexThreadState>,
+    pub(crate) workdir: String,
 }
 
 /// Defines the session runtime variants.
 #[derive(Clone)]
-enum SessionRuntime {
+pub(crate) enum SessionRuntime {
     None,
     Claude(ClaudeRuntimeHandle),
     Codex(CodexRuntimeHandle),
@@ -44,24 +46,26 @@ enum SessionRuntime {
 
 /// Represents the Claude runtime handle.
 #[derive(Clone)]
-struct ClaudeRuntimeHandle {
-    runtime_id: String,
-    input_tx: Sender<ClaudeRuntimeCommand>,
-    process: Arc<SharedChild>,
+pub(crate) struct ClaudeRuntimeHandle {
+    pub(crate) runtime_id: String,
+    pub(crate) input_tx: Sender<ClaudeRuntimeCommand>,
+    pub(crate) process: Arc<SharedChild>,
     #[cfg(windows)]
-    process_tree: Option<Arc<RuntimeProcessTree>>,
+    pub(crate) process_tree: Option<Arc<RuntimeProcessTree>>,
 }
 
 impl ClaudeRuntimeHandle {
-    fn kill_for_locked_reset(&self) -> Result<()> {
+    pub(crate) fn kill_for_locked_reset(&self) -> Result<()> {
         #[cfg(windows)]
         if let Some(tree) = &self.process_tree {
-            if tree.is_confirmed() { return Ok(()); }
+            if tree.is_confirmed() {
+                return Ok(());
+            }
             bail!("dedicated runtime reset requires off-lock cleanup preparation");
         }
         self.kill()
     }
-    fn kill(&self) -> Result<()> {
+    pub(crate) fn kill(&self) -> Result<()> {
         #[cfg(windows)]
         if let Some(tree) = &self.process_tree {
             return tree.terminate(&self.process, "Claude");
@@ -72,15 +76,15 @@ impl ClaudeRuntimeHandle {
 
 /// Represents the Codex runtime handle.
 #[derive(Clone)]
-struct CodexRuntimeHandle {
-    runtime_id: String,
-    input_tx: Sender<CodexRuntimeCommand>,
-    process: Arc<SharedChild>,
-    shared_session: Option<SharedCodexSessionHandle>,
+pub(crate) struct CodexRuntimeHandle {
+    pub(crate) runtime_id: String,
+    pub(crate) input_tx: Sender<CodexRuntimeCommand>,
+    pub(crate) process: Arc<SharedChild>,
+    pub(crate) shared_session: Option<SharedCodexSessionHandle>,
 }
 
 impl CodexRuntimeHandle {
-    fn kill(&self) -> Result<()> {
+    pub(crate) fn kill(&self) -> Result<()> {
         kill_child_process(&self.process, "Codex")
     }
 }
@@ -90,23 +94,23 @@ impl CodexRuntimeHandle {
 /// handlers to tell a busy server from a wedged one: a server that spoke
 /// during a request's wait window is alive and merely slow, so timing out that
 /// one request must not tear down the runtime under every other session.
-type SharedCodexStdoutActivityState = Arc<Mutex<std::time::Instant>>;
+pub(crate) type SharedCodexStdoutActivityState = Arc<Mutex<std::time::Instant>>;
 
 /// Represents shared Codex runtime.
 #[derive(Clone)]
-struct SharedCodexRuntime {
-    runtime_id: String,
-    input_tx: Sender<CodexRuntimeCommand>,
-    process: Arc<SharedChild>,
-    sessions: SharedCodexSessionMap,
-    thread_sessions: SharedCodexThreadMap,
-    stdout_activity: SharedCodexStdoutActivityState,
+pub(crate) struct SharedCodexRuntime {
+    pub(crate) runtime_id: String,
+    pub(crate) input_tx: Sender<CodexRuntimeCommand>,
+    pub(crate) process: Arc<SharedChild>,
+    pub(crate) sessions: SharedCodexSessionMap,
+    pub(crate) thread_sessions: SharedCodexThreadMap,
+    pub(crate) stdout_activity: SharedCodexStdoutActivityState,
 }
 
 impl SharedCodexRuntime {
     /// Sends a graceful shutdown notification to the app-server, waits briefly
     /// for the process to exit, then escalates to a hard kill if necessary.
-    fn kill(&self) -> Result<()> {
+    pub(crate) fn kill(&self) -> Result<()> {
         // Attempt graceful shutdown by sending a `shutdown` notification.
         // The send may fail if the writer thread already exited — that is
         // fine, we will fall through to the hard kill.
@@ -133,9 +137,9 @@ impl SharedCodexRuntime {
 
 /// Represents the shared Codex session handle.
 #[derive(Clone)]
-struct SharedCodexSessionHandle {
-    runtime: SharedCodexRuntime,
-    session_id: String,
+pub(crate) struct SharedCodexSessionHandle {
+    pub(crate) runtime: SharedCodexRuntime,
+    pub(crate) session_id: String,
 }
 
 impl SharedCodexSessionHandle {
@@ -162,7 +166,7 @@ impl SharedCodexSessionHandle {
     /// (`runtime.sessions`) and its `thread_id` → session mapping
     /// (`runtime.thread_sessions`) if one is bound. The underlying
     /// runtime subprocess keeps running for other sessions.
-    fn detach(&self) {
+    pub(crate) fn detach(&self) {
         let removed_thread_id = {
             let mut sessions = self
                 .runtime
@@ -179,7 +183,7 @@ impl SharedCodexSessionHandle {
     /// `turn/completed` handling owns `runtime.sessions` while applying the
     /// state transition; blocking here would self-deadlock before parent
     /// delegation result deltas are published.
-    fn try_detach(&self) -> bool {
+    pub(crate) fn try_detach(&self) -> bool {
         let removed_thread_id = match self.runtime.sessions.try_lock() {
             Ok(mut sessions) => Self::remove_locked_session(&mut sessions, &self.session_id),
             Err(std::sync::TryLockError::WouldBlock) => return false,
@@ -276,7 +280,7 @@ impl SharedCodexSessionHandle {
 
 /// Defines the ACP agent variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AcpAgent {
+pub(crate) enum AcpAgent {
     Cursor,
     Gemini,
     OpenCode,
@@ -284,7 +288,7 @@ enum AcpAgent {
 }
 
 impl AcpAgent {
-    fn agent(self) -> Agent {
+    pub(crate) fn agent(self) -> Agent {
         match self {
             Self::Cursor => Agent::Cursor,
             Self::Gemini => Agent::Gemini,
@@ -297,7 +301,7 @@ impl AcpAgent {
     /// agent. Cursor uses `cursor-agent acp`; the Gemini harness uses
     /// Antigravity's `agy acp`. Each adapter resolves its native executable
     /// before changing the working directory and reports missing setup.
-    fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
+    pub(crate) fn command(self, launch_options: AcpLaunchOptions) -> Result<Command> {
         match self {
             Self::Kimi => kimi_acp_command(resolve_kimi_executable()),
             Self::Cursor => {
@@ -321,40 +325,42 @@ impl AcpAgent {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         self.agent().name()
     }
 }
 
 /// Represents the ACP runtime handle.
 #[derive(Clone)]
-struct AcpRuntimeHandle {
-    agent: AcpAgent,
-    runtime_id: String,
-    input_tx: Sender<AcpRuntimeCommand>,
-    process: Arc<SharedChild>,
+pub(crate) struct AcpRuntimeHandle {
+    pub(crate) agent: AcpAgent,
+    pub(crate) runtime_id: String,
+    pub(crate) input_tx: Sender<AcpRuntimeCommand>,
+    pub(crate) process: Arc<SharedChild>,
     #[cfg(windows)]
-    process_tree: Option<Arc<RuntimeProcessTree>>,
-    turn_lifecycle: AcpTurnLifecycle,
+    pub(crate) process_tree: Option<Arc<RuntimeProcessTree>>,
+    pub(crate) turn_lifecycle: AcpTurnLifecycle,
 }
 
 #[cfg(test)]
 #[derive(Clone)]
-struct TestAcpRuntimeOverride {
-    agent: AcpAgent,
-    runtime: AcpRuntimeHandle,
+pub(crate) struct TestAcpRuntimeOverride {
+    pub(crate) agent: AcpAgent,
+    pub(crate) runtime: AcpRuntimeHandle,
 }
 
 impl AcpRuntimeHandle {
-    fn kill_for_locked_reset(&self) -> Result<()> {
+    pub(crate) fn kill_for_locked_reset(&self) -> Result<()> {
         #[cfg(windows)]
         if let Some(tree) = &self.process_tree {
-            if tree.is_confirmed() { return Ok(()); }
+            if tree.is_confirmed() {
+                return Ok(());
+            }
             bail!("dedicated runtime reset requires off-lock cleanup preparation");
         }
         self.kill()
     }
-    fn kill(&self) -> Result<()> {
+    pub(crate) fn kill(&self) -> Result<()> {
         #[cfg(windows)]
         if let Some(tree) = &self.process_tree {
             return tree.terminate(&self.process, self.agent.label());
@@ -368,11 +374,11 @@ impl AcpRuntimeHandle {
     /// Local process termination never proves that the agent-side session is
     /// invalid, so this path always preserves the external session id. The
     /// typed resume classifier owns any later continuity invalidation.
-    fn stop(&self) -> Result<()> {
+    pub(crate) fn stop(&self) -> Result<()> {
         self.stop_with_grace(ACP_CANCEL_GRACE)
     }
 
-    fn stop_with_grace(&self, grace: Duration) -> Result<()> {
+    pub(crate) fn stop_with_grace(&self, grace: Duration) -> Result<()> {
         if let Err(err) = self.input_tx.send(AcpRuntimeCommand::Cancel) {
             eprintln!(
                 "session cleanup warning> failed to queue {} ACP cancellation; \
@@ -394,7 +400,7 @@ impl AcpRuntimeHandle {
 
 /// Defines the killable runtime variants.
 #[derive(Clone)]
-enum KillableRuntime {
+pub(crate) enum KillableRuntime {
     Claude(ClaudeRuntimeHandle),
     Codex(CodexRuntimeHandle),
     Acp(AcpRuntimeHandle),
@@ -402,7 +408,7 @@ enum KillableRuntime {
 
 impl KillableRuntime {
     /// Stops failure is best effort.
-    fn stop_failure_is_best_effort(&self) -> bool {
+    pub(crate) fn stop_failure_is_best_effort(&self) -> bool {
         matches!(self, Self::Codex(handle) if handle.shared_session.is_some())
     }
 
@@ -410,7 +416,7 @@ impl KillableRuntime {
     /// retain a dedicated runtime handle when termination failed and this
     /// probe cannot prove exit, otherwise the stale MCP-bearing process loses
     /// its only retry handle.
-    fn process_has_exited(&self) -> Result<bool> {
+    pub(crate) fn process_has_exited(&self) -> Result<bool> {
         #[cfg(windows)]
         match self {
             Self::Claude(handle) if handle.process_tree.is_some() => {
@@ -433,7 +439,7 @@ impl KillableRuntime {
 }
 
 /// Shuts down removed runtime.
-fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
+pub(crate) fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
     match runtime {
         KillableRuntime::Codex(handle) => {
             if let Some(shared_session) = &handle.shared_session {
@@ -472,7 +478,7 @@ fn shutdown_removed_runtime(runtime: KillableRuntime, context: &str) -> Result<(
 /// Stops a user-visible runtime. OpenCode and Kimi get a bounded graceful ACP
 /// cancel so their resumable sessions can settle before local process teardown; the
 /// existing Cursor and Gemini stop contract remains immediate termination.
-fn shutdown_stopped_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
+pub(crate) fn shutdown_stopped_runtime(runtime: KillableRuntime, context: &str) -> Result<()> {
     match runtime {
         KillableRuntime::Acp(handle)
             if matches!(handle.agent, AcpAgent::OpenCode | AcpAgent::Kimi) =>
@@ -490,7 +496,7 @@ fn shutdown_stopped_runtime(runtime: KillableRuntime, context: &str) -> Result<(
 
 /// Detaches a naturally terminal delegation child without interrupting an
 /// already-finished shared Codex turn.
-fn shutdown_terminal_delegation_child_runtime(
+pub(crate) fn shutdown_terminal_delegation_child_runtime(
     runtime: KillableRuntime,
     context: &str,
 ) -> Result<()> {
@@ -525,7 +531,7 @@ fn shutdown_terminal_delegation_child_runtime(
 
 /// Defines the deferred stop callback variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum DeferredStopCallback {
+pub(crate) enum DeferredStopCallback {
     /// Delivery is durable, but the Stop owner has not resolved yet.
     TurnHandoff {
         active_turn_generation: u64,
@@ -551,7 +557,7 @@ enum DeferredStopCallback {
 }
 
 impl DeferredStopCallback {
-    fn active_turn_generation(&self) -> u64 {
+    pub(crate) fn active_turn_generation(&self) -> u64 {
         match self {
             Self::TurnHandoff {
                 active_turn_generation,
@@ -578,7 +584,7 @@ impl DeferredStopCallback {
 
 /// Defines the runtime token variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum RuntimeToken {
+pub(crate) enum RuntimeToken {
     Claude(String),
     Codex(String),
     Acp(String),
@@ -586,19 +592,37 @@ enum RuntimeToken {
 
 impl SessionRuntime {
     #[cfg(windows)]
-    fn dedicated_tree_owner(&self) -> Option<(Arc<RuntimeProcessTree>, Arc<SharedChild>, &'static str)> {
+    pub(crate) fn dedicated_tree_owner(
+        &self,
+    ) -> Option<(Arc<RuntimeProcessTree>, Arc<SharedChild>, &'static str)> {
         match self {
-            Self::Claude(handle) => handle.process_tree.as_ref().map(|tree| (tree.clone(), handle.process.clone(), "Claude")),
-            Self::Acp(handle) => handle.process_tree.as_ref().map(|tree| (tree.clone(), handle.process.clone(), handle.agent.label())),
+            Self::Claude(handle) => handle
+                .process_tree
+                .as_ref()
+                .map(|tree| (tree.clone(), handle.process.clone(), "Claude")),
+            Self::Acp(handle) => handle
+                .process_tree
+                .as_ref()
+                .map(|tree| (tree.clone(), handle.process.clone(), handle.agent.label())),
             _ => None,
         }
     }
-    fn dedicated_cleanup_failure(&self) -> Option<String> {
+    pub(crate) fn dedicated_cleanup_failure(&self) -> Option<String> {
         #[cfg(windows)]
         match self {
-            Self::Claude(handle) => return handle.process_tree.as_ref().and_then(|tree| tree.cleanup_failure()),
-            Self::Acp(handle) => return handle.process_tree.as_ref().and_then(|tree| tree.cleanup_failure()),
-            _ => {},
+            Self::Claude(handle) => {
+                return handle
+                    .process_tree
+                    .as_ref()
+                    .and_then(|tree| tree.cleanup_failure());
+            }
+            Self::Acp(handle) => {
+                return handle
+                    .process_tree
+                    .as_ref()
+                    .and_then(|tree| tree.cleanup_failure());
+            }
+            _ => {}
         }
         None
     }
@@ -608,7 +632,7 @@ impl SessionRuntime {
     /// `_if_runtime_matches` guard wrappers in `turn_lifecycle.rs`
     /// to drop stray events from torn-down runtimes — see that file
     /// for the staleness pattern.
-    fn runtime_token(&self) -> Option<RuntimeToken> {
+    pub(crate) fn runtime_token(&self) -> Option<RuntimeToken> {
         match self {
             Self::Claude(handle) => Some(RuntimeToken::Claude(handle.runtime_id.clone())),
             Self::Codex(handle) => Some(RuntimeToken::Codex(handle.runtime_id.clone())),
@@ -618,7 +642,7 @@ impl SessionRuntime {
     }
 
     /// Returns whether runtime token.
-    fn matches_runtime_token(&self, token: &RuntimeToken) -> bool {
+    pub(crate) fn matches_runtime_token(&self, token: &RuntimeToken) -> bool {
         match (self, token) {
             (Self::Claude(handle), RuntimeToken::Claude(runtime_id)) => {
                 handle.runtime_id == *runtime_id
@@ -652,7 +676,10 @@ fn forced_kill_child_process_failure() -> &'static Mutex<Option<ForcedKillChildP
 
 /// Sets test kill child process failure.
 #[cfg(test)]
-fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc<SharedChild>>) {
+pub(crate) fn set_test_kill_child_process_failure(
+    label: Option<&str>,
+    process: Option<&Arc<SharedChild>>,
+) {
     *forced_kill_child_process_failure()
         .lock()
         .expect("forced kill-child-process failure mutex poisoned") = match (label, process) {
@@ -666,7 +693,7 @@ fn set_test_kill_child_process_failure(label: Option<&str>, process: Option<&Arc
 }
 
 #[cfg(test)]
-fn set_test_kill_child_process_failure_count(
+pub(crate) fn set_test_kill_child_process_failure_count(
     label: &str,
     process: &Arc<SharedChild>,
     remaining_failures: usize,
@@ -682,7 +709,7 @@ fn set_test_kill_child_process_failure_count(
 }
 
 /// Kills child process.
-fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
+pub(crate) fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
     #[cfg(test)]
     {
         let mut forced_failure = forced_kill_child_process_failure()
@@ -724,7 +751,7 @@ fn kill_child_process(process: &Arc<SharedChild>, label: &str) -> Result<()> {
     }
 }
 
-fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bool> {
+pub(crate) fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bool> {
     match process.try_wait() {
         Ok(Some(_)) => Ok(true),
         Ok(None) => Ok(false),
@@ -733,7 +760,7 @@ fn shared_child_has_exited(process: &Arc<SharedChild>, label: &str) -> Result<bo
 }
 
 /// Handles wait for shared child exit timeout.
-fn wait_for_shared_child_exit_timeout(
+pub(crate) fn wait_for_shared_child_exit_timeout(
     process: &Arc<SharedChild>,
     timeout: Duration,
     label: &str,

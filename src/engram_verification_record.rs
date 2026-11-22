@@ -37,19 +37,22 @@
 // src/engram_capabilities.rs); the tick thread (src/engram_retry_schedule.rs);
 // any credit, acceptance or tracker decision, which stay Engram's.
 
+use super::*;
+
 /// The frozen body's file in the run directory: written once, never rebuilt.
-const ENGRAM_VERIFICATION_RECORD_BODY_FILE: &str = "engram-verification-record.json";
+pub(crate) const ENGRAM_VERIFICATION_RECORD_BODY_FILE: &str = "engram-verification-record.json";
 
 /// The record's progress beside the body: pending (and why), settled, or
 /// rejected. Informational: a received, settled or rejected record is decided
 /// by the host's own `TestRunVerificationAck` on the registration, never by
 /// this file, which an agent can write.
-const ENGRAM_VERIFICATION_RECORD_STATE_FILE: &str = "engram-verification-record-state.json";
+pub(crate) const ENGRAM_VERIFICATION_RECORD_STATE_FILE: &str =
+    "engram-verification-record-state.json";
 
 /// The most one pass over the registered runs may take, on its own thread
 /// (src/engram_retry_schedule.rs), so it never holds up the owed binds; each
 /// Engram call and durability wait gets what is left of it.
-const ENGRAM_VERIFICATION_RECORD_TICK_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+pub(crate) const ENGRAM_VERIFICATION_RECORD_TICK_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 
 /// How long the settlement of a held receipt waits for its associations to be
 /// read back durable when no tick budget bounds it.
@@ -58,10 +61,10 @@ const ENGRAM_VERIFICATION_RECORD_SETTLE_FENCE: Duration = Duration::from_secs(5)
 /// The first wait before a run left pending, or with its receipt unsettled,
 /// is looked at again; each further look that leaves it so doubles the wait,
 /// up to `ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX`.
-const ENGRAM_VERIFICATION_RECORD_BACKOFF_START: Duration = Duration::from_secs(2);
+pub(crate) const ENGRAM_VERIFICATION_RECORD_BACKOFF_START: Duration = Duration::from_secs(2);
 
 /// The longest wait between two looks at a run that stays pending.
-const ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX: Duration = Duration::from_secs(5 * 60);
+pub(crate) const ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// Engram's refusals of the record itself: the producer's own refusal and a
 /// request it cannot decode or validate. Only these are final; any other
@@ -72,49 +75,49 @@ const ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS: &[&str] =
 
 /// The idempotency key of one run's record: one key per host run, so every
 /// retry, before or after a restart, names the same record.
-fn engram_verification_record_key(run_id: &str) -> String {
+pub(crate) fn engram_verification_record_key(run_id: &str) -> String {
     format!("termal-run:{run_id}")
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-struct EngramVerificationRecordBody {
-    registration: EngramVerificationRecordRegistration,
-    input: EngramVerificationRecordInput,
-    run: EngramVerificationRecordRun,
-    checks: Vec<EngramVerificationRecordCheck>,
-    post_run: EngramVerificationRecordPostRun,
+pub(crate) struct EngramVerificationRecordBody {
+    pub(crate) registration: EngramVerificationRecordRegistration,
+    pub(crate) input: EngramVerificationRecordInput,
+    pub(crate) run: EngramVerificationRecordRun,
+    pub(crate) checks: Vec<EngramVerificationRecordCheck>,
+    pub(crate) post_run: EngramVerificationRecordPostRun,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordRegistration {
-    host_run_id: String,
-    request_identity: String,
-    registered_at: String,
-    initiating_session_id: String,
+pub(crate) struct EngramVerificationRecordRegistration {
+    pub(crate) host_run_id: String,
+    pub(crate) request_identity: String,
+    pub(crate) registered_at: String,
+    pub(crate) initiating_session_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    owning_session_id: Option<String>,
-    binding: EngramControlWorkBinding,
-    root: EngramVerificationRecordRoot,
+    pub(crate) owning_session_id: Option<String>,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) root: EngramVerificationRecordRoot,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordRoot {
-    workspace_id: String,
+pub(crate) struct EngramVerificationRecordRoot {
+    pub(crate) workspace_id: String,
     /// Positive and within `i64`, as the producer requires.
-    generation: i64,
-    state: EngramVerificationRecordRootState,
+    pub(crate) generation: i64,
+    pub(crate) state: EngramVerificationRecordRootState,
 }
 
 /// A registered run's root was named (bound) when it registered.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum EngramVerificationRecordRootState {
+pub(crate) enum EngramVerificationRecordRootState {
     Named,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum EngramVerificationRecordInput {
+pub(crate) enum EngramVerificationRecordInput {
     SourceId {
         source_id: EngramSourceId,
     },
@@ -133,7 +136,7 @@ enum EngramVerificationRecordInput {
 impl EngramVerificationRecordInput {
     // Commit-only consumers keep their existing policy after the full body
     // has been rebuilt and its receipt/digest checked by the caller.
-    fn clean_commit(&self) -> Option<&str> {
+    pub(crate) fn clean_commit(&self) -> Option<&str> {
         match self {
             Self::Commit { commit } => Some(commit),
             Self::SourceId { source_id } if source_id.is_clean() => Some(&source_id.commit),
@@ -143,7 +146,9 @@ impl EngramVerificationRecordInput {
 }
 
 impl<'de> Deserialize<'de> for EngramVerificationRecordInput {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
         if value.get("kind").and_then(Value::as_str) == Some("source_id") {
             #[derive(Deserialize)]
@@ -153,8 +158,11 @@ impl<'de> Deserialize<'de> for EngramVerificationRecordInput {
                 _kind: String,
                 source_id: EngramSourceId,
             }
-            let input: SourceInput = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-            return Ok(Self::SourceId { source_id: input.source_id });
+            let input: SourceInput =
+                serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+            return Ok(Self::SourceId {
+                source_id: input.source_id,
+            });
         }
         // Preserve the historical variants' decoding behavior. The new
         // closed branch cannot fall through to a commit-only interpretation.
@@ -166,21 +174,23 @@ impl<'de> Deserialize<'de> for EngramVerificationRecordInput {
         }
         match serde_json::from_value(value).map_err(serde::de::Error::custom)? {
             HistoricalInput::Commit { commit } => Ok(Self::Commit { commit }),
-            HistoricalInput::StagedTree { tree, base_commit } => Ok(Self::StagedTree { tree, base_commit }),
+            HistoricalInput::StagedTree { tree, base_commit } => {
+                Ok(Self::StagedTree { tree, base_commit })
+            }
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum EngramVerificationRecordMode {
+pub(crate) enum EngramVerificationRecordMode {
     Full,
     Focused,
     Live,
 }
 
 impl EngramVerificationRecordMode {
-    fn word(self) -> &'static str {
+    pub(crate) fn word(self) -> &'static str {
         match self {
             Self::Full => "full",
             Self::Focused => "focused",
@@ -191,7 +201,7 @@ impl EngramVerificationRecordMode {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum EngramVerificationRecordRunOutcome {
+pub(crate) enum EngramVerificationRecordRunOutcome {
     Passed,
     Failed,
     /// The launcher recorded the run as interrupted.
@@ -199,21 +209,21 @@ enum EngramVerificationRecordRunOutcome {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordRun {
-    mode: EngramVerificationRecordMode,
+pub(crate) struct EngramVerificationRecordRun {
+    pub(crate) mode: EngramVerificationRecordMode,
     /// The launcher invocation, rendered as TermAl's normalised command line
     /// (`engram_verification_record_command_text`).
-    command: String,
-    started_at: String,
-    finished_at: String,
-    outcome: EngramVerificationRecordRunOutcome,
+    pub(crate) command: String,
+    pub(crate) started_at: String,
+    pub(crate) finished_at: String,
+    pub(crate) outcome: EngramVerificationRecordRunOutcome,
 }
 
 /// A check's kind on the wire, lowercase as the producer's
 /// `VerificationKind` reads it.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-enum EngramVerificationRecordCheckKind {
+pub(crate) enum EngramVerificationRecordCheckKind {
     Test,
     Build,
     Lint,
@@ -221,7 +231,7 @@ enum EngramVerificationRecordCheckKind {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum EngramVerificationRecordCheckOutcome {
+pub(crate) enum EngramVerificationRecordCheckOutcome {
     Passed,
     Failed,
     /// The stage never started.
@@ -231,26 +241,26 @@ enum EngramVerificationRecordCheckOutcome {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordCheck {
-    stage: String,
-    check_kind: EngramVerificationRecordCheckKind,
+pub(crate) struct EngramVerificationRecordCheck {
+    pub(crate) stage: String,
+    pub(crate) check_kind: EngramVerificationRecordCheckKind,
     /// The stage's actual argv as TermAl's normalised command line: the very
     /// text its check fingerprint hashes.
-    command: String,
-    check_fingerprint: String,
+    pub(crate) command: String,
+    pub(crate) check_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    started_at: Option<String>,
+    pub(crate) started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    completed_at: Option<String>,
-    outcome: EngramVerificationRecordCheckOutcome,
+    pub(crate) completed_at: Option<String>,
+    pub(crate) outcome: EngramVerificationRecordCheckOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    summary: Option<String>,
+    pub(crate) summary: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    refs: Vec<String>,
+    pub(crate) refs: Vec<String>,
     /// The stage's own numeric test counts, as the launcher recorded them:
     /// non-negative integers only, at most `ENGRAM_VERIFICATION_RECORD_MAX_COUNTS`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    counts: Option<BTreeMap<String, u64>>,
+    pub(crate) counts: Option<BTreeMap<String, u64>>,
 }
 
 /// The most count keys the producer admits on one check.
@@ -258,67 +268,75 @@ const ENGRAM_VERIFICATION_RECORD_MAX_COUNTS: usize = 32;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
-enum EngramVerificationRecordPostRun {
+pub(crate) enum EngramVerificationRecordPostRun {
     SourceId(EngramVerificationRecordSourcePostRun),
     Commit(EngramVerificationRecordCommitPostRun),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-struct EngramVerificationRecordSourcePostRun {
-    source_id: EngramSourceId,
+pub(crate) struct EngramVerificationRecordSourcePostRun {
+    pub(crate) source_id: EngramSourceId,
 }
 
 impl<'de> Deserialize<'de> for EngramVerificationRecordPostRun {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
         // A present new field selects strict decoding, including explicit
         // null and mixed legacy fields. It never falls back to Commit.
         if value.get("source_id").is_some() {
-            serde_json::from_value(value).map(Self::SourceId).map_err(serde::de::Error::custom)
+            serde_json::from_value(value)
+                .map(Self::SourceId)
+                .map_err(serde::de::Error::custom)
         } else {
-            serde_json::from_value(value).map(Self::Commit).map_err(serde::de::Error::custom)
+            serde_json::from_value(value)
+                .map(Self::Commit)
+                .map_err(serde::de::Error::custom)
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordCommitPostRun {
-    outcome: TestRunCommittedInputOutcome,
-    clean_before: bool,
-    clean_after: bool,
+pub(crate) struct EngramVerificationRecordCommitPostRun {
+    pub(crate) outcome: TestRunCommittedInputOutcome,
+    pub(crate) clean_before: bool,
+    pub(crate) clean_after: bool,
     /// Paths only; empty, and so left out, for the clean runs the producer
     /// admits today.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    dirty_paths: Vec<String>,
+    pub(crate) dirty_paths: Vec<String>,
     /// No disposition flow exists yet; reserved for one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    disposition: Option<String>,
+    pub(crate) disposition: Option<String>,
 }
 
 /// Engram's answer to a `verification_record`: `operation` and `producer`
 /// both name the run's own `registered_host_run` object.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordReceipt {
-    operation: String,
-    producer: String,
-    verifications: Vec<EngramVerificationRecordVerification>,
-    run_outcome: EngramVerificationRecordRunOutcome,
+pub(crate) struct EngramVerificationRecordReceipt {
+    pub(crate) operation: String,
+    pub(crate) producer: String,
+    pub(crate) verifications: Vec<EngramVerificationRecordVerification>,
+    pub(crate) run_outcome: EngramVerificationRecordRunOutcome,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct EngramVerificationRecordVerification {
-    stage: String,
-    record_id: String,
+pub(crate) struct EngramVerificationRecordVerification {
+    pub(crate) stage: String,
+    pub(crate) record_id: String,
 }
 
 /// Why a frozen record has not been sent, or not settled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum EngramVerificationRecordPending {
+pub(crate) enum EngramVerificationRecordPending {
     /// The initiating session's ordinary work-session answer does not list
     /// the capability under the current connection and child generation.
-    CapabilityUnsupported { support: EngramVerificationRecordSupport },
+    CapabilityUnsupported {
+        support: EngramVerificationRecordSupport,
+    },
     /// The initiating session no longer exists. No other session's
     /// connection is ever used in its place.
     InitiatingSessionGone,
@@ -333,7 +351,9 @@ enum EngramVerificationRecordPending {
     UnclassifiedStages { stages: Vec<String> },
     /// The run's checkout was not clean after it. The producer admits only a
     /// clean post-run input today, so nothing is sent.
-    PostRunNotClean { outcome: TestRunCommittedInputOutcome },
+    PostRunNotClean {
+        outcome: TestRunCommittedInputOutcome,
+    },
     /// The registration's root generation is not a positive `i64`.
     RootGenerationOutOfRange { generation: u64 },
     /// A stage's recorded start precedes the registration, or the run ended
@@ -371,21 +391,30 @@ enum EngramVerificationRecordPending {
     /// frozen or sent.
     BodyNotBuilt { detail: String },
     /// Full owner observations differ; the artifact verdict is unchanged.
-    SourceChanged { detail: String, changes: Vec<EngramSourceIdDifference> },
+    SourceChanged {
+        detail: String,
+        changes: Vec<EngramSourceIdDifference>,
+    },
     /// The call failed without an answer from Engram; it is sent again.
     TransportFailed { error_kind: String },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
-enum EngramVerificationRecordProgress {
-    Pending { reason: EngramVerificationRecordPending },
+pub(crate) enum EngramVerificationRecordProgress {
+    Pending {
+        reason: EngramVerificationRecordPending,
+    },
     /// Engram answered with a valid receipt: never sent again. Its records
     /// have not yet reached the run's own launch observation durably (the
     /// row's artifact may attach only after the launcher exits); a later look
     /// settles them from this receipt alone.
-    Received { receipt: EngramVerificationRecordReceipt },
-    Settled { receipt: EngramVerificationRecordReceipt },
+    Received {
+        receipt: EngramVerificationRecordReceipt,
+    },
+    Settled {
+        receipt: EngramVerificationRecordReceipt,
+    },
     /// Engram refused the record or answered unreadably: not sent again.
     Rejected { detail: String },
 }
@@ -399,7 +428,7 @@ enum EngramVerificationRecordProgress {
 /// has that digest is acknowledged by nothing, however it was rewritten.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
-enum TestRunVerificationAck {
+pub(crate) enum TestRunVerificationAck {
     /// Engram's receipt as the host received and checked it; not settled yet.
     Received {
         receipt: EngramVerificationRecordReceipt,
@@ -423,9 +452,11 @@ enum TestRunVerificationAck {
 
 impl TestRunVerificationAck {
     /// The digest of the body a received or settled receipt answered.
-    fn body_digest(&self) -> Option<&str> {
+    pub(crate) fn body_digest(&self) -> Option<&str> {
         match self {
-            Self::Received { body_digest, .. } | Self::Settled { body_digest, .. } => Some(body_digest),
+            Self::Received { body_digest, .. } | Self::Settled { body_digest, .. } => {
+                Some(body_digest)
+            }
             Self::Rejected { .. } | Self::LocalUnclassified { .. } => None,
         }
     }
@@ -434,25 +465,30 @@ impl TestRunVerificationAck {
 /// The SHA-256 of `body`'s canonical text (`engram_verification_record_text`,
 /// the frozen bytes the host writes and sends); empty when it does not
 /// serialize, which no acknowledgment ever matches.
-fn engram_verification_record_body_digest(body: &EngramVerificationRecordBody) -> String {
+pub(crate) fn engram_verification_record_body_digest(
+    body: &EngramVerificationRecordBody,
+) -> String {
     engram_verification_record_text(body)
         .map(|text| sha256_hex(text.as_bytes()))
         .unwrap_or_default()
 }
 
 /// Whether `digest`, kept on an acknowledgment, is the digest of `body`.
-fn engram_verification_record_digest_answers(digest: &str, body: &EngramVerificationRecordBody) -> bool {
+pub(crate) fn engram_verification_record_digest_answers(
+    digest: &str,
+    body: &EngramVerificationRecordBody,
+) -> bool {
     !digest.is_empty() && engram_verification_record_body_digest(body) == digest
 }
 
 /// One run's frozen record, ready to send.
 #[derive(Clone)]
-struct EngramVerificationRecordFrozen {
-    run_dir: PathBuf,
-    run_id: String,
+pub(crate) struct EngramVerificationRecordFrozen {
+    pub(crate) run_dir: PathBuf,
+    pub(crate) run_id: String,
     /// The persisted body; it re-serializes to the exact persisted text.
-    record: Value,
-    body: EngramVerificationRecordBody,
+    pub(crate) record: Value,
+    pub(crate) body: EngramVerificationRecordBody,
 }
 
 impl std::fmt::Debug for EngramVerificationRecordFrozen {
@@ -468,7 +504,7 @@ impl std::fmt::Debug for EngramVerificationRecordFrozen {
 /// read by tests and diagnostics only; the tick acts on `Ready` alone.
 #[derive(Clone, Debug)]
 #[cfg_attr(not(test), allow(dead_code))]
-enum EngramVerificationRecordPrepared {
+pub(crate) enum EngramVerificationRecordPrepared {
     /// The run is not a bound, registered committed-input run: it emits
     /// nothing.
     NotEligible,
@@ -495,7 +531,7 @@ enum EngramVerificationRecordPrepared {
 /// further send.
 #[derive(Clone, Debug)]
 #[cfg_attr(not(test), allow(dead_code))]
-enum EngramVerificationRecordStep {
+pub(crate) enum EngramVerificationRecordStep {
     Pending(EngramVerificationRecordPending),
     Rejected(String),
     Received {
@@ -508,16 +544,20 @@ enum EngramVerificationRecordStep {
 /// record settled; the others leave it received, for a later look.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(not(test), allow(dead_code))]
-enum EngramVerificationRecordSettlement {
+pub(crate) enum EngramVerificationRecordSettlement {
     Settled,
     /// No launch observation of this run carries its artifact yet (it
     /// attaches once the launcher exits), or the records did not all reach
     /// one.
     NoLaunchRow,
     /// The associations were written but not read back durable (`detail`).
-    NotDurable { detail: String },
+    NotDurable {
+        detail: String,
+    },
     /// The receipt does not answer the body (`detail`): nothing is settled.
-    ReceiptMismatch { detail: String },
+    ReceiptMismatch {
+        detail: String,
+    },
     /// The host already holds a receipt for another body of this run (its
     /// kept digest differs): nothing is settled for this one.
     AcknowledgedBodyChanged,
@@ -525,29 +565,29 @@ enum EngramVerificationRecordSettlement {
 
 /// What associating a receipt's records found: the run's own launch rows as
 /// they now stand, each carrying every record, or none that does.
-enum EngramVerificationRecordAssociation {
+pub(crate) enum EngramVerificationRecordAssociation {
     Associated(Vec<TestRunCommandObservation>),
     NoLaunchRow,
 }
 
 /// The initiating session's ordinary work-session connection. The owning
 /// session is audit only.
-struct EngramVerificationRecordLink<'a> {
-    adapter: &'a EngramHostAdapter,
-    connection: &'a EngramConnectionConfig,
-    timeout: Duration,
+pub(crate) struct EngramVerificationRecordLink<'a> {
+    pub(crate) adapter: &'a EngramHostAdapter,
+    pub(crate) connection: &'a EngramConnectionConfig,
+    pub(crate) timeout: Duration,
 }
 
 /// An owned `EngramVerificationRecordLink`, carried off the state lock: the
 /// initiating session's owner-managed ordinary connection.
-struct EngramVerificationRecordRoute {
-    adapter: Arc<EngramHostAdapter>,
-    connection: EngramConnectionConfig,
-    timeout: Duration,
+pub(crate) struct EngramVerificationRecordRoute {
+    pub(crate) adapter: Arc<EngramHostAdapter>,
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) timeout: Duration,
 }
 
 impl EngramVerificationRecordRoute {
-    fn link(&self) -> EngramVerificationRecordLink<'_> {
+    pub(crate) fn link(&self) -> EngramVerificationRecordLink<'_> {
         EngramVerificationRecordLink {
             adapter: &self.adapter,
             connection: &self.connection,
@@ -569,7 +609,11 @@ fn engram_verification_record_registration_bound(registration: &TestRunRegistrat
 /// no whitespace or quote, else double-quoted with the Windows argument rules
 /// for backslashes before a quote.
 fn engram_verification_record_quote(word: &str) -> String {
-    if !word.is_empty() && !word.chars().any(|character| character.is_whitespace() || matches!(character, '"' | '\'')) {
+    if !word.is_empty()
+        && !word
+            .chars()
+            .any(|character| character.is_whitespace() || matches!(character, '"' | '\''))
+    {
         return word.to_owned();
     }
     let mut quoted = String::from('"');
@@ -597,7 +641,7 @@ fn engram_verification_record_quote(word: &str) -> String {
 /// The typed check command of a stage's actual argv, of `kind`: one simple
 /// command the launcher ran directly, with no shell between, normalised word
 /// by word. `None` for an empty argv.
-fn engram_verification_record_check_command(
+pub(crate) fn engram_verification_record_check_command(
     argv: &[String],
     kind: EngramVerificationKind,
 ) -> Option<EngramCheckCommand> {
@@ -617,7 +661,7 @@ fn engram_verification_record_check_command(
 /// `argv` as TermAl's normalised command line: each word as the check
 /// fingerprint's normalisation spells it (`engram_verification_record_quote`),
 /// so the text reads back to the argv and the fingerprint hashes this text.
-fn engram_verification_record_command_text(argv: &[String]) -> String {
+pub(crate) fn engram_verification_record_command_text(argv: &[String]) -> String {
     argv.iter()
         .map(|word| engram_verification_record_quote(word))
         .collect::<Vec<_>>()
@@ -627,7 +671,7 @@ fn engram_verification_record_command_text(argv: &[String]) -> String {
 /// The stage's counts as the producer admits them: only entries whose value
 /// is a non-negative integer, none when no such entry remains or more than
 /// `ENGRAM_VERIFICATION_RECORD_MAX_COUNTS` do. A runner label is dropped.
-fn engram_verification_record_counts(stage: &Value) -> Option<BTreeMap<String, u64>> {
+pub(crate) fn engram_verification_record_counts(stage: &Value) -> Option<BTreeMap<String, u64>> {
     let counts: BTreeMap<String, u64> = stage
         .get("tests")?
         .as_object()?
@@ -649,7 +693,11 @@ fn engram_verification_record_is_build(argv: &[String]) -> bool {
     let args = &argv[1..];
     engram_is_build_command(&program, args)
         || (program == "cargo"
-            && args.iter().map(String::as_str).find(|word| !word.starts_with('+')) == Some("check"))
+            && args
+                .iter()
+                .map(String::as_str)
+                .find(|word| !word.starts_with('+'))
+                == Some("check"))
         || program == "tsc"
         || (program == "npx" && args.first().is_some_and(|word| word == "tsc"))
         || (program == "node"
@@ -659,7 +707,7 @@ fn engram_verification_record_is_build(argv: &[String]) -> bool {
 }
 
 #[cfg(test)]
-fn engram_verification_record_check_kind(
+pub(crate) fn engram_verification_record_check_kind(
     mode: EngramVerificationRecordMode,
     stage: &str,
     argv: &[String],
@@ -745,7 +793,15 @@ fn engram_verification_record_is_lint(
         (EngramVerificationRecordMode::Full, "clippy", [program, args @ ..]) => {
             engram_program_name(program) == "cargo"
                 && !engram_verification_record_is_script_shim(program)
-                && args == ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+                && args
+                    == [
+                        "clippy",
+                        "--all-targets",
+                        "--all-features",
+                        "--",
+                        "-D",
+                        "warnings",
+                    ]
         }
         (EngramVerificationRecordMode::Full, "docs", [program, script])
         | (EngramVerificationRecordMode::Focused, "focused", [program, script]) => {
@@ -759,7 +815,9 @@ fn engram_verification_record_is_lint(
 
 fn engram_verification_record_is_script_shim(program: &str) -> bool {
     let program = program.to_ascii_lowercase();
-    [".cmd", ".bat", ".ps1"].iter().any(|suffix| program.ends_with(suffix))
+    [".cmd", ".bat", ".ps1"]
+        .iter()
+        .any(|suffix| program.ends_with(suffix))
 }
 
 /// Launcher stage ids this sender alone records as tests when neither their
@@ -786,7 +844,8 @@ fn engram_verification_record_stage_argv(
 }
 
 fn engram_verification_record_stage_name(stage: &Value) -> Result<&str, String> {
-    stage.get("name")
+    stage
+        .get("name")
         .and_then(Value::as_str)
         .filter(|name| test_run_valid_stage_name(name))
         .ok_or_else(|| "a stage has no valid name".to_owned())
@@ -799,28 +858,43 @@ fn engram_verification_record_classify_stage(
     mode: EngramVerificationRecordMode,
     test_stages: &[String],
     admit_full_lint: bool,
-) -> Result<(String, Vec<String>, Option<EngramVerificationRecordCheckKind>), String> {
+) -> Result<
+    (
+        String,
+        Vec<String>,
+        Option<EngramVerificationRecordCheckKind>,
+    ),
+    String,
+> {
     let name = engram_verification_record_stage_name(stage)?;
     let unrun = stage.get("state").and_then(Value::as_str) == Some("unrun")
         && ["command", "started", "ended", "code"]
             .iter()
             .all(|key| stage.get(*key).is_none());
-    let argv = if admit_full_lint && engram_verification_record_full_lint_stage(mode, name) && !unrun {
-        // Missing or unusable observed argv must yield a named refusal, even
-        // if the request planned an exact lint or a real test/build command.
-        test_run_argv(stage.get("command"))
-            .filter(|argv| argv.first().is_some_and(|program| !program.trim().is_empty()))
-            .unwrap_or_default()
-    } else {
-        engram_verification_record_stage_argv(stage, planned)?.1
-    };
-    let kind = engram_verification_record_classify_argv(mode, name, &argv, test_stages, admit_full_lint);
+    let argv =
+        if admit_full_lint && engram_verification_record_full_lint_stage(mode, name) && !unrun {
+            // Missing or unusable observed argv must yield a named refusal, even
+            // if the request planned an exact lint or a real test/build command.
+            test_run_argv(stage.get("command"))
+                .filter(|argv| {
+                    argv.first()
+                        .is_some_and(|program| !program.trim().is_empty())
+                })
+                .unwrap_or_default()
+        } else {
+            engram_verification_record_stage_argv(stage, planned)?.1
+        };
+    let kind =
+        engram_verification_record_classify_argv(mode, name, &argv, test_stages, admit_full_lint);
     Ok((name.to_owned(), argv, kind))
 }
 
 /// The stages of a run that are neither a test, build nor admitted lint check
 /// (`engram_verification_record_classify_argv`), in results order.
-fn engram_verification_record_unclassified_stages(request: &Value, results: &Value) -> Vec<String> {
+pub(crate) fn engram_verification_record_unclassified_stages(
+    request: &Value,
+    results: &Value,
+) -> Vec<String> {
     let mode = engram_verification_record_mode(request);
     let planned = engram_verification_record_planned_argv(request);
     let test_stages = engram_launcher_test_stages(request);
@@ -830,7 +904,13 @@ fn engram_verification_record_unclassified_stages(request: &Value, results: &Val
         .into_iter()
         .flatten()
         .filter_map(|stage| {
-            match engram_verification_record_classify_stage(stage, &planned, mode, &test_stages, true) {
+            match engram_verification_record_classify_stage(
+                stage,
+                &planned,
+                mode,
+                &test_stages,
+                true,
+            ) {
                 Ok((name, _, None)) => Some(name),
                 _ => None,
             }
@@ -838,7 +918,7 @@ fn engram_verification_record_unclassified_stages(request: &Value, results: &Val
         .collect()
 }
 
-fn engram_verification_record_registration_unclassified_stages(
+pub(crate) fn engram_verification_record_registration_unclassified_stages(
     registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
@@ -854,7 +934,9 @@ fn engram_verification_record_registration_unclassified_stages(
 
 /// The argv each stage was planned with in the request (`command` and
 /// `args`), by stage name: what an unrun stage would have run.
-fn engram_verification_record_planned_argv(request: &Value) -> HashMap<String, Vec<String>> {
+pub(crate) fn engram_verification_record_planned_argv(
+    request: &Value,
+) -> HashMap<String, Vec<String>> {
     request
         .get("stages")
         .and_then(Value::as_array)
@@ -872,7 +954,10 @@ fn engram_verification_record_planned_argv(request: &Value) -> HashMap<String, V
 fn engram_verification_record_mode(request: &Value) -> EngramVerificationRecordMode {
     if request.get("full").and_then(Value::as_bool) == Some(true) {
         EngramVerificationRecordMode::Full
-    } else if request.get("liveEngram").is_some_and(|live| !live.is_null()) {
+    } else if request
+        .get("liveEngram")
+        .is_some_and(|live| !live.is_null())
+    {
         EngramVerificationRecordMode::Live
     } else {
         EngramVerificationRecordMode::Focused
@@ -882,9 +967,16 @@ fn engram_verification_record_mode(request: &Value) -> EngramVerificationRecordM
 /// The launcher's own recorded command (`command`, an argv, in results.json
 /// or else request.json), when either records one. Today's launcher records
 /// none, so `engram_verification_record_run_command` reconstructs it.
-fn engram_verification_record_recorded_command(request: &Value, results: &Value) -> Option<Vec<String>> {
-    if let Some(command) = request.get("nativeExecution").and_then(Value::as_str)
-        .and_then(|_| test_run_argv(request.get("observedCommand"))).filter(|argv| !argv.is_empty()) {
+fn engram_verification_record_recorded_command(
+    request: &Value,
+    results: &Value,
+) -> Option<Vec<String>> {
+    if let Some(command) = request
+        .get("nativeExecution")
+        .and_then(Value::as_str)
+        .and_then(|_| test_run_argv(request.get("observedCommand")))
+        .filter(|argv| !argv.is_empty())
+    {
         return Some(command);
     }
     [results, request]
@@ -899,10 +991,16 @@ fn engram_verification_record_run_command(
     mode: EngramVerificationRecordMode,
     request: &Value,
 ) -> Vec<String> {
-    let mut command: Vec<String> = ["node", "scripts/test-launcher.mjs", mode.word(), "--input", "commit"]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+    let mut command: Vec<String> = [
+        "node",
+        "scripts/test-launcher.mjs",
+        mode.word(),
+        "--input",
+        "commit",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
     if mode == EngramVerificationRecordMode::Focused
         && let Some(argv) = request
             .get("stages")
@@ -931,7 +1029,11 @@ fn engram_verification_record_check(
     admit_full_lint: bool,
 ) -> Result<EngramVerificationRecordCheck, String> {
     let (name, argv, kind) = engram_verification_record_classify_stage(
-        stage, planned, mode, test_stages, admit_full_lint,
+        stage,
+        planned,
+        mode,
+        test_stages,
+        admit_full_lint,
     )?;
     let outcome = match test_run_stage_state(stage.get("state").and_then(Value::as_str)) {
         TestRunStageState::Passed => EngramVerificationRecordCheckOutcome::Passed,
@@ -940,7 +1042,9 @@ fn engram_verification_record_check(
         TestRunStageState::Running => EngramVerificationRecordCheckOutcome::Indeterminate,
     };
     let Some(kind) = kind else {
-        return Err(format!("stage {name} is neither a test, build nor admitted lint check"));
+        return Err(format!(
+            "stage {name} is neither a test, build nor admitted lint check"
+        ));
     };
     let command = engram_verification_record_command_text(&argv);
     let exit = stage.get("code").and_then(Value::as_i64);
@@ -976,7 +1080,7 @@ fn engram_verification_record_check(
     })
 }
 
-fn engram_verification_record_declared_check(
+pub(crate) fn engram_verification_record_declared_check(
     stage: &Value,
     planned: &HashMap<String, Vec<String>>,
     binding: &EngramDeclaredBinding,
@@ -993,42 +1097,64 @@ fn engram_verification_record_declared_check(
     }
     let result = engram_declared_artifact_result(binding);
     let outcome = match &result.verdict {
-            EngramTrxVerdict::Pass => EngramVerificationRecordCheckOutcome::Passed,
-            EngramTrxVerdict::Fail(_) => EngramVerificationRecordCheckOutcome::Failed,
-            EngramTrxVerdict::Unknown(_) => EngramVerificationRecordCheckOutcome::Indeterminate,
+        EngramTrxVerdict::Pass => EngramVerificationRecordCheckOutcome::Passed,
+        EngramTrxVerdict::Fail(_) => EngramVerificationRecordCheckOutcome::Failed,
+        EngramTrxVerdict::Unknown(_) => EngramVerificationRecordCheckOutcome::Indeterminate,
     };
     let refs = engram_declared_refs(&command, Some(binding), exit, &result);
-    let safe = |text: &str| text == text.trim() && !text.chars().any(|c| {
+    let safe = |text: &str| {
+        text == text.trim() && !text.chars().any(|c| {
         c.is_control() || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-    });
+    })
+    };
     let summary = engram_declared_summary(&command, Some(binding), exit, &result);
     if !safe(&command.normalized)
-        || summary.len() > ENGRAM_CHECK_SUMMARY_MAX_BYTES || !safe(&summary)
+        || summary.len() > ENGRAM_CHECK_SUMMARY_MAX_BYTES
+        || !safe(&summary)
         || refs.len() > 64
-        || refs.iter().any(|value| value.len() > ENGRAM_CHECK_REF_MAX_BYTES || !safe(value))
+        || refs
+            .iter()
+            .any(|value| value.len() > ENGRAM_CHECK_REF_MAX_BYTES || !safe(value))
     {
         return Err("declared provenance is outside the verification text contract".to_owned());
     }
     let counts = result.counters.as_ref().map(|counters| {
-        counters.values.iter().cloned().collect::<BTreeMap<String, u64>>()
+        counters
+            .values
+            .iter()
+            .cloned()
+            .collect::<BTreeMap<String, u64>>()
     });
-    if counts.as_ref().is_some_and(|counts| counts.len() > 32 || counts.keys().any(|key| key.len() > 128 || !safe(key))) {
+    if counts.as_ref().is_some_and(|counts| {
+        counts.len() > 32 || counts.keys().any(|key| key.len() > 128 || !safe(key))
+    }) {
         return Err("declared counters exceed the verification contract".to_owned());
     }
     Ok(EngramVerificationRecordCheck {
-        stage: name, check_kind: EngramVerificationRecordCheckKind::Test,
+        stage: name,
+        check_kind: EngramVerificationRecordCheckKind::Test,
         command: command.normalized.clone(),
         check_fingerprint: EngramHost::check_fingerprint(&command),
-        started_at: test_run_str(stage, "started"), completed_at: test_run_str(stage, "ended"),
-        outcome, summary: Some(summary),
-        refs, counts,
+        started_at: test_run_str(stage, "started"),
+        completed_at: test_run_str(stage, "ended"),
+        outcome,
+        summary: Some(summary),
+        refs,
+        counts,
     })
 }
 
 // Producer-only terminal admission. Generic launcher disk parsing is unchanged.
-fn engram_verification_record_results_are_terminal(registration: &TestRunRegistration, results: &Value) -> bool {
-    let Some(start) = &registration.declared_native else { return test_run_results_are_terminal(results); };
-    let Some(terminal) = &registration.declared_terminal else { return false; };
+pub(crate) fn engram_verification_record_results_are_terminal(
+    registration: &TestRunRegistration,
+    results: &Value,
+) -> bool {
+    let Some(start) = &registration.declared_native else {
+        return test_run_results_are_terminal(results);
+    };
+    let Some(terminal) = &registration.declared_terminal else {
+        return false;
+    };
     // A native artifact verdict may be unknown or failed despite exit 0 or
     // Claude ReportedSuccess. Only this host-owned terminal and exact digest
     // admit it; generic launchers keep their existing numeric terminal rule.
@@ -1041,22 +1167,32 @@ fn engram_verification_record_results_are_terminal(registration: &TestRunRegistr
         || registration.authority_store.as_ref() != Some(&start.store)
         || results.get("runId").and_then(Value::as_str) != Some(start.run_id.as_str())
         || results.get("state").and_then(Value::as_str) != Some(state)
-        || !results.get("ended").and_then(Value::as_str).is_some_and(|ended| EngramHost::check_timestamp(ended).is_some())
-    { return false; }
-    let Some(stages) = results.get("stages").and_then(Value::as_array) else { return false; };
-    let [stage] = stages.as_slice() else { return false; };
+        || !results
+            .get("ended")
+            .and_then(Value::as_str)
+            .is_some_and(|ended| EngramHost::check_timestamp(ended).is_some())
+    {
+        return false;
+    }
+    let Some(stages) = results.get("stages").and_then(Value::as_array) else {
+        return false;
+    };
+    let [stage] = stages.as_slice() else {
+        return false;
+    };
     stage.get("name").and_then(Value::as_str) == Some("focused")
         && stage.get("state").and_then(Value::as_str) == Some(state)
         && stage.get("reportedSuccess").and_then(Value::as_bool) == Some(terminal.reported_success)
         && stage.get("code") == exit
         && test_run_str(stage, "ended") == terminal.check.completed_at
-        && serde_json::to_vec_pretty(results).ok().is_some_and(|bytes|
-            file_content_hash(&bytes) == terminal.results_digest)
+        && serde_json::to_vec_pretty(results)
+            .ok()
+            .is_some_and(|bytes| file_content_hash(&bytes) == terminal.results_digest)
 }
 
 /// The record of a bound committed-input run, from its registration and its
 /// own request and terminal results; why not, when the run cannot emit one.
-fn engram_verification_record_body(
+pub(crate) fn engram_verification_record_body(
     registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
@@ -1067,14 +1203,18 @@ fn engram_verification_record_body(
 // A retained body is checked in its original format, never converted during
 // replay. Only that historical reader can reconstruct a commit projection
 // from source-bearing artifacts; a fresh record keeps the complete identity.
-fn engram_verification_record_build_body(
+pub(crate) fn engram_verification_record_build_body(
     registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
     retained_input: Option<&EngramVerificationRecordInput>,
 ) -> Result<EngramVerificationRecordBody, String> {
     let body = engram_verification_record_build_with_stage_policy(
-        registration, request, results, retained_input, true,
+        registration,
+        request,
+        results,
+        retained_input,
+        true,
     );
     let Some(digest) = registration
         .verification_record
@@ -1086,7 +1226,9 @@ fn engram_verification_record_build_body(
     };
     if retained_input.is_none()
         || engram_verification_record_mode(request) != EngramVerificationRecordMode::Full
-        || body.as_ref().is_ok_and(|body| engram_verification_record_digest_answers(digest, body))
+        || body
+            .as_ref()
+            .is_ok_and(|body| engram_verification_record_digest_answers(digest, body))
     {
         return body;
     }
@@ -1094,16 +1236,23 @@ fn engram_verification_record_build_body(
     // old classification only when reconstruction matches the digest already
     // recorded by the host for an acknowledged receipt.
     let historical = engram_verification_record_build_with_stage_policy(
-        registration, request, results, retained_input, false,
+        registration,
+        request,
+        results,
+        retained_input,
+        false,
     );
-    if historical.as_ref().is_ok_and(|body| engram_verification_record_digest_answers(digest, body)) {
+    if historical
+        .as_ref()
+        .is_ok_and(|body| engram_verification_record_digest_answers(digest, body))
+    {
         historical
     } else {
         body
     }
 }
 
-fn engram_verification_record_build_with_stage_policy(
+pub(crate) fn engram_verification_record_build_with_stage_policy(
     registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
@@ -1139,9 +1288,8 @@ fn engram_verification_record_build_with_stage_policy(
         .into_iter()
         .flatten()
     {
-        let check = engram_verification_record_check(
-            stage, &planned, mode, &test_stages, admit_full_lint,
-        )?;
+        let check =
+            engram_verification_record_check(stage, &planned, mode, &test_stages, admit_full_lint)?;
         if checks
             .iter()
             .any(|earlier: &EngramVerificationRecordCheck| earlier.stage == check.stage)
@@ -1153,10 +1301,11 @@ fn engram_verification_record_build_with_stage_policy(
     if checks.is_empty() {
         return Err("the run records no stage".to_owned());
     }
-    let historical = retained_input.is_some_and(|input| matches!(input,
-        EngramVerificationRecordInput::Commit { .. }));
+    let historical = retained_input
+        .is_some_and(|input| matches!(input, EngramVerificationRecordInput::Commit { .. }));
     let has_source = request.get("sourceId").is_some()
-        || results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some();
+        || results.get("sourceIdBefore").is_some()
+        || results.get("sourceIdAfter").is_some();
     let endpoints = if has_source {
         let admitted = test_run_source_id(request.get("sourceId"))
             .ok_or("the admitted owner source_id is unavailable")?;
@@ -1164,7 +1313,10 @@ fn engram_verification_record_build_with_stage_policy(
             .ok_or("the owner source_id endpoints are unavailable")?;
         match (admitted.compare(&before), before.compare(&after)) {
             (None, _) | (_, None) => {
-                return Err("the owner source_id formats across the run boundaries are incomparable".to_owned());
+                return Err(
+                    "the owner source_id formats across the run boundaries are incomparable"
+                        .to_owned(),
+                );
             }
             (Some(true), Some(true)) if before.commit == commit => {}
             _ => return Err("the owner source_id differs across the run boundaries".to_owned()),
@@ -1173,43 +1325,81 @@ fn engram_verification_record_build_with_stage_policy(
             return Err("the owner source_id contradicts the clean committed input".to_owned());
         }
         Some((before, after))
-    } else { None };
+    } else {
+        None
+    };
     let (record_input, post_run) = if !historical {
         // SourceId carries no legacy classification fields. Retain the
         // ordinary committed-input policy even when rebuilding a held receipt.
-        if outcome != TestRunCommittedInputOutcome::Clean || !after.clean || !after.paths.is_empty() {
+        if outcome != TestRunCommittedInputOutcome::Clean || !after.clean || !after.paths.is_empty()
+        {
             return Err("the run's post-run committed input is not clean".to_owned());
         }
         let (before, after) = endpoints.ok_or("the run records no complete owner source_id")?;
-        (EngramVerificationRecordInput::SourceId { source_id: before },
-            EngramVerificationRecordPostRun::SourceId(EngramVerificationRecordSourcePostRun { source_id: after }))
+        (
+            EngramVerificationRecordInput::SourceId { source_id: before },
+            EngramVerificationRecordPostRun::SourceId(EngramVerificationRecordSourcePostRun {
+                source_id: after,
+            }),
+        )
     } else {
         // A retained commit body keeps its historical shape, without
         // inventing equivalence with a new SourceId or rewriting its bytes.
-        (EngramVerificationRecordInput::Commit { commit },
+        (
+            EngramVerificationRecordInput::Commit { commit },
             EngramVerificationRecordPostRun::Commit(EngramVerificationRecordCommitPostRun {
-            outcome, clean_before: input.clean_before, clean_after: after.clean,
-            dirty_paths: after.paths.iter().map(|path| path.path.clone()).collect(), disposition: None,
-        }))
+                outcome,
+                clean_before: input.clean_before,
+                clean_after: after.clean,
+                dirty_paths: after.paths.iter().map(|path| path.path.clone()).collect(),
+                disposition: None,
+            }),
+        )
     };
-    let body = engram_verification_record_envelope(registration, request, results, record_input, post_run, checks)?;
-    engram_verification_record_frame_bound(&body, &registration.run_id, "verification_frame_too_large")?;
+    let body = engram_verification_record_envelope(
+        registration,
+        request,
+        results,
+        record_input,
+        post_run,
+        checks,
+    )?;
+    engram_verification_record_frame_bound(
+        &body,
+        &registration.run_id,
+        "verification_frame_too_large",
+    )?;
     Ok(body)
 }
 
 fn engram_verification_record_native_body(
-    registration: &TestRunRegistration, request: &Value, results: &Value,
+    registration: &TestRunRegistration,
+    request: &Value,
+    results: &Value,
     start: &DeclaredRunReservation,
 ) -> Result<EngramVerificationRecordBody, String> {
-    let terminal = registration.declared_terminal.as_ref()
+    let terminal = registration
+        .declared_terminal
+        .as_ref()
         .ok_or("the host has not confirmed the native terminal")?;
-    let after = terminal.source.as_ref().ok_or_else(|| format!("native source_id after the run is unavailable: {}",
-        terminal.source_refusal.as_deref().unwrap_or("owner measurement unavailable")))?;
-    let digest = serde_json::to_vec_pretty(results).map_err(|_| "native results cannot be encoded")?;
-    let input = EngramVerificationRecordInput::SourceId { source_id: start.source.source_id.clone() };
-    let post_run = EngramVerificationRecordPostRun::SourceId(EngramVerificationRecordSourcePostRun {
-        source_id: after.source_id.clone(),
-    });
+    let after = terminal.source.as_ref().ok_or_else(|| {
+        format!(
+            "native source_id after the run is unavailable: {}",
+            terminal
+                .source_refusal
+                .as_deref()
+                .unwrap_or("owner measurement unavailable")
+        )
+    })?;
+    let digest =
+        serde_json::to_vec_pretty(results).map_err(|_| "native results cannot be encoded")?;
+    let input = EngramVerificationRecordInput::SourceId {
+        source_id: start.source.source_id.clone(),
+    };
+    let post_run =
+        EngramVerificationRecordPostRun::SourceId(EngramVerificationRecordSourcePostRun {
+            source_id: after.source_id.clone(),
+        });
     if terminal.results_digest != file_content_hash(&digest)
         || registration.registered_at != start.registered_at
         || !start.accepts_registration_binding(registration.work_binding.as_ref())
@@ -1220,16 +1410,22 @@ fn engram_verification_record_native_body(
         || test_run_registration_identity(request).ok().as_ref() != Some(&start.request_identity)
         || request.get("input").and_then(Value::as_str) != Some("source_id")
         || request.get("nativeSourceId") != Some(&json!(start.source.source_id))
-        || after.root != start.source.root || after.source_owner != start.source.source_owner
-        || results.get("input") != Some(&serde_json::to_value(&input).map_err(|error| error.to_string())?)
-        || results.get("post_run") != Some(&serde_json::to_value(&post_run).map_err(|error| error.to_string())?)
+        || after.root != start.source.root
+        || after.source_owner != start.source.source_owner
+        || results.get("input")
+            != Some(&serde_json::to_value(&input).map_err(|error| error.to_string())?)
+        || results.get("post_run")
+            != Some(&serde_json::to_value(&post_run).map_err(|error| error.to_string())?)
     {
         return Err("native terminal does not match its host reservation".to_owned());
     }
     match start.source.source_id.compare(&after.source_id) {
         Some(true) => {}
-        Some(false) => return Err(engram_source_id_change_detail(&engram_source_id_differences(
-            &start.source.source_id, &after.source_id))),
+        Some(false) => {
+            return Err(engram_source_id_change_detail(
+                &engram_source_id_differences(&start.source.source_id, &after.source_id),
+            ));
+        }
         None => return Err("native source_id formats are incomparable".to_owned()),
     }
     if results.get("nativeEligible").and_then(Value::as_bool) != Some(true) {
@@ -1238,22 +1434,39 @@ fn engram_verification_record_native_body(
     if !engram_verification_record_results_are_terminal(registration, results) {
         return Err("the native run has no terminal result".to_owned());
     }
-    if results.get("stages").and_then(Value::as_array).is_none_or(|stages|
-        stages.len() != 1 || stages[0].get("name").and_then(Value::as_str) != Some("focused")) {
+    if results
+        .get("stages")
+        .and_then(Value::as_array)
+        .is_none_or(|stages| {
+            stages.len() != 1 || stages[0].get("name").and_then(Value::as_str) != Some("focused")
+        })
+    {
         return Err("the native run does not have its single original stage".to_owned());
     }
-    let body = engram_verification_record_envelope(registration, request, results, input, post_run,
-        vec![terminal.check.clone()])?;
+    let body = engram_verification_record_envelope(
+        registration,
+        request,
+        results,
+        input,
+        post_run,
+        vec![terminal.check.clone()],
+    )?;
     // Reuse the control transport's operation-specific frame bound. Keep the full
     // identity and a named refusal instead of sending a shortened record or
     // letting a permanent oversize frame become a transport retry.
-    engram_verification_record_frame_bound(&body, &registration.run_id, "native_verification_frame_too_large")?;
+    engram_verification_record_frame_bound(
+        &body,
+        &registration.run_id,
+        "native_verification_frame_too_large",
+    )?;
     Ok(body)
 }
 
-fn engram_verification_record_frame_bound(body: &EngramVerificationRecordBody, run_id: &str, code: &str)
-    -> Result<(), String>
-{
+pub(crate) fn engram_verification_record_frame_bound(
+    body: &EngramVerificationRecordBody,
+    run_id: &str,
+    code: &str,
+) -> Result<(), String> {
     let frame = EngramControlRequest::VerificationRecord {
         operation_key: engram_verification_record_key(run_id),
         record: serde_json::to_value(body).map_err(|_| "the record cannot be encoded")?,
@@ -1262,25 +1475,40 @@ fn engram_verification_record_frame_bound(body: &EngramVerificationRecordBody, r
     let framed_len = bytes.len().saturating_add(1); // The transport writes one LF.
     let limit = engram_control_request_frame_limit(&frame);
     if framed_len > limit {
-        return Err(format!("{code}: {framed_len} bytes exceeds the {limit} byte verification frame"));
+        return Err(format!(
+            "{code}: {framed_len} bytes exceeds the {limit} byte verification frame"
+        ));
     }
     Ok(())
 }
 
 fn engram_verification_record_envelope(
-    registration: &TestRunRegistration, request: &Value, results: &Value,
-    input: EngramVerificationRecordInput, post_run: EngramVerificationRecordPostRun,
+    registration: &TestRunRegistration,
+    request: &Value,
+    results: &Value,
+    input: EngramVerificationRecordInput,
+    post_run: EngramVerificationRecordPostRun,
     checks: Vec<EngramVerificationRecordCheck>,
 ) -> Result<EngramVerificationRecordBody, String> {
-    let binding = registration.work_binding.clone().ok_or("the run is not bound to a claim")?;
-    let root = registration.named_root.as_ref().ok_or("the run names no root")?;
+    let binding = registration
+        .work_binding
+        .clone()
+        .ok_or("the run is not bound to a claim")?;
+    let root = registration
+        .named_root
+        .as_ref()
+        .ok_or("the run names no root")?;
     let mode = engram_verification_record_mode(request);
     let run_outcome = if results.get("interrupted").and_then(Value::as_bool) == Some(true)
-        || checks.iter().any(|check| check.outcome == EngramVerificationRecordCheckOutcome::Indeterminate)
+        || checks
+            .iter()
+            .any(|check| check.outcome == EngramVerificationRecordCheckOutcome::Indeterminate)
     {
         EngramVerificationRecordRunOutcome::Indeterminate
     } else if results.get("state").and_then(Value::as_str) == Some("passed")
-        && checks.iter().all(|check| check.outcome == EngramVerificationRecordCheckOutcome::Passed)
+        && checks
+            .iter()
+            .all(|check| check.outcome == EngramVerificationRecordCheckOutcome::Passed)
     {
         EngramVerificationRecordRunOutcome::Passed
     } else {
@@ -1325,14 +1553,18 @@ fn engram_verification_record_envelope(
 /// The persisted text of `body`: its JSON value, serialized once. Reading
 /// that text back and serializing the value again gives the same bytes,
 /// whatever map order serde_json was built with.
-fn engram_verification_record_text(body: &EngramVerificationRecordBody) -> Result<String, String> {
+pub(crate) fn engram_verification_record_text(
+    body: &EngramVerificationRecordBody,
+) -> Result<String, String> {
     serde_json::to_value(body)
         .and_then(|value| serde_json::to_string(&value))
         .map_err(|error| format!("the record does not serialize: {error}"))
 }
 
 /// The frozen record in `text`, only when it reads back to exactly `text`.
-fn engram_verification_record_parse(text: &str) -> Option<(Value, EngramVerificationRecordBody)> {
+pub(crate) fn engram_verification_record_parse(
+    text: &str,
+) -> Option<(Value, EngramVerificationRecordBody)> {
     let record: Value = serde_json::from_str(text).ok()?;
     if !record.is_object() || serde_json::to_string(&record).ok()?.as_str() != text {
         return None;
@@ -1349,7 +1581,7 @@ fn engram_verification_record_parse(text: &str) -> Option<(Value, EngramVerifica
 
 /// The tokenless ordinary request sends the same frozen key and body bytes
 /// on every attempt.
-fn engram_verification_record_request(
+pub(crate) fn engram_verification_record_request(
     frozen: &EngramVerificationRecordFrozen,
 ) -> EngramControlRequest {
     EngramControlRequest::VerificationRecord {
@@ -1360,11 +1592,14 @@ fn engram_verification_record_request(
 
 /// The stages the producer mints a verification for: those with a completion
 /// time whose outcome is not `not_run`.
-fn engram_verification_record_emitted_stages(body: &EngramVerificationRecordBody) -> Vec<&str> {
+pub(crate) fn engram_verification_record_emitted_stages(
+    body: &EngramVerificationRecordBody,
+) -> Vec<&str> {
     body.checks
         .iter()
         .filter(|check| {
-            check.completed_at.is_some() && check.outcome != EngramVerificationRecordCheckOutcome::NotRun
+            check.completed_at.is_some()
+                && check.outcome != EngramVerificationRecordCheckOutcome::NotRun
         })
         .map(|check| check.stage.as_str())
         .collect()
@@ -1374,7 +1609,7 @@ fn engram_verification_record_emitted_stages(body: &EngramVerificationRecordBody
 /// object it names, a well-formed record id; one well-formed, distinct record
 /// for each emitted stage (`engram_verification_record_emitted_stages`) and
 /// no other; and the run's own outcome.
-fn engram_verification_record_receipt_check(
+pub(crate) fn engram_verification_record_receipt_check(
     body: &EngramVerificationRecordBody,
     receipt: &EngramVerificationRecordReceipt,
 ) -> Result<(), &'static str> {
@@ -1384,14 +1619,18 @@ fn engram_verification_record_receipt_check(
     if receipt.run_outcome != body.run.outcome {
         return Err("the receipt states another run outcome");
     }
-    let emitted: HashSet<&str> = engram_verification_record_emitted_stages(body).into_iter().collect();
+    let emitted: HashSet<&str> = engram_verification_record_emitted_stages(body)
+        .into_iter()
+        .collect();
     if receipt.verifications.len() != emitted.len() {
         return Err("the receipt does not name one record per emitted check");
     }
     let mut stages = HashSet::new();
     let mut records = HashSet::new();
     for verification in &receipt.verifications {
-        if !emitted.contains(verification.stage.as_str()) || !stages.insert(verification.stage.as_str()) {
+        if !emitted.contains(verification.stage.as_str())
+            || !stages.insert(verification.stage.as_str())
+        {
             return Err("the receipt names a stage the producer does not record, or one twice");
         }
         if !is_engram_record_id(&verification.record_id)
@@ -1407,7 +1646,7 @@ fn engram_verification_record_receipt_check(
 /// pending reason: a post-run checkout that is not clean, a root generation
 /// outside a positive `i64`, or a stage start (or the run's end) before the
 /// registration. Times are compared as recorded, never adjusted.
-fn engram_verification_record_producer_refusal(
+pub(crate) fn engram_verification_record_producer_refusal(
     registration: &TestRunRegistration,
     results: &Value,
 ) -> Option<EngramVerificationRecordPending> {
@@ -1442,13 +1681,15 @@ fn engram_verification_record_producer_refusal(
                 .and_then(|started| time(&started))
                 .is_some_and(|started| started < registered)
         })
-        .map(|stage| EngramVerificationRecordPending::StartedBeforeRegistration {
-            stage: test_run_str(stage, "name"),
-        })
+        .map(
+            |stage| EngramVerificationRecordPending::StartedBeforeRegistration {
+                stage: test_run_str(stage, "name"),
+            },
+        )
 }
 
 /// Writes `bytes` at `path` through a synced temporary file and a rename.
-fn engram_verification_record_write(path: &FsPath, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn engram_verification_record_write(path: &FsPath, bytes: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("json.tmp");
     let mut file = fs::File::create(&temporary)?;
     file.write_all(bytes)?;
@@ -1457,14 +1698,16 @@ fn engram_verification_record_write(path: &FsPath, bytes: &[u8]) -> io::Result<(
     fs::rename(&temporary, path)
 }
 
-fn engram_verification_record_progress(run_dir: &FsPath) -> Option<EngramVerificationRecordProgress> {
+pub(crate) fn engram_verification_record_progress(
+    run_dir: &FsPath,
+) -> Option<EngramVerificationRecordProgress> {
     let text = fs::read_to_string(run_dir.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE)).ok()?;
     serde_json::from_str(&text).ok()
 }
 
 /// Records `progress` beside the run when it differs from what is there, so
 /// an unchanged pending reason is neither rewritten nor logged again.
-fn engram_verification_record_set_progress(
+pub(crate) fn engram_verification_record_set_progress(
     run_dir: &FsPath,
     run_id: &str,
     progress: EngramVerificationRecordProgress,
@@ -1475,7 +1718,10 @@ fn engram_verification_record_set_progress(
     let written = serde_json::to_vec(&progress)
         .map_err(io::Error::other)
         .and_then(|bytes| {
-            engram_verification_record_write(&run_dir.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE), &bytes)
+            engram_verification_record_write(
+                &run_dir.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE),
+                &bytes,
+            )
         });
     if let Err(error) = written {
         eprintln!("engram> run={run_id} verification record state not written: {error}");
@@ -1484,7 +1730,10 @@ fn engram_verification_record_set_progress(
 
 /// The frozen body beside `run_dir`, read back exactly; `None` when it is
 /// missing or does not read back to its own bytes.
-fn engram_verification_record_frozen(run_dir: &FsPath, run_id: &str) -> Option<EngramVerificationRecordFrozen> {
+pub(crate) fn engram_verification_record_frozen(
+    run_dir: &FsPath,
+    run_id: &str,
+) -> Option<EngramVerificationRecordFrozen> {
     let text = fs::read_to_string(run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)).ok()?;
     let (record, body) = engram_verification_record_parse(&text)?;
     Some(EngramVerificationRecordFrozen {
@@ -1499,7 +1748,7 @@ fn engram_verification_record_frozen(run_dir: &FsPath, run_id: &str) -> Option<E
 /// `registration` and the run's request and results beside it: the check a
 /// frozen body read back from the run directory must pass before anything is
 /// sent, settled or admitted from it.
-fn engram_verification_record_is_host_body(
+pub(crate) fn engram_verification_record_is_host_body(
     registration: &TestRunRegistration,
     body: &EngramVerificationRecordBody,
 ) -> bool {
@@ -1528,7 +1777,9 @@ fn engram_verification_record_is_host_body(
 /// file beside the run: a finished run's producer body is never rebuilt, and a
 /// file that claims a receipt, a settlement or a rejection the host never
 /// observed neither holds nor stops the send.
-fn engram_verification_record_prepare(registration: &TestRunRegistration) -> EngramVerificationRecordPrepared {
+pub(crate) fn engram_verification_record_prepare(
+    registration: &TestRunRegistration,
+) -> EngramVerificationRecordPrepared {
     use EngramVerificationRecordPrepared as Prepared;
     if !engram_verification_record_registration_bound(registration) {
         return Prepared::NotEligible;
@@ -1538,44 +1789,62 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         engram_verification_record_set_progress(
             &run_dir,
             &registration.run_id,
-            EngramVerificationRecordProgress::Pending { reason: reason.clone() },
+            EngramVerificationRecordProgress::Pending {
+                reason: reason.clone(),
+            },
         );
         Prepared::Pending(reason)
     };
     let held = match &registration.verification_record {
-        Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. }
-            | TestRunVerificationAck::LocalUnclassified { .. }) => {
+        Some(
+            TestRunVerificationAck::Settled { .. }
+            | TestRunVerificationAck::Rejected { .. }
+            | TestRunVerificationAck::LocalUnclassified { .. },
+        ) => {
             return Prepared::Finished;
         }
-        Some(TestRunVerificationAck::Received { receipt, body_digest }) => {
-            Some((receipt.clone(), body_digest.clone()))
-        }
+        Some(TestRunVerificationAck::Received {
+            receipt,
+            body_digest,
+        }) => Some((receipt.clone(), body_digest.clone())),
         None => None,
     };
     // The run's own request and terminal results, as the record is built
     // from; `Err` is what the look comes to without them.
     let inputs = || -> std::result::Result<(Value, Value), Prepared> {
-        let TestRunJson::Parsed(request, _, _) = test_run_read_json(&run_dir.join("request.json")) else {
+        let TestRunJson::Parsed(request, _, _) = test_run_read_json(&run_dir.join("request.json"))
+        else {
             return Err(Prepared::NotEligible);
         };
-        if !test_run_request_is_committed_input(&request) && registration.declared_native.is_none() {
+        if !test_run_request_is_committed_input(&request) && registration.declared_native.is_none()
+        {
             return Err(Prepared::NotEligible);
         }
-        if test_run_registration_identity(&request).ok().as_ref() != Some(&registration.request_identity) {
+        if test_run_registration_identity(&request).ok().as_ref()
+            != Some(&registration.request_identity)
+        {
             return Err(Prepared::NotEligible);
         }
         let results = match test_run_read_json(&run_dir.join("results.json")) {
-            TestRunJson::Parsed(results, _, _) if engram_verification_record_results_are_terminal(registration, &results) => results,
-            TestRunJson::TooLarge if registration.declared_native.is_some() => return Err(pending(
-                EngramVerificationRecordPending::BodyNotBuilt {
-                    detail: format!("native_results_too_large: exceeds the existing {TEST_RUN_JSON_MAX_BYTES} byte run JSON bound"),
-                })),
+            TestRunJson::Parsed(results, _, _)
+                if engram_verification_record_results_are_terminal(registration, &results) =>
+            {
+                results
+            }
+            TestRunJson::TooLarge if registration.declared_native.is_some() => {
+                return Err(pending(EngramVerificationRecordPending::BodyNotBuilt {
+                    detail: format!(
+                        "native_results_too_large: exceeds the existing {TEST_RUN_JSON_MAX_BYTES} byte run JSON bound"
+                    ),
+                }));
+            }
             _ => return Err(Prepared::Waiting),
         };
         // A run whose results hold no committed-input record never emits;
         // only a record that cannot be built from a present one is held
         // pending.
-        if registration.declared_native.is_none() && TestRunCommittedInput::read(&results).is_none() {
+        if registration.declared_native.is_none() && TestRunCommittedInput::read(&results).is_none()
+        {
             return Err(Prepared::NotEligible);
         }
         Ok((request, results))
@@ -1591,10 +1860,15 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         let Some(frozen) = engram_verification_record_frozen(&run_dir, &registration.run_id) else {
             return Prepared::Pending(EngramVerificationRecordPending::BodyUnreadable);
         };
-        let rebuilt = inputs()
+        let rebuilt = inputs().ok().and_then(|(request, results)| {
+            engram_verification_record_build_body(
+                registration,
+                &request,
+                &results,
+                Some(&frozen.body.input),
+            )
             .ok()
-            .and_then(|(request, results)| engram_verification_record_build_body(
-                registration, &request, &results, Some(&frozen.body.input)).ok());
+        });
         if rebuilt.as_ref() != Some(&frozen.body) {
             return Prepared::Pending(EngramVerificationRecordPending::BodyMismatch);
         }
@@ -1602,7 +1876,9 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
             return pending(EngramVerificationRecordPending::AcknowledgedBodyChanged);
         }
         if let Err(why) = engram_verification_record_receipt_check(&frozen.body, &receipt) {
-            return pending(EngramVerificationRecordPending::ReceiptMismatch { detail: why.to_owned() });
+            return pending(EngramVerificationRecordPending::ReceiptMismatch {
+                detail: why.to_owned(),
+            });
         }
         return Prepared::ReceiptHeld { frozen, receipt };
     }
@@ -1610,7 +1886,11 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
         Ok(inputs) => inputs,
         Err(prepared) => return prepared,
     };
-    let stages = engram_verification_record_registration_unclassified_stages(registration, &request, &results);
+    let stages = engram_verification_record_registration_unclassified_stages(
+        registration,
+        &request,
+        &results,
+    );
     let refusal = if stages.is_empty() {
         engram_verification_record_producer_refusal(registration, &results)
     } else {
@@ -1621,17 +1901,30 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
     }
     let retained = engram_verification_record_frozen(&run_dir, &registration.run_id);
     let built = match retained.as_ref() {
-        Some(frozen) => engram_verification_record_build_body(registration, &request, &results, Some(&frozen.body.input)),
+        Some(frozen) => engram_verification_record_build_body(
+            registration,
+            &request,
+            &results,
+            Some(&frozen.body.input),
+        ),
         None => engram_verification_record_body(registration, &request, &results),
-    }.and_then(|body| engram_verification_record_text(&body).map(|text| (body, text)));
+    }
+    .and_then(|body| engram_verification_record_text(&body).map(|text| (body, text)));
     let (rebuilt, rebuilt_text) = match built {
         Ok(built) => built,
         Err(detail) => {
-            let changes = registration.declared_native.as_ref().zip(registration.declared_terminal.as_ref())
-                .and_then(|(start, terminal)| terminal.source.as_ref().map(|after|
-                    engram_source_id_differences(&start.source.source_id, &after.source_id)));
-            if let Some(changes) = changes.filter(|changes| !changes.is_empty()
-                && engram_source_id_change_detail(changes) == detail) {
+            let changes = registration
+                .declared_native
+                .as_ref()
+                .zip(registration.declared_terminal.as_ref())
+                .and_then(|(start, terminal)| {
+                    terminal.source.as_ref().map(|after| {
+                        engram_source_id_differences(&start.source.source_id, &after.source_id)
+                    })
+                });
+            if let Some(changes) = changes.filter(|changes| {
+                !changes.is_empty() && engram_source_id_change_detail(changes) == detail
+            }) {
                 return pending(EngramVerificationRecordPending::SourceChanged { detail, changes });
             }
             return pending(EngramVerificationRecordPending::BodyNotBuilt { detail });
@@ -1667,22 +1960,30 @@ fn engram_verification_record_prepare(registration: &TestRunRegistration) -> Eng
 fn engram_verification_record_retire_legacy(
     frozen: &EngramVerificationRecordFrozen,
 ) -> Option<EngramVerificationRecordStep> {
-    if !matches!(frozen.body.input, EngramVerificationRecordInput::Commit { .. }) {
+    if !matches!(
+        frozen.body.input,
+        EngramVerificationRecordInput::Commit { .. }
+    ) {
         return None;
     }
     let detail = "legacy_source_input_retired: retained commit input is not sent; any earlier producer outcome is unchanged".to_owned();
-    eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
+    eprintln!(
+        "engram> run={} verification record not settled: {detail}",
+        frozen.run_id
+    );
     engram_verification_record_set_progress(
         &frozen.run_dir,
         &frozen.run_id,
-        EngramVerificationRecordProgress::Rejected { detail: detail.clone() },
+        EngramVerificationRecordProgress::Rejected {
+            detail: detail.clone(),
+        },
     );
     Some(EngramVerificationRecordStep::Rejected(detail))
 }
 
 /// Sends current input when its connection supports the operation. Retired
 /// input rejects locally; missing capability/link leaves current input pending.
-fn engram_verification_record_send(
+pub(crate) fn engram_verification_record_send(
     frozen: EngramVerificationRecordFrozen,
     link: std::result::Result<EngramVerificationRecordLink<'_>, EngramVerificationRecordPending>,
 ) -> EngramVerificationRecordStep {
@@ -1693,16 +1994,23 @@ fn engram_verification_record_send(
         engram_verification_record_set_progress(
             &frozen.run_dir,
             &frozen.run_id,
-            EngramVerificationRecordProgress::Pending { reason: reason.clone() },
+            EngramVerificationRecordProgress::Pending {
+                reason: reason.clone(),
+            },
         );
         EngramVerificationRecordStep::Pending(reason)
     };
     let rejected = |detail: String| {
-        eprintln!("engram> run={} verification record not settled: {detail}", frozen.run_id);
+        eprintln!(
+            "engram> run={} verification record not settled: {detail}",
+            frozen.run_id
+        );
         engram_verification_record_set_progress(
             &frozen.run_dir,
             &frozen.run_id,
-            EngramVerificationRecordProgress::Rejected { detail: detail.clone() },
+            EngramVerificationRecordProgress::Rejected {
+                detail: detail.clone(),
+            },
         );
         EngramVerificationRecordStep::Rejected(detail)
     };
@@ -1720,14 +2028,26 @@ fn engram_verification_record_send(
     // original command explicitly rather than changing its text/fingerprint.
     const COMMAND_LIMIT: usize = 8192;
     for (field, command) in std::iter::once(("run.command".to_owned(), &frozen.body.run.command))
-        .chain(frozen.body.checks.iter().enumerate()
-            .map(|(index, check)| (format!("checks[{index}].command"), &check.command))) {
+        .chain(
+            frozen
+                .body
+                .checks
+                .iter()
+                .enumerate()
+                .map(|(index, check)| (format!("checks[{index}].command"), &check.command)),
+        )
+    {
         if command.len() > COMMAND_LIMIT {
-            return rejected(format!("verification_command_too_long: {field} has {} UTF-8 bytes; Engram limit is {COMMAND_LIMIT} bytes", command.len()));
+            return rejected(format!(
+                "verification_command_too_long: {field} has {} UTF-8 bytes; Engram limit is {COMMAND_LIMIT} bytes",
+                command.len()
+            ));
         }
     }
     let request = engram_verification_record_request(&frozen);
-    let reply = link.adapter.request(link.connection, &request, link.timeout);
+    let reply = link
+        .adapter
+        .request(link.connection, &request, link.timeout);
     match reply {
         Ok(value) => {
             let receipt = match parse_engram_result::<EngramVerificationRecordReceipt>(value) {
@@ -1744,9 +2064,14 @@ fn engram_verification_record_send(
             engram_verification_record_set_progress(
                 &frozen.run_dir,
                 &frozen.run_id,
-                EngramVerificationRecordProgress::Received { receipt: receipt.clone() },
+                EngramVerificationRecordProgress::Received {
+                    receipt: receipt.clone(),
+                },
             );
-            EngramVerificationRecordStep::Received { body: frozen.body, receipt }
+            EngramVerificationRecordStep::Received {
+                body: frozen.body,
+                receipt,
+            }
         }
         // A refusal from a child that no longer serves the connection (it was
         // respawned under the send) says nothing about this record: the
@@ -1765,10 +2090,9 @@ fn engram_verification_record_send(
         // Only a definite refusal of the record itself is final.
         Err(error)
             if error.kind == EngramTransportErrorKind::Remote
-                && error
-                    .code
-                    .as_deref()
-                    .is_some_and(|code| ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)) =>
+                && error.code.as_deref().is_some_and(|code| {
+                    ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)
+                }) =>
         {
             rejected(engram_verification_record_refusal_detail(
                 error.code.as_deref(),
@@ -1795,7 +2119,10 @@ fn engram_verification_record_send(
 /// usual cause and what avoids it, because the run cannot be credited again:
 /// Engram refuses a record whose claim, fence or run moved after
 /// registration, and a claim that lapsed and was taken again has a new fence.
-fn engram_verification_record_refusal_detail(code: Option<&str>, field: Option<&str>) -> String {
+pub(crate) fn engram_verification_record_refusal_detail(
+    code: Option<&str>,
+    field: Option<&str>,
+) -> String {
     let refused = format!("Engram refused it: {}", code.unwrap_or("no code"));
     if field == Some("claim") {
         format!(
@@ -1813,9 +2140,13 @@ fn engram_verification_record_refusal_detail(code: Option<&str>, field: Option<&
 /// records retain the complete owner value. Historical commit records remain
 /// readable, but cannot create new producer observations. Staged inputs also
 /// supply no producer basis.
-fn engram_verification_record_basis(body: &EngramVerificationRecordBody) -> Option<EngramExecutionSourceBasis> {
+pub(crate) fn engram_verification_record_basis(
+    body: &EngramVerificationRecordBody,
+) -> Option<EngramExecutionSourceBasis> {
     let (source_id, source_revision) = match &body.input {
-        EngramVerificationRecordInput::SourceId { source_id } => (Some(source_id.clone()), String::new()),
+        EngramVerificationRecordInput::SourceId { source_id } => {
+            (Some(source_id.clone()), String::new())
+        }
         EngramVerificationRecordInput::Commit { .. }
         | EngramVerificationRecordInput::StagedTree { .. } => return None,
     };
@@ -1830,7 +2161,7 @@ fn engram_verification_record_basis(body: &EngramVerificationRecordBody) -> Opti
 
 /// The producer observation each recorded test check of `run_id` stands
 /// for, with its stage: the observations a receipt's records settle.
-fn engram_verification_record_producers(
+pub(crate) fn engram_verification_record_producers(
     run_id: &str,
     body: &EngramVerificationRecordBody,
 ) -> Vec<(String, EngramExecutionObservationInput)> {
@@ -1849,14 +2180,22 @@ fn engram_verification_record_producers(
             (
                 check.stage.clone(),
                 EngramExecutionObservationInput {
-                    observation_id: sha256_hex(format!("termal-run:{run_id}:{}", check.stage).as_bytes()),
+                    observation_id: sha256_hex(
+                        format!("termal-run:{run_id}:{}", check.stage).as_bytes(),
+                    ),
                     action_fingerprint: check.check_fingerprint.clone(),
                     effect: EngramEffect::Observe,
                     outcome: match check.outcome {
-                        EngramVerificationRecordCheckOutcome::Passed => EngramExecutionOutcome::Succeeded,
-                        EngramVerificationRecordCheckOutcome::Failed => EngramExecutionOutcome::Failed,
+                        EngramVerificationRecordCheckOutcome::Passed => {
+                            EngramExecutionOutcome::Succeeded
+                        }
+                        EngramVerificationRecordCheckOutcome::Failed => {
+                            EngramExecutionOutcome::Failed
+                        }
                         EngramVerificationRecordCheckOutcome::NotRun
-                        | EngramVerificationRecordCheckOutcome::Indeterminate => EngramExecutionOutcome::Unknown,
+                        | EngramVerificationRecordCheckOutcome::Indeterminate => {
+                            EngramExecutionOutcome::Unknown
+                        }
                     },
                     source_changed: false,
                     source_basis: Some(basis.clone()),
@@ -1874,50 +2213,77 @@ fn engram_verification_record_producers(
 /// the tick's own thread (src/engram_retry_schedule.rs) across its passes,
 /// in memory only, with each run's backoff.
 #[derive(Debug, Default)]
-struct EngramVerificationRecordCursor {
-    last: Option<String>,
-    backoff: HashMap<String, EngramVerificationRecordBackoff>,
+pub(crate) struct EngramVerificationRecordCursor {
+    pub(crate) last: Option<String>,
+    pub(crate) backoff: HashMap<String, EngramVerificationRecordBackoff>,
     // Presentation repaired once per unchanged registration in this process.
     // A fresh process retries from the authoritative local disposition.
-    local_refusals: HashMap<String, EngramLocalRefusalPresentation>,
+    pub(crate) local_refusals: HashMap<String, EngramLocalRefusalPresentation>,
 }
 
 #[derive(Debug)]
-struct EngramVerificationRecordBackoff {
-    next: std::time::Instant,
-    wait: Duration,
-    ack: Option<TestRunVerificationAck>,
+pub(crate) struct EngramVerificationRecordBackoff {
+    pub(crate) next: std::time::Instant,
+    pub(crate) wait: Duration,
+    pub(crate) ack: Option<TestRunVerificationAck>,
 }
 
 impl EngramVerificationRecordCursor {
-    fn waits(&mut self, registration: &TestRunRegistration, now: std::time::Instant) -> bool {
-        if self.backoff.get(&registration.run_id)
+    pub(crate) fn waits(
+        &mut self,
+        registration: &TestRunRegistration,
+        now: std::time::Instant,
+    ) -> bool {
+        if self
+            .backoff
+            .get(&registration.run_id)
             .is_some_and(|backoff| backoff.ack != registration.verification_record)
         {
             self.backoff.remove(&registration.run_id);
         }
-        self.backoff.get(&registration.run_id).is_some_and(|backoff| now < backoff.next)
+        self.backoff
+            .get(&registration.run_id)
+            .is_some_and(|backoff| now < backoff.next)
     }
 
     fn back_off(&mut self, registration: &TestRunRegistration, now: std::time::Instant) {
-        let wait = self.backoff.get(&registration.run_id)
-            .map_or(ENGRAM_VERIFICATION_RECORD_BACKOFF_START, |backoff|
-                (backoff.wait * 2).min(ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX));
-        self.backoff.insert(registration.run_id.clone(), EngramVerificationRecordBackoff {
-            next: now + wait, wait, ack: registration.verification_record.clone(),
-        });
+        let wait = self
+            .backoff
+            .get(&registration.run_id)
+            .map_or(ENGRAM_VERIFICATION_RECORD_BACKOFF_START, |backoff| {
+                (backoff.wait * 2).min(ENGRAM_VERIFICATION_RECORD_BACKOFF_MAX)
+            });
+        self.backoff.insert(
+            registration.run_id.clone(),
+            EngramVerificationRecordBackoff {
+                next: now + wait,
+                wait,
+                ack: registration.verification_record.clone(),
+            },
+        );
     }
 
-    fn retain(&mut self, selected: &[TestRunRegistration]) {
-        let runs: HashSet<&str> = selected.iter().map(|registration| registration.run_id.as_str()).collect();
-        self.backoff.retain(|run_id, _| runs.contains(run_id.as_str()));
-        self.local_refusals.retain(|run_id, _| runs.contains(run_id.as_str()));
+    pub(crate) fn retain(&mut self, selected: &[TestRunRegistration]) {
+        let runs: HashSet<&str> = selected
+            .iter()
+            .map(|registration| registration.run_id.as_str())
+            .collect();
+        self.backoff
+            .retain(|run_id, _| runs.contains(run_id.as_str()));
+        self.local_refusals
+            .retain(|run_id, _| runs.contains(run_id.as_str()));
     }
 
-    fn order(&self, mut registrations: Vec<TestRunRegistration>) -> Vec<TestRunRegistration> {
+    pub(crate) fn order(
+        &self,
+        mut registrations: Vec<TestRunRegistration>,
+    ) -> Vec<TestRunRegistration> {
         registrations.sort_by(|left, right| left.run_id.cmp(&right.run_id));
         let start = self.last.as_ref().map_or(0, |last| {
-            registrations.iter().position(|registration| registration.run_id > *last).unwrap_or(0)
+            registrations
+                .iter()
+                .position(|registration| registration.run_id > *last)
+                .unwrap_or(0)
         });
         registrations.rotate_left(start);
         registrations
@@ -1925,7 +2291,7 @@ impl EngramVerificationRecordCursor {
 }
 
 /// Whether the observation `row` is this registered run's own launch.
-fn engram_verification_record_row_matches(
+pub(crate) fn engram_verification_record_row_matches(
     row: &TestRunCommandObservation,
     registration: &TestRunRegistration,
 ) -> bool {
@@ -1942,8 +2308,11 @@ impl AppState {
     /// One pass over the registered, bound runs within
     /// `ENGRAM_VERIFICATION_RECORD_TICK_BUDGET`; tests call it directly.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn engram_verification_records_tick(&self) {
-        self.engram_verification_records_tick_within(ENGRAM_VERIFICATION_RECORD_TICK_BUDGET, &|| false);
+    pub(crate) fn engram_verification_records_tick(&self) {
+        self.engram_verification_records_tick_within(
+            ENGRAM_VERIFICATION_RECORD_TICK_BUDGET,
+            &|| false,
+        );
     }
 
     /// One pass over the registered, bound runs: each that emits is
@@ -1955,15 +2324,23 @@ impl AppState {
     /// thread of its own (src/engram_retry_schedule.rs). Returns how many runs
     /// it looked at.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn engram_verification_records_tick_within(&self, budget: Duration, stopping: &dyn Fn() -> bool) -> usize {
-        self.engram_verification_records_tick_from(budget, stopping, &mut EngramVerificationRecordCursor::default())
+    pub(crate) fn engram_verification_records_tick_within(
+        &self,
+        budget: Duration,
+        stopping: &dyn Fn() -> bool,
+    ) -> usize {
+        self.engram_verification_records_tick_from(
+            budget,
+            stopping,
+            &mut EngramVerificationRecordCursor::default(),
+        )
     }
 
     /// `engram_verification_records_tick_within`, starting after the run
     /// `cursor` names and leaving it at the last run this pass looked at.
     /// A run whose look left it pending, or its receipt unsettled, waits out
     /// its backoff in `cursor` before the next look.
-    fn engram_verification_records_tick_from(
+    pub(crate) fn engram_verification_records_tick_from(
         &self,
         budget: Duration,
         stopping: &dyn Fn() -> bool,
@@ -1983,7 +2360,10 @@ impl AppState {
                         && engram_verification_record_registration_bound(registration)
                         && !matches!(
                             registration.verification_record,
-                            Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. })
+                            Some(
+                                TestRunVerificationAck::Settled { .. }
+                                    | TestRunVerificationAck::Rejected { .. }
+                            )
                         )
                 })
                 .cloned()
@@ -1995,8 +2375,13 @@ impl AppState {
             if stopping() || clock.now() >= deadline {
                 break;
             }
-            if cursor.local_refusals.get(&registration.run_id).is_some_and(|presentation|
-                presentation.registration == registration && presentation.finished()) {
+            if cursor
+                .local_refusals
+                .get(&registration.run_id)
+                .is_some_and(|presentation| {
+                    presentation.registration == registration && presentation.finished()
+                })
+            {
                 continue;
             }
             // A run in its backoff is neither read nor routed.
@@ -2009,40 +2394,59 @@ impl AppState {
                 settlement == EngramVerificationRecordSettlement::Settled
             };
             let mut attempted = registration.clone();
-            let done = if matches!(registration.verification_record,
-                Some(TestRunVerificationAck::LocalUnclassified { .. })) {
+            let done = if matches!(
+                registration.verification_record,
+                Some(TestRunVerificationAck::LocalUnclassified { .. })
+            ) {
                 cursor.repair_local_refusal(self, &registration)
             } else {
                 match engram_verification_record_prepare(&registration) {
                     EngramVerificationRecordPrepared::Ready(frozen) => {
-                        let step = if let Some(retired) = engram_verification_record_retire_legacy(&frozen) {
+                        let step = if let Some(retired) =
+                            engram_verification_record_retire_legacy(&frozen)
+                        {
                             retired
                         } else {
-                            let route = self.engram_verification_record_route_until(&registration, deadline);
+                            let route = self
+                                .engram_verification_record_route_until(&registration, deadline);
                             engram_verification_record_send(
                                 frozen,
-                                route.as_ref().map(EngramVerificationRecordRoute::link).map_err(Clone::clone),
+                                route
+                                    .as_ref()
+                                    .map(EngramVerificationRecordRoute::link)
+                                    .map_err(Clone::clone),
                             )
                         };
                         self.note_engram_verification_record_step(&registration, &step);
                         match step {
-                            EngramVerificationRecordStep::Received { body, receipt } => settled(
-                                self.complete_engram_verification_record_until(&registration, &body, &receipt, deadline),
-                            ),
+                            EngramVerificationRecordStep::Received { body, receipt } => {
+                                settled(self.complete_engram_verification_record_until(
+                                    &registration,
+                                    &body,
+                                    &receipt,
+                                    deadline,
+                                ))
+                            }
                             EngramVerificationRecordStep::Rejected(_) => true,
                             EngramVerificationRecordStep::Pending(_) => false,
                         }
                     }
-                    EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } => settled(
-                        self.complete_engram_verification_record_until(&registration, &frozen.body, &receipt, deadline),
-                    ),
+                    EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } => {
+                        settled(self.complete_engram_verification_record_until(
+                            &registration,
+                            &frozen.body,
+                            &receipt,
+                            deadline,
+                        ))
+                    }
                     EngramVerificationRecordPrepared::Pending(
                         EngramVerificationRecordPending::UnclassifiedStages { stages },
                     ) if registration.declared_native.is_none() => {
                         if self.reject_unclassified_verification_record(&registration, &stages) {
-                            attempted.verification_record = Some(TestRunVerificationAck::LocalUnclassified {
-                                detail: unclassified_verification_detail(&stages),
-                            });
+                            attempted.verification_record =
+                                Some(TestRunVerificationAck::LocalUnclassified {
+                                    detail: unclassified_verification_detail(&stages),
+                                });
                             cursor.repair_local_refusal(self, &attempted)
                         } else {
                             false
@@ -2068,7 +2472,7 @@ impl AppState {
     /// `complete_engram_verification_record_until`, waiting at most
     /// `ENGRAM_VERIFICATION_RECORD_SETTLE_FENCE` for durability.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn complete_engram_verification_record(
+    pub(crate) fn complete_engram_verification_record(
         &self,
         registration: &TestRunRegistration,
         body: &EngramVerificationRecordBody,
@@ -2085,7 +2489,7 @@ impl AppState {
     /// and a later look settles it again from the receipt alone: never a
     /// resend. Every step is idempotent, so a crash anywhere between them is
     /// repaired by the next look.
-    fn complete_engram_verification_record_until(
+    pub(crate) fn complete_engram_verification_record_until(
         &self,
         registration: &TestRunRegistration,
         body: &EngramVerificationRecordBody,
@@ -2097,13 +2501,23 @@ impl AppState {
         // then queue the owned notice worker within the caller's remaining
         // time and its presentation cap. Never extend a verification tick.
         let settled = self.complete_engram_verification_record_state_until(
-            registration, body, receipt, deadline);
+            registration,
+            body,
+            receipt,
+            deadline,
+        );
         if std::time::Instant::now() < deadline
-            && !matches!(settled, EngramVerificationRecordSettlement::ReceiptMismatch { .. }
-                | EngramVerificationRecordSettlement::AcknowledgedBodyChanged
-                | EngramVerificationRecordSettlement::NotDurable { .. }) {
-            self.schedule_received_launcher_notice(registration,
-                deadline.min(std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET));
+            && !matches!(
+                settled,
+                EngramVerificationRecordSettlement::ReceiptMismatch { .. }
+                    | EngramVerificationRecordSettlement::AcknowledgedBodyChanged
+                    | EngramVerificationRecordSettlement::NotDurable { .. }
+            )
+        {
+            self.schedule_received_launcher_notice(
+                registration,
+                deadline.min(std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET),
+            );
         }
         settled
     }
@@ -2117,7 +2531,9 @@ impl AppState {
     ) -> EngramVerificationRecordSettlement {
         // Only a receipt that answers exactly this body settles anything.
         if let Err(why) = engram_verification_record_receipt_check(body, receipt) {
-            return EngramVerificationRecordSettlement::ReceiptMismatch { detail: why.to_owned() };
+            return EngramVerificationRecordSettlement::ReceiptMismatch {
+                detail: why.to_owned(),
+            };
         }
         // A receipt the host holds answers one body only: never settled
         // into, nor rebound to, another body of the same run.
@@ -2145,7 +2561,9 @@ impl AppState {
         engram_verification_record_set_progress(
             run_dir,
             &registration.run_id,
-            EngramVerificationRecordProgress::Received { receipt: receipt.clone() },
+            EngramVerificationRecordProgress::Received {
+                receipt: receipt.clone(),
+            },
         );
         let rows = match self.settle_engram_verification_record(registration, body, receipt) {
             EngramVerificationRecordAssociation::Associated(rows) => rows,
@@ -2179,7 +2597,9 @@ impl AppState {
         engram_verification_record_set_progress(
             run_dir,
             &registration.run_id,
-            EngramVerificationRecordProgress::Settled { receipt: receipt.clone() },
+            EngramVerificationRecordProgress::Settled {
+                receipt: receipt.clone(),
+            },
         );
         EngramVerificationRecordSettlement::Settled
     }
@@ -2198,7 +2618,11 @@ impl AppState {
         deadline: std::time::Instant,
     ) -> std::result::Result<(), String> {
         let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock);
-        if self.persist_tx.send(PersistRequest::Fence(Box::new(fence))).is_ok() {
+        if self
+            .persist_tx
+            .send(PersistRequest::Fence(Box::new(fence)))
+            .is_ok()
+        {
             return waiter.wait().map_err(|error| format!("{error:?}"));
         }
         let inner = self.inner.lock().expect("state mutex poisoned");
@@ -2208,19 +2632,21 @@ impl AppState {
 
     /// Keeps what one send step observed on the run's registration: a
     /// received receipt or a rejection; a pending step changes nothing.
-    fn note_engram_verification_record_step(
+    pub(crate) fn note_engram_verification_record_step(
         &self,
         registration: &TestRunRegistration,
         step: &EngramVerificationRecordStep,
     ) {
         let ack = match step {
-            EngramVerificationRecordStep::Received { body, receipt } => TestRunVerificationAck::Received {
-                receipt: receipt.clone(),
-                body_digest: engram_verification_record_body_digest(body),
-            },
-            EngramVerificationRecordStep::Rejected(detail) => {
-                TestRunVerificationAck::Rejected { detail: detail.clone() }
+            EngramVerificationRecordStep::Received { body, receipt } => {
+                TestRunVerificationAck::Received {
+                    receipt: receipt.clone(),
+                    body_digest: engram_verification_record_body_digest(body),
+                }
             }
+            EngramVerificationRecordStep::Rejected(detail) => TestRunVerificationAck::Rejected {
+                detail: detail.clone(),
+            },
             EngramVerificationRecordStep::Pending(_) => return,
         };
         self.note_engram_verification_record_ack(registration, ack);
@@ -2232,7 +2658,11 @@ impl AppState {
     /// and checked, a settlement read back durable, or a refusal. A received
     /// receipt never replaces a finished record, and a row that is gone or is
     /// no longer this run's is left alone.
-    fn note_engram_verification_record_ack(&self, registration: &TestRunRegistration, ack: TestRunVerificationAck) {
+    pub(crate) fn note_engram_verification_record_ack(
+        &self,
+        registration: &TestRunRegistration,
+        ack: TestRunVerificationAck,
+    ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let changes = inner.test_run_registrations.get(&registration.run_id).is_some_and(|row| {
             row.request_identity == registration.request_identity
@@ -2257,7 +2687,9 @@ impl AppState {
         }
         inner
             .test_run_registrations
-            .update_unindexed_fields(&registration.run_id, |row| row.verification_record = Some(ack));
+            .update_unindexed_fields(&registration.run_id, |row| {
+                row.verification_record = Some(ack)
+            });
         if let Err(error) = self.persist_internal_locked(&inner) {
             eprintln!(
                 "engram> run={} verification record outcome not persisted: {error:#}",
@@ -2268,7 +2700,7 @@ impl AppState {
 
     /// `engram_verification_record_route_until` within one tick's budget.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn engram_verification_record_route(
+    pub(crate) fn engram_verification_record_route(
         &self,
         registration: &TestRunRegistration,
     ) -> std::result::Result<EngramVerificationRecordRoute, EngramVerificationRecordPending> {
@@ -2298,7 +2730,8 @@ impl AppState {
                 .flatten()
                 .ok_or(EngramVerificationRecordPending::NoConnection)?;
             if registration.authority_store.is_none()
-                || target.settings.authority_store_key.as_ref() != registration.authority_store.as_ref()
+                || target.settings.authority_store_key.as_ref()
+                    != registration.authority_store.as_ref()
             {
                 return Err(EngramVerificationRecordPending::StoreChanged);
             }
@@ -2314,11 +2747,19 @@ impl AppState {
             }
             Ok(target.settings.call_timeout().min(left))
         };
-        target.adapter.read_work_session(
-            &target.connection, registration.authority_store.as_ref().expect("checked store"), timeout_left()?,
-        ).map_err(|error| EngramVerificationRecordPending::TransportFailed {
-            error_kind: format!("{:?}", error.kind),
-        })?;
+        target
+            .adapter
+            .read_work_session(
+                &target.connection,
+                registration
+                    .authority_store
+                    .as_ref()
+                    .expect("checked store"),
+                timeout_left()?,
+            )
+            .map_err(|error| EngramVerificationRecordPending::TransportFailed {
+                error_kind: format!("{:?}", error.kind),
+            })?;
         Ok(EngramVerificationRecordRoute {
             adapter: Arc::clone(&target.adapter),
             connection: target.connection.clone(),
@@ -2333,15 +2774,16 @@ impl AppState {
     /// launch rows as they now stand when each carries every record the
     /// receipt names for a test check; none while no row of the run carries
     /// its artifact (it attaches once the launcher exits).
-    fn settle_engram_verification_record(
+    pub(crate) fn settle_engram_verification_record(
         &self,
         registration: &TestRunRegistration,
         body: &EngramVerificationRecordBody,
         receipt: &EngramVerificationRecordReceipt,
     ) -> EngramVerificationRecordAssociation {
-        let (Some(store), Some(binding)) =
-            (registration.authority_store.as_ref(), registration.work_binding.as_ref())
-        else {
+        let (Some(store), Some(binding)) = (
+            registration.authority_store.as_ref(),
+            registration.work_binding.as_ref(),
+        ) else {
             return EngramVerificationRecordAssociation::NoLaunchRow;
         };
         let producers = engram_verification_record_producers(&registration.run_id, body);
@@ -2411,7 +2853,8 @@ impl AppState {
                 changed.insert(row.execution_id.clone(), row);
             }
         }
-        let mut settlements = HashMap::<&str, Vec<(&EngramExecutionObservationInput, &String)>>::new();
+        let mut settlements =
+            HashMap::<&str, Vec<(&EngramExecutionObservationInput, &String)>>::new();
         for (stage, producer) in &producers {
             if let Some(record_id) = records.get(stage.as_str()) {
                 settlements
@@ -2420,15 +2863,16 @@ impl AppState {
                     .push((producer, *record_id));
             }
         }
-        for row in Self::settle_test_run_producer_records_locked(
-            &mut inner,
-            settlements,
-            store,
-            binding,
-        ) {
+        for row in
+            Self::settle_test_run_producer_records_locked(&mut inner, settlements, store, binding)
+        {
             changed.insert(row.execution_id.clone(), row);
         }
-        self.persist_test_run_evidence_batch_locked(&mut inner, changed.into_values().collect(), Vec::new());
+        self.persist_test_run_evidence_batch_locked(
+            &mut inner,
+            changed.into_values().collect(),
+            Vec::new(),
+        );
         let rows: Vec<TestRunCommandObservation> = keys
             .iter()
             .filter_map(|key| inner.test_run_observations.get(key))

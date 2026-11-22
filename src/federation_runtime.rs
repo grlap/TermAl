@@ -2,34 +2,39 @@
 // Does not mutate enrollment, start satellite hosts or expose local APIs.
 // New composition beside main.rs/run_server, not an executor-proxy refactor.
 
-struct FederationPeerHandle {
-    channel: FederationChannel,
+use super::*;
+
+pub(crate) struct FederationPeerHandle {
+    pub(crate) channel: FederationChannel,
     // Consumed by later federation RPC slices; the production monitor uses
     // this same client and the lifecycle tests exercise this exported handle.
     #[cfg_attr(not(test), allow(dead_code))]
-    rpc: FederationRpcClient,
+    pub(crate) rpc: FederationRpcClient,
 }
 
-type FederationPeerHandles = Arc<Mutex<HashMap<String, Arc<FederationPeerHandle>>>>;
-type FederationQuarantinedPeers = Arc<Mutex<HashSet<String>>>;
+pub(crate) type FederationPeerHandles = Arc<Mutex<HashMap<String, Arc<FederationPeerHandle>>>>;
+pub(crate) type FederationQuarantinedPeers = Arc<Mutex<HashSet<String>>>;
 
 impl AppState {
-    fn federation_peer_handle(&self, host: &str) -> Option<Arc<FederationPeerHandle>> {
+    pub(crate) fn federation_peer_handle(&self, host: &str) -> Option<Arc<FederationPeerHandle>> {
         self.federation_peer_handles
-            .lock().expect("federation registry mutex poisoned").get(host).cloned()
+            .lock()
+            .expect("federation registry mutex poisoned")
+            .get(host)
+            .cloned()
     }
 }
 
-struct FederationWorker {
-    basis: Arc<FederationTransportBasis>,
-    os: Arc<FederationOsAccount>,
-    stop: tokio::sync::watch::Sender<bool>,
-    task: tokio::task::JoinHandle<()>,
-    joined: bool,
+pub(crate) struct FederationWorker {
+    pub(crate) basis: Arc<FederationTransportBasis>,
+    pub(crate) os: Arc<FederationOsAccount>,
+    pub(crate) stop: tokio::sync::watch::Sender<bool>,
+    pub(crate) task: tokio::task::JoinHandle<()>,
+    pub(crate) joined: bool,
 }
 
 impl FederationWorker {
-    async fn join(&mut self) {
+    pub(crate) async fn join(&mut self) {
         if !self.joined {
             if let Err(error) = (&mut self.task).await {
                 eprintln!("federation worker failed: {error}");
@@ -39,18 +44,18 @@ impl FederationWorker {
     }
 }
 
-struct FederationRuntime {
+pub(crate) struct FederationRuntime {
     executor_signal: Arc<FederationExecutorWakeSignal>,
     #[cfg_attr(not(test), allow(dead_code))]
-    peers: FederationPeerHandles,
+    pub(crate) peers: FederationPeerHandles,
     #[cfg_attr(not(test), allow(dead_code))]
-    quarantined: FederationQuarantinedPeers,
-    stop: tokio::sync::watch::Sender<bool>,
-    task: tokio::task::JoinHandle<()>,
+    pub(crate) quarantined: FederationQuarantinedPeers,
+    pub(crate) stop: tokio::sync::watch::Sender<bool>,
+    pub(crate) task: tokio::task::JoinHandle<()>,
 }
 
 impl FederationRuntime {
-    async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         self.executor_signal.stop();
         self.stop.send_replace(true);
         if let Err(error) = self.task.await {
@@ -59,7 +64,7 @@ impl FederationRuntime {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn peer(&self, peer_host_id: &str) -> Option<Arc<FederationPeerHandle>> {
+    pub(crate) fn peer(&self, peer_host_id: &str) -> Option<Arc<FederationPeerHandle>> {
         self.peers
             .lock()
             .expect("federation registry mutex poisoned")
@@ -68,11 +73,14 @@ impl FederationRuntime {
     }
 }
 
-fn start_federation_runtime(app: AppState) -> FederationRuntime {
+pub(crate) fn start_federation_runtime(app: AppState) -> FederationRuntime {
     start_federation_runtime_with_io(app, FederationRuntimeIo::default())
 }
 
-fn start_federation_runtime_with_io(app: AppState, io: FederationRuntimeIo) -> FederationRuntime {
+pub(crate) fn start_federation_runtime_with_io(
+    app: AppState,
+    io: FederationRuntimeIo,
+) -> FederationRuntime {
     let executor_signal = app.federation_executor_wake_signal.clone();
     let peers = app.federation_peer_handles.clone();
     let quarantined = FederationQuarantinedPeers::default();
@@ -112,7 +120,10 @@ async fn federation_supervise(
     let mut test_waits = RemoteTestRunWaitRecovery::default();
     let mut causal_completions = CausalTestCompletionRecovery::default();
     loop {
-        if *stop.borrow() || *host_stop.borrow() || app.federation_executor_wake_signal.is_stopping() {
+        if *stop.borrow()
+            || *host_stop.borrow()
+            || app.federation_executor_wake_signal.is_stopping()
+        {
             break;
         }
         durability.tick(&app);
@@ -122,7 +133,10 @@ async fn federation_supervise(
         for (id, worker) in &workers {
             worker.os.tick();
             if !worker.os.pending() {
-                quarantined.lock().expect("federation quarantine mutex poisoned").remove(id);
+                quarantined
+                    .lock()
+                    .expect("federation quarantine mutex poisoned")
+                    .remove(id);
             }
         }
         executor.tick(&app).await;
@@ -133,7 +147,9 @@ async fn federation_supervise(
         sender_recovery.tick(&app).await;
         test_waits.tick(&app, true).await;
         causal_completions.tick(&app, true).await;
-        if app.federation_executor_wake_signal.is_stopping() { break; }
+        if app.federation_executor_wake_signal.is_stopping() {
+            break;
+        }
         // The snapshot API releases StateInner before returning. Disabled and
         // standalone settings return no peers: no bind, secret lookup or SSH.
         let snapshots = match app.federation_peer_snapshots() {
@@ -143,8 +159,22 @@ async fn federation_supervise(
                 // A failed authoritative read is not an empty registry. In
                 // particular, a pending durability fence must not tear down
                 // a healthy channel and invalidate verification in a loop.
-                if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut test_waits, &mut causal_completions, &mut stop,
-                    &mut host_stop, io.reconcile_interval).await { break; }
+                if federation_wait_supervisor_tick(
+                    &app,
+                    &mut wake_drain,
+                    &mut activation,
+                    &mut native_wakes,
+                    &mut relay_wakes,
+                    &mut test_waits,
+                    &mut causal_completions,
+                    &mut stop,
+                    &mut host_stop,
+                    io.reconcile_interval,
+                )
+                .await
+                {
+                    break;
+                }
                 continue;
             }
         };
@@ -225,7 +255,9 @@ async fn federation_supervise(
             }
         }
         for (id, snapshot) in desired {
-            if app.federation_executor_wake_signal.is_stopping() { break; }
+            if app.federation_executor_wake_signal.is_stopping() {
+                break;
+            }
             if workers.contains_key(&id) {
                 continue;
             }
@@ -252,8 +284,22 @@ async fn federation_supervise(
                 },
             );
         }
-        if federation_wait_supervisor_tick(&app, &mut wake_drain, &mut activation, &mut native_wakes, &mut relay_wakes, &mut test_waits, &mut causal_completions, &mut stop,
-            &mut host_stop, io.reconcile_interval).await { break; }
+        if federation_wait_supervisor_tick(
+            &app,
+            &mut wake_drain,
+            &mut activation,
+            &mut native_wakes,
+            &mut relay_wakes,
+            &mut test_waits,
+            &mut causal_completions,
+            &mut stop,
+            &mut host_stop,
+            io.reconcile_interval,
+        )
+        .await
+        {
+            break;
+        }
     }
     app.federation_executor_wake_signal.stop();
     causal_completions.shutdown().await;
@@ -265,16 +311,20 @@ async fn federation_supervise(
     app.federation_executor_wake_signal.observe("drainJoined");
     activation.shutdown(&app).await;
     #[cfg(test)]
-    app.federation_executor_wake_signal.observe("activationJoined");
+    app.federation_executor_wake_signal
+        .observe("activationJoined");
     executor.shutdown().await;
     #[cfg(test)]
-    app.federation_executor_wake_signal.observe("receiverRecoveryJoined");
+    app.federation_executor_wake_signal
+        .observe("receiverRecoveryJoined");
     sender_recovery.shutdown().await;
     #[cfg(test)]
-    app.federation_executor_wake_signal.observe("senderRecoveryJoined");
+    app.federation_executor_wake_signal
+        .observe("senderRecoveryJoined");
     durability.shutdown().await;
     #[cfg(test)]
-    app.federation_executor_wake_signal.observe("durabilityRecoveryJoined");
+    app.federation_executor_wake_signal
+        .observe("durabilityRecoveryJoined");
     // Reap every old worker before the runtime reports shutdown complete.
     for worker in workers.values() {
         worker.stop.send_replace(true);
@@ -290,23 +340,30 @@ async fn federation_supervise(
     app.federation_executor_wake_signal.join_receives().await;
     // A late COMMIT callback captured only dormant intent. All callback/job
     // owners are joined before pending credits are released at boot shutdown.
-    app.federation_executor_wake_signal.activation_work.lock()
-        .expect("activation work mutex poisoned").clear();
+    app.federation_executor_wake_signal
+        .activation_work
+        .lock()
+        .expect("activation work mutex poisoned")
+        .clear();
     #[cfg(test)]
-    app.federation_executor_wake_signal.observe("supervisorJoined");
+    app.federation_executor_wake_signal
+        .observe("supervisorJoined");
 }
 
 // Wake traffic runs the one bounded drain owner, not the registry reconciler,
 // journal-recovery scan, or any global queue resume. Kicks never reset the
 // periodic fallback deadline. A generation retains an append during a batch.
-async fn federation_wait_supervisor_tick(
-    app: &AppState, drain: &mut FederationExecutorWakeDrain, activation: &mut FederationExecutorActivationWorker,
+pub(crate) async fn federation_wait_supervisor_tick(
+    app: &AppState,
+    drain: &mut FederationExecutorWakeDrain,
+    activation: &mut FederationExecutorActivationWorker,
     native_wakes: &mut FederationMailboxWakeWorker,
     relay_wakes: &mut MailboxRelayWakeWorker,
     test_waits: &mut RemoteTestRunWaitRecovery,
     causal_completions: &mut CausalTestCompletionRecovery,
     stop: &mut tokio::sync::watch::Receiver<bool>,
-    host_stop: &mut tokio::sync::watch::Receiver<bool>, interval: Duration,
+    host_stop: &mut tokio::sync::watch::Receiver<bool>,
+    interval: Duration,
 ) -> bool {
     let timer = tokio::time::sleep(interval);
     tokio::pin!(timer);
@@ -337,14 +394,19 @@ async fn federation_run_peer(
     io: FederationRuntimeIo,
 ) {
     let mut retry = FederationBackoff::default();
-    let mut attempt = FederationAttemptState { os, ..Default::default() };
+    let mut attempt = FederationAttemptState {
+        os,
+        ..Default::default()
+    };
     attempt.reporter = Some(FederationWorkerReporter::new(app.clone(), basis.clone()));
     loop {
         if *stop.borrow() {
             return;
         }
         if basis.is_settling() {
-            if let Some(reporter) = &attempt.reporter { reporter.stage("credentialSettlement"); }
+            if let Some(reporter) = &attempt.reporter {
+                reporter.stage("credentialSettlement");
+            }
             tokio::select! {
                 _ = federation_wait_stop(&mut stop) => return,
                 _ = tokio::time::sleep(io.reconcile_interval) => {}
@@ -355,7 +417,9 @@ async fn federation_run_peer(
             .read()
             .expect("federation basis lock poisoned")
             .clone();
-        if let Some(reporter) = &mut attempt.reporter { reporter.begin(); }
+        if let Some(reporter) = &mut attempt.reporter {
+            reporter.begin();
+        }
         let result = match app.federation_reconnect_snapshot(&expected) {
             Ok(snapshot) => {
                 federation_serve_peer(
@@ -384,7 +448,9 @@ async fn federation_run_peer(
             let cleanup_unknown =
                 matches!(error.kind, Some(ApiErrorKind::FederationSshCleanupUnknown));
             if cleanup_unknown || attempt.os.pending() {
-                if let Some(reporter) = &attempt.reporter { reporter.stage("runtimeQuarantine"); }
+                if let Some(reporter) = &attempt.reporter {
+                    reporter.stage("runtimeQuarantine");
+                }
                 quarantined
                     .lock()
                     .expect("federation quarantine mutex poisoned")
@@ -394,24 +460,40 @@ async fn federation_run_peer(
                     expected.peer.host_id
                 );
                 #[cfg(test)]
-                { (io.attempt_finished)(&result); reported = true; }
+                {
+                    (io.attempt_finished)(&result);
+                    reported = true;
+                }
             }
             while attempt.os.pending() {
                 attempt.os.tick();
-                if !attempt.os.pending() { break; }
-                if let Some(reporter) = &attempt.reporter { reporter.stage(attempt.os.stage()); }
+                if !attempt.os.pending() {
+                    break;
+                }
+                if let Some(reporter) = &attempt.reporter {
+                    reporter.stage(attempt.os.stage());
+                }
                 tokio::select! {
                     _ = federation_wait_stop(&mut stop) => return,
                     _ = tokio::time::sleep(io.reconcile_interval) => {},
                 }
             }
-            quarantined.lock().expect("federation quarantine mutex poisoned")
+            quarantined
+                .lock()
+                .expect("federation quarantine mutex poisoned")
                 .remove(&expected.peer.host_id);
             if attempt.material_changed {
-                if let Some(reporter) = &attempt.reporter { reporter.stage("materialChanged"); }
-                eprintln!("federation peer {} paused: enrolled credential material changed", expected.peer.host_id);
+                if let Some(reporter) = &attempt.reporter {
+                    reporter.stage("materialChanged");
+                }
+                eprintln!(
+                    "federation peer {} paused: enrolled credential material changed",
+                    expected.peer.host_id
+                );
                 #[cfg(test)]
-                if !reported { (io.attempt_finished)(&result); }
+                if !reported {
+                    (io.attempt_finished)(&result);
+                }
                 // Only locally proven hard fences park. Remote 409/403 and
                 // temporary durability holds remain bounded retry outcomes.
                 federation_wait_stop(&mut stop).await;
@@ -420,14 +502,20 @@ async fn federation_run_peer(
         }
         if *stop.borrow() {
             #[cfg(test)]
-            if result.is_err() && !reported { (io.attempt_finished)(&result); }
+            if result.is_err() && !reported {
+                (io.attempt_finished)(&result);
+            }
             return;
         }
         let delay = retry.next_delay();
         retry.record_failure();
-        if let Some(reporter) = &attempt.reporter { reporter.retry(delay); }
+        if let Some(reporter) = &attempt.reporter {
+            reporter.retry(delay);
+        }
         #[cfg(test)]
-        if result.is_err() && !reported { (io.attempt_finished)(&result); }
+        if result.is_err() && !reported {
+            (io.attempt_finished)(&result);
+        }
         tokio::select! {
             _ = federation_wait_stop(&mut stop) => return,
             _ = tokio::time::sleep(delay) => {}
@@ -435,7 +523,7 @@ async fn federation_run_peer(
     }
 }
 
-async fn federation_wait_stop(stop: &mut tokio::sync::watch::Receiver<bool>) {
+pub(crate) async fn federation_wait_stop(stop: &mut tokio::sync::watch::Receiver<bool>) {
     loop {
         if *stop.borrow_and_update() {
             return;

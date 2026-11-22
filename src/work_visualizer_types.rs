@@ -2,18 +2,20 @@
 // Owns read models and strict required-field validation, not CLI execution,
 // host reader selection, work mutation, or HTML rendering.
 
+use super::*;
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkListQuery {
-    search: Option<String>,
-    label: Option<String>,
-    availability: Option<String>,
-    after: Option<String>,
-    reader_id: Option<String>,
+pub(crate) struct WorkListQuery {
+    pub(crate) search: Option<String>,
+    pub(crate) label: Option<String>,
+    pub(crate) availability: Option<String>,
+    pub(crate) after: Option<String>,
+    pub(crate) reader_id: Option<String>,
 }
 
 impl WorkListQuery {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         for value in [&self.search, &self.label, &self.after, &self.reader_id]
             .into_iter()
             .flatten()
@@ -41,7 +43,7 @@ impl WorkListQuery {
         Ok(())
     }
 
-    fn arguments(&self) -> Vec<String> {
+    pub(crate) fn arguments(&self) -> Vec<String> {
         // Fetch all lifecycles once; the UI defaults to Open and filters the
         // loaded set. Ready/blocked remain Engram's open-only source filters.
         // This host-to-Engram JSON page never enters an agent prompt. Use the
@@ -79,58 +81,58 @@ impl WorkListQuery {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkSourceStatus {
-    source: &'static str,
-    state: &'static str,
-    message: String,
+pub(crate) struct WorkSourceStatus {
+    pub(crate) source: &'static str,
+    pub(crate) state: &'static str,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkListResponse {
-    sources: Vec<WorkSourceStatus>,
-    reader_id: Option<String>,
-    observed_at: String,
-    page: Option<WorkPage>,
+pub(crate) struct WorkListResponse {
+    pub(crate) sources: Vec<WorkSourceStatus>,
+    pub(crate) reader_id: Option<String>,
+    pub(crate) observed_at: String,
+    pub(crate) page: Option<WorkPage>,
 }
 
 /// A blocking relation ("waits for"), distinct from parent/child hierarchy.
 /// `satisfied` marks a prerequisite already closed/completed.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct WorkPrerequisiteView {
-    id: String,
-    satisfied: bool,
+pub(crate) struct WorkPrerequisiteView {
+    pub(crate) id: String,
+    pub(crate) satisfied: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkItemView {
-    source: String,
-    id: String,
-    short_ref: String,
-    title: String,
-    kind: String,
-    lifecycle: String,
-    availability: String,
-    priority: u8,
-    labels: Vec<String>,
-    assigned_to: Option<String>,
-    parent_id: Option<String>,
-    updated_at: String,
-    blocked_by: Vec<String>,
-    prerequisites: Vec<WorkPrerequisiteView>,
+pub(crate) struct WorkItemView {
+    pub(crate) source: String,
+    pub(crate) id: String,
+    pub(crate) short_ref: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) lifecycle: String,
+    pub(crate) availability: String,
+    pub(crate) priority: u8,
+    pub(crate) labels: Vec<String>,
+    pub(crate) assigned_to: Option<String>,
+    pub(crate) parent_id: Option<String>,
+    pub(crate) updated_at: String,
+    pub(crate) blocked_by: Vec<String>,
+    pub(crate) prerequisites: Vec<WorkPrerequisiteView>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkPage {
-    items: Vec<WorkItemView>,
-    total: usize,
-    shown_before: usize,
-    more: bool,
-    after: Option<String>,
-    hint: Option<String>,
+pub(crate) struct WorkPage {
+    pub(crate) items: Vec<WorkItemView>,
+    pub(crate) total: usize,
+    pub(crate) shown_before: usize,
+    pub(crate) more: bool,
+    pub(crate) after: Option<String>,
+    pub(crate) hint: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -164,7 +166,7 @@ struct EngramWorkListItem {
     updated_at: String,
 }
 
-fn normalize_engram_work_page(value: Value) -> Result<WorkPage, ApiError> {
+pub(crate) fn normalize_engram_work_page(value: Value) -> Result<WorkPage, ApiError> {
     let receipt: EngramWorkListReceipt = serde_json::from_value(value)
         .map_err(|e| ApiError::bad_gateway(format!("engram work ls: invalid receipt: {e}")))?;
     let mut ids = HashSet::new();

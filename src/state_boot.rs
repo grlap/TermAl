@@ -34,6 +34,8 @@
 //   so the next turn starts a fresh runtime instead of inheriting a
 //   half-dead state machine.
 
+use super::*;
+
 impl StateInner {
     /// Merges Codex threads discovered on disk into `self.sessions` as
     /// ghost-sessions that resume the existing `threadId` rather than
@@ -67,7 +69,7 @@ impl StateInner {
     /// otherwise erase the stamp that `push_session` applied (see
     /// `stamp_session_at_index` in `state_inner.rs` for the
     /// mutation-stamp invariant).
-    fn import_discovered_codex_threads(
+    pub(crate) fn import_discovered_codex_threads(
         &mut self,
         default_workdir: &str,
         threads: Vec<DiscoveredCodexThread>,
@@ -112,7 +114,9 @@ impl StateInner {
             if let Some(index) = existing_index {
                 self.allow_discovered_codex_thread(Some(thread.id.as_str()));
                 if !discovered_codex_thread_refresh_needed(
-                    &self.sessions[index], &thread, &project_id,
+                    &self.sessions[index],
+                    &thread,
+                    &project_id,
                 ) {
                     continue;
                 }
@@ -172,10 +176,13 @@ impl StateInner {
     /// references a project in `self.projects`. Returns an error when
     /// a persisted state file is internally inconsistent — boot aborts
     /// rather than loading garbage into memory.
-    fn validate_projects_consistent(&self) -> Result<()> {
+    pub(crate) fn validate_projects_consistent(&self) -> Result<()> {
         let mut project_ids = HashSet::new();
         for project in &self.projects {
-            project.environment.validate().map_err(|_| anyhow!("invalid persisted project environment"))?;
+            project
+                .environment
+                .validate()
+                .map_err(|_| anyhow!("invalid persisted project environment"))?;
             if !project_ids.insert(project.id.as_str()) {
                 return Err(anyhow!("duplicate persisted project id `{}`", project.id));
             }
@@ -213,7 +220,7 @@ impl StateInner {
     /// equality comparisons across sessions / projects / file watchers
     /// don't mismatch due to casing, trailing separators, or
     /// Windows/Unix path flavour differences.
-    fn normalize_local_paths(&mut self) {
+    pub(crate) fn normalize_local_paths(&mut self) {
         let local_project_ids = self
             .projects
             .iter_mut()
@@ -251,7 +258,7 @@ impl StateInner {
     /// longer reachable. Called during boot; runtime crashes mid-
     /// turn during normal operation are handled by
     /// `handle_runtime_exit_if_matches` in `turn_lifecycle.rs` instead.
-    fn recover_interrupted_sessions(&mut self) {
+    pub(crate) fn recover_interrupted_sessions(&mut self) {
         for index in 0..self.sessions.len() {
             let record = &self.sessions[index];
             // Mutable access stamps a row for persistence. A clean restored
@@ -261,8 +268,10 @@ impl StateInner {
             }
             // Archiving an idle session's retained observation is not a new
             // activation event; only an interrupted running turn gets a wake.
-            let interrupted_turn = matches!(record.session.status,
-                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping);
+            let interrupted_turn = matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            );
             let recovery = {
                 let record = self
                     .session_mut_by_index(index)
@@ -280,8 +289,10 @@ impl StateInner {
             let record = self
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            if interrupted_turn && record.restart_recovery.is_none()
-                && !restart_recovery_is_suppressed(record) {
+            if interrupted_turn
+                && record.restart_recovery.is_none()
+                && !restart_recovery_is_suppressed(record)
+            {
                 record.restart_recovery = Some(SessionRestartRecovery {
                     notice: recovery.text.clone(),
                     restarted_at: restarted_at.clone(),
@@ -312,7 +323,7 @@ impl StateInner {
         self.recover_interrupted_delegations();
     }
 
-    fn recover_interrupted_delegations(&mut self) {
+    pub(crate) fn recover_interrupted_delegations(&mut self) {
         for delegation_index in 0..self.delegations.len() {
             // Terminal refresh is a no-op. Skip before its record clone so
             // restoring large completed prompts does not copy history again

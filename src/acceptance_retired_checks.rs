@@ -3,24 +3,26 @@
 // root authority. The API records it before taking a fresh canonical evidence
 // bracket; only that attempt's complete persisted brief carries the exclusion.
 
-const ACCEPTANCE_RETIRED_CHECKS_MAX: usize = 4;
+use super::*;
+
+pub(crate) const ACCEPTANCE_RETIRED_CHECKS_MAX: usize = 4;
 const ACCEPTANCE_RETIRED_CHECK_DISCLOSURE_MAX: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AcceptanceRetiredCheckRequest {
-    run_id: String,
-    reason: String,
+pub(crate) struct AcceptanceRetiredCheckRequest {
+    pub(crate) run_id: String,
+    pub(crate) reason: String,
 }
 
-struct AcceptanceRetiredCheckDisposition {
-    registration: TestRunRegistration,
-    current: AcceptanceEvaluationSourceRoot,
-    identity: AcceptanceEvidenceIdentity,
-    disclosure: Value,
+pub(crate) struct AcceptanceRetiredCheckDisposition {
+    pub(crate) registration: TestRunRegistration,
+    pub(crate) current: AcceptanceEvaluationSourceRoot,
+    pub(crate) identity: AcceptanceEvidenceIdentity,
+    pub(crate) disclosure: Value,
 }
 
-fn validate_acceptance_retired_check_requests(
+pub(crate) fn validate_acceptance_retired_check_requests(
     requests: &[AcceptanceRetiredCheckRequest],
 ) -> Result<(), ApiError> {
     let mut seen = BTreeSet::new();
@@ -110,7 +112,7 @@ impl AppState {
         Ok(row.clone())
     }
 
-    fn validate_acceptance_retired_dispositions(
+    pub(crate) fn validate_acceptance_retired_dispositions(
         &self,
         parent: &str,
         connection: &EngramConnectionConfig,
@@ -148,7 +150,7 @@ impl AppState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn record_acceptance_retired_dispositions(
+    pub(crate) fn record_acceptance_retired_dispositions(
         &self,
         parent: &str,
         connection: &EngramConnectionConfig,

@@ -1,12 +1,14 @@
 // Recursive layered inventory assembly for review identity. Owns repository
 // traversal and record selection, not Git execution or caller authority.
-fn identity_oid(oid: &str) -> bool {
+
+use super::*;
+pub(crate) fn identity_oid(oid: &str) -> bool {
     matches!(oid.len(), 40 | 64)
         && oid
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-fn identity_relative(bytes: &[u8]) -> Result<String> {
+pub(crate) fn identity_relative(bytes: &[u8]) -> Result<String> {
     let path =
         std::str::from_utf8(bytes).map_err(|_| identity_refusal("path_encoding_unsupported"))?;
     if path.is_empty()
@@ -19,14 +21,14 @@ fn identity_relative(bytes: &[u8]) -> Result<String> {
     }
     Ok(path.to_owned())
 }
-fn identity_join(prefix: &str, path: &str) -> String {
+pub(crate) fn identity_join(prefix: &str, path: &str) -> String {
     if prefix.is_empty() {
         path.to_owned()
     } else {
         format!("{prefix}/{path}")
     }
 }
-fn identity_tracked_key(path: &str) -> String {
+pub(crate) fn identity_tracked_key(path: &str) -> String {
     if cfg!(windows) {
         path.to_lowercase()
     } else {
@@ -34,7 +36,7 @@ fn identity_tracked_key(path: &str) -> String {
     }
 }
 
-fn identity_index_records(bytes: &[u8]) -> Result<Vec<(&[u8], u32)>> {
+pub(crate) fn identity_index_records(bytes: &[u8]) -> Result<Vec<(&[u8], u32)>> {
     let mut records = Vec::new();
     let mut remaining = bytes;
     while !remaining.is_empty() {
@@ -65,7 +67,7 @@ fn identity_index_records(bytes: &[u8]) -> Result<Vec<(&[u8], u32)>> {
     }
     Ok(records)
 }
-fn identity_repository(
+pub(crate) fn identity_repository(
     git: &ReviewIdentityGit,
     prefix: &str,
     depth: usize,

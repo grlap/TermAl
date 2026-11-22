@@ -10,11 +10,13 @@
 // the authority and durability audit harder without crossing the Rust module
 // size threshold.
 
+use super::*;
+
 impl AppState {
     /// Commits state localized from a remote response while preserving a
     /// full-snapshot retry obligation if the synchronous persistence fallback
     /// fails after mutating memory or advancing remote recovery watermarks.
-    fn commit_remote_localization_locked(&self, inner: &mut StateInner) -> Result<u64> {
+    pub(crate) fn commit_remote_localization_locked(&self, inner: &mut StateInner) -> Result<u64> {
         match self.commit_locked(inner) {
             Ok(revision) => Ok(revision),
             Err(error) => {
@@ -28,7 +30,7 @@ impl AppState {
     /// A failed synchronous create persist leaves the proxy authoritative in
     /// memory, so later remote recovery must retry the full snapshot before
     /// treating an equal response or delta as a no-op.
-    fn commit_remote_session_created_locked(
+    pub(crate) fn commit_remote_session_created_locked(
         &self,
         inner: &mut StateInner,
         record: &SessionRecord,
@@ -63,7 +65,10 @@ impl AppState {
     /// when a post-commit integrity check fails, so rolling memory back would
     /// risk inverting memory and SQLite; a full-snapshot retry is safe in both
     /// the pre-commit and post-commit failure cases.
-    fn commit_remote_delta_persisted_locked(&self, inner: &mut StateInner) -> Result<u64> {
+    pub(crate) fn commit_remote_delta_persisted_locked(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<u64> {
         match self.commit_persisted_delta_locked_with_outcome(inner) {
             Ok((revision, outcome)) => {
                 if let Err(error) = outcome.require_remote_rows_saved(inner) {
@@ -108,7 +113,10 @@ impl AppState {
     /// replay is accepted as a semantic no-op. Re-publish the current snapshot
     /// at the revision already allocated by the failed apply so clients also
     /// observe the mutation whose narrow delta was never emitted.
-    fn retry_remote_delta_persist_if_dirty_locked(&self, inner: &mut StateInner) -> Result<()> {
+    pub(crate) fn retry_remote_delta_persist_if_dirty_locked(
+        &self,
+        inner: &mut StateInner,
+    ) -> Result<()> {
         if !inner.remote_delta_persist_dirty {
             return Ok(());
         }
@@ -126,7 +134,7 @@ impl AppState {
     /// counterparts before publish. Errors here cause
     /// `dispatch_remote_event` (src/remote_sync.rs) to fall back to
     /// `resync_remote_state_snapshot_with_authority`.
-    fn apply_remote_delta_event(
+    pub(crate) fn apply_remote_delta_event(
         &self,
         remote_id: &str,
         event: DeltaEvent,
@@ -137,7 +145,7 @@ impl AppState {
     /// Applies a delta returned by a request while retaining the exact lease.
     /// Marker responses use this path so an A -> B -> A settings cycle cannot
     /// make a retired pre-cycle response current again by routing-byte equality.
-    fn apply_remote_delta_event_for_request(
+    pub(crate) fn apply_remote_delta_event_for_request(
         &self,
         lease: &RemoteRequestLease,
         event: DeltaEvent,
@@ -151,7 +159,7 @@ impl AppState {
         )
     }
 
-    fn apply_remote_delta_event_for_bridge(
+    pub(crate) fn apply_remote_delta_event_for_bridge(
         &self,
         expected_remote: &RemoteConfig,
         expected_connection: &RemoteConnection,

@@ -1,76 +1,78 @@
 // Immutable terminal custody under the existing delegated-review mailbox owner.
 // Submission envelopes remain untouched. No primary history vector or new store.
-const REVIEW_ATTEMPT_TOPIC: &str = "delegation-review-terminal/v1";
-const REVIEW_ATTEMPT_KEY_PREFIX: &str = "delegation-review-terminal-v1";
-const REVIEW_ATTEMPT_AUTH_KEY: &str = "delegation_review_terminal_auth_v1";
-const MAX_RETAINED_REVIEW_ATTEMPTS: u32 = 64;
+
+use super::*;
+pub(crate) const REVIEW_ATTEMPT_TOPIC: &str = "delegation-review-terminal/v1";
+pub(crate) const REVIEW_ATTEMPT_KEY_PREFIX: &str = "delegation-review-terminal-v1";
+pub(crate) const REVIEW_ATTEMPT_AUTH_KEY: &str = "delegation_review_terminal_auth_v1";
+pub(crate) const MAX_RETAINED_REVIEW_ATTEMPTS: u32 = 64;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_REVIEW_ATTEMPT_AFTER_APPEND: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = const { std::cell::RefCell::new(None) };
-    static TEST_REVIEW_BEFORE_FOLLOWUP_RESERVATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_REVIEW_CUSTODY_AFTER_CONFIRM_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = const { std::cell::RefCell::new(None) };
-    static TEST_REVIEW_CUSTODY_AFTER_NEUTRALIZE_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = const { std::cell::RefCell::new(None) };
-    static TEST_REVIEW_CUSTODY_AFTER_CUT_VALIDATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_REVIEW_FOLLOWUP_AFTER_RECUT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_REVIEW_FOLLOWUP_AFTER_RECUT_ADOPTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_ATTEMPT_AFTER_APPEND: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_BEFORE_FOLLOWUP_RESERVATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_CUSTODY_AFTER_CONFIRM_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_CUSTODY_AFTER_NEUTRALIZE_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce() -> bool>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_CUSTODY_AFTER_CUT_VALIDATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_FOLLOWUP_AFTER_RECUT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_FOLLOWUP_AFTER_RECUT_ADOPTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     // Between the parent packet's unguarded discovery check and the owner guard.
-    static TEST_REVIEW_PACKET_BEFORE_OWNER_GUARD: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_REVIEW_PACKET_BEFORE_OWNER_GUARD: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewAttemptProvenance {
-    submission: String,
+pub(crate) struct ReviewAttemptProvenance {
+    pub(crate) submission: String,
     submission_message_id: Option<String>,
-    raw_output_available: bool,
+    pub(crate) raw_output_available: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewAttemptReadState {
-    original_project_id: Option<String>,
-    current_submission_attempt: Option<u32>,
+pub(crate) struct ReviewAttemptReadState {
+    pub(crate) original_project_id: Option<String>,
+    pub(crate) current_submission_attempt: Option<u32>,
     /// Publication is historical truth, never certification of a later input.
-    disposition: String,
+    pub(crate) disposition: String,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewAttemptSnapshot {
+pub(crate) struct ReviewAttemptSnapshot {
     #[serde(default)]
-    project_basis_recorded: bool,
+    pub(crate) project_basis_recorded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    original_project_id: Option<String>,
-    schema_version: u32,
-    kind: String,
-    parent_session_id: String,
-    delegation_id: String,
-    child_session_id: String,
-    submission_attempt: u32,
-    write_policy: DelegationWritePolicy,
-    result: DelegationResult,
-    provenance: ReviewAttemptProvenance,
+    pub(crate) original_project_id: Option<String>,
+    pub(crate) schema_version: u32,
+    pub(crate) kind: String,
+    pub(crate) parent_session_id: String,
+    pub(crate) delegation_id: String,
+    pub(crate) child_session_id: String,
+    pub(crate) submission_attempt: u32,
+    pub(crate) write_policy: DelegationWritePolicy,
+    pub(crate) result: DelegationResult,
+    pub(crate) provenance: ReviewAttemptProvenance,
     original_submission_body: Option<String>,
-    raw_output: Option<String>,
+    pub(crate) raw_output: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SignedReviewAttempt {
-    payload: String,
-    authentication_tag: String,
+pub(crate) struct SignedReviewAttempt {
+    pub(crate) payload: String,
+    pub(crate) authentication_tag: String,
 }
 
-fn review_attempt_key(id: &str, attempt: u32) -> String {
+pub(crate) fn review_attempt_key(id: &str, attempt: u32) -> String {
     format!("{REVIEW_ATTEMPT_KEY_PREFIX}-{id}-{attempt}")
 }
 
-fn review_attempt_corrupt() -> ApiError {
+pub(crate) fn review_attempt_corrupt() -> ApiError {
     ApiError::conflict("retained review attempt is corrupt or has unproven host provenance")
 }
 
-fn review_attempt_mac(key: &str, payload: &str) -> Result<Vec<u8>, ApiError> {
+pub(crate) fn review_attempt_mac(key: &str, payload: &str) -> Result<Vec<u8>, ApiError> {
     // A fixed, NUL-terminated domain followed by one exact JSON payload.
     federation_mac(
         key.as_bytes(),
@@ -82,7 +84,10 @@ fn review_attempt_mac(key: &str, payload: &str) -> Result<Vec<u8>, ApiError> {
 impl MailboxStore {
     // Opaque coordination metadata, preserved by existing migrations/readers.
     // Never returned through mailbox reads or created by a historical read.
-    fn review_attempt_auth_key(&self, create: bool) -> Result<Option<zeroize::Zeroizing<String>>> {
+    pub(crate) fn review_attempt_auth_key(
+        &self,
+        create: bool,
+    ) -> Result<Option<zeroize::Zeroizing<String>>> {
         let _writer = if create {
             Some(self.lock_writer("retaining review result authentication")?)
         } else {
@@ -145,7 +150,7 @@ impl MailboxStore {
     }
 }
 
-fn validate_review_snapshot(
+pub(crate) fn validate_review_snapshot(
     snapshot: &ReviewAttemptSnapshot,
     parent: &str,
     delegation: &str,
@@ -183,12 +188,15 @@ fn review_legacy_identity_error() -> ApiError {
 // Legacy project recovery uses only consistent native host facts. The new
 // commissioning field and authenticated snapshot remain authoritative even if
 // the parent later moves, disappears, pauses, or loses its runtime.
-fn review_original_project_locked<'a>(
+pub(crate) fn review_original_project_locked<'a>(
     inner: &'a StateInner,
     record: &'a DelegationRecord,
 ) -> Option<&'a str> {
     if record.project_basis_recorded || record.original_project_id.is_some() {
-        return record.original_project_id.as_deref().filter(|project| !project.trim().is_empty());
+        return record
+            .original_project_id
+            .as_deref()
+            .filter(|project| !project.trim().is_empty());
     }
     let parent = &inner.sessions[inner.find_session_index(&record.parent_session_id)?];
     let child = &inner.sessions[inner.find_session_index(&record.child_session_id)?];
@@ -207,9 +215,9 @@ fn review_original_project_locked<'a>(
 /// A failed publication of a terminal review attempt, as the parent packet
 /// last saw it, with the delegation record identity it was seen at.
 #[derive(Clone, Debug)]
-struct ReviewPacketRetentionFailure {
-    record: String,
-    error: String,
+pub(crate) struct ReviewPacketRetentionFailure {
+    pub(crate) record: String,
+    pub(crate) error: String,
 }
 
 /// The parts of a delegation record whose change makes a remembered packet
@@ -233,26 +241,40 @@ fn terminal_review_attempt(record: &DelegationRecord, attempt: u32) -> bool {
         )
 }
 
-fn review_requester_project_locked(inner: &StateInner, requester: &str) -> Result<String, ApiError> {
-    let index = inner.find_session_index(requester)
+fn review_requester_project_locked(
+    inner: &StateInner,
+    requester: &str,
+) -> Result<String, ApiError> {
+    let index = inner
+        .find_session_index(requester)
         .ok_or_else(|| ApiError::not_found("review result is unavailable"))?;
     let root = &inner.sessions[index];
-    if root.hidden || !root.is_local_session()
+    if root.hidden
+        || !root.is_local_session()
         || root.engram.observation_delete_requested
         || root.session.parent_delegation_id.is_some()
-        || inner.find_delegation_index_by_child_session_id(requester).is_some()
+        || inner
+            .find_delegation_index_by_child_session_id(requester)
+            .is_some()
     {
         return Err(ApiError::not_found("review result is unavailable"));
     }
-    root.session.project_id.as_ref().filter(|project| !project.trim().is_empty())
-        .cloned().ok_or_else(|| ApiError::not_found("review result is unavailable"))
+    root.session
+        .project_id
+        .as_ref()
+        .filter(|project| !project.trim().is_empty())
+        .cloned()
+        .ok_or_else(|| ApiError::not_found("review result is unavailable"))
 }
 
-fn review_snapshot_matches_inner(inner: &StateInner, snapshot: &ReviewAttemptSnapshot) -> bool {
+pub(crate) fn review_snapshot_matches_inner(
+    inner: &StateInner,
+    snapshot: &ReviewAttemptSnapshot,
+) -> bool {
     review_snapshot_matches_before_prompt(inner, snapshot, None)
 }
 
-fn review_snapshot_matches_before_prompt(
+pub(crate) fn review_snapshot_matches_before_prompt(
     inner: &StateInner,
     snapshot: &ReviewAttemptSnapshot,
     admitted_prompt: Option<&str>,
@@ -282,63 +304,104 @@ fn review_snapshot_matches_before_prompt(
 }
 
 impl AppState {
-    fn review_attempt_read_state(&self, snapshot: &ReviewAttemptSnapshot, selected_id: &str) -> ReviewAttemptReadState {
+    fn review_attempt_read_state(
+        &self,
+        snapshot: &ReviewAttemptSnapshot,
+        selected_id: &str,
+    ) -> ReviewAttemptReadState {
         let (current_attempt, original_project_id) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let current = inner.find_delegation_index(&snapshot.delegation_id)
+            let current = inner
+                .find_delegation_index(&snapshot.delegation_id)
                 .map(|i| &inner.delegations[i]);
-            (current.map(|record| record.review_result_submission_attempt),
-                snapshot.original_project_id.clone().or_else(|| (!snapshot.project_basis_recorded).then_some(current).flatten()
-                    .and_then(|record| review_original_project_locked(&inner, record)).map(str::to_owned)))
+            (
+                current.map(|record| record.review_result_submission_attempt),
+                snapshot.original_project_id.clone().or_else(|| {
+                    (!snapshot.project_basis_recorded)
+                        .then_some(current)
+                        .flatten()
+                        .and_then(|record| review_original_project_locked(&inner, record))
+                        .map(str::to_owned)
+                }),
+            )
         };
         // This is a live observation, separate from immutable result bytes.
         // Validate through the existing archive owner. A later damaged row
         // must neither revoke the selected id nor certify it as the head.
         let head = (|| -> Result<(Option<String>, bool, bool), ApiError> {
-            let rows = self.review_custody_rows_read_only(Some(&snapshot.child_session_id), &snapshot.delegation_id)?;
-            let key = self.mailbox_store.review_attempt_auth_key(false)
-                .map_err(mailbox_api_error)?.ok_or_else(review_attempt_corrupt)?;
+            let rows = self.review_custody_rows_read_only(
+                Some(&snapshot.child_session_id),
+                &snapshot.delegation_id,
+            )?;
+            let key = self
+                .mailbox_store
+                .review_attempt_auth_key(false)
+                .map_err(mailbox_api_error)?
+                .ok_or_else(review_attempt_corrupt)?;
             let mut verified = Vec::new();
             let mut uncertain = false;
             for row in &rows {
-                match decode_review_slots_with_chain(std::slice::from_ref(row),
-                    &snapshot.parent_session_id, &snapshot.delegation_id,
-                    &snapshot.child_session_id, &snapshot.write_policy, &key, false)
-                {
+                match decode_review_slots_with_chain(
+                    std::slice::from_ref(row),
+                    &snapshot.parent_session_id,
+                    &snapshot.delegation_id,
+                    &snapshot.child_session_id,
+                    &snapshot.write_policy,
+                    &key,
+                    false,
+                ) {
                     Ok(slots) => verified.extend(slots),
                     Err(_) => uncertain = true,
                 }
             }
-            let later_attempt = verified.iter().any(|slot| slot.submission_attempt > snapshot.submission_attempt
-                && slot.publication.is_some());
-            if !verified.iter().any(|slot| slot.submission_attempt == snapshot.submission_attempt
-                && slot.publication.as_ref().is_some_and(|proof| proof.result_id == selected_id)) {
+            let later_attempt = verified.iter().any(|slot| {
+                slot.submission_attempt > snapshot.submission_attempt && slot.publication.is_some()
+            });
+            if !verified.iter().any(|slot| {
+                slot.submission_attempt == snapshot.submission_attempt
+                    && slot
+                        .publication
+                        .as_ref()
+                        .is_some_and(|proof| proof.result_id == selected_id)
+            }) {
                 return Ok((None, true, later_attempt));
             }
-            let latest = verified.iter().filter(|slot| slot.submission_attempt == snapshot.submission_attempt)
-                .filter_map(|slot| slot.publication.as_ref()).max_by_key(|proof| proof.ordinal)
+            let latest = verified
+                .iter()
+                .filter(|slot| slot.submission_attempt == snapshot.submission_attempt)
+                .filter_map(|slot| slot.publication.as_ref())
+                .max_by_key(|proof| proof.ordinal)
                 .map(|proof| proof.result_id.clone());
             Ok((latest, uncertain, later_attempt))
         })();
-        let superseded_publication = head.as_ref().is_ok_and(|(latest, _, _)|
-            latest.as_deref().is_some_and(|latest| latest != selected_id));
+        let superseded_publication = head.as_ref().is_ok_and(|(latest, _, _)| {
+            latest
+                .as_deref()
+                .is_some_and(|latest| latest != selected_id)
+        });
         ReviewAttemptReadState {
             original_project_id,
             current_submission_attempt: current_attempt,
-            disposition: if superseded_publication || head.as_ref().is_ok_and(|(_, _, later_attempt)| *later_attempt)
-                || current_attempt.is_some_and(|attempt| attempt > snapshot.submission_attempt) {
+            disposition: if superseded_publication
+                || head
+                    .as_ref()
+                    .is_ok_and(|(_, _, later_attempt)| *later_attempt)
+                || current_attempt.is_some_and(|attempt| attempt > snapshot.submission_attempt)
+            {
                 "superseded"
-            } else if !head.as_ref().is_ok_and(|(latest, uncertain, _)|
-                !uncertain && latest.as_deref() == Some(selected_id)) {
+            } else if !head.as_ref().is_ok_and(|(latest, uncertain, _)| {
+                !uncertain && latest.as_deref() == Some(selected_id)
+            }) {
                 "published_head_unavailable"
             } else if current_attempt == Some(snapshot.submission_attempt) {
                 "published"
             } else {
                 "published_current_unavailable"
-            }.to_owned(),
+            }
+            .to_owned(),
         }
     }
-    fn review_attempt_storage_enabled(&self) -> bool {
+    pub(crate) fn review_attempt_storage_enabled(&self) -> bool {
         #[cfg(test)]
         if self.mailbox_store.connection_if_enabled().is_none() {
             return false;
@@ -363,7 +426,8 @@ impl AppState {
         let (requester_project, current) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let project = review_requester_project_locked(&inner, requester)?;
-            let current = inner.find_delegation_index(delegation)
+            let current = inner
+                .find_delegation_index(delegation)
                 .map(|i| inner.delegations[i].clone());
             if let Some(record) = current.as_ref() {
                 if record.mode != DelegationMode::Reviewer {
@@ -380,13 +444,22 @@ impl AppState {
             }
             (project, current)
         };
-        let child = current.as_ref().map(|record| record.child_session_id.clone()).or_else(|| {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let mut children = inner.sessions.iter().filter(|record| record.is_local_session()
-                && record.session.parent_delegation_id.as_deref() == Some(delegation));
-            let first = children.next().map(|record| record.session.id.clone());
-            if children.next().is_none() { first } else { None }
-        });
+        let child = current
+            .as_ref()
+            .map(|record| record.child_session_id.clone())
+            .or_else(|| {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let mut children = inner.sessions.iter().filter(|record| {
+                    record.is_local_session()
+                        && record.session.parent_delegation_id.as_deref() == Some(delegation)
+                });
+                let first = children.next().map(|record| record.session.id.clone());
+                if children.next().is_none() {
+                    first
+                } else {
+                    None
+                }
+            });
         let records = self.review_custody_rows_read_only(child.as_deref(), delegation)?;
         if records.is_empty() {
             if let Some(record) = current.as_ref() {
@@ -400,48 +473,82 @@ impl AppState {
                     ));
                 }
             }
-            return Err(ApiError::not_found("review attempt has no confirmed publication"));
+            return Err(ApiError::not_found(
+                "review attempt has no confirmed publication",
+            ));
         }
-        let key = self.mailbox_store.review_attempt_auth_key(false)
-            .map_err(mailbox_api_error)?.ok_or_else(review_attempt_corrupt)?;
+        let key = self
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .map_err(mailbox_api_error)?
+            .ok_or_else(review_attempt_corrupt)?;
         for row in &records {
             // A damaged later publication cannot revoke an earlier exact id.
             let Ok(slot) = decode_review_value::<ReviewCustodySlot>(&row.body, &key) else {
                 continue;
             };
-            let Some(candidate) = slot.candidate.as_ref() else { continue; };
-            if review_candidate_id(candidate)? != result_id { continue; }
-            if slot.delegation_id != delegation || slot.submission_attempt != attempt
+            let Some(candidate) = slot.candidate.as_ref() else {
+                continue;
+            };
+            if review_candidate_id(candidate)? != result_id {
+                continue;
+            }
+            if slot.delegation_id != delegation
+                || slot.submission_attempt != attempt
                 || row.sender_session_id != slot.child_session_id
             {
-                return Err(ApiError::not_found("review result is unavailable for this attempt"));
+                return Err(ApiError::not_found(
+                    "review result is unavailable for this attempt",
+                ));
             }
             let body = serde_json::to_string(candidate).map_err(|_| review_attempt_corrupt())?;
             let snapshot: ReviewAttemptSnapshot = decode_review_value(&body, &key)?;
-            let original_project = snapshot.original_project_id.clone().or_else(|| {
-                if snapshot.project_basis_recorded { return None; }
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                current.as_ref().filter(|record| {
-                    record.parent_session_id == snapshot.parent_session_id
-                        && record.child_session_id == snapshot.child_session_id
-                }).and_then(|record| review_original_project_locked(&inner, record))
-                    .map(str::to_owned)
-            }).ok_or_else(|| ApiError::conflict("project_basis_missing"))?;
+            let original_project = snapshot
+                .original_project_id
+                .clone()
+                .or_else(|| {
+                    if snapshot.project_basis_recorded {
+                        return None;
+                    }
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    current
+                        .as_ref()
+                        .filter(|record| {
+                            record.parent_session_id == snapshot.parent_session_id
+                                && record.child_session_id == snapshot.child_session_id
+                        })
+                        .and_then(|record| review_original_project_locked(&inner, record))
+                        .map(str::to_owned)
+                })
+                .ok_or_else(|| ApiError::conflict("project_basis_missing"))?;
             if original_project != requester_project {
                 return Err(ApiError::not_found("review result is unavailable"));
             }
-            if current.as_ref().and_then(|record| record.original_project_id.as_deref())
+            if current
+                .as_ref()
+                .and_then(|record| record.original_project_id.as_deref())
                 .is_some_and(|project| project != original_project)
-                || current.as_ref().is_some_and(|record| record.project_basis_recorded
-                    && record.original_project_id != snapshot.original_project_id)
+                || current.as_ref().is_some_and(|record| {
+                    record.project_basis_recorded
+                        && record.original_project_id != snapshot.original_project_id
+                })
             {
                 return Err(review_attempt_corrupt());
             }
             decode_review_slots_with_chain(
-                std::slice::from_ref(row), &snapshot.parent_session_id,
-                delegation, &snapshot.child_session_id, &snapshot.write_policy, &key, false,
+                std::slice::from_ref(row),
+                &snapshot.parent_session_id,
+                delegation,
+                &snapshot.child_session_id,
+                &snapshot.write_policy,
+                &key,
+                false,
             )?;
-            if !slot.publication.as_ref().is_some_and(|proof| proof.result_id == result_id) {
+            if !slot
+                .publication
+                .as_ref()
+                .is_some_and(|proof| proof.result_id == result_id)
+            {
                 return Err(ApiError::conflict(
                     "review_result_pending: requested candidate has no confirmed publication",
                 ));
@@ -489,7 +596,7 @@ impl AppState {
     }
 
     // Caller owns the existing recovery guard. No StateInner lock spans I/O.
-    fn review_custody_rows(
+    pub(crate) fn review_custody_rows(
         &self,
         child: &str,
         delegation: &str,
@@ -505,7 +612,7 @@ impl AppState {
         Ok(records)
     }
 
-    fn review_custody_rows_read_only(
+    pub(crate) fn review_custody_rows_read_only(
         &self,
         child: Option<&str>,
         delegation: &str,
@@ -514,7 +621,7 @@ impl AppState {
         review_slot_rows_on(&connection, child, delegation).map_err(mailbox_api_error)
     }
 
-    fn read_retained_review_attempt(
+    pub(crate) fn read_retained_review_attempt(
         &self,
         parent: &str,
         delegation: &str,
@@ -525,7 +632,7 @@ impl AppState {
 
     /// Parent-only discovery through the existing bounded authenticated custody
     /// reader. This neither captures a cut nor finalizes dispatch metadata.
-    fn retained_review_attempt_identities(
+    pub(crate) fn retained_review_attempt_identities(
         &self,
         parent: &str,
         delegation: &str,
@@ -559,14 +666,16 @@ impl AppState {
         published.sort_by_key(|(attempt, ordinal, _)| (*attempt, *ordinal));
         Ok(published
             .into_iter()
-            .map(|(submission_attempt, _, result_id)| RetainedReviewAttemptIdentity {
-                submission_attempt,
-                result_id,
-            })
+            .map(
+                |(submission_attempt, _, result_id)| RetainedReviewAttemptIdentity {
+                    submission_attempt,
+                    result_id,
+                },
+            )
             .collect())
     }
 
-    fn read_review_publication(
+    pub(crate) fn read_review_publication(
         &self,
         parent: &str,
         delegation: &str,
@@ -576,11 +685,12 @@ impl AppState {
         let (child, policy, _) = self.review_attempt_authority(parent, delegation, attempt)?;
         // Pinned immutable reads do not join retention/recovery ownership.
         // Unpinned internal selection retains its existing serialization.
-        let _owner = expected_id.is_none().then(|| self
-            .mailbox_store
-            .delegation_review_recovery_guard
-            .lock()
-            .expect("delegation review recovery guard mutex poisoned"));
+        let _owner = expected_id.is_none().then(|| {
+            self.mailbox_store
+                .delegation_review_recovery_guard
+                .lock()
+                .expect("delegation review recovery guard mutex poisoned")
+        });
         let records = self.review_custody_rows_read_only(Some(&child), delegation)?;
         if records.is_empty() {
             return Ok(None);
@@ -750,7 +860,7 @@ impl AppState {
             .map_err(mailbox_api_error)
     }
 
-    fn retain_review_attempt(
+    pub(crate) fn retain_review_attempt(
         &self,
         parent: &str,
         delegation: &str,
@@ -965,7 +1075,7 @@ impl AppState {
         Ok(Some((snapshot, id)))
     }
 
-    fn reserve_next_review_capture(
+    pub(crate) fn reserve_next_review_capture(
         &self,
         snapshot: &ReviewAttemptSnapshot,
     ) -> Result<String, ApiError> {
@@ -1077,23 +1187,39 @@ impl AppState {
     /// (`None` inside meaning recorded without a project), `Ok(None)` when no
     /// snapshot carries a stamp, and `Err(())` when custody cannot be read.
     /// Read-only; damaged rows are skipped, as in the exact read.
-    fn stamped_archive_project(&self, record: &DelegationRecord) -> Result<Option<Option<String>>, ()> {
-        let rows = self.review_custody_rows_read_only(Some(record.child_session_id.as_str()), &record.id)
+    fn stamped_archive_project(
+        &self,
+        record: &DelegationRecord,
+    ) -> Result<Option<Option<String>>, ()> {
+        let rows = self
+            .review_custody_rows_read_only(Some(record.child_session_id.as_str()), &record.id)
             .map_err(|_| ())?;
         if rows.is_empty() {
             return Ok(None);
         }
-        let Some(key) = self.mailbox_store.review_attempt_auth_key(false).map_err(|_| ())? else {
+        let Some(key) = self
+            .mailbox_store
+            .review_attempt_auth_key(false)
+            .map_err(|_| ())?
+        else {
             return Err(());
         };
         for row in &rows {
-            let Ok(slot) = decode_review_value::<ReviewCustodySlot>(&row.body, &key) else { continue; };
-            let Some(candidate) = slot.candidate.as_ref() else { continue; };
+            let Ok(slot) = decode_review_value::<ReviewCustodySlot>(&row.body, &key) else {
+                continue;
+            };
+            let Some(candidate) = slot.candidate.as_ref() else {
+                continue;
+            };
             if slot.delegation_id != record.id || row.sender_session_id != slot.child_session_id {
                 continue;
             }
-            let Ok(body) = serde_json::to_string(candidate) else { continue; };
-            let Ok(snapshot) = decode_review_value::<ReviewAttemptSnapshot>(&body, &key) else { continue; };
+            let Ok(body) = serde_json::to_string(candidate) else {
+                continue;
+            };
+            let Ok(snapshot) = decode_review_value::<ReviewAttemptSnapshot>(&body, &key) else {
+                continue;
+            };
             if snapshot.parent_session_id != record.parent_session_id
                 || snapshot.child_session_id != record.child_session_id
             {
@@ -1116,16 +1242,20 @@ impl AppState {
         if let Some(id) = id {
             let is_parent = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                inner.find_delegation_index(delegation)
+                inner
+                    .find_delegation_index(delegation)
                     .is_some_and(|i| inner.delegations[i].parent_session_id == parent)
             };
             if !is_parent {
                 return self.read_exact_review_as_root(parent, delegation, attempt, id);
             }
-            return self.read_review_publication(parent, delegation, attempt, Some(id))?
-                .ok_or_else(|| ApiError::conflict(
-                    "retained review result identity does not match a confirmed publication",
-                ));
+            return self
+                .read_review_publication(parent, delegation, attempt, Some(id))?
+                .ok_or_else(|| {
+                    ApiError::conflict(
+                        "retained review result identity does not match a confirmed publication",
+                    )
+                });
         }
         // Attempt-only selection is the parent's. An eligible root of the
         // original project that omits the result identity is told what it
@@ -1153,7 +1283,7 @@ impl AppState {
     /// state lock covers only the mode and status reads; custody and capture
     /// I/O run off that lock. A failure is reported in
     /// retainedReviewAttemptsError while the current result stays served.
-    fn publish_terminal_review_for_packet(
+    pub(crate) fn publish_terminal_review_for_packet(
         &self,
         parent: &str,
         delegation: &str,
@@ -1283,7 +1413,7 @@ impl AppState {
             .any(|slot| slot.submission_attempt == attempt && slot.publication.is_some()))
     }
 
-    fn get_delegation_result_selected(
+    pub(crate) fn get_delegation_result_selected(
         &self,
         parent: &str,
         delegation: &str,
@@ -1340,7 +1470,7 @@ impl AppState {
         })
     }
 
-    fn get_delegation_result_output_selected(
+    pub(crate) fn get_delegation_result_output_selected(
         &self,
         parent: &str,
         delegation: &str,

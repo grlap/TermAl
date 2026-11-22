@@ -10,52 +10,57 @@ This layer keeps the browser on one local origin while proxying REST calls,
 bridging SSE streams, and rewriting local/remote identifiers.
 */
 
-use reqwest::Method;
-use reqwest::blocking::{Client as BlockingHttpClient, Response as BlockingHttpResponse};
-use serde::de::DeserializeOwned;
-use std::io::Read as _;
-use std::thread;
-use std::time::Instant;
+use super::*;
 
-const REMOTE_SERVER_PORT: u16 = 8787;
-const REMOTE_FORWARD_PORT_START: u16 = 47000;
-const REMOTE_FORWARD_PORT_END: u16 = 56999;
-const REMOTE_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
-const REMOTE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) use reqwest::Method;
+pub(crate) use reqwest::blocking::{
+    Client as BlockingHttpClient, Response as BlockingHttpResponse,
+};
+pub(crate) use serde::de::DeserializeOwned;
+pub(crate) use std::io::Read as _;
+pub(crate) use std::thread;
+pub(crate) use std::time::Instant;
+
+pub(crate) const REMOTE_SERVER_PORT: u16 = 8787;
+pub(crate) const REMOTE_FORWARD_PORT_START: u16 = 47000;
+pub(crate) const REMOTE_FORWARD_PORT_END: u16 = 56999;
+pub(crate) const REMOTE_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const REMOTE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Session settings can wait up to 55 seconds for acknowledged OpenCode
 /// model/effort/mode updates on the owning backend. Leave transport overhead
 /// beyond that application deadline so the proxy cannot report failure for a
 /// change the remote has already committed.
-const REMOTE_SESSION_SETTINGS_TIMEOUT: Duration = Duration::from_secs(60);
-const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
-const REMOTE_ACTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-const REMOTE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+pub(crate) const REMOTE_SESSION_SETTINGS_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const REMOTE_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const REMOTE_ACTION_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+pub(crate) const REMOTE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const REMOTE_EVENT_RETRY_DELAY: Duration = Duration::from_secs(2);
 const REMOTE_EVENT_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const TERMINAL_REMOTE_STREAM_READ_CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const MAX_REMOTE_ERROR_BODY_CHARS: usize = 512;
-const MAX_REMOTE_ERROR_BODY_BYTES: usize = 64 * 1024;
-const MAX_REMOTE_ACTION_OUTPUT_CHARS: usize = 4_000;
-const MAX_REMOTE_ACTION_OUTPUT_BYTES: usize = 64 * 1024;
-static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
+pub(crate) const TERMINAL_REMOTE_STREAM_READ_CANCEL_POLL_INTERVAL: Duration =
+    Duration::from_millis(10);
+pub(crate) const MAX_REMOTE_ERROR_BODY_CHARS: usize = 512;
+pub(crate) const MAX_REMOTE_ERROR_BODY_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_REMOTE_ACTION_OUTPUT_CHARS: usize = 4_000;
+pub(crate) const MAX_REMOTE_ACTION_OUTPUT_BYTES: usize = 64 * 1024;
+pub(crate) static NEXT_REMOTE_FORWARD_PORT: AtomicU16 = AtomicU16::new(REMOTE_FORWARD_PORT_START);
 
 /// Represents remote registry.
-struct RemoteRegistry {
-    client: BlockingHttpClientHandle,
+pub(crate) struct RemoteRegistry {
+    pub(crate) client: BlockingHttpClientHandle,
     /// Authoritative settings-owned configurations. Settings publication takes
     /// the state mutex before the registry mutexes, whose order is configs,
     /// desired event bridges, then connections. Registry callers never take
     /// the state mutex while holding a registry mutex.
-    configs: Arc<Mutex<HashMap<String, RemoteConfig>>>,
+    pub(crate) configs: Arc<Mutex<HashMap<String, RemoteConfig>>>,
     /// Remote ids whose local proxy state needs an inbound event bridge. The
     /// subscription survives a disabled interval so re-enabling the remote can
     /// restart the bridge without running an idle retry worker while disabled.
-    desired_event_bridges: Arc<Mutex<HashSet<String>>>,
-    connections: Arc<Mutex<HashMap<String, Arc<RemoteConnection>>>>,
+    pub(crate) desired_event_bridges: Arc<Mutex<HashSet<String>>>,
+    pub(crate) connections: Arc<Mutex<HashMap<String, Arc<RemoteConnection>>>>,
     /// Monotonic publication epoch used by streaming readers to keep the
     /// normal per-chunk authority check lock-free. A changed epoch triggers a
     /// full settings-map comparison before the reader accepts more bytes.
-    config_generation: Arc<AtomicU64>,
+    pub(crate) config_generation: Arc<AtomicU64>,
     /// One-shot deterministic interleaving seam for tests that must publish a
     /// settings cycle after JSON decoding but before the caller localizes the
     /// response. Production builds contain no hook or branch.
@@ -82,32 +87,32 @@ struct RemoteRegistry {
 /// removed from the shared cache and marked retired while registry locks are
 /// held, but process teardown is deliberately deferred until after the caller
 /// releases the application state mutex.
-struct RemoteConfigPublication {
-    changed_ids: Vec<String>,
+pub(crate) struct RemoteConfigPublication {
+    pub(crate) changed_ids: Vec<String>,
     retired_connections: Vec<Arc<RemoteConnection>>,
-    bridges_to_restart: Vec<String>,
+    pub(crate) bridges_to_restart: Vec<String>,
 }
 
 /// A request-scoped route pinned to the authoritative config observed during
 /// registry lookup. Cached connections are never retargeted in place.
 #[derive(Clone)]
-struct RemoteRequestLease {
-    connection: Arc<RemoteConnection>,
-    pinned: RemoteConfig,
-    config_generation: u64,
+pub(crate) struct RemoteRequestLease {
+    pub(crate) connection: Arc<RemoteConnection>,
+    pub(crate) pinned: RemoteConfig,
+    pub(crate) config_generation: u64,
     /// Same-connection state-continuity epoch captured at issuance. Event
     /// bridge cleanup advances this epoch when it clears recovery watermarks,
     /// preventing a pre-cleanup response from mutating proxy state afterward.
-    state_continuity_generation: u64,
+    pub(crate) state_continuity_generation: u64,
 }
 
 /// Cloneable authority fence for consumers that buffer bytes after the HTTP
 /// body has already passed its producer-side route checks.
 #[derive(Clone)]
-struct RemoteStreamingAuthority {
-    lease: RemoteRequestLease,
-    configs: Arc<Mutex<HashMap<String, RemoteConfig>>>,
-    config_generation: Arc<AtomicU64>,
+pub(crate) struct RemoteStreamingAuthority {
+    pub(crate) lease: RemoteRequestLease,
+    pub(crate) configs: Arc<Mutex<HashMap<String, RemoteConfig>>>,
+    pub(crate) config_generation: Arc<AtomicU64>,
     observed_generation: Arc<AtomicU64>,
     /// One-shot deterministic seam after the optimistic terminal dispatch
     /// check but before its authoritative locked enqueue. Production builds
@@ -117,7 +122,7 @@ struct RemoteStreamingAuthority {
 }
 
 impl RemoteStreamingAuthority {
-    fn new(
+    pub(crate) fn new(
         lease: RemoteRequestLease,
         configs: Arc<Mutex<HashMap<String, RemoteConfig>>>,
         config_generation: Arc<AtomicU64>,
@@ -133,7 +138,7 @@ impl RemoteStreamingAuthority {
         }
     }
 
-    fn ensure_current(&self) -> Result<(), ApiError> {
+    pub(crate) fn ensure_current(&self) -> Result<(), ApiError> {
         // Retirement is a monotonic cross-thread authority fence. Keep every
         // access SeqCst so request, bridge, and localization audits all reason
         // about the same ordering contract.
@@ -175,7 +180,7 @@ impl RemoteStreamingAuthority {
     /// under the same configs lock that publication takes before retiring a
     /// connection, so the operation is ordered entirely before or after a
     /// route change.
-    fn with_current<T>(&self, operation: impl FnOnce() -> T) -> Result<T, ApiError> {
+    pub(crate) fn with_current<T>(&self, operation: impl FnOnce() -> T) -> Result<T, ApiError> {
         let configs = self
             .configs
             .lock()
@@ -194,7 +199,10 @@ impl RemoteStreamingAuthority {
     }
 
     #[cfg(test)]
-    fn set_test_before_terminal_event_enqueue(&self, hook: impl FnOnce() + Send + 'static) {
+    pub(crate) fn set_test_before_terminal_event_enqueue(
+        &self,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
         *self
             .test_before_terminal_event_enqueue
             .lock()
@@ -202,7 +210,7 @@ impl RemoteStreamingAuthority {
     }
 
     #[cfg(test)]
-    fn run_test_before_terminal_event_enqueue(&self) {
+    pub(crate) fn run_test_before_terminal_event_enqueue(&self) {
         let hook = self
             .test_before_terminal_event_enqueue
             .lock()
@@ -213,7 +221,7 @@ impl RemoteStreamingAuthority {
         }
     }
 
-    fn prefer_current<T>(&self, result: Result<T, ApiError>) -> Result<T, ApiError> {
+    pub(crate) fn prefer_current<T>(&self, result: Result<T, ApiError>) -> Result<T, ApiError> {
         match self.ensure_current() {
             Ok(()) => result,
             Err(authority_error) => Err(authority_error),
@@ -224,21 +232,21 @@ impl RemoteStreamingAuthority {
 /// A long-lived response body that retains its route lease. Each read checks
 /// both the immutable connection and settings-owned authority so terminal
 /// output from a replaced endpoint stops before another chunk is forwarded.
-struct RemoteStreamingResponse {
-    response: Option<BlockingHttpResponse>,
-    authority: RemoteStreamingAuthority,
+pub(crate) struct RemoteStreamingResponse {
+    pub(crate) response: Option<BlockingHttpResponse>,
+    pub(crate) authority: RemoteStreamingAuthority,
 }
 
 impl RemoteStreamingResponse {
-    fn ensure_current(&self) -> Result<(), ApiError> {
+    pub(crate) fn ensure_current(&self) -> Result<(), ApiError> {
         self.authority.ensure_current()
     }
 
-    fn authority(&self) -> RemoteStreamingAuthority {
+    pub(crate) fn authority(&self) -> RemoteStreamingAuthority {
         self.authority.clone()
     }
 
-    fn decode_json<T: DeserializeOwned>(mut self) -> Result<T, ApiError> {
+    pub(crate) fn decode_json<T: DeserializeOwned>(mut self) -> Result<T, ApiError> {
         self.ensure_current()?;
         let response = self
             .response
@@ -275,19 +283,19 @@ impl std::io::Read for RemoteStreamingResponse {
 }
 
 /// Represents the blocking HTTP client handle.
-struct BlockingHttpClientHandle {
-    client: Option<BlockingHttpClient>,
+pub(crate) struct BlockingHttpClientHandle {
+    pub(crate) client: Option<BlockingHttpClient>,
 }
 
 impl BlockingHttpClientHandle {
     /// Creates a new instance.
-    fn new(client: BlockingHttpClient) -> Self {
+    pub(crate) fn new(client: BlockingHttpClient) -> Self {
         Self {
             client: Some(client),
         }
     }
 
-    fn client(&self) -> &BlockingHttpClient {
+    pub(crate) fn client(&self) -> &BlockingHttpClient {
         self.client
             .as_ref()
             .expect("remote HTTP client should exist while registry is alive")
@@ -308,7 +316,7 @@ impl Drop for BlockingHttpClientHandle {
 
 impl RemoteRegistry {
     /// Creates a new instance.
-    fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         let client = BlockingHttpClient::builder()
             .connect_timeout(REMOTE_HEALTH_TIMEOUT)
             .build()
@@ -334,7 +342,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn set_test_after_json_decode(&self, hook: impl FnOnce() + Send + 'static) {
+    pub(crate) fn set_test_after_json_decode(&self, hook: impl FnOnce() + Send + 'static) {
         *self
             .test_after_json_decode
             .lock()
@@ -354,7 +362,10 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn set_test_before_remote_delta_hydration_target(&self, hook: impl FnOnce() + Send + 'static) {
+    pub(crate) fn set_test_before_remote_delta_hydration_target(
+        &self,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
         *self
             .test_before_remote_delta_hydration_target
             .lock()
@@ -362,7 +373,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn set_test_before_existing_remote_project_revalidation(
+    pub(crate) fn set_test_before_existing_remote_project_revalidation(
         &self,
         hook: impl FnOnce() + Send + 'static,
     ) {
@@ -374,7 +385,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn run_test_before_existing_remote_project_revalidation(&self) {
+    pub(crate) fn run_test_before_existing_remote_project_revalidation(&self) {
         let hook = self
             .test_before_existing_remote_project_revalidation
             .lock()
@@ -386,7 +397,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn run_test_before_remote_delta_hydration_target(&self) {
+    pub(crate) fn run_test_before_remote_delta_hydration_target(&self) {
         let hook = self
             .test_before_remote_delta_hydration_target
             .lock()
@@ -398,7 +409,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn set_test_before_remote_informational_delta_watermark(
+    pub(crate) fn set_test_before_remote_informational_delta_watermark(
         &self,
         hook: impl FnOnce() + Send + 'static,
     ) {
@@ -410,7 +421,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn run_test_before_remote_informational_delta_watermark(&self) {
+    pub(crate) fn run_test_before_remote_informational_delta_watermark(&self) {
         let hook = self
             .test_before_remote_informational_delta_watermark
             .lock()
@@ -425,7 +436,7 @@ impl RemoteRegistry {
     /// released. This is deliberately separate from connection teardown: a
     /// request in the interval before `reconcile_connections` still consults
     /// this map and therefore cannot use or install stale routing state.
-    fn publish_configs(&self, remotes: &[RemoteConfig]) -> RemoteConfigPublication {
+    pub(crate) fn publish_configs(&self, remotes: &[RemoteConfig]) -> RemoteConfigPublication {
         self.publish_configs_with_event_bridge_rearms(remotes, &[])
     }
 
@@ -434,7 +445,7 @@ impl RemoteRegistry {
     /// still refer to them. Disabled remotes retain the subscription without
     /// starting a retry worker; a later enable edit queues the restart through
     /// the normal changed-config path.
-    fn publish_configs_with_event_bridge_rearms(
+    pub(crate) fn publish_configs_with_event_bridge_rearms(
         &self,
         remotes: &[RemoteConfig],
         event_bridge_rearms: &[String],
@@ -515,7 +526,10 @@ impl RemoteRegistry {
     /// Finishes a publication after all global/application locks are released.
     /// Child termination can wait on the OS, so it must never run while the
     /// configs or connections mutex is held.
-    fn finish_config_publication(&self, publication: RemoteConfigPublication) -> Vec<String> {
+    pub(crate) fn finish_config_publication(
+        &self,
+        publication: RemoteConfigPublication,
+    ) -> Vec<String> {
         for connection in publication.retired_connections {
             connection.stop_event_bridge();
         }
@@ -526,7 +540,7 @@ impl RemoteRegistry {
     /// convenience method; settings updates split the phases so only the cheap
     /// publication occurs while holding the state mutex.
     #[cfg(test)]
-    fn reconcile(&self, remotes: &[RemoteConfig]) -> Vec<String> {
+    pub(crate) fn reconcile(&self, remotes: &[RemoteConfig]) -> Vec<String> {
         let publication = self.publish_configs(remotes);
         let changed_ids = publication.changed_ids.clone();
         self.finish_config_publication(publication);
@@ -545,7 +559,7 @@ impl RemoteRegistry {
         Ok(())
     }
 
-    fn ensure_lease_current(&self, lease: &RemoteRequestLease) -> Result<(), ApiError> {
+    pub(crate) fn ensure_lease_current(&self, lease: &RemoteRequestLease) -> Result<(), ApiError> {
         // Resolve settings authority first so removal keeps the established
         // unknown-remote contract (400 on create flows). Replacement under the
         // same id still returns the retryable 409; an A -> B -> A cycle then
@@ -587,7 +601,7 @@ impl RemoteRegistry {
         Some(connection)
     }
 
-    fn connection(&self, remote: &RemoteConfig) -> Result<RemoteRequestLease, ApiError> {
+    pub(crate) fn connection(&self, remote: &RemoteConfig) -> Result<RemoteRequestLease, ApiError> {
         // Always gate caller snapshots against settings-owned authority before
         // touching the cache. Keeping the config lock through cache insertion
         // prevents a removed remote from being reinserted by a stale caller.
@@ -632,7 +646,7 @@ impl RemoteRegistry {
         })
     }
 
-    fn request_json<T: DeserializeOwned>(
+    pub(crate) fn request_json<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -644,7 +658,7 @@ impl RemoteRegistry {
             .map(|(response, _lease)| response)
     }
 
-    fn request_json_with_lease<T: DeserializeOwned>(
+    pub(crate) fn request_json_with_lease<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -662,7 +676,7 @@ impl RemoteRegistry {
         )
     }
 
-    fn request_state_with_lease(
+    pub(crate) fn request_state_with_lease(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -680,7 +694,7 @@ impl RemoteRegistry {
         )
     }
 
-    fn request_state_with_timeout_and_lease(
+    pub(crate) fn request_state_with_timeout_and_lease(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -696,7 +710,7 @@ impl RemoteRegistry {
         Ok((response.0, lease))
     }
 
-    fn request_project_with_lease(
+    pub(crate) fn request_project_with_lease(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -711,7 +725,7 @@ impl RemoteRegistry {
         Ok((response.0, lease))
     }
 
-    fn request_orchestrator_with_lease(
+    pub(crate) fn request_orchestrator_with_lease(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -728,7 +742,7 @@ impl RemoteRegistry {
         Ok((response.0, lease))
     }
 
-    fn request_json_with_timeout<T: DeserializeOwned>(
+    pub(crate) fn request_json_with_timeout<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -741,7 +755,7 @@ impl RemoteRegistry {
             .map(|(response, _lease)| response)
     }
 
-    fn request_json_with_timeout_and_lease<T: DeserializeOwned>(
+    pub(crate) fn request_json_with_timeout_and_lease<T: DeserializeOwned>(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -758,7 +772,7 @@ impl RemoteRegistry {
         Ok((response, lease))
     }
 
-    fn request_without_timeout(
+    pub(crate) fn request_without_timeout(
         &self,
         remote: &RemoteConfig,
         method: Method,
@@ -856,7 +870,7 @@ impl RemoteRegistry {
     /// started flag are one configs -> connections critical section: a later
     /// settings publication must therefore either observe the claim and queue
     /// a restart, or win first and make this claim use its newer config.
-    fn start_event_bridge_by_id(&self, state: AppState, remote_id: &str) {
+    pub(crate) fn start_event_bridge_by_id(&self, state: AppState, remote_id: &str) {
         match self.claim_event_bridge(remote_id) {
             Ok(Some(connection)) => {
                 connection.spawn_claimed_event_bridge(self.client.client().clone(), state)
@@ -875,7 +889,7 @@ impl RemoteRegistry {
     /// owns the settings-published connection. Remote create responses use
     /// this path before localization so an old endpoint cannot claim the
     /// replacement endpoint's bridge in the post-decode race window.
-    fn start_event_bridge_for_lease(
+    pub(crate) fn start_event_bridge_for_lease(
         &self,
         state: AppState,
         lease: &RemoteRequestLease,
@@ -886,7 +900,7 @@ impl RemoteRegistry {
         Ok(())
     }
 
-    fn claim_event_bridge(
+    pub(crate) fn claim_event_bridge(
         &self,
         remote_id: &str,
     ) -> Result<Option<Arc<RemoteConnection>>, ApiError> {
@@ -901,7 +915,7 @@ impl RemoteRegistry {
     }
 
     #[cfg(test)]
-    fn claim_event_bridge_with_locked_claim(
+    pub(crate) fn claim_event_bridge_with_locked_claim(
         &self,
         remote_id: &str,
         on_locked_claim: impl FnOnce(&Arc<RemoteConnection>),
@@ -988,37 +1002,37 @@ impl RemoteRegistry {
     }
 }
 
-const REMOTE_STREAM_PENDING: u8 = 0;
-const REMOTE_STREAM_LIVE: u8 = 1;
-const REMOTE_STREAM_OUTPUT_LIMIT: u8 = 2;
+pub(crate) const REMOTE_STREAM_PENDING: u8 = 0;
+pub(crate) const REMOTE_STREAM_LIVE: u8 = 1;
+pub(crate) const REMOTE_STREAM_OUTPUT_LIMIT: u8 = 2;
 
 /// Represents remote connection.
-struct RemoteConnection {
+pub(crate) struct RemoteConnection {
     /// Immutable routing identity captured when this connection is created.
     /// Settings publication retires and replaces the whole connection instead
     /// of mutating an endpoint in place.
-    config: RemoteConfig,
+    pub(crate) config: RemoteConfig,
     /// Publication generation that owns inbound bridge frames from this
     /// connection. Request leases instead capture the current generation at
     /// issuance, even when they reuse an older still-authoritative connection.
-    authority_generation: u64,
+    pub(crate) authority_generation: u64,
     /// Monotonic route-retirement fence; all loads and stores use SeqCst.
-    retired: AtomicBool,
+    pub(crate) retired: AtomicBool,
     /// Invalidates state-localizing request leases when the event bridge loses
     /// continuity without replacing this connection. Transport-only consumers
     /// deliberately ignore this epoch.
-    state_continuity_generation: AtomicU64,
-    forwarded_port: u16,
-    process: Mutex<Option<RemoteProcessHandle>>,
-    event_bridge_started: AtomicBool,
-    event_bridge_shutdown: AtomicBool,
+    pub(crate) state_continuity_generation: AtomicU64,
+    pub(crate) forwarded_port: u16,
+    pub(crate) process: Mutex<Option<RemoteProcessHandle>>,
+    pub(crate) event_bridge_started: AtomicBool,
+    pub(crate) event_bridge_shutdown: AtomicBool,
     // Only replacement by an explicit settings change resets a terminal latch.
-    event_stream_status: AtomicU8,
+    pub(crate) event_stream_status: AtomicU8,
 }
 
 impl RemoteConnection {
     /// Creates a new instance.
-    fn new(remote: RemoteConfig, authority_generation: u64) -> Self {
+    pub(crate) fn new(remote: RemoteConfig, authority_generation: u64) -> Self {
         Self {
             config: remote,
             authority_generation,
@@ -1032,22 +1046,24 @@ impl RemoteConnection {
         }
     }
 
-    fn config(&self) -> RemoteConfig {
+    pub(crate) fn config(&self) -> RemoteConfig {
         self.config.clone()
     }
 
-    fn output_limited(&self) -> bool {
+    pub(crate) fn output_limited(&self) -> bool {
         self.event_stream_status.load(Ordering::SeqCst) == REMOTE_STREAM_OUTPUT_LIMIT
     }
 
     fn ensure_request_output_available(&self) -> Result<(), ApiError> {
         if self.output_limited() {
-            return Err(ApiError::conflict("Remote live output is stopped after an output limit. No remote request was sent; disable and re-enable the remote to resume."));
+            return Err(ApiError::conflict(
+                "Remote live output is stopped after an output limit. No remote request was sent; disable and re-enable the remote to resume.",
+            ));
         }
         Ok(())
     }
 
-    fn disconnect(&self) {
+    pub(crate) fn disconnect(&self) {
         let mut process = self.process.lock().expect("remote process mutex poisoned");
         if let Some(mut handle) = process.take() {
             let _ = handle.child.kill();
@@ -1056,7 +1072,7 @@ impl RemoteConnection {
     }
 
     /// Stops event bridge.
-    fn stop_event_bridge(&self) {
+    pub(crate) fn stop_event_bridge(&self) {
         self.event_bridge_shutdown.store(true, Ordering::SeqCst);
         self.disconnect();
     }
@@ -1078,11 +1094,11 @@ impl RemoteConnection {
         }
     }
 
-    fn base_url(&self) -> String {
+    pub(crate) fn base_url(&self) -> String {
         format!("http://127.0.0.1:{}", self.forwarded_port)
     }
 
-    fn ensure_pinned_route(&self, pinned: &RemoteConfig) -> Result<(), ApiError> {
+    pub(crate) fn ensure_pinned_route(&self, pinned: &RemoteConfig) -> Result<(), ApiError> {
         // The config comparison is defensive: the field is immutable, while
         // `retired` is the live publication signal.
         if self.retired.load(Ordering::SeqCst) || !same_remote_routing_config(&self.config, pinned)
@@ -1092,14 +1108,14 @@ impl RemoteConnection {
         Ok(())
     }
 
-    fn ensure_state_continuity_generation(&self, expected: u64) -> Result<(), ApiError> {
+    pub(crate) fn ensure_state_continuity_generation(&self, expected: u64) -> Result<(), ApiError> {
         if self.state_continuity_generation.load(Ordering::SeqCst) != expected {
             return Err(ApiError::conflict(REMOTE_CONNECTION_CHANGED_BEFORE_REQUEST));
         }
         Ok(())
     }
 
-    fn invalidate_state_continuity(&self) {
+    pub(crate) fn invalidate_state_continuity(&self) {
         self.state_continuity_generation
             .fetch_add(1, Ordering::SeqCst);
     }
@@ -1208,7 +1224,11 @@ impl RemoteConnection {
     }
 
     /// Starts a bridge whose ownership was claimed atomically by the registry.
-    fn spawn_claimed_event_bridge(self: &Arc<Self>, client: BlockingHttpClient, state: AppState) {
+    pub(crate) fn spawn_claimed_event_bridge(
+        self: &Arc<Self>,
+        client: BlockingHttpClient,
+        state: AppState,
+    ) {
         if self.retired.load(Ordering::SeqCst) {
             self.event_bridge_started.store(false, Ordering::SeqCst);
             return;
@@ -1309,53 +1329,53 @@ impl RemoteConnection {
     }
 }
 
-fn local_ssh_start_error(remote_name: &str, err: std::io::Error) -> ApiError {
+pub(crate) fn local_ssh_start_error(remote_name: &str, err: std::io::Error) -> ApiError {
     eprintln!("failed to start SSH connection for remote `{remote_name}`: {err}");
     ApiError::bad_gateway(local_ssh_start_issue_message(remote_name))
         .with_kind(ApiErrorKind::RemoteConnectionUnavailable)
 }
 
 /// Represents the remote process handle.
-struct RemoteProcessHandle {
-    child: Child,
-    mode: RemoteProcessMode,
+pub(crate) struct RemoteProcessHandle {
+    pub(crate) child: Child,
+    pub(crate) mode: RemoteProcessMode,
 }
 
 /// Enumerates remote process modes.
 #[derive(Clone, Copy)]
-enum RemoteProcessMode {
+pub(crate) enum RemoteProcessMode {
     ManagedServer,
     TunnelOnly,
 }
 
 /// Represents remote scope.
 #[derive(Clone)]
-struct RemoteScope {
-    remote: RemoteConfig,
-    remote_project_id: Option<String>,
-    remote_session_id: Option<String>,
+pub(crate) struct RemoteScope {
+    pub(crate) remote: RemoteConfig,
+    pub(crate) remote_project_id: Option<String>,
+    pub(crate) remote_session_id: Option<String>,
 }
 
 /// Represents the remote session target.
 #[derive(Clone)]
-struct RemoteSessionTarget {
-    local_session_id: String,
-    remote: RemoteConfig,
-    remote_session_id: String,
+pub(crate) struct RemoteSessionTarget {
+    pub(crate) local_session_id: String,
+    pub(crate) remote: RemoteConfig,
+    pub(crate) remote_session_id: String,
 }
 
 /// Represents the remote orchestrator target.
 #[derive(Clone)]
-struct RemoteOrchestratorTarget {
-    local_instance_id: String,
-    remote: RemoteConfig,
-    remote_orchestrator_id: String,
+pub(crate) struct RemoteOrchestratorTarget {
+    pub(crate) local_instance_id: String,
+    pub(crate) remote: RemoteConfig,
+    pub(crate) remote_orchestrator_id: String,
 }
 
 /// Represents remote project binding.
 #[derive(Clone)]
-struct RemoteProjectBinding {
-    local_project_id: String,
-    remote: RemoteConfig,
-    remote_project_id: String,
+pub(crate) struct RemoteProjectBinding {
+    pub(crate) local_project_id: String,
+    pub(crate) remote: RemoteConfig,
+    pub(crate) remote_project_id: String,
 }

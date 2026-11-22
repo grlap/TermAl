@@ -18,11 +18,13 @@ them.
 Provenance: new module; nothing was moved here from another file.
 */
 
+use super::*;
+
 /// One admitted Markdown document plus its optional plain-text caption.
-struct TelegramDocumentUpload<'a> {
-    file_name: &'a str,
-    bytes: &'a [u8],
-    caption: Option<&'a str>,
+pub(crate) struct TelegramDocumentUpload<'a> {
+    pub(crate) file_name: &'a str,
+    pub(crate) bytes: &'a [u8],
+    pub(crate) caption: Option<&'a str>,
 }
 
 /// Narrow `sendDocument` result projection: only the message id is used.
@@ -31,7 +33,7 @@ struct TelegramSentDocumentMessage {
     message_id: i64,
 }
 
-trait TelegramDocumentSender {
+pub(crate) trait TelegramDocumentSender {
     /// Sends the document to `chat_id` and returns the Telegram message id.
     fn send_document(&self, chat_id: i64, upload: &TelegramDocumentUpload<'_>) -> Result<i64>;
 }
@@ -56,7 +58,7 @@ impl TelegramDocumentSender for TelegramApiClient {
 /// Builds a `multipart/form-data` body with `chat_id`, optional `caption`,
 /// and the `document` file part. Returns the Content-Type header value (with
 /// its boundary) and the body bytes.
-fn telegram_document_multipart_body(
+pub(crate) fn telegram_document_multipart_body(
     chat_id: i64,
     upload: &TelegramDocumentUpload<'_>,
 ) -> (String, Vec<u8>) {

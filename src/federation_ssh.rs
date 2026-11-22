@@ -1,15 +1,17 @@
 // Owns federation-only SSH argv, not enrollment, process lifetimes or APIs.
 // New transport beside remote_ssh.rs; reuses its endpoint validation seam.
 
-struct FederationForwards {
-    local_forward_port: u16,
-    satellite_listener_port: u16,
-    reverse_forward_port: u16,
-    central_listener_port: u16,
-    host_key_alias: String,
+use super::*;
+
+pub(crate) struct FederationForwards {
+    pub(crate) local_forward_port: u16,
+    pub(crate) satellite_listener_port: u16,
+    pub(crate) reverse_forward_port: u16,
+    pub(crate) central_listener_port: u16,
+    pub(crate) host_key_alias: String,
 }
 
-fn federation_ssh_command_args(
+pub(crate) fn federation_ssh_command_args(
     remote: &RemoteConfig,
     forwards: &FederationForwards,
     known_hosts: &FsPath,

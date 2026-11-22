@@ -2,9 +2,11 @@
 // Does not run probes, provision hosts or activate membership. New O1 module,
 // composed beside federation_registry.rs rather than split from another file.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum FederationOnboardingCheck {
+pub(crate) enum FederationOnboardingCheck {
     Reachability,
     HostKey,
     CapabilityExchange,
@@ -16,7 +18,7 @@ enum FederationOnboardingCheck {
     IsolatedWake,
 }
 
-const FEDERATION_ONBOARDING_CHECKS: [FederationOnboardingCheck; 9] = [
+pub(crate) const FEDERATION_ONBOARDING_CHECKS: [FederationOnboardingCheck; 9] = [
     FederationOnboardingCheck::Reachability,
     FederationOnboardingCheck::HostKey,
     FederationOnboardingCheck::CapabilityExchange,
@@ -30,25 +32,25 @@ const FEDERATION_ONBOARDING_CHECKS: [FederationOnboardingCheck; 9] = [
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationOnboardingOutcome {
-    check: FederationOnboardingCheck,
-    passed: bool,
+pub(crate) struct FederationOnboardingOutcome {
+    pub(crate) check: FederationOnboardingCheck,
+    pub(crate) passed: bool,
     // Fixed local reason, never an untrusted HTTP/SSH response or credential.
-    reason: String,
+    pub(crate) reason: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationEngramOnboardingOutcome {
-    status: FederationEngramProbeStatus,
-    exit_code: Option<i32>,
-    summary: Option<FederationEngramProbeSummary>,
-    reason: String,
+pub(crate) struct FederationEngramOnboardingOutcome {
+    pub(crate) status: FederationEngramProbeStatus,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) summary: Option<FederationEngramProbeSummary>,
+    pub(crate) reason: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum FederationEngramProbeStatus {
+pub(crate) enum FederationEngramProbeStatus {
     Pass,
     Fail,
     Unavailable,
@@ -56,13 +58,13 @@ enum FederationEngramProbeStatus {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationEngramProbeSummary {
-    passed: bool,
-    checks: Vec<String>,
+pub(crate) struct FederationEngramProbeSummary {
+    pub(crate) passed: bool,
+    pub(crate) checks: Vec<String>,
 }
 
 impl FederationEngramOnboardingOutcome {
-    fn unavailable() -> Self {
+    pub(crate) fn unavailable() -> Self {
         Self {
             status: FederationEngramProbeStatus::Unavailable,
             exit_code: None,
@@ -74,17 +76,17 @@ impl FederationEngramOnboardingOutcome {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationQualifiedProbe {
-    attempt_id: String,
-    expected: FederationPeerSnapshot,
-    basis: String,
-    link_incarnation: String,
-    session_id: String,
-    outcome_id: String,
+pub(crate) struct FederationQualifiedProbe {
+    pub(crate) attempt_id: String,
+    pub(crate) expected: FederationPeerSnapshot,
+    pub(crate) basis: String,
+    pub(crate) link_incarnation: String,
+    pub(crate) session_id: String,
+    pub(crate) outcome_id: String,
 }
 
 impl FederationQualifiedProbe {
-    fn same_authority_as(&self, current: &FederationPeerSnapshot) -> bool {
+    pub(crate) fn same_authority_as(&self, current: &FederationPeerSnapshot) -> bool {
         self.expected.local == current.local
             && self.expected.peer == current.peer
             && self.expected.central == current.central
@@ -94,7 +96,7 @@ impl FederationQualifiedProbe {
             && self.expected.endpoint == current.endpoint
     }
 
-    fn from_report(report: &FederationOnboardingReport) -> Option<Self> {
+    pub(crate) fn from_report(report: &FederationOnboardingReport) -> Option<Self> {
         if !report.termal_complete() {
             return None;
         }
@@ -108,7 +110,7 @@ impl FederationQualifiedProbe {
         }))
     }
 
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.expected.validate().is_ok()
             && self.expected.local_role == FederationRole::Central
             && self.basis.len() == 64
@@ -129,32 +131,32 @@ impl FederationQualifiedProbe {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationOnboardingReport {
-    attempt_id: String,
-    expected: FederationPeerSnapshot,
-    basis: String,
-    link_incarnation: String,
-    outcomes: Vec<FederationOnboardingOutcome>,
-    probe_session_id: Option<String>,
-    wake_outcome_id: Option<String>,
+pub(crate) struct FederationOnboardingReport {
+    pub(crate) attempt_id: String,
+    pub(crate) expected: FederationPeerSnapshot,
+    pub(crate) basis: String,
+    pub(crate) link_incarnation: String,
+    pub(crate) outcomes: Vec<FederationOnboardingOutcome>,
+    pub(crate) probe_session_id: Option<String>,
+    pub(crate) wake_outcome_id: Option<String>,
     // Reconnects re-attest the current link but do not launch another isolated
     // child. Preserve the original qualified probe's exact provenance instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    retained_probe: Option<FederationQualifiedProbe>,
+    pub(crate) retained_probe: Option<FederationQualifiedProbe>,
     #[serde(default)]
-    running_image: FederationImageObservation,
+    pub(crate) running_image: FederationImageObservation,
     #[serde(
         default,
         skip_serializing_if = "FederationImageObservation::is_unknown"
     )]
-    reverse_running_image: FederationImageObservation,
+    pub(crate) reverse_running_image: FederationImageObservation,
     // This observation affects Engram sync readiness only. It is deliberately
     // excluded from the TermAl checklist's complete predicate.
-    engram: Option<FederationEngramOnboardingOutcome>,
+    pub(crate) engram: Option<FederationEngramOnboardingOutcome>,
 }
 
 impl FederationOnboardingReport {
-    fn termal_complete(&self) -> bool {
+    pub(crate) fn termal_complete(&self) -> bool {
         let Some((session_id, outcome_id)) = self
             .probe_session_id
             .as_deref()
@@ -193,7 +195,7 @@ impl FederationOnboardingReport {
             })
     }
 
-    fn registry_checks(&self) -> Result<FederationVerificationChecks, ApiError> {
+    pub(crate) fn registry_checks(&self) -> Result<FederationVerificationChecks, ApiError> {
         if !self.termal_complete() {
             return Err(ApiError::conflict(
                 "federation onboarding checklist incomplete",

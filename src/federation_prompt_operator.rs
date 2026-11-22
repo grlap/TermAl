@@ -5,6 +5,8 @@
 // use the ordinary local operator/OS trust boundary, not the own-caller agent
 // facade or the peer listener. References below are derived views, not records.
 
+use super::*;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
@@ -39,7 +41,7 @@ struct FederationPromptPageQuery {
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_operator_routes() -> Router<AppState> {
+pub(crate) fn federation_prompt_operator_routes() -> Router<AppState> {
     // Foundation only: production registration waits for the qualified vertical.
     Router::new()
         .route(
@@ -208,7 +210,7 @@ async fn get_federation_prompt_permissions(
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
-    fn remote_prompt_references_for_caller(
+    pub(crate) fn remote_prompt_references_for_caller(
         &self,
         caller: &str,
         after: Option<&str>,

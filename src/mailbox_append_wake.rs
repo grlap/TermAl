@@ -2,8 +2,10 @@
 // Does not append messages, authorize domain callers or deliver remote wakes.
 // Split from mailboxes.rs so central routing reuses the existing local behavior.
 
+use super::*;
+
 impl AppState {
-    fn finish_mailbox_append_and_notify(
+    pub(crate) fn finish_mailbox_append_and_notify(
         &self,
         sender_session_id: &str,
         target_runtime_session_id: &str,

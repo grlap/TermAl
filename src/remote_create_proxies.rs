@@ -23,8 +23,10 @@
 // `lookup_remote_config`, `ensure_remote_project_binding`) lives in
 // `remote_routes.rs` and is shared with the proxy files below.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteCreateMissingProjectStatus {
+pub(crate) enum RemoteCreateMissingProjectStatus {
     // Preserve each route's established unknown-project contract: session
     // creation reports 400 while orchestrator creation reports 404.
     BadRequest,
@@ -32,7 +34,7 @@ enum RemoteCreateMissingProjectStatus {
 }
 
 impl RemoteCreateMissingProjectStatus {
-    fn error(self, message: impl Into<String>) -> ApiError {
+    pub(crate) fn error(self, message: impl Into<String>) -> ApiError {
         match self {
             Self::BadRequest => ApiError::bad_request(message),
             Self::NotFound => ApiError::not_found(message),
@@ -81,7 +83,7 @@ impl AppState {
     /// root path (so repeated project creates are idempotent), otherwise
     /// posts to the remote, persists a local proxy `Project` carrying the
     /// returned `remote_project_id`, and returns both.
-    fn create_remote_project_proxy(
+    pub(crate) fn create_remote_project_proxy(
         &self,
         request: CreateProjectRequest,
         remote: RemoteConfig,
@@ -205,7 +207,7 @@ impl AppState {
     /// delta bridge rather than this response, since Node 1 of the
     /// type-safety plan dropped the `CreateSessionResponse.state`
     /// field. Returns the local session id.
-    fn create_remote_session_proxy(
+    pub(crate) fn create_remote_session_proxy(
         &self,
         request: CreateSessionRequest,
         project: Project,
@@ -312,7 +314,7 @@ impl AppState {
                 .cloned()
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let local_session =
-                AppState::wire_session_from_record( &self.server_instance_id, &local_record);
+                AppState::wire_session_from_record(&self.server_instance_id, &local_record);
             let revision = if changed {
                 self.commit_remote_session_created_locked(&mut inner, &local_record)
                     .map_err(|err| {
@@ -330,7 +332,7 @@ impl AppState {
                 inner.revision
             };
             let delta_session = changed.then(|| {
-                AppState::wire_session_summary_from_record( &self.server_instance_id, &local_record)
+                AppState::wire_session_summary_from_record(&self.server_instance_id, &local_record)
             });
             (
                 revision,
@@ -373,7 +375,7 @@ impl AppState {
     /// orchestrator + sessions into local proxy records, and starts the
     /// event bridge. Remote errors retain their status and message after
     /// authority-aware error classification.
-    fn create_remote_orchestrator_proxy(
+    pub(crate) fn create_remote_orchestrator_proxy(
         &self,
         template: &OrchestratorTemplate,
         project: &Project,

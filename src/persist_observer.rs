@@ -4,6 +4,8 @@
 // transcript payloads enter this observer. Session-local write rejections have
 // one bounded diagnostic (session id and concrete error), never a history store.
 
+use super::*;
+
 const PERSIST_OBSERVER_RECENT_LIMIT: usize = 16;
 const PERSIST_OBSERVER_SLOWEST_LIMIT: usize = 8;
 
@@ -20,7 +22,7 @@ enum PersistObservedMetric {
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistObservedCommit {
+pub(crate) struct PersistObservedCommit {
     sqlite_call_us: PersistObservedMetric,
     transaction_cleanup_us: PersistObservedMetric,
     // SQLite's implicit autocheckpoint is inside COMMIT. Observing it via a
@@ -36,7 +38,9 @@ struct PersistObservedCommit {
 /// Same COMMIT statement and Transaction drop as rusqlite's commit(), with
 /// separate boundaries so a failed COMMIT's rollback is charged to cleanup.
 /// No checkpoint query, callback, policy or error conversion is introduced.
-fn persist_commit_transaction_observed(tx: rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+pub(crate) fn persist_commit_transaction_observed(
+    tx: rusqlite::Transaction<'_>,
+) -> rusqlite::Result<()> {
     let started = std::time::Instant::now();
     let result = tx.execute_batch("COMMIT");
     let committed = std::time::Instant::now();
@@ -59,51 +63,51 @@ fn persist_commit_transaction_observed(tx: rusqlite::Transaction<'_>) -> rusqlit
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistObservedCounts {
+pub(crate) struct PersistObservedCounts {
     #[cfg(test)]
-    metadata_cloned_fields: Vec<&'static str>,
-    drained_requests: usize,
-    accepted_fences: usize,
-    pending_fences_before: usize,
-    pending_fences_after: usize,
+    pub(crate) metadata_cloned_fields: Vec<&'static str>,
+    pub(crate) drained_requests: usize,
+    pub(crate) accepted_fences: usize,
+    pub(crate) pending_fences_before: usize,
+    pub(crate) pending_fences_after: usize,
     /// From construction immediately before submission, including any caller
     /// delay before send: an upper bound, not exact channel wait.
-    new_fence_age_max_us: u64,
-    changed_sessions: usize,
-    changed_delegations: usize,
+    pub(crate) new_fence_age_max_us: u64,
+    pub(crate) changed_sessions: usize,
+    pub(crate) changed_delegations: usize,
     removed_sessions: usize,
     removed_delegations: usize,
     deferred_sessions: usize,
     deferred_delegations: usize,
-    retained_messages: usize,
-    payload_measured: bool,
-    metadata_bytes: usize,
-    metadata_fields: Vec<PersistMetadataFieldObservation>,
-    metadata_transaction_committed: bool,
-    session_metadata_bytes: usize,
-    message_bytes: usize,
+    pub(crate) retained_messages: usize,
+    pub(crate) payload_measured: bool,
+    pub(crate) metadata_bytes: usize,
+    pub(crate) metadata_fields: Vec<PersistMetadataFieldObservation>,
+    pub(crate) metadata_transaction_committed: bool,
+    pub(crate) session_metadata_bytes: usize,
+    pub(crate) message_bytes: usize,
     prompt_history_bytes: usize,
     delegation_bytes: usize,
 }
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistMetadataFieldObservation {
-    field: &'static str,
-    units: usize,
-    encoded_bytes: usize,
-    attempted_upserts: usize,
-    attempted_bytes: usize,
+pub(crate) struct PersistMetadataFieldObservation {
+    pub(crate) field: &'static str,
+    pub(crate) units: usize,
+    pub(crate) encoded_bytes: usize,
+    pub(crate) attempted_upserts: usize,
+    pub(crate) attempted_bytes: usize,
     attempted_deletes: usize,
-    committed_upserts: usize,
-    committed_bytes: usize,
-    committed_deletes: usize,
+    pub(crate) committed_upserts: usize,
+    pub(crate) committed_bytes: usize,
+    pub(crate) committed_deletes: usize,
 }
 
-struct PersistMetadataUnitObservation(Vec<PersistMetadataFieldObservation>);
+pub(crate) struct PersistMetadataUnitObservation(pub(crate) Vec<PersistMetadataFieldObservation>);
 
 impl PersistMetadataUnitObservation {
-    fn new(units: &PersistMetadataUnits) -> Self {
+    pub(crate) fn new(units: &PersistMetadataUnits) -> Self {
         let mut rows: Vec<_> = METADATA_UNIT_FIELDS
             .iter()
             .map(|field| PersistMetadataFieldObservation {
@@ -120,14 +124,14 @@ impl PersistMetadataUnitObservation {
         Self(rows)
     }
 
-    fn upsert(&mut self, field: &str, bytes: usize) {
+    pub(crate) fn upsert(&mut self, field: &str, bytes: usize) {
         if let Some(row) = self.0.iter_mut().find(|row| row.field == field) {
             row.attempted_upserts += 1;
             row.attempted_bytes = row.attempted_bytes.saturating_add(bytes);
         }
     }
 
-    fn delete(&mut self, field: &str) {
+    pub(crate) fn delete(&mut self, field: &str) {
         if let Some(row) = self.0.iter_mut().find(|row| row.field == field) {
             row.attempted_deletes += 1;
         }
@@ -146,7 +150,7 @@ impl Drop for PersistMetadataUnitObservation {
     }
 }
 
-fn persist_observe_metadata_commit() {
+pub(crate) fn persist_observe_metadata_commit() {
     persist_observe(|observer| {
         observer.update(|tick| {
             tick.counts.metadata_transaction_committed = true;
@@ -161,60 +165,60 @@ fn persist_observe_metadata_commit() {
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistObservedPhases {
-    drain_us: u64,
-    collect_us: u64,
-    collect_wait_us: u64,
-    collect_hold_us: u64,
-    collect_lock_count: usize,
-    serialize_us: u64,
-    open_us: u64,
+pub(crate) struct PersistObservedPhases {
+    pub(crate) drain_us: u64,
+    pub(crate) collect_us: u64,
+    pub(crate) collect_wait_us: u64,
+    pub(crate) collect_hold_us: u64,
+    pub(crate) collect_lock_count: usize,
+    pub(crate) serialize_us: u64,
+    pub(crate) open_us: u64,
     #[cfg(test)]
-    test_open_connection_us: Option<u64>,
+    pub(crate) test_open_connection_us: Option<u64>,
     #[cfg(test)]
-    test_open_path_checks_us: Option<u64>,
+    pub(crate) test_open_path_checks_us: Option<u64>,
     #[cfg(test)]
-    test_open_reused_connection: Option<bool>,
-    ticket_wait_us: u64,
-    statements_us: u64,
-    commit_us: u64,
-    post_commit_us: u64,
-    acknowledge_us: u64,
-    bookkeeping_us: u64,
+    pub(crate) test_open_reused_connection: Option<bool>,
+    pub(crate) ticket_wait_us: u64,
+    pub(crate) statements_us: u64,
+    pub(crate) commit_us: u64,
+    pub(crate) post_commit_us: u64,
+    pub(crate) acknowledge_us: u64,
+    pub(crate) bookkeeping_us: u64,
 }
 
-fn persist_observed_us(duration: Duration) -> u64 {
+pub(crate) fn persist_observed_us(duration: Duration) -> u64 {
     duration.as_micros().min(u64::MAX as u128) as u64
 }
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistObservedTick {
-    tick: u64,
-    success: bool,
-    loop_wall_us: u64,
-    counts: PersistObservedCounts,
-    phases: PersistObservedPhases,
-    commit: PersistObservedCommit,
+pub(crate) struct PersistObservedTick {
+    pub(crate) tick: u64,
+    pub(crate) success: bool,
+    pub(crate) loop_wall_us: u64,
+    pub(crate) counts: PersistObservedCounts,
+    pub(crate) phases: PersistObservedPhases,
+    pub(crate) commit: PersistObservedCommit,
 }
 
-struct PersistObservedActive {
-    started: std::time::Instant,
-    phase_started: std::time::Instant,
-    phase: &'static str,
-    tick: PersistObservedTick,
+pub(crate) struct PersistObservedActive {
+    pub(crate) started: std::time::Instant,
+    pub(crate) phase_started: std::time::Instant,
+    pub(crate) phase: &'static str,
+    pub(crate) tick: PersistObservedTick,
 }
 
 #[derive(Default)]
-struct PersistObserverState {
+pub(crate) struct PersistObserverState {
     next_tick: u64,
-    completed_ticks: u64,
-    failed_ticks: u64,
-    rejected_session_writes: u64,
-    last_session_rejection: Option<PersistSessionRejection>,
-    active: Option<PersistObservedActive>,
-    recent: std::collections::VecDeque<PersistObservedTick>,
-    slowest: Vec<PersistObservedTick>,
+    pub(crate) completed_ticks: u64,
+    pub(crate) failed_ticks: u64,
+    pub(crate) rejected_session_writes: u64,
+    pub(crate) last_session_rejection: Option<PersistSessionRejection>,
+    pub(crate) active: Option<PersistObservedActive>,
+    pub(crate) recent: std::collections::VecDeque<PersistObservedTick>,
+    pub(crate) slowest: Vec<PersistObservedTick>,
     // Since the host lifecycle heartbeat last took them.
     heartbeat_payload_bytes: u64,
     heartbeat_longest_tick_us: u64,
@@ -222,65 +226,68 @@ struct PersistObserverState {
 
 /// The writer's totals and its since-last-heartbeat payload and slowest tick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct PersistHeartbeatCounters {
-    completed_ticks: u64,
-    failed_ticks: u64,
-    payload_bytes: u64,
-    longest_tick_us: u64,
+pub(crate) struct PersistHeartbeatCounters {
+    pub(crate) completed_ticks: u64,
+    pub(crate) failed_ticks: u64,
+    pub(crate) payload_bytes: u64,
+    pub(crate) longest_tick_us: u64,
 }
 
 #[derive(Default)]
-struct PersistObserver {
-    state: Mutex<PersistObserverState>,
+pub(crate) struct PersistObserver {
+    pub(crate) state: Mutex<PersistObserverState>,
     // Only an explicitly armed disposable fixture retains every completed
     // sample. Production keeps its existing bounded recent/slowest windows.
     #[cfg(test)]
-    test_tick_sink: Mutex<Option<mpsc::Sender<(std::time::Instant, PersistObservedTick)>>>,
+    pub(crate) test_tick_sink:
+        Mutex<Option<mpsc::Sender<(std::time::Instant, PersistObservedTick)>>>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistObserverSnapshot {
-    version: u8,
+pub(crate) struct PersistObserverSnapshot {
+    pub(crate) version: u8,
     recent_limit: usize,
     slowest_limit: usize,
-    completed_ticks: u64,
-    failed_ticks: u64,
-    rejected_session_writes: u64,
-    last_session_rejection: Option<PersistSessionRejection>,
+    pub(crate) completed_ticks: u64,
+    pub(crate) failed_ticks: u64,
+    pub(crate) rejected_session_writes: u64,
+    pub(crate) last_session_rejection: Option<PersistSessionRejection>,
     /// std::sync::mpsc has no instantaneous depth; do not mislabel the
     /// drained-request or accepted-fence counts as a channel depth.
-    channel_queue_depth: Option<usize>,
-    current: Option<PersistObserverCurrent>,
-    recent: Vec<PersistObservedTick>,
+    pub(crate) channel_queue_depth: Option<usize>,
+    pub(crate) current: Option<PersistObserverCurrent>,
+    pub(crate) recent: Vec<PersistObservedTick>,
     /// Greatest loop wall time first; equal times prefer the newest tick.
-    slowest: Vec<PersistObservedTick>,
+    pub(crate) slowest: Vec<PersistObservedTick>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistObserverCurrent {
-    phase: &'static str,
-    age_us: u64,
-    phase_age_us: u64,
-    sample: PersistObservedTick,
+pub(crate) struct PersistObserverCurrent {
+    pub(crate) phase: &'static str,
+    pub(crate) age_us: u64,
+    pub(crate) phase_age_us: u64,
+    pub(crate) sample: PersistObservedTick,
 }
 
 impl PersistObserver {
-    fn record_session_rejections(&self, rejected: &[PersistSessionRejection]) {
+    pub(crate) fn record_session_rejections(&self, rejected: &[PersistSessionRejection]) {
         let Some(last) = rejected.last() else { return };
         self.with_state(|state| {
-            state.rejected_session_writes = state.rejected_session_writes.saturating_add(rejected.len() as u64);
+            state.rejected_session_writes = state
+                .rejected_session_writes
+                .saturating_add(rejected.len() as u64);
             state.last_session_rejection = Some(last.bounded_observation());
         });
     }
 
-    fn with_state<R>(&self, work: impl FnOnce(&mut PersistObserverState) -> R) -> R {
+    pub(crate) fn with_state<R>(&self, work: impl FnOnce(&mut PersistObserverState) -> R) -> R {
         // Diagnostic poisoning must not change the writer's result.
         work(&mut self.state.lock().unwrap_or_else(|error| error.into_inner()))
     }
 
-    fn begin_at(self: &Arc<Self>, now: std::time::Instant) -> PersistObservationScope {
+    pub(crate) fn begin_at(self: &Arc<Self>, now: std::time::Instant) -> PersistObservationScope {
         self.with_state(|state| {
             state.next_tick = state.next_tick.saturating_add(1);
             state.active = Some(PersistObservedActive {
@@ -301,7 +308,7 @@ impl PersistObserver {
         }
     }
 
-    fn update(&self, work: impl FnOnce(&mut PersistObservedTick)) {
+    pub(crate) fn update(&self, work: impl FnOnce(&mut PersistObservedTick)) {
         self.with_state(|state| {
             if let Some(active) = &mut state.active {
                 work(&mut active.tick);
@@ -309,7 +316,7 @@ impl PersistObserver {
         });
     }
 
-    fn phase(&self, phase: &'static str) {
+    pub(crate) fn phase(&self, phase: &'static str) {
         self.with_state(|state| {
             if let Some(active) = &mut state.active {
                 active.phase = phase;
@@ -318,7 +325,7 @@ impl PersistObserver {
         });
     }
 
-    fn collection_lock(&self, waited: Duration, held: Duration) {
+    pub(crate) fn collection_lock(&self, waited: Duration, held: Duration) {
         self.update(|tick| {
             tick.phases.collect_wait_us = tick
                 .phases
@@ -332,7 +339,12 @@ impl PersistObserver {
         });
     }
 
-    fn finish_at(&self, success: bool, timings: &PersistTickTimings, now: std::time::Instant) {
+    pub(crate) fn finish_at(
+        &self,
+        success: bool,
+        timings: &PersistTickTimings,
+        now: std::time::Instant,
+    ) {
         self.with_state(|state| {
             let Some(mut active) = state.active.take() else {
                 return;
@@ -352,12 +364,19 @@ impl PersistObserver {
             state.completed_ticks = state.completed_ticks.saturating_add(1);
             state.failed_ticks = state.failed_ticks.saturating_add(u64::from(!success));
             let counts = &active.tick.counts;
-            let payload = [counts.metadata_bytes, counts.session_metadata_bytes, counts.message_bytes,
-                counts.prompt_history_bytes, counts.delegation_bytes]
-                .into_iter()
-                .fold(0u64, |total, bytes| total.saturating_add(bytes as u64));
+            let payload = [
+                counts.metadata_bytes,
+                counts.session_metadata_bytes,
+                counts.message_bytes,
+                counts.prompt_history_bytes,
+                counts.delegation_bytes,
+            ]
+            .into_iter()
+            .fold(0u64, |total, bytes| total.saturating_add(bytes as u64));
             state.heartbeat_payload_bytes = state.heartbeat_payload_bytes.saturating_add(payload);
-            state.heartbeat_longest_tick_us = state.heartbeat_longest_tick_us.max(active.tick.loop_wall_us);
+            state.heartbeat_longest_tick_us = state
+                .heartbeat_longest_tick_us
+                .max(active.tick.loop_wall_us);
             if state.recent.len() == PERSIST_OBSERVER_RECENT_LIMIT {
                 state.recent.pop_front();
             }
@@ -378,7 +397,7 @@ impl PersistObserver {
 
     /// Totals plus the payload and slowest tick since the previous call,
     /// which resets those two. Only the observer mutex is taken.
-    fn take_heartbeat_counters(&self) -> PersistHeartbeatCounters {
+    pub(crate) fn take_heartbeat_counters(&self) -> PersistHeartbeatCounters {
         self.with_state(|state| PersistHeartbeatCounters {
             completed_ticks: state.completed_ticks,
             failed_ticks: state.failed_ticks,
@@ -387,7 +406,7 @@ impl PersistObserver {
         })
     }
 
-    fn snapshot_at(&self, now: std::time::Instant) -> PersistObserverSnapshot {
+    pub(crate) fn snapshot_at(&self, now: std::time::Instant) -> PersistObserverSnapshot {
         self.with_state(|state| PersistObserverSnapshot {
             version: 1,
             recent_limit: PERSIST_OBSERVER_RECENT_LIMIT,
@@ -412,10 +431,10 @@ impl PersistObserver {
 }
 
 thread_local! {
-    static PERSIST_OBSERVATION: std::cell::RefCell<Option<Arc<PersistObserver>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static PERSIST_OBSERVATION: std::cell::RefCell<Option<Arc<PersistObserver>>> = const { std::cell::RefCell::new(None) };
 }
 
-fn persist_observe(work: impl FnOnce(&PersistObserver)) {
+pub(crate) fn persist_observe(work: impl FnOnce(&PersistObserver)) {
     PERSIST_OBSERVATION.with(|slot| {
         if let Some(observer) = slot.borrow().as_ref() {
             work(observer);
@@ -423,22 +442,22 @@ fn persist_observe(work: impl FnOnce(&PersistObserver)) {
     });
 }
 
-fn persist_observe_phase(phase: &'static str) {
+pub(crate) fn persist_observe_phase(phase: &'static str) {
     persist_observe(|observer| observer.phase(phase));
 }
 
-fn persist_observe_session_rejections(rejected: &[PersistSessionRejection]) {
+pub(crate) fn persist_observe_session_rejections(rejected: &[PersistSessionRejection]) {
     persist_observe(|observer| observer.record_session_rejections(rejected));
 }
 
-struct PersistObservationScope {
-    observer: Arc<PersistObserver>,
-    previous: Option<Arc<PersistObserver>>,
-    finished: bool,
+pub(crate) struct PersistObservationScope {
+    pub(crate) observer: Arc<PersistObserver>,
+    pub(crate) previous: Option<Arc<PersistObserver>>,
+    pub(crate) finished: bool,
 }
 
 impl PersistObservationScope {
-    fn finish(mut self, success: bool, timings: &PersistTickTimings) {
+    pub(crate) fn finish(mut self, success: bool, timings: &PersistTickTimings) {
         self.observer
             .finish_at(success, timings, std::time::Instant::now());
         self.finished = true;
@@ -464,7 +483,7 @@ impl Drop for PersistObservationScope {
 /// held across StateInner acquisition or copying. Outside a writer tick it
 /// follows the original path without collecting times.
 #[track_caller]
-fn persist_collect_locked<R>(
+pub(crate) fn persist_collect_locked<R>(
     inner: &StateMutex<StateInner>,
     work: impl FnOnce(&mut StateInner) -> R,
 ) -> R {
@@ -485,7 +504,7 @@ fn persist_collect_locked<R>(
     result
 }
 
-fn persist_observe_delta(delta: &PersistDelta) {
+pub(crate) fn persist_observe_delta(delta: &PersistDelta) {
     persist_observe(|observer| {
         observer.update(|tick| {
             tick.counts.changed_sessions = delta.changed_sessions.len();
@@ -499,7 +518,7 @@ fn persist_observe_delta(delta: &PersistDelta) {
     });
 }
 
-fn persist_observe_payload(
+pub(crate) fn persist_observe_payload(
     metadata: &str,
     sessions: &[SerializedPersistedSession],
     delegations: &[(&str, String)],
@@ -525,7 +544,7 @@ fn persist_observe_payload(
     });
 }
 
-async fn get_persistence_diagnostics(State(state): State<AppState>) -> Json<Value> {
+pub(crate) async fn get_persistence_diagnostics(State(state): State<AppState>) -> Json<Value> {
     // Only the bounded observer mutex and atomics; no StateInner, SQLite or
     // file reads. `stateBroadcast` counts the SSE broadcaster's diffs and full
     // states (state_broadcast_diff.rs).

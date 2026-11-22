@@ -1,9 +1,11 @@
 // Exact direct-prompt association owned by the existing primary receipt.
 // No queue, lifecycle, retry loop or retirement authority is owned here.
 
+use super::*;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RemotePromptPrimaryAssociation {
-    identity: remote_prompt_authority::RetainedIdentity,
+pub(crate) struct RemotePromptPrimaryAssociation {
+    pub(crate) identity: remote_prompt_authority::RetainedIdentity,
 }
 
 impl Serialize for RemotePromptPrimaryAssociation {
@@ -37,7 +39,7 @@ impl<'de> Deserialize<'de> for RemotePromptPrimaryAssociation {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptPrimaryAssociation {
-    fn new(intent: &remote_prompt_authority::Intent) -> Result<Self> {
+    pub(crate) fn new(intent: &remote_prompt_authority::Intent) -> Result<Self> {
         remote_prompt_protocol::encode_stored_intent(intent)
             .map_err(|_| remote_prompt_invalid_record())?;
         Ok(Self {
@@ -45,12 +47,12 @@ impl RemotePromptPrimaryAssociation {
         })
     }
 
-    fn operation_id(&self) -> Uuid {
+    pub(crate) fn operation_id(&self) -> Uuid {
         let (basis, _, key, _) = self.identity.components();
         remote_prompt_operation_id_for_source(&basis.source, key)
     }
 
-    fn prompt_id(&self) -> String {
+    pub(crate) fn prompt_id(&self) -> String {
         remote_prompt_queue_id(self.operation_id()).to_string()
     }
 }
@@ -59,7 +61,7 @@ impl RemotePromptPrimaryAssociation {
 // authority admission. A retained association is immutable across receipt
 // settlement, display pruning and reload; it never recreates a missing entry.
 #[cfg_attr(not(test), allow(dead_code))]
-fn associate_remote_prompt_receipt(
+pub(crate) fn associate_remote_prompt_receipt(
     record: &mut SessionRecord,
     intent: &remote_prompt_authority::Intent,
 ) -> Result<bool> {

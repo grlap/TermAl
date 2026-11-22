@@ -8,8 +8,10 @@
 // which is already past its size limit; it now waits the doubled freeze
 // budget.
 
+use super::*;
+
 impl TermalDelegationMcpBridge {
-    fn tool_review_freeze_check(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_review_freeze_check(&self, arguments: Value) -> Result<Value> {
         let path = format!(
             "/api/sessions/{}/delegation-review-freeze",
             self.serving_session_id

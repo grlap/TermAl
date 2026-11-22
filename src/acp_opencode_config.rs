@@ -3,8 +3,10 @@
 // Does not own generic ACP transport, message handling, process lifecycle, or prompt dispatch.
 // Split from acp.rs to keep the OpenCode configuration protocol boundary cohesive.
 
+use super::*;
+
 const MAX_OPENCODE_RECONCILE_FINGERPRINTS: usize = 8;
-const MAX_OPENCODE_CONFIG_NOTICE_DETAIL_CHARS: usize = 2_000;
+pub(crate) const MAX_OPENCODE_CONFIG_NOTICE_DETAIL_CHARS: usize = 2_000;
 const OPENCODE_POST_MODEL_CONFIG_TIMEOUT: Duration = Duration::from_secs(4);
 const OPENCODE_CONFIG_REFRESH_HINT: &str =
     " Use `Refresh models` to reconnect OpenCode and reload model-specific choices.";
@@ -15,7 +17,7 @@ const OPENCODE_CONFIG_REFRESH_HINT: &str =
 /// model-then-effort-then-mode order. If a previously selected value
 /// disappeared, TermAl visibly resets that one selection to `auto` and adopts
 /// the agent's current value.
-fn reconcile_opencode_config(
+pub(crate) fn reconcile_opencode_config(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -220,7 +222,7 @@ fn reconcile_opencode_session_config(
 /// reconciliation path runtime-fatal. A late update, rejected saved selection,
 /// or transient config request must remain visible and recoverable while the
 /// active ACP prompt and process continue independently.
-fn handle_opencode_config_reconcile_command(
+pub(crate) fn handle_opencode_config_reconcile_command(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -307,7 +309,7 @@ fn handle_opencode_config_reconcile_command(
 /// runtime. Transport failures still terminate the runtime so the next prompt
 /// must re-establish and reconcile authority before dispatch.
 #[allow(clippy::too_many_arguments)]
-fn handle_opencode_config_apply_command(
+pub(crate) fn handle_opencode_config_apply_command(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -367,7 +369,7 @@ fn handle_opencode_config_apply_command(
 
 /// Sends acknowledged OpenCode model/effort/mode changes in deterministic order and
 /// commits each selection only after the agent accepts it.
-fn apply_opencode_config_update(
+pub(crate) fn apply_opencode_config_update(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -391,7 +393,7 @@ fn apply_opencode_config_update(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn apply_opencode_config_update_with_timeout(
+pub(crate) fn apply_opencode_config_update_with_timeout(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -870,15 +872,15 @@ fn sync_applied_opencode_selection(
 }
 
 #[derive(Debug, Default)]
-struct OpenCodePostModelOptions {
-    effort: Option<(Option<String>, Vec<SessionModelOption>)>,
-    mode: Option<(Option<String>, Vec<SessionModelOption>)>,
+pub(crate) struct OpenCodePostModelOptions {
+    pub(crate) effort: Option<(Option<String>, Vec<SessionModelOption>)>,
+    pub(crate) mode: Option<(Option<String>, Vec<SessionModelOption>)>,
 }
 
 #[derive(Debug)]
-struct IncompleteOpenCodePostModelOptions {
-    options: OpenCodePostModelOptions,
-    reason: String,
+pub(crate) struct IncompleteOpenCodePostModelOptions {
+    pub(crate) options: OpenCodePostModelOptions,
+    pub(crate) reason: String,
 }
 
 /// Waits for config options emitted after a model request.
@@ -889,7 +891,7 @@ struct IncompleteOpenCodePostModelOptions {
 /// such update is authoritative unless an intervening notification explicitly
 /// reported a different model. The reader records notifications directly, so
 /// this bounded wait does not deadlock behind its queued reconciliation command.
-fn wait_for_opencode_post_model_options(
+pub(crate) fn wait_for_opencode_post_model_options(
     notifications: &mpsc::Receiver<OpenCodeConfigNotification>,
     expected_model: &str,
     needs_effort: bool,
@@ -1010,7 +1012,7 @@ fn bounded_opencode_config_notice_detail(detail: &str) -> String {
 /// include a current value without the selectable list. Absence is not proof
 /// that a previously saved explicit selection disappeared; only a present list
 /// can support that conclusion.
-fn has_acp_config_option_list(config_result: &Value, option_id: &str) -> bool {
+pub(crate) fn has_acp_config_option_list(config_result: &Value, option_id: &str) -> bool {
     acp_config_options(config_result).is_some_and(|options| {
         options.iter().any(|entry| {
             entry.get("id").and_then(Value::as_str) == Some(option_id)
@@ -1020,7 +1022,10 @@ fn has_acp_config_option_list(config_result: &Value, option_id: &str) -> bool {
 }
 
 /// Returns the current ACP config option value.
-fn current_acp_config_option_value(config_result: &Value, option_id: &str) -> Option<String> {
+pub(crate) fn current_acp_config_option_value(
+    config_result: &Value,
+    option_id: &str,
+) -> Option<String> {
     acp_config_options(config_result)?
         .iter()
         .find(|entry| entry.get("id").and_then(Value::as_str) == Some(option_id))
@@ -1064,7 +1069,7 @@ fn current_opencode_config_option_value(
 }
 
 /// Returns the matching ACP config option value.
-fn matching_acp_config_option_value(
+pub(crate) fn matching_acp_config_option_value(
     config_result: &Value,
     option_id: &str,
     requested_value: &str,
@@ -1097,14 +1102,14 @@ fn matching_acp_config_option_value(
 
 /// Handles ACP model options without imposing one agent's ingress contract on
 /// the others.
-fn acp_model_options(config_result: &Value, agent: AcpAgent) -> Vec<SessionModelOption> {
+pub(crate) fn acp_model_options(config_result: &Value, agent: AcpAgent) -> Vec<SessionModelOption> {
     let max_value_chars = (agent == AcpAgent::OpenCode).then_some(MAX_OPENCODE_MODEL_CHARS);
     acp_session_config_options(config_result, "model", max_value_chars)
 }
 
 /// Handles bounded, model-specific OpenCode reasoning variants. OpenCode's
 /// TUI calls these variants while ACP exposes the selector as `effort`.
-fn acp_opencode_effort_options(config_result: &Value) -> Vec<SessionModelOption> {
+pub(crate) fn acp_opencode_effort_options(config_result: &Value) -> Vec<SessionModelOption> {
     acp_session_config_options(config_result, "effort", Some(MAX_OPENCODE_EFFORT_CHARS))
 }
 
@@ -1113,7 +1118,7 @@ fn acp_opencode_mode_options(config_result: &Value) -> Vec<SessionModelOption> {
     acp_session_config_options(config_result, "mode", Some(MAX_OPENCODE_MODE_CHARS))
 }
 
-fn acp_session_config_options(
+pub(crate) fn acp_session_config_options(
     config_result: &Value,
     option_id: &str,
     max_value_chars: Option<usize>,
@@ -1193,7 +1198,7 @@ fn acp_config_options(config_result: &Value) -> Option<&Vec<Value>> {
 /// Signals bounded OpenCode config facts before the reader queues writer-side
 /// reconciliation. A live model+effort/mode update can therefore wait for
 /// model-authoritative lists without deadlocking or retaining raw agent JSON.
-fn record_opencode_config_notification(
+pub(crate) fn record_opencode_config_notification(
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     config_result: &Value,
 ) {

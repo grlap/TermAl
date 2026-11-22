@@ -13,21 +13,23 @@
 // engram_host_adapter.rs).
 // New module.
 
+use super::*;
+
 /// Engram refusal codes that mean the project store is temporarily unable to
 /// serve while it repairs its derived projection. Store-open failures also
 /// require the separately qualified readiness kind below.
-const ENGRAM_STORE_TRANSIENT_CODES: &[&str] =
+pub(crate) const ENGRAM_STORE_TRANSIENT_CODES: &[&str] =
     &["work_projection_invalid", "projection_repair_required"];
 
 /// The stable code a host API reports beside `error` for a refusal that
 /// `engram_store_transient` classified.
-const ENGRAM_STORE_TRANSIENT_API_CODE: &str = "engram_store_transient";
+pub(crate) const ENGRAM_STORE_TRANSIENT_API_CODE: &str = "engram_store_transient";
 
 /// Whether Engram refused because its project store is temporarily unable to
 /// serve, judged on structured refusal fields, never on message text. A failed CLI call
 /// carries that code as `refusal_code`; a control-transport reply carries it
 /// as the remote `code`.
-fn engram_store_transient(error: &EngramTransportError) -> bool {
+pub(crate) fn engram_store_transient(error: &EngramTransportError) -> bool {
     let code = error.refusal_code.as_deref().or_else(|| {
         (error.kind == EngramTransportErrorKind::Remote)
             .then_some(error.code.as_deref())
@@ -42,7 +44,7 @@ fn engram_store_transient(error: &EngramTransportError) -> bool {
         || engram_store_readiness_open_kind(error) == Some("busy")
 }
 
-fn engram_store_readiness_open_kind(error: &EngramTransportError) -> Option<&str> {
+pub(crate) fn engram_store_readiness_open_kind(error: &EngramTransportError) -> Option<&str> {
     if error.refusal_code.as_deref() == Some("store_open_refused") {
         error.refusal_kind.as_deref()
     } else {

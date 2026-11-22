@@ -3,27 +3,37 @@
 // or change Claude/ACP cleanup. The reservation is installed with the terminal
 // state; only its post-commit ticket may enqueue the external side effect.
 
-const CODEX_CHILD_RESULT_FENCE_TIMEOUT: Duration = Duration::from_secs(5);
+use super::*;
+
+pub(crate) const CODEX_CHILD_RESULT_FENCE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-struct CodexTerminalArchive {
-    thread_id: String,
-    profile: SharedCodexProfile,
+pub(crate) struct CodexTerminalArchive {
+    pub(crate) thread_id: String,
+    pub(crate) profile: SharedCodexProfile,
 }
 
 impl CodexTerminalArchive {
-    fn identity(record: &SessionRecord) -> Option<(&str, SharedCodexProfile)> {
+    pub(crate) fn identity(record: &SessionRecord) -> Option<(&str, SharedCodexProfile)> {
         if record.session.agent != Agent::Codex
             || record.remote_id.is_some()
             || record.session.parent_delegation_id.is_none()
         {
             return None;
         }
-        let thread_id = record.external_session_id.as_deref().filter(|id| !id.is_empty())?;
-        Some((thread_id, record.codex_thread_profile.unwrap_or(SharedCodexProfile::Default)))
+        let thread_id = record
+            .external_session_id
+            .as_deref()
+            .filter(|id| !id.is_empty())?;
+        Some((
+            thread_id,
+            record
+                .codex_thread_profile
+                .unwrap_or(SharedCodexProfile::Default),
+        ))
     }
 
-    fn of_record(record: &SessionRecord) -> Option<Self> {
+    pub(crate) fn of_record(record: &SessionRecord) -> Option<Self> {
         let (thread_id, profile) = Self::identity(record)?;
         Some(Self {
             thread_id: thread_id.to_owned(),
@@ -31,17 +41,19 @@ impl CodexTerminalArchive {
         })
     }
 
-    fn matches(&self, record: &SessionRecord) -> bool {
+    pub(crate) fn matches(&self, record: &SessionRecord) -> bool {
         Self::identity(record) == Some((self.thread_id.as_str(), self.profile))
     }
 }
 
 // A completed automatic archive is durable. Runtime handles, in-flight RPCs,
 // compensation and synchronization are not: only rebuild a settled barrier.
-fn restore_codex_terminal_archive_barrier(record: &mut SessionRecord) {
-    let Some(archive) = record.codex_terminal_archive.clone().filter(|archive| {
-        record_has_archived_codex_thread(record) && archive.matches(record)
-    }) else {
+pub(crate) fn restore_codex_terminal_archive_barrier(record: &mut SessionRecord) {
+    let Some(archive) = record
+        .codex_terminal_archive
+        .clone()
+        .filter(|archive| record_has_archived_codex_thread(record) && archive.matches(record))
+    else {
         record.codex_terminal_archive = None;
         return;
     };
@@ -56,7 +68,7 @@ fn restore_codex_terminal_archive_barrier(record: &mut SessionRecord) {
 
 // Only a failed/canceled first follow-up owns this compensation. A generic
 // terminal status read must not undo an explicit manual Unarchive action.
-fn retain_followup_archive_compensation_locked(
+pub(crate) fn retain_followup_archive_compensation_locked(
     inner: &mut StateInner,
     delegation_index: usize,
     detached: &mut DetachedDelegationChildRuntime,
@@ -87,17 +99,17 @@ fn retain_followup_archive_compensation_locked(
     }
 }
 
-const CODEX_CHILD_ARCHIVE_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-const CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT: Duration = Duration::from_secs(31);
-const CODEX_THREAD_RECONCILIATION_TIMEOUT: Duration = Duration::from_secs(10);
-const CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT: Duration =
+pub(crate) const CODEX_CHILD_ARCHIVE_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT: Duration = Duration::from_secs(31);
+pub(crate) const CODEX_THREAD_RECONCILIATION_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT: Duration =
     Duration::from_secs(CODEX_THREAD_RECONCILIATION_TIMEOUT.as_secs() + 1);
-const CODEX_CHILD_UNARCHIVE_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-const CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT: Duration =
+pub(crate) const CODEX_CHILD_UNARCHIVE_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const CODEX_CHILD_UNARCHIVE_REPLY_TIMEOUT: Duration =
     Duration::from_secs(CODEX_CHILD_UNARCHIVE_RPC_TIMEOUT.as_secs() + 1);
 // Serial fence + RPC receipt + archived/active probes + local detach/commit
 // headroom. This bounds the caller's wait, not a blocked mutex or SQL commit.
-const CODEX_CHILD_RELEASE_WAIT_TIMEOUT: Duration = Duration::from_secs(
+pub(crate) const CODEX_CHILD_RELEASE_WAIT_TIMEOUT: Duration = Duration::from_secs(
     CODEX_CHILD_RESULT_FENCE_TIMEOUT.as_secs()
         + CODEX_CHILD_ARCHIVE_REPLY_TIMEOUT.as_secs()
         + 2 * CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT.as_secs()
@@ -105,7 +117,7 @@ const CODEX_CHILD_RELEASE_WAIT_TIMEOUT: Duration = Duration::from_secs(
 );
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum CodexReleaseOutcome {
+pub(crate) enum CodexReleaseOutcome {
     NotSent(String),
     Archived,
     NotArchived,
@@ -116,32 +128,32 @@ enum CodexReleaseOutcome {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum CodexRestoreOwner {
+pub(crate) enum CodexRestoreOwner {
     Manual,
     Followup,
 }
 
 #[derive(Default)]
-struct CodexDelegationRelease {
-    outcome: Mutex<Option<CodexReleaseOutcome>>,
-    resume: Mutex<()>,
-    ready: std::sync::Condvar,
+pub(crate) struct CodexDelegationRelease {
+    pub(crate) outcome: Mutex<Option<CodexReleaseOutcome>>,
+    pub(crate) resume: Mutex<()>,
+    pub(crate) ready: std::sync::Condvar,
     // One owner, retained across spawn/commit failure. Never hand this slot to
     // an independent detach_async worker that can outlive the release barrier.
-    local: Mutex<Option<SharedCodexSessionHandle>>,
-    undurable_terminal: Mutex<Option<DelegationRecord>>,
+    pub(crate) local: Mutex<Option<SharedCodexSessionHandle>>,
+    pub(crate) undurable_terminal: Mutex<Option<DelegationRecord>>,
     // Only automatic terminal release authorizes automatic unarchive.
-    terminal_release: bool,
-    terminal_thread: Option<CodexTerminalArchive>,
+    pub(crate) terminal_release: bool,
+    pub(crate) terminal_thread: Option<CodexTerminalArchive>,
     // A detached restored thread still needs archive even when no transport
     // exists. Keep a retry owner instead of treating Restored as cleanup.
-    compensation_pending: std::sync::atomic::AtomicBool,
+    pub(crate) compensation_pending: std::sync::atomic::AtomicBool,
     // Restored alone also describes manual Unarchive. Only a restore performed
     // by the follow-up may be undone when that attempt never starts.
-    followup_restore_owned: std::sync::atomic::AtomicBool,
+    pub(crate) followup_restore_owned: std::sync::atomic::AtomicBool,
     // Retain process identity, not its writer sender (which would keep the
     // runtime channel alive). A replaced slot alone does not prove exit.
-    archive_origin: Mutex<Option<(String, Arc<SharedChild>, SharedCodexProfile)>>,
+    pub(crate) archive_origin: Mutex<Option<(String, Arc<SharedChild>, SharedCodexProfile)>>,
 }
 
 impl CodexDelegationRelease {
@@ -149,10 +161,13 @@ impl CodexDelegationRelease {
         // Existing process-local barriers need no durable row. A restarted
         // host only creates the barrier from a matching saved identity above.
         self.terminal_release
-            && self.terminal_thread.as_ref().is_none_or(|thread| thread.matches(record))
+            && self
+                .terminal_thread
+                .as_ref()
+                .is_none_or(|thread| thread.matches(record))
     }
 
-    fn needs_followup_compensation(&self) -> bool {
+    pub(crate) fn needs_followup_compensation(&self) -> bool {
         let outcome = self.outcome.lock().expect("Codex release mutex poisoned");
         (self
             .followup_restore_owned
@@ -164,7 +179,11 @@ impl CodexDelegationRelease {
                 && matches!(*outcome, Some(CodexReleaseOutcome::NotSent(_))))
     }
 
-    fn record_archive_origin(&self, runtime: &SharedCodexRuntime, profile: SharedCodexProfile) {
+    pub(crate) fn record_archive_origin(
+        &self,
+        runtime: &SharedCodexRuntime,
+        profile: SharedCodexProfile,
+    ) {
         *self
             .archive_origin
             .lock()
@@ -172,7 +191,7 @@ impl CodexDelegationRelease {
             Some((runtime.runtime_id.clone(), runtime.process.clone(), profile));
     }
 
-    fn archive_origin_has_exited(&self, state: &AppState) -> bool {
+    pub(crate) fn archive_origin_has_exited(&self, state: &AppState) -> bool {
         let origin = self
             .archive_origin
             .lock()
@@ -191,7 +210,7 @@ impl CodexDelegationRelease {
         replacement && matches!(process.try_wait(), Ok(Some(_)))
     }
 
-    fn for_child(
+    pub(crate) fn for_child(
         shared: SharedCodexSessionHandle,
         terminal: DelegationRecord,
         thread: Option<CodexTerminalArchive>,
@@ -216,7 +235,7 @@ impl CodexDelegationRelease {
         }
     }
 
-    fn confirm_completed_outcome(&self, confirmed: CodexReleaseOutcome) {
+    pub(crate) fn confirm_completed_outcome(&self, confirmed: CodexReleaseOutcome) {
         let mut outcome = self.outcome.lock().expect("Codex release mutex poisoned");
         // A late positive archive/restore must supersede an earlier unknown
         // outcome, but must not release a still-running archive operation.
@@ -225,12 +244,12 @@ impl CodexDelegationRelease {
         }
     }
 
-    fn finish(&self, outcome: CodexReleaseOutcome) {
+    pub(crate) fn finish(&self, outcome: CodexReleaseOutcome) {
         *self.outcome.lock().expect("Codex release mutex poisoned") = Some(outcome);
         self.ready.notify_all();
     }
 
-    fn wait(&self) -> Result<CodexReleaseOutcome, ApiError> {
+    pub(crate) fn wait(&self) -> Result<CodexReleaseOutcome, ApiError> {
         let outcome = self.outcome.lock().expect("Codex release mutex poisoned");
         let (outcome, _) = self
             .ready
@@ -292,7 +311,7 @@ impl CodexDelegationRelease {
         Ok(())
     }
 
-    fn retry_durability(&self, state: &AppState) -> Result<(), ApiError> {
+    pub(crate) fn retry_durability(&self, state: &AppState) -> Result<(), ApiError> {
         let terminal = self
             .undurable_terminal
             .lock()
@@ -335,13 +354,13 @@ impl CodexDelegationRelease {
     }
 }
 
-struct CodexDelegationReleaseTicket {
-    release: Arc<CodexDelegationRelease>,
-    session_id: String,
-    thread_id: String,
-    runtime: SharedCodexRuntime,
-    terminal: DelegationRecord,
-    armed: bool,
+pub(crate) struct CodexDelegationReleaseTicket {
+    pub(crate) release: Arc<CodexDelegationRelease>,
+    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) runtime: SharedCodexRuntime,
+    pub(crate) terminal: DelegationRecord,
+    pub(crate) armed: bool,
 }
 
 impl Drop for CodexDelegationReleaseTicket {
@@ -355,7 +374,7 @@ impl Drop for CodexDelegationReleaseTicket {
 }
 
 impl CodexDelegationReleaseTicket {
-    fn start(mut self, state: &AppState) {
+    pub(crate) fn start(mut self, state: &AppState) {
         self.armed = false;
         // commit_locked normally only queues persistence. Ask the existing
         // writer to acknowledge this exact terminal result after SQL COMMIT.
@@ -456,7 +475,8 @@ impl CodexDelegationReleaseTicket {
                             "Codex child thread changed during archive",
                         ));
                     }
-                    let record = inner.session_mut_by_index(index)
+                    let record = inner
+                        .session_mut_by_index(index)
                         .expect("validated child session index");
                     set_record_codex_thread_state(record, CodexThreadState::Archived);
                     record.codex_terminal_archive = CodexTerminalArchive::of_record(record);
@@ -492,7 +512,10 @@ impl AppState {
     // admitted, so return the detached terminal child to automatic archive
     // ownership even if Stop has made its local status Stopping. This is not a
     // manual thread action and must not bypass a live runtime or queued prompt.
-    fn rearchive_undispatched_codex_child(&self, session_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn rearchive_undispatched_codex_child(
+        &self,
+        session_id: &str,
+    ) -> Result<(), ApiError> {
         let profile = self.shared_codex_profile_of_session(session_id);
         let runtime = self.running_shared_codex_runtime(profile);
         let ticket = {
@@ -564,7 +587,7 @@ impl AppState {
         Ok(())
     }
 
-    fn wait_for_codex_child_release(
+    pub(crate) fn wait_for_codex_child_release(
         &self,
         session_id: &str,
     ) -> Result<Option<CodexReleaseOutcome>, ApiError> {
@@ -577,14 +600,14 @@ impl AppState {
         release.map(|release| release.wait()).transpose()
     }
 
-    fn prepare_codex_child_followup(&self, session_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn prepare_codex_child_followup(&self, session_id: &str) -> Result<(), ApiError> {
         self.prepare_codex_child_followup_with_restore(session_id, true)
     }
 
     // Terminal results must be durable before atomic re-arm admission, but
     // that preflight must not undo archival if admission is later rejected.
     // Admitted dispatch calls prepare_codex_child_followup to restore the thread.
-    fn prepare_codex_child_rearm(&self, session_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn prepare_codex_child_rearm(&self, session_id: &str) -> Result<(), ApiError> {
         self.prepare_codex_child_followup_with_restore(session_id, false)
     }
 
@@ -710,10 +733,14 @@ impl AppState {
                         ));
                     }
                     if archived {
-                        let record = inner.session_mut_by_index(index)
+                        let record = inner
+                            .session_mut_by_index(index)
                             .expect("validated child session index");
                         set_record_codex_thread_state(record, CodexThreadState::Archived);
-                        if barrier.as_ref().is_some_and(|barrier| barrier.authorizes_thread(record)) {
+                        if barrier
+                            .as_ref()
+                            .is_some_and(|barrier| barrier.authorizes_thread(record))
+                        {
                             record.codex_terminal_archive = CodexTerminalArchive::of_record(record);
                         }
                         self.commit_locked(&mut inner).map_err(|error| {
@@ -735,9 +762,9 @@ impl AppState {
             let automatic = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 inner.find_session_index(session_id).is_some_and(|index| {
-                    barrier.as_ref().is_some_and(|barrier| {
-                        barrier.authorizes_thread(&inner.sessions[index])
-                    })
+                    barrier
+                        .as_ref()
+                        .is_some_and(|barrier| barrier.authorizes_thread(&inner.sessions[index]))
                 })
             };
             if !automatic {

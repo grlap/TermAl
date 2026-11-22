@@ -5,6 +5,8 @@
 // for the frozen connection and the actual receipt. The separate completion
 // can retain two full SourceId endpoints even when no request fits a frame.
 // The encoded aggregate is still checked before every save and decode.
+
+use super::*;
 const CAUSAL_SETTLEMENT_MAX_BYTES: usize = MAILBOX_TEST_REQUEST_MAX_TARGETS
     * (5 * ENGRAM_CONTROL_MAX_FRAME_BYTES)
     + 2 * ENGRAM_SOURCE_JSON_LIMIT
@@ -12,21 +14,21 @@ const CAUSAL_SETTLEMENT_MAX_BYTES: usize = MAILBOX_TEST_REQUEST_MAX_TARGETS
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CausalTestAdmission {
-    request: Option<engram_remote_verification::Request>,
-    wire: Option<String>,
-    connection: Option<EngramConnectionConfig>,
-    receipt: Option<Value>,
-    refusal: Option<String>,
-    pending: Option<String>,
+pub(crate) struct CausalTestAdmission {
+    pub(crate) request: Option<engram_remote_verification::Request>,
+    pub(crate) wire: Option<String>,
+    pub(crate) connection: Option<EngramConnectionConfig>,
+    pub(crate) receipt: Option<Value>,
+    pub(crate) refusal: Option<String>,
+    pub(crate) pending: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CausalTestSettlement {
-    schema_version: u16,
-    completion: native_test_completion::Completion,
-    admissions: Vec<CausalTestAdmission>,
+pub(crate) struct CausalTestSettlement {
+    pub(crate) schema_version: u16,
+    pub(crate) completion: native_test_completion::Completion,
+    pub(crate) admissions: Vec<CausalTestAdmission>,
 }
 
 impl std::fmt::Debug for CausalTestSettlement {
@@ -95,7 +97,7 @@ fn causal_test_admission_request(
 }
 
 impl CausalTestSettlement {
-    fn new(delivery: &CausalTestCompletionDelivery) -> Self {
+    pub(crate) fn new(delivery: &CausalTestCompletionDelivery) -> Self {
         let admissions = (0..delivery.selector.payload.targets.len())
             .map(|index| {
                 let built = causal_test_admission_request(
@@ -148,13 +150,13 @@ impl CausalTestSettlement {
         }
     }
 
-    fn complete(&self) -> bool {
+    pub(crate) fn complete(&self) -> bool {
         self.admissions
             .iter()
             .all(|a| a.receipt.is_some() || a.refusal.is_some())
     }
 
-    fn validate(
+    pub(crate) fn validate(
         &self,
         selector: &CausalTestCompletionSelector,
         scope: Option<&MailboxTestSenderScope>,
@@ -241,7 +243,7 @@ impl CausalTestSettlement {
         Ok(())
     }
 
-    fn decode(
+    pub(crate) fn decode(
         encoded: &str,
         selector: &CausalTestCompletionSelector,
         scope: Option<&MailboxTestSenderScope>,
@@ -262,7 +264,7 @@ impl CausalTestSettlement {
 impl MailboxStore {
     // Reads and writes use the original owner/key, refusing an ambiguous UNION.
     // A valid saved receipt needs no current claim or connection to be read.
-    fn causal_test_settlement(
+    pub(crate) fn causal_test_settlement(
         &self,
         selector: &CausalTestCompletionSelector,
         scope: Option<&MailboxTestSenderScope>,
@@ -274,7 +276,7 @@ impl MailboxStore {
             .transpose()
     }
 
-    fn save_causal_test_settlement(
+    pub(crate) fn save_causal_test_settlement(
         &self,
         selector: &CausalTestCompletionSelector,
         scope: Option<&MailboxTestSenderScope>,
@@ -312,12 +314,20 @@ impl MailboxStore {
             bail!("causal settlement changed before publication");
         }
         let text = serde_json::to_string(after)?;
-        let count = transaction.execute(&format!(
-            "UPDATE {table} SET test_request_settlement_json=?1,
+        let count = transaction.execute(
+            &format!(
+                "UPDATE {table} SET test_request_settlement_json=?1,
              test_request_pending_json=CASE WHEN ?4 THEN NULL ELSE test_request_pending_json END,
              test_request_pending_order=CASE WHEN ?4 THEN NULL ELSE test_request_pending_order END
              WHERE {owner}=?2 AND idempotency_key=?3"
-        ), rusqlite::params![text, selector.payload.requester.native_session_id, key, after.complete()])?;
+            ),
+            rusqlite::params![
+                text,
+                selector.payload.requester.native_session_id,
+                key,
+                after.complete()
+            ],
+        )?;
         if count != 1 {
             bail!("original send disappeared before settlement");
         }

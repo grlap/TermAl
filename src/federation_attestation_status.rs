@@ -1,33 +1,41 @@
 // Owns redacted runtime attestation observations and owner-generation status.
 // Does not persist keys or change membership. New projection beside federation_views.rs.
 
+use super::*;
+
 #[derive(Default)]
-struct FederationAttestationObservation {
-    failures: u64,
-    owner: u64,
-    transport_generation: u64,
+pub(crate) struct FederationAttestationObservation {
+    pub(crate) failures: u64,
+    pub(crate) owner: u64,
+    pub(crate) transport_generation: u64,
     last_success: Option<String>,
     last_stage: Option<&'static str>,
     last_reason: Option<&'static str>,
-    enrollment_generation: u64,
+    pub(crate) enrollment_generation: u64,
     attempt_owner: u64,
     attempt_channel: Option<String>,
-    worker: Option<FederationWorkerObservation>,
+    pub(crate) worker: Option<FederationWorkerObservation>,
 }
 
 impl FederationAttestationObservation {
-    fn project_for(&self, peer: &FederationPeerRecord) -> Value {
+    pub(crate) fn project_for(&self, peer: &FederationPeerRecord) -> Value {
         let mut value = self.project();
         let current = self.enrollment_generation == peer.enrollment_generation
             && self.transport_generation == peer.transport_generation;
         let attempted = self.attempt_owner != 0 || self.last_stage.is_some();
         value["currentBasis"] = json!(attempted.then_some(current));
-        if !current && self.last_stage.is_some() { value["state"] = json!("historical"); }
-        value["worker"] = self.worker.as_ref().map(|worker| worker.project(peer)).unwrap_or(Value::Null);
+        if !current && self.last_stage.is_some() {
+            value["state"] = json!("historical");
+        }
+        value["worker"] = self
+            .worker
+            .as_ref()
+            .map(|worker| worker.project(peer))
+            .unwrap_or(Value::Null);
         value
     }
 
-    fn project(&self) -> Value {
+    pub(crate) fn project(&self) -> Value {
         json!({"state": if self.failures >= 3 { "failing" } else if self.failures > 0 { "retrying" }
             else if self.owner > 0 { "authenticated" } else { "unverified" },
             "consecutiveFailures":self.failures, "ownerGeneration":self.owner, "lastSuccess":self.last_success,
@@ -36,7 +44,7 @@ impl FederationAttestationObservation {
 }
 
 impl FederationChannel {
-    fn observe_terminal(
+    pub(crate) fn observe_terminal(
         &self,
         context: &FederationSecurityContext,
         stage: &'static str,
@@ -45,7 +53,7 @@ impl FederationChannel {
         self.observe_terminal_detail(context, stage, reason, None);
     }
 
-    fn observe_terminal_detail(
+    pub(crate) fn observe_terminal_detail(
         &self,
         context: &FederationSecurityContext,
         stage: &'static str,
@@ -60,7 +68,7 @@ impl FederationChannel {
     /// atomic: no lock and no I/O, so nothing can delay or skip the fence, and
     /// a later teardown observer of this context cannot record a different
     /// first cause. The record in shared state and the console line follow.
-    fn fence_rpc_security_failure(
+    pub(crate) fn fence_rpc_security_failure(
         &self,
         context: &FederationSecurityContext,
         reason: &'static str,
@@ -115,8 +123,7 @@ impl FederationChannel {
             // old task cannot replace a successor attempt's observation, and a
             // later cause cannot replace the first one.
             if observation.attempt_owner != context.owner
-                || observation.attempt_channel.as_deref()
-                    != Some(self.server_instance_id.as_str())
+                || observation.attempt_channel.as_deref() != Some(self.server_instance_id.as_str())
                 || matches!(observation.last_stage, Some("control" | "monitor" | "rpc"))
             {
                 return;
@@ -133,7 +140,11 @@ impl FederationChannel {
             .installed_at
             .get()
             .map(|installed| {
-                self.control.clock.now().saturating_duration_since(*installed).as_millis()
+                self.control
+                    .clock
+                    .now()
+                    .saturating_duration_since(*installed)
+                    .as_millis()
             })
             .unwrap_or(0);
         let sequence = context.last_control_sequence.load(Ordering::SeqCst);
@@ -143,11 +154,13 @@ impl FederationChannel {
         let status = status.unwrap_or(0);
         format!(
             "federation link ended peer={} role={role} stage={stage} reason={reason} ioKind={} incarnation={} elapsedMs={elapsed_ms} lastSequence={sequence} rpcPath={rpc_path} rpcStage={rpc_stage} httpStatus={status}",
-            self.snapshot.peer.host_id, io_kind.unwrap_or("none"), context.incarnation
+            self.snapshot.peer.host_id,
+            io_kind.unwrap_or("none"),
+            context.incarnation
         )
     }
 
-    fn observe_attestation(&self, success: Option<u64>) {
+    pub(crate) fn observe_attestation(&self, success: Option<u64>) {
         self.update_attestation(|observation, basis| match success {
             Some(owner)
                 if (basis.transport_generation, owner)
@@ -165,7 +178,7 @@ impl FederationChannel {
         });
     }
 
-    fn observe_attestation_failure(
+    pub(crate) fn observe_attestation_failure(
         &self,
         owner: Option<u64>,
         stage: &'static str,
@@ -190,7 +203,7 @@ impl FederationChannel {
         });
     }
 
-    fn begin_attestation(&self, owner: u64) {
+    pub(crate) fn begin_attestation(&self, owner: u64) {
         self.update_attestation(|observation, basis| {
             observation.enrollment_generation = basis.enrollment_generation;
             observation.transport_generation = basis.transport_generation;
@@ -235,7 +248,10 @@ impl FederationChannel {
 }
 
 impl AppState {
-    fn federation_observed_attestation_failure(&self, expected: &FederationPeerSnapshot) -> bool {
+    pub(crate) fn federation_observed_attestation_failure(
+        &self,
+        expected: &FederationPeerSnapshot,
+    ) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
         // A local proof observation is evidence only for this authority basis.
         // Starting another owner clears its prior terminal reason immediately.

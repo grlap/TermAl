@@ -1,28 +1,30 @@
 // Copies process-local observations before acquiring the SQLite read guard.
 // Neither projection nor classification advances the producer's scan cache.
-struct FederationJournalSnapshot {
-    basis: String,
-    local: FederationHostIdentity,
-    role: FederationRole,
-    scan: FederationJournalScan,
+
+use super::*;
+pub(crate) struct FederationJournalSnapshot {
+    pub(crate) basis: String,
+    pub(crate) local: FederationHostIdentity,
+    pub(crate) role: FederationRole,
+    pub(crate) scan: FederationJournalScan,
 }
 
-struct FederationJournalCandidate {
-    rowid: i64,
-    message: String,
-    target: FederationMailboxBinding,
-    payload_bytes: u64,
+pub(crate) struct FederationJournalCandidate {
+    pub(crate) rowid: i64,
+    pub(crate) message: String,
+    pub(crate) target: FederationMailboxBinding,
+    pub(crate) payload_bytes: u64,
 }
 
-struct FederationJournalScan {
-    summary: Option<Value>,
-    domain: FederationExecutorReservationCache,
-    scan_after: i64,
+pub(crate) struct FederationJournalScan {
+    pub(crate) summary: Option<Value>,
+    pub(crate) domain: FederationExecutorReservationCache,
+    pub(crate) scan_after: i64,
     prefix_complete: bool,
-    candidates: Vec<FederationJournalCandidate>,
+    pub(crate) candidates: Vec<FederationJournalCandidate>,
 }
 
-fn federation_journal_basis(
+pub(crate) fn federation_journal_basis(
     state: &AppState,
 ) -> FederationJournalResult<(
     String,
@@ -49,7 +51,7 @@ fn federation_journal_basis(
     Ok((sha256_hex(&bytes), local, role, domain))
 }
 
-fn federation_journal_snapshot(
+pub(crate) fn federation_journal_snapshot(
     state: &AppState,
 ) -> FederationJournalResult<FederationJournalSnapshot> {
     let (basis, local, role, domain) = federation_journal_basis(state)?;
@@ -108,7 +110,7 @@ fn federation_journal_snapshot(
 }
 
 impl FederationJournalScan {
-    fn project(
+    pub(crate) fn project(
         &self,
         connection: &rusqlite::Connection,
         rows: Vec<FederationJournalWakeRow>,

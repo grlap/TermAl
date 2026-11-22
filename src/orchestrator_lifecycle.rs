@@ -36,9 +36,14 @@
 // instance-level state machine that routes transitions into that
 // machinery.
 
+use super::*;
+
 impl AppState {
     /// Pauses orchestrator instance.
-    fn pause_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
+    pub(crate) fn pause_orchestrator_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<StateResponse, ApiError> {
         if let Some(target) = self.remote_orchestrator_target(instance_id)? {
             return self.proxy_remote_pause_orchestrator_instance(target);
         }
@@ -74,7 +79,10 @@ impl AppState {
     }
 
     /// Resumes orchestrator instance.
-    fn resume_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
+    pub(crate) fn resume_orchestrator_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<StateResponse, ApiError> {
         if let Some(target) = self.remote_orchestrator_target(instance_id)? {
             return self.proxy_remote_resume_orchestrator_instance(target);
         }
@@ -121,7 +129,7 @@ impl AppState {
     }
 
     /// Begins orchestrator stop.
-    fn begin_orchestrator_stop(&self, instance_id: &str) -> Result<(), ApiError> {
+    pub(crate) fn begin_orchestrator_stop(&self, instance_id: &str) -> Result<(), ApiError> {
         let mut stopping = self
             .stopping_orchestrator_ids
             .lock()
@@ -195,7 +203,7 @@ impl AppState {
     }
 
     /// Finishes orchestrator stop.
-    fn finish_orchestrator_stop(&self, instance_id: &str) {
+    pub(crate) fn finish_orchestrator_stop(&self, instance_id: &str) {
         self.stopping_orchestrator_ids
             .lock()
             .expect("orchestrator stop mutex poisoned")
@@ -207,7 +215,7 @@ impl AppState {
     }
 
     /// Records stopped orchestrator session.
-    fn note_stopped_orchestrator_session(&self, instance_id: &str, session_id: &str) {
+    pub(crate) fn note_stopped_orchestrator_session(&self, instance_id: &str, session_id: &str) {
         self.stopping_orchestrator_session_ids
             .lock()
             .expect("orchestrator stop session mutex poisoned")
@@ -225,7 +233,9 @@ impl AppState {
     }
 
     /// Returns the stopping orchestrator session IDs snapshot.
-    fn stopping_orchestrator_session_ids_snapshot(&self) -> HashMap<String, HashSet<String>> {
+    pub(crate) fn stopping_orchestrator_session_ids_snapshot(
+        &self,
+    ) -> HashMap<String, HashSet<String>> {
         self.stopping_orchestrator_session_ids
             .lock()
             .expect("orchestrator stop session mutex poisoned")
@@ -233,7 +243,7 @@ impl AppState {
     }
 
     /// Prunes pending transitions for stopped orchestrator sessions.
-    fn prune_pending_transitions_for_stopped_orchestrator_sessions(
+    pub(crate) fn prune_pending_transitions_for_stopped_orchestrator_sessions(
         &self,
         instance_id: &str,
     ) -> Result<(), ApiError> {
@@ -355,7 +365,10 @@ impl AppState {
     }
 
     /// Stops orchestrator instance.
-    fn stop_orchestrator_instance(&self, instance_id: &str) -> Result<StateResponse, ApiError> {
+    pub(crate) fn stop_orchestrator_instance(
+        &self,
+        instance_id: &str,
+    ) -> Result<StateResponse, ApiError> {
         if let Some(target) = self.remote_orchestrator_target(instance_id)? {
             return self.proxy_remote_stop_orchestrator_instance(target);
         }
@@ -492,7 +505,7 @@ impl AppState {
     }
 
     /// Resumes pending orchestrator transitions.
-    fn resume_pending_orchestrator_transitions(&self) -> Result<()> {
+    pub(crate) fn resume_pending_orchestrator_transitions(&self) -> Result<()> {
         #[cfg(test)]
         assert!(
             self.inner.is_not_held_by_current_thread_for_test(),

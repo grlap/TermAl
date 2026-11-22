@@ -5,32 +5,34 @@
 // its persistence or activation, any lock, any dispatch or handoff path, or
 // any hold installation or release; nothing in production calls it yet.
 
+use super::*;
+
 #[cfg_attr(not(test), allow(dead_code))]
 /// The exact scope of one dispatch candidate, as its caller knows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramImportDispatchCandidate {
-    store_association: String,
-    project_id: String,
-    original_binding: EngramImportOriginalBinding,
-    host_incarnation: String,
+pub(crate) struct EngramImportDispatchCandidate {
+    pub(crate) store_association: String,
+    pub(crate) project_id: String,
+    pub(crate) original_binding: EngramImportOriginalBinding,
+    pub(crate) host_incarnation: String,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 /// One fence that holds a candidate.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramImportHeldFence {
-    key: String,
-    hold_id: String,
-    phase: EngramImportFencePhase,
+pub(crate) struct EngramImportHeldFence {
+    pub(crate) key: String,
+    pub(crate) hold_id: String,
+    pub(crate) phase: EngramImportFencePhase,
     /// Whether the fence was installed by the current host incarnation. A
     /// fence from another incarnation holds all the same.
-    current_incarnation: bool,
+    pub(crate) current_incarnation: bool,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 /// Why the decision cannot say whether a candidate is held.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramImportHoldUnknownReason {
+pub(crate) enum EngramImportHoldUnknownReason {
     /// The journal could not be established (the import-reconciliation
     /// journal's load refusal, engram_import_reconciliation.rs).
     JournalNotEstablished,
@@ -50,7 +52,7 @@ enum EngramImportHoldUnknownReason {
 #[cfg_attr(not(test), allow(dead_code))]
 /// The typed import-hold disposition of one dispatch candidate.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramImportHoldDisposition {
+pub(crate) enum EngramImportHoldDisposition {
     /// Every fence that covers the candidate, in journal key order.
     HeldByImportReconciliation(Vec<EngramImportHeldFence>),
     Admitted,
@@ -72,7 +74,7 @@ enum EngramImportHoldDisposition {
 /// leaves the candidate unknown rather than admitted. Any covering fence
 /// holds, whatever its phase: only removing its record releases the guard.
 /// Held wins over unknown, and both refuse dispatch.
-fn engram_import_hold_disposition<E>(
+pub(crate) fn engram_import_hold_disposition<E>(
     journal: Result<&EngramImportReconciliationState, &E>,
     candidate: &EngramImportDispatchCandidate,
 ) -> EngramImportHoldDisposition {
@@ -167,8 +169,10 @@ fn engram_import_fence_owner_is_another(
         if owner.owner_id != fence_owner || !engram_import_scope_matches(&owner.scope, candidate) {
             continue;
         }
-        if !matches!(owner.original_binding, EngramImportOriginalBinding::Exact(_))
-            || owner.original_binding == candidate.original_binding
+        if !matches!(
+            owner.original_binding,
+            EngramImportOriginalBinding::Exact(_)
+        ) || owner.original_binding == candidate.original_binding
         {
             return false;
         }

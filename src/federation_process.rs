@@ -1,16 +1,18 @@
 // Owns a single federation SSH child and reap-before-replace cleanup.
 // Does not start a remote TermAl server. New sibling to remote_ssh.rs.
 
-struct FederationSshProcess {
-    child: Option<Child>,
-    input: Option<std::process::ChildStdin>,
-    output: Option<std::process::ChildStdout>,
-    diagnostic: FederationSshDiagnostics,
+use super::*;
+
+pub(crate) struct FederationSshProcess {
+    pub(crate) child: Option<Child>,
+    pub(crate) input: Option<std::process::ChildStdin>,
+    pub(crate) output: Option<std::process::ChildStdout>,
+    pub(crate) diagnostic: FederationSshDiagnostics,
 }
 
 impl FederationSshProcess {
     #[cfg(test)]
-    fn from_child(child: Child) -> Result<Self, ApiError> {
+    pub(crate) fn from_child(child: Child) -> Result<Self, ApiError> {
         let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
         let mut process = Self::retain_child(child, diagnostic);
         process.attach_stdio();
@@ -26,8 +28,11 @@ impl FederationSshProcess {
         }
     }
 
-    fn attach_stdio(&mut self) {
-        let child = self.child.as_mut().expect("owned SSH child before stdio setup");
+    pub(crate) fn attach_stdio(&mut self) {
+        let child = self
+            .child
+            .as_mut()
+            .expect("owned SSH child before stdio setup");
         self.input = child.stdin.take();
         self.output = child.stdout.take();
         let stderr = child.stderr.take();
@@ -36,16 +41,17 @@ impl FederationSshProcess {
             if std::thread::Builder::new()
                 .name("federation-stderr".to_owned())
                 .spawn(move || federation_read_ssh_diagnostics(stderr, &diagnostic))
-                .is_err() {
-                    // The child already exists. Return its owned guard even
-                    // when diagnostic-thread creation fails, so cleanup stays
-                    // with the worker rather than becoming a no-child error.
-                    eprintln!("federation SSH diagnostic reader unavailable");
-                }
+                .is_err()
+            {
+                // The child already exists. Return its owned guard even
+                // when diagnostic-thread creation fails, so cleanup stays
+                // with the worker rather than becoming a no-child error.
+                eprintln!("federation SSH diagnostic reader unavailable");
+            }
         }
     }
 
-    fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
+    pub(crate) fn take_control_stream(&mut self) -> Result<FederationControlIo, ApiError> {
         let input = self
             .input
             .take()
@@ -56,7 +62,7 @@ impl FederationSshProcess {
             .ok_or_else(federation_transport_unavailable)?;
         federation_stdio_control(input, output)
     }
-    fn child_exited(&mut self) -> Result<bool, ApiError> {
+    pub(crate) fn child_exited(&mut self) -> Result<bool, ApiError> {
         match self.child.as_mut() {
             Some(child) => {
                 let status = child
@@ -76,11 +82,11 @@ impl FederationSshProcess {
 
     // Called on spawn_blocking, and completed before another attempt starts.
     #[cfg(test)]
-    fn shutdown(mut self) -> Result<(), ApiError> {
+    pub(crate) fn shutdown(mut self) -> Result<(), ApiError> {
         self.reap()
     }
 
-    fn reap(&mut self) -> Result<(), ApiError> {
+    pub(crate) fn reap(&mut self) -> Result<(), ApiError> {
         if let Some(child) = self.child.as_mut() {
             let status = child.try_wait();
             if let Ok(Some(status)) = &status {
@@ -124,7 +130,7 @@ impl Drop for FederationSshProcess {
     }
 }
 
-fn start_federation_ssh(
+pub(crate) fn start_federation_ssh(
     snapshot: &FederationPeerSnapshot,
     forward_port: u16,
     known_hosts: &FsPath,
@@ -165,6 +171,11 @@ fn start_federation_ssh(
     let child = command
         .spawn()
         .map_err(|_| federation_transport_unavailable())?;
-    *owned = Some(Box::new(FederationSshProcess::retain_child(child, diagnostic)));
-    owned.as_mut().expect("published SSH guard").prepare_control()
+    *owned = Some(Box::new(FederationSshProcess::retain_child(
+        child, diagnostic,
+    )));
+    owned
+        .as_mut()
+        .expect("published SSH guard")
+        .prepare_control()
 }

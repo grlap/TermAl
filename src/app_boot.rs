@@ -40,10 +40,12 @@
 // function made the types + struct definitions hard to navigate
 // when editing; nothing else needs to live in this file.
 
-const PERSIST_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
+use super::*;
+
+pub(crate) const PERSIST_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
 const PERSIST_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
-const PERSIST_FENCE_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
-const PERSIST_FENCE_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+pub(crate) const PERSIST_FENCE_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
+pub(crate) const PERSIST_FENCE_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 const COORDINATION_CLEANUP_RETRY_SEED_DELAY: Duration = Duration::from_millis(250);
 const COORDINATION_CLEANUP_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 
@@ -51,18 +53,18 @@ const COORDINATION_CLEANUP_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 thread_local! {
     // Disposable production-worker fixtures can observe the original mutex
     // and isolate unrelated Codex discovery from the developer's real homes.
-    static TEST_BOOT_STATE_MUTEX: std::cell::RefCell<Option<Box<dyn FnOnce(StateInner) -> StateMutex<StateInner>>>> =
+    pub(crate) static TEST_BOOT_STATE_MUTEX: std::cell::RefCell<Option<Box<dyn FnOnce(StateInner) -> StateMutex<StateInner>>>> =
         const { std::cell::RefCell::new(None) };
-    static TEST_BOOT_SKIP_CODEX_DISCOVERY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static TEST_BOOT_PERSIST_TICK_SINK: std::cell::RefCell<Option<mpsc::Sender<(std::time::Instant, PersistObservedTick)>>> =
+    pub(crate) static TEST_BOOT_SKIP_CODEX_DISCOVERY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static TEST_BOOT_PERSIST_TICK_SINK: std::cell::RefCell<Option<mpsc::Sender<(std::time::Instant, PersistObservedTick)>>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct PersistWorkerRetryState {
-    retry_after_failure: bool,
-    retry_delay: Duration,
-    fence_retry_delay: Option<Duration>,
+pub(crate) struct PersistWorkerRetryState {
+    pub(crate) retry_after_failure: bool,
+    pub(crate) retry_delay: Duration,
+    pub(crate) fence_retry_delay: Option<Duration>,
 }
 
 impl Default for PersistWorkerRetryState {
@@ -82,28 +84,28 @@ impl Default for PersistWorkerRetryState {
 ///   without browser refresh can lose the last streamed message"),
 /// - a clean exit (channel disconnected, nothing to do).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PersistWorkerWaitOutcome {
+pub(crate) enum PersistWorkerWaitOutcome {
     Process,
     Shutdown,
     Exit,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CoordinationCleanupRequest {
+pub(crate) enum CoordinationCleanupRequest {
     Process,
     Shutdown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CoordinationCleanupWaitOutcome {
+pub(crate) enum CoordinationCleanupWaitOutcome {
     Process,
     Shutdown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct CoordinationCleanupRetryState {
+pub(crate) struct CoordinationCleanupRetryState {
     retry_pending: bool,
-    retry_delay: Duration,
+    pub(crate) retry_delay: Duration,
 }
 
 impl Default for CoordinationCleanupRetryState {
@@ -116,7 +118,7 @@ impl Default for CoordinationCleanupRetryState {
 }
 
 impl CoordinationCleanupRetryState {
-    fn wait_for_next_tick(
+    pub(crate) fn wait_for_next_tick(
         &self,
         cleanup_rx: &mpsc::Receiver<CoordinationCleanupRequest>,
     ) -> CoordinationCleanupWaitOutcome {
@@ -156,7 +158,7 @@ impl CoordinationCleanupRetryState {
         }
     }
 
-    fn record_pending(&mut self, pending: bool) {
+    pub(crate) fn record_pending(&mut self, pending: bool) {
         if pending {
             self.retry_pending = true;
             self.retry_delay =
@@ -169,7 +171,7 @@ impl CoordinationCleanupRetryState {
 }
 
 impl PersistWorkerRetryState {
-    fn next_tick_delay(&self) -> Option<Duration> {
+    pub(crate) fn next_tick_delay(&self) -> Option<Duration> {
         match (
             self.retry_after_failure.then_some(self.retry_delay),
             self.fence_retry_delay,
@@ -179,7 +181,7 @@ impl PersistWorkerRetryState {
         }
     }
 
-    fn wait_for_next_tick(
+    pub(crate) fn wait_for_next_tick(
         &self,
         persist_rx: &mpsc::Receiver<PersistRequest>,
         fences: &mut PersistFenceBatch,
@@ -192,7 +194,7 @@ impl PersistWorkerRetryState {
         })
     }
 
-    fn wait_for_next_tick_using(
+    pub(crate) fn wait_for_next_tick_using(
         &self,
         fences: &mut PersistFenceBatch,
         receive: impl FnOnce(
@@ -206,7 +208,7 @@ impl PersistWorkerRetryState {
         }
     }
 
-    fn record_result(&mut self, result: &Result<()>) {
+    pub(crate) fn record_result(&mut self, result: &Result<()>) {
         if result.is_err() {
             self.retry_after_failure = true;
             self.retry_delay = std::cmp::min(self.retry_delay * 2, PERSIST_RETRY_MAX_DELAY);
@@ -216,7 +218,7 @@ impl PersistWorkerRetryState {
         }
     }
 
-    fn should_exit_after_tick(&self, shutdown_requested: bool) -> bool {
+    pub(crate) fn should_exit_after_tick(&self, shutdown_requested: bool) -> bool {
         // A failed primary-state write must keep shutdown blocked so the last
         // mutation is not lost. Coordination cleanup runs on its own worker;
         // its unfinished outbox entries remain durable and never affect this
@@ -224,7 +226,7 @@ impl PersistWorkerRetryState {
         shutdown_requested && !self.retry_after_failure
     }
 
-    fn finish_fenced_tick(
+    pub(crate) fn finish_fenced_tick(
         &mut self,
         result: &Result<()>,
         shutdown_requested: bool,
@@ -253,12 +255,12 @@ impl PersistWorkerRetryState {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct CoordinationCleanupPass {
-    completed: usize,
-    pending: bool,
+pub(crate) struct CoordinationCleanupPass {
+    pub(crate) completed: usize,
+    pub(crate) pending: bool,
 }
 
-fn process_pending_coordination_scope_deletions<F>(
+pub(crate) fn process_pending_coordination_scope_deletions<F>(
     inner: &Arc<StateMutex<StateInner>>,
     mut delete_scope: F,
 ) -> CoordinationCleanupPass
@@ -313,7 +315,7 @@ where
     }
 }
 
-fn process_pending_response_board_project_detachments<F>(
+pub(crate) fn process_pending_response_board_project_detachments<F>(
     inner: &Arc<StateMutex<StateInner>>,
     mut detach_project_tab: F,
 ) -> CoordinationCleanupPass
@@ -419,7 +421,7 @@ fn run_coordination_cleanup_worker(
 
 // Fixed phase labels and durations only: startup diagnostics never print
 // persisted content, credentials, project names or filesystem paths.
-fn log_startup_phase(phase: &'static str, started: &mut std::time::Instant) {
+pub(crate) fn log_startup_phase(phase: &'static str, started: &mut std::time::Instant) {
     eprintln!(
         "startup> phase={phase} elapsed_ms={}",
         started.elapsed().as_millis()
@@ -441,13 +443,15 @@ impl AppState {
     /// enters through `AppState::new_server` (`server_instance_lock.rs`),
     /// which locks the data directory before calling it.
     #[cfg(test)]
-    fn new_with_paths(
+    pub(crate) fn new_with_paths(
         default_workdir: String,
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
     ) -> Result<Self> {
         let state = Self::new_before_listen_with_paths(
-            default_workdir, persistence_path, orchestrator_templates_path,
+            default_workdir,
+            persistence_path,
+            orchestrator_templates_path,
         )?;
         // Direct test constructors preserve their ready-state convenience.
         // The server entry point always chooses the explicit pre-listen seam,
@@ -456,7 +460,7 @@ impl AppState {
         Ok(state)
     }
 
-    fn new_before_listen_with_paths(
+    pub(crate) fn new_before_listen_with_paths(
         default_workdir: String,
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
@@ -464,7 +468,8 @@ impl AppState {
         let mut phase_started = std::time::Instant::now();
         // Defensive: tests and other direct callers may pass an un-normalized workdir.
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
-        let (loaded_state, mut boot_persistence_connection) = load_state_for_boot(&persistence_path)?;
+        let (loaded_state, mut boot_persistence_connection) =
+            load_state_for_boot(&persistence_path)?;
         if boot_persistence_connection.is_none() {
             if let Some(parent) = persistence_path.parent() {
                 create_local_state_directory(parent)?;
@@ -475,17 +480,28 @@ impl AppState {
         }
         let mut inner =
             loaded_state.unwrap_or_else(|| bootstrap_default_local_state(&default_workdir));
-        if inner.metadata_predecessor.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        if inner
+            .metadata_predecessor
+            .load(std::sync::atomic::Ordering::Acquire)
+            == 0
+        {
             // Fresh initialization committed before this live source exists.
             // Capture its confirmed predecessor before any boot effects.
             inner.metadata_predecessor.store(
-                metadata_unit_generation(boot_persistence_connection.as_ref()
-                    .ok_or_else(|| anyhow!("initialized boot metadata connection disappeared"))?)?,
+                metadata_unit_generation(
+                    boot_persistence_connection.as_ref().ok_or_else(|| {
+                        anyhow!("initialized boot metadata connection disappeared")
+                    })?,
+                )?,
                 std::sync::atomic::Ordering::Release,
             );
         }
         log_startup_phase("state_load", &mut phase_started);
-        prepare_federation_boot(&mut inner, &persistence_path, &mut boot_persistence_connection)?;
+        prepare_federation_boot(
+            &mut inner,
+            &persistence_path,
+            &mut boot_persistence_connection,
+        )?;
         log_startup_phase("federation_boot", &mut phase_started);
         let host_workdir = engram_host_workdir(&persistence_path)?;
         inner.engram_host_adapter = Arc::new(EngramHostAdapter::new(host_workdir.clone()));
@@ -883,7 +899,7 @@ impl AppState {
             persist_worker_alive: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             shutdown_signal_tx: Arc::new(tokio::sync::watch::channel(false).0),
             runtime_observation_lifetime: Arc::new(EngramRuntimeObservationLifetime::default()),
-        capture_lifetime: Arc::new(CaptureLifetime::default()),
+            capture_lifetime: Arc::new(CaptureLifetime::default()),
             state_broadcast_mailbox: Some(state_broadcast_mailbox),
             state_broadcast_worker: None,
             telegram_relay_runtime: Arc::new(Mutex::new(TelegramRelayRuntime::default())),
@@ -974,7 +990,7 @@ impl AppState {
     /// can reach a listening backend. Each step self-persists / self-commits, so
     /// deferring this work past the boot persist above is safe.
     #[cfg(test)]
-    fn run_post_listen_boot(&self) -> Result<()> {
+    pub(crate) fn run_post_listen_boot(&self) -> Result<()> {
         self.load_delegation_inventory_observed(|_| {})?;
         self.run_post_listen_boot_after_inventory();
         Ok(())
@@ -982,11 +998,11 @@ impl AppState {
 
     /// Inventory-dependent routes remain fenced while an owned worker restores
     /// the full inventory and only then prepares and runs boot recovery.
-    fn start_post_listen_boot(&self) -> Result<std::thread::JoinHandle<()>> {
+    pub(crate) fn start_post_listen_boot(&self) -> Result<std::thread::JoinHandle<()>> {
         self.start_post_listen_boot_observed(|_| {})
     }
 
-    fn start_post_listen_boot_observed(
+    pub(crate) fn start_post_listen_boot_observed(
         &self,
         observe: impl FnMut(&str) + Send + 'static,
     ) -> Result<std::thread::JoinHandle<()>> {

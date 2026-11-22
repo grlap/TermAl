@@ -1,7 +1,9 @@
 // Resolves an explicit message selection through the existing mailbox reader.
 // The registration owner publishes custody and its ACK in its existing write.
 
-enum TestRunCausalAdmission {
+use super::*;
+
+pub(crate) enum TestRunCausalAdmission {
     Direct,
     Api {
         selector: Option<String>,
@@ -9,22 +11,22 @@ enum TestRunCausalAdmission {
     },
 }
 
-struct TestRunSelectedMessage {
-    selector: String,
-    canonical: String,
-    message: MailboxMessage,
-    runner: MailboxRelayPrincipal,
-    project_id: String,
-    peer: Option<FederationPeerSnapshot>,
+pub(crate) struct TestRunSelectedMessage {
+    pub(crate) selector: String,
+    pub(crate) canonical: String,
+    pub(crate) message: MailboxMessage,
+    pub(crate) runner: MailboxRelayPrincipal,
+    pub(crate) project_id: String,
+    pub(crate) peer: Option<FederationPeerSnapshot>,
 }
 
-struct TestRunCausalCapture {
-    causal: TestRunCausalRequest,
-    project_id: String,
-    peer: Option<FederationPeerSnapshot>,
+pub(crate) struct TestRunCausalCapture {
+    pub(crate) causal: TestRunCausalRequest,
+    pub(crate) project_id: String,
+    pub(crate) peer: Option<FederationPeerSnapshot>,
 }
 
-fn test_run_request_message_id(request: &Value) -> Result<Option<&str>, ApiError> {
+pub(crate) fn test_run_request_message_id(request: &Value) -> Result<Option<&str>, ApiError> {
     let Some(value) = request.get("requestMessageId") else {
         return Ok(None);
     };
@@ -35,11 +37,13 @@ fn test_run_request_message_id(request: &Value) -> Result<Option<&str>, ApiError
         .ok_or_else(|| ApiError::bad_request("invalid_request: malformed requestMessageId"))
 }
 
-fn test_run_causal_request(registration: &TestRunRegistration) -> Option<&TestRunCausalRequest> {
+pub(crate) fn test_run_causal_request(
+    registration: &TestRunRegistration,
+) -> Option<&TestRunCausalRequest> {
     registration.native_origin.as_ref()?.causal_request.as_ref()
 }
 
-fn test_run_retained_registration<'a>(
+pub(crate) fn test_run_retained_registration<'a>(
     inner: &'a StateInner,
     run: &str,
 ) -> Option<&'a TestRunRegistration> {
@@ -50,7 +54,7 @@ fn test_run_retained_registration<'a>(
 }
 
 impl TestRunCausalCapture {
-    fn validate_locked(
+    pub(crate) fn validate_locked(
         &self,
         inner: &StateInner,
         session: &str,
@@ -135,7 +139,7 @@ impl AppState {
         })
     }
 
-    async fn prepare_test_run_causal_admission(
+    pub(crate) async fn prepare_test_run_causal_admission(
         &self,
         session: &str,
         run: &str,
@@ -205,7 +209,7 @@ impl AppState {
         })
     }
 
-    fn resolve_test_run_causal_admission(
+    pub(crate) fn resolve_test_run_causal_admission(
         &self,
         session: &str,
         run: &str,

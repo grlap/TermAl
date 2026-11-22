@@ -4,6 +4,8 @@
 // executor admission path. No journal, queue, lifecycle or scheduler is owned
 // here. Each later effect must retain the existing owner guards and revalidate.
 
+use super::*;
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn federation_prompt_native_value(
     host: &FederationHostIdentity,
@@ -19,7 +21,7 @@ fn federation_prompt_native_value(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_intent_value(
+pub(crate) fn federation_prompt_intent_value(
     permission: &FederationPromptPermission,
     request: &remote_prompt_protocol::OwnPrompt,
 ) -> Result<remote_prompt_authority::Intent, ApiError> {
@@ -99,7 +101,7 @@ fn federation_prompt_issuer_proof_current(
 // This check runs only on the satellite that issued the absolute expiry.
 // The source validates its own monotonic observation deadline instead.
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_issuer_proof_current_at(
+pub(crate) fn federation_prompt_issuer_proof_current_at(
     lease: &FederationLinkLease,
     proof: &remote_prompt_protocol::UnverifiedProof,
     issuer_now: u64,
@@ -117,7 +119,7 @@ fn federation_prompt_issuer_proof_current_at(
 // Only a committed permanent revocation is a cancellation fact. Missing data,
 // disabled settings, link/IO loss, quarantine and pause remain scheduling holds.
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_prompt_intent_revoked_locked(
+pub(crate) fn federation_prompt_intent_revoked_locked(
     inner: &StateInner,
     intent: &remote_prompt_authority::Intent,
 ) -> bool {
@@ -157,7 +159,7 @@ fn federation_prompt_intent_revoked_locked(
 impl AppState {
     // Called only on NEW source admission. Historical status/reconciliation
     // reads the retained exact intent and never enters this method.
-    async fn capture_remote_prompt_for_caller(
+    pub(crate) async fn capture_remote_prompt_for_caller(
         &self,
         caller: &str,
         request: &remote_prompt_protocol::OwnPrompt,
@@ -224,7 +226,7 @@ impl AppState {
     // Called before FIRST receiver admission, not duplicate/status recovery.
     // Source permission is read from its authenticated owner, then retained as
     // data in the same primary federation unit as destination-local consent.
-    async fn observe_remote_prompt_grant(
+    pub(crate) async fn observe_remote_prompt_grant(
         &self,
         lease: &FederationLinkLease,
         rpc: &FederationRpcClient,
@@ -327,7 +329,7 @@ impl AppState {
 
     // Local revoke is already committed before transport. A failed or lost
     // reply leaves remote effectiveness unknown and retains that revocation.
-    async fn confirm_remote_prompt_revocation(
+    pub(crate) async fn confirm_remote_prompt_revocation(
         &self,
         id: &str,
     ) -> Result<FederationPromptPermission, ApiError> {

@@ -9,14 +9,16 @@
 // `engram_host_adapter.rs` (the CLI reader/process-tree seam is tm-81vf).
 // Split out of `engram_host_adapter.rs` as a pure code move (tm-tg1g).
 
+use super::*;
+
 const ENGRAM_CONTROL_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 /// The control process a terminal failure was observed on: its pid and its
 /// exit state at that moment, as observed, never inferred afterwards.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramControlProcessEvidence {
-    pid: u32,
-    exit_state: String,
+pub(crate) struct EngramControlProcessEvidence {
+    pub(crate) pid: u32,
+    pub(crate) exit_state: String,
 }
 
 fn engram_control_cleanup_pending() -> EngramTransportError {
@@ -61,26 +63,26 @@ fn observe_engram_control_process(process: &SharedChild) -> EngramControlProcess
     }
 }
 
-struct EngramProcessRequest {
+pub(crate) struct EngramProcessRequest {
     /// None is an internal shutdown wake, never a wire frame.
-    request: Option<Vec<u8>>,
-    response_limit: usize,
-    reply: mpsc::Sender<std::result::Result<Value, EngramTransportError>>,
+    pub(crate) request: Option<Vec<u8>>,
+    pub(crate) response_limit: usize,
+    pub(crate) reply: mpsc::Sender<std::result::Result<Value, EngramTransportError>>,
 }
 
-struct EngramControlProcess {
-    config: EngramConnectionConfig,
-    process: Arc<SharedChild>,
-    process_tree: Arc<EngramProcessTree>,
-    stderr: EngramControlStderr,
-    requests: mpsc::Sender<EngramProcessRequest>,
-    worker_finished: Arc<AtomicBool>,
-    retiring: AtomicBool,
-    cleanup_finished: Arc<AtomicBool>,
+pub(crate) struct EngramControlProcess {
+    pub(crate) config: EngramConnectionConfig,
+    pub(crate) process: Arc<SharedChild>,
+    pub(crate) process_tree: Arc<EngramProcessTree>,
+    pub(crate) stderr: EngramControlStderr,
+    pub(crate) requests: mpsc::Sender<EngramProcessRequest>,
+    pub(crate) worker_finished: Arc<AtomicBool>,
+    pub(crate) retiring: AtomicBool,
+    pub(crate) cleanup_finished: Arc<AtomicBool>,
     /// Why the worker could not confirm its cleanup, once it has given up:
     /// the termination or reap error, or a group still present after the
     /// reap. A successor's refusal names it.
-    cleanup_failure: Arc<Mutex<Option<String>>>,
+    pub(crate) cleanup_failure: Arc<Mutex<Option<String>>>,
 }
 
 impl EngramControlProcess {
@@ -90,7 +92,7 @@ impl EngramControlProcess {
             .with_control_stderr(&self.stderr)
     }
 
-    fn request_termination(&self) -> Result<()> {
+    pub(crate) fn request_termination(&self) -> Result<()> {
         self.retiring.store(true, Ordering::Release);
         let (reply, _) = mpsc::channel();
         let _ = self.requests.send(EngramProcessRequest {
@@ -101,7 +103,7 @@ impl EngramControlProcess {
         self.process_tree.terminate(&self.process)
     }
 
-    fn terminate(&self) {
+    pub(crate) fn terminate(&self) {
         let _ = self.process_tree.terminate(&self.process);
         let _ = self.process.wait();
     }
@@ -120,28 +122,28 @@ impl Drop for EngramControlProcess {
 }
 
 #[derive(Clone, Copy)]
-struct EngramControlStartupHandshake {
-    expected_line: &'static str,
-    timeout: Duration,
+pub(crate) struct EngramControlStartupHandshake {
+    pub(crate) expected_line: &'static str,
+    pub(crate) timeout: Duration,
 }
 
-struct ProcessEngramControlTransport {
-    host_workdir: PathBuf,
+pub(crate) struct ProcessEngramControlTransport {
+    pub(crate) host_workdir: PathBuf,
     // An occupied None reserves this session's cold start. Other sessions
     // remain usable, and no caller spawns a losing, unregistered child.
-    processes: Mutex<HashMap<String, Option<Arc<EngramControlProcess>>>>,
+    pub(crate) processes: Mutex<HashMap<String, Option<Arc<EngramControlProcess>>>>,
     // How many children each session has had: a spawn or respawn starts a
     // new connection, whose capabilities are read afresh
     // (`connection_generation`, src/engram_capabilities.rs).
-    generations: Mutex<HashMap<String, u64>>,
-    startup_handshake: Option<EngramControlStartupHandshake>,
-    idle_timeout: Duration,
+    pub(crate) generations: Mutex<HashMap<String, u64>>,
+    pub(crate) startup_handshake: Option<EngramControlStartupHandshake>,
+    pub(crate) idle_timeout: Duration,
     #[cfg(test)]
-    start_gate: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
+    pub(crate) start_gate: Mutex<Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>>,
 }
 
 impl ProcessEngramControlTransport {
-    fn new(host_workdir: PathBuf) -> Self {
+    pub(crate) fn new(host_workdir: PathBuf) -> Self {
         Self {
             host_workdir,
             processes: Mutex::new(HashMap::new()),
@@ -156,7 +158,7 @@ impl ProcessEngramControlTransport {
 
 impl ProcessEngramControlTransport {
     #[cfg(test)]
-    fn with_startup_handshake(
+    pub(crate) fn with_startup_handshake(
         host_workdir: PathBuf,
         expected_line: &'static str,
         timeout: Duration,
@@ -175,7 +177,7 @@ impl ProcessEngramControlTransport {
     }
 
     #[cfg(test)]
-    fn with_startup_handshake_and_idle_timeout(
+    pub(crate) fn with_startup_handshake_and_idle_timeout(
         host_workdir: PathBuf,
         expected_line: &'static str,
         startup_timeout: Duration,
@@ -195,7 +197,7 @@ impl ProcessEngramControlTransport {
     }
 
     #[cfg(test)]
-    fn process_for(
+    pub(crate) fn process_for(
         &self,
         connection: &EngramConnectionConfig,
     ) -> std::result::Result<Arc<EngramControlProcess>, EngramTransportError> {
@@ -205,7 +207,7 @@ impl ProcessEngramControlTransport {
         )
     }
 
-    fn process_for_until(
+    pub(crate) fn process_for_until(
         &self,
         connection: &EngramConnectionConfig,
         deadline: std::time::Instant,
@@ -705,7 +707,12 @@ fn spawn_engram_control_process(
     }
 
     if let Some(handshake) = startup_handshake {
-        let startup_result = match receive_engram_call(&startup_rx, std::time::Instant::now(), handshake.timeout, "control startup handshake") {
+        let startup_result = match receive_engram_call(
+            &startup_rx,
+            std::time::Instant::now(),
+            handshake.timeout,
+            "control startup handshake",
+        ) {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => Err(EngramTransportError::transport(format!(
                 "Engram control startup handshake exceeded {} ms",
@@ -793,7 +800,7 @@ fn read_engram_control_startup_handshake(
 }
 
 #[cfg(test)]
-fn exchange_engram_control_frame(
+pub(crate) fn exchange_engram_control_frame(
     stdin: &mut impl Write,
     stdout: &mut impl BufRead,
     request: &[u8],
@@ -801,7 +808,7 @@ fn exchange_engram_control_frame(
     exchange_engram_control_frame_with_limit(stdin, stdout, request, ENGRAM_CONTROL_MAX_FRAME_BYTES)
 }
 
-fn exchange_engram_control_frame_with_limit(
+pub(crate) fn exchange_engram_control_frame_with_limit(
     stdin: &mut impl Write,
     stdout: &mut impl BufRead,
     request: &[u8],
@@ -851,8 +858,6 @@ fn exchange_engram_control_frame_with_limit(
             }
             Ok(result)
         }
-        EngramControlResponse::Error { error } => {
-            Err(error.into_transport_error())
-        }
+        EngramControlResponse::Error { error } => Err(error.into_transport_error()),
     }
 }

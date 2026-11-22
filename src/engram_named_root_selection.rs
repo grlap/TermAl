@@ -3,28 +3,28 @@
 // Restore keeps its existing work-binding rule and restores no selection.
 
 #[derive(Clone)]
-struct EngramPendingNamingSelection {
-    store: EngramAuthorityStoreKey,
-    connection: EngramConnectionConfig,
-    previous: Option<EngramControlWorkBinding>,
-    previous_root: Option<EngramNamedRootState>,
-    binding: EngramControlWorkBinding,
-    root: EngramNamedRootState,
-    named_in_generation: u64,
-    named_turn_ref: Option<String>,
-    predecessors: Vec<EngramNamingPredecessor>,
-    applied_in_generation: Option<u64>,
+pub(crate) struct EngramPendingNamingSelection {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) previous: Option<EngramControlWorkBinding>,
+    pub(crate) previous_root: Option<EngramNamedRootState>,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) root: EngramNamedRootState,
+    pub(crate) named_in_generation: u64,
+    pub(crate) named_turn_ref: Option<String>,
+    pub(crate) predecessors: Vec<EngramNamingPredecessor>,
+    pub(crate) applied_in_generation: Option<u64>,
 }
 
 // A fixed acknowledgement cut, never a generation-based enrollment rule.
 // The scope is retained only for live adopted reporting, not new measurement.
 #[derive(Clone)]
-struct EngramNamingPredecessor {
-    turn_ref: String,
-    scope: Option<EngramRuntimeClosingScope>,
-    adoptable: bool,
-    capture_durable: bool,
-    terminal_no_report: Option<String>,
+pub(crate) struct EngramNamingPredecessor {
+    pub(crate) turn_ref: String,
+    pub(crate) scope: Option<EngramRuntimeClosingScope>,
+    pub(crate) adoptable: bool,
+    pub(crate) capture_durable: bool,
+    pub(crate) terminal_no_report: Option<String>,
 }
 
 fn naming_report_has_scope(
@@ -280,7 +280,7 @@ impl AppState {
     }
 }
 
-fn apply_engram_named_root_selection_locked(
+pub(crate) fn apply_engram_named_root_selection_locked(
     inner: &mut StateInner, index: usize, generation: u64, adopted: bool,
 ) {
     settle_engram_named_predecessor_locked(inner, index, None);
@@ -328,7 +328,7 @@ fn apply_engram_named_root_selection_locked(
         .applied_in_generation = Some(generation);
 }
 
-fn finish_engram_named_root_selection_locked(inner: &mut StateInner, index: usize) {
+pub(crate) fn finish_engram_named_root_selection_locked(inner: &mut StateInner, index: usize) {
     let record = &inner.sessions[index];
     if record
         .engram
@@ -345,7 +345,7 @@ fn finish_engram_named_root_selection_locked(inner: &mut StateInner, index: usiz
 
 // Successful capture waits for exact report readback. A terminal no-report
 // outcome instead releases the hold with a diagnostic, never with credit.
-fn engram_turn_capture_pending(record: &SessionRecord, turn: &str) -> bool {
+pub(crate) fn engram_turn_capture_pending(record: &SessionRecord, turn: &str) -> bool {
     if record.engram.unadmitted_active_turn.as_ref()
         .is_some_and(|trace| trace.host_turn_ref == turn) { return true; }
     if let Some(job) = record.engram.unadmitted_closing_jobs.iter()
@@ -375,7 +375,7 @@ fn engram_named_member_no_report(
     Some("closing capture ended without a retained report or job")
 }
 
-fn settle_engram_named_predecessor_locked(
+pub(crate) fn settle_engram_named_predecessor_locked(
     inner: &mut StateInner, index: usize, reason: Option<&str>,
 ) -> bool {
     let record = &inner.sessions[index];
@@ -420,7 +420,7 @@ fn note_engram_named_predecessor_without_report_locked(
     true
 }
 
-fn engram_named_selection_capture_pending(record: &SessionRecord) -> bool {
+pub(crate) fn engram_named_selection_capture_pending(record: &SessionRecord) -> bool {
     record.engram.pending_naming_selection.as_ref().is_some_and(|selection|
         selection.applied_in_generation.is_none()
             && selection.predecessors.iter().any(|member|
@@ -430,7 +430,7 @@ fn engram_named_selection_capture_pending(record: &SessionRecord) -> bool {
                     && engram_named_member_no_report(record, member).is_none()))
 }
 
-const ENGRAM_ADOPTED_PREDECESSOR_REASON: &str =
+pub(crate) const ENGRAM_ADOPTED_PREDECESSOR_REASON: &str =
     "a successor adopted turn opened before the predecessor capture settled";
 
 fn mark_engram_adopted_naming_predecessor_locked(inner: &mut StateInner, index: usize) {

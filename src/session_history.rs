@@ -1,6 +1,8 @@
 // A history page combines a resident tail with a durable prefix. Pin the
 // SQLite view at the resident capture, so rollback cannot mix two transcripts.
 
+use super::*;
+
 const SESSION_HISTORY_CAPTURE_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_HISTORY_WARNING_AFTER: Duration = Duration::from_secs(10);
 const SESSION_HISTORY_RETRY_DELAY: Duration = Duration::from_millis(25);
@@ -29,21 +31,25 @@ fn observe_history_capture_budget(
 }
 
 #[derive(Clone, Copy)]
-struct SessionHistorySelector<'a> {
-    before: Option<&'a str>,
-    after: Option<&'a str>,
-    around: Option<usize>,
-    start: Option<usize>,
-    from_start: bool,
-    limit: usize,
+pub(crate) struct SessionHistorySelector<'a> {
+    pub(crate) before: Option<&'a str>,
+    pub(crate) after: Option<&'a str>,
+    pub(crate) around: Option<usize>,
+    pub(crate) start: Option<usize>,
+    pub(crate) from_start: bool,
+    pub(crate) limit: usize,
 }
 
 impl SessionHistorySelector<'_> {
-    fn cursor(&self) -> Option<&str> {
+    pub(crate) fn cursor(&self) -> Option<&str> {
         self.before.or(self.after)
     }
 
-    fn range(&self, cursor: Option<usize>, count: usize) -> Result<(usize, usize), ApiError> {
+    pub(crate) fn range(
+        &self,
+        cursor: Option<usize>,
+        count: usize,
+    ) -> Result<(usize, usize), ApiError> {
         let range = if let Some(start) = self.start {
             if start >= count && count > 0 {
                 return Err(ApiError::conflict(
@@ -81,16 +87,16 @@ impl SessionHistorySelector<'_> {
     }
 }
 
-struct LocalSessionHistorySnapshot {
-    messages: MessageSequence,
-    start_index: usize,
+pub(crate) struct LocalSessionHistorySnapshot {
+    pub(crate) messages: MessageSequence,
+    pub(crate) start_index: usize,
     cursor_position: Option<usize>,
-    message_count: usize,
-    revision: u64,
-    session_mutation_stamp: u64,
-    body_seq: Option<u64>,
-    body_seq_epoch: Option<String>,
-    persistence: Option<rusqlite::Connection>,
+    pub(crate) message_count: usize,
+    pub(crate) revision: u64,
+    pub(crate) session_mutation_stamp: u64,
+    pub(crate) body_seq: Option<u64>,
+    pub(crate) body_seq_epoch: Option<String>,
+    pub(crate) persistence: Option<rusqlite::Connection>,
 }
 
 fn missing_history_cursor() -> ApiError {
@@ -98,7 +104,7 @@ fn missing_history_cursor() -> ApiError {
 }
 
 impl AppState {
-    fn capture_local_session_history(
+    pub(crate) fn capture_local_session_history(
         &self,
         session_id: &str,
         selector: SessionHistorySelector<'_>,
@@ -115,16 +121,19 @@ impl AppState {
                     elapsed.as_millis()
                 );
             },
-            || open_sqlite_history_snapshot_with_busy_timeout(
-                self.persistence_path.as_ref(), Duration::ZERO,
-            ),
+            || {
+                open_sqlite_history_snapshot_with_busy_timeout(
+                    self.persistence_path.as_ref(),
+                    Duration::ZERO,
+                )
+            },
         )
     }
 
     // Keep the clock, diagnostic and off-lock backoff in this capture owner.
     // The opening boundary permits a prepared read connection in contention
     // tests; production always opens the existing history snapshot helper.
-    fn capture_local_session_history_with_wait(
+    pub(crate) fn capture_local_session_history_with_wait(
         &self,
         session_id: &str,
         selector: SessionHistorySelector<'_>,
@@ -147,7 +156,11 @@ impl AppState {
                 } else {
                     SESSION_HISTORY_WARNING_AFTER.saturating_sub(spent)
                 };
-                pause(SESSION_HISTORY_RETRY_DELAY.min(remaining).min(until_warning));
+                pause(
+                    SESSION_HISTORY_RETRY_DELAY
+                        .min(remaining)
+                        .min(until_warning),
+                );
                 wait_pending = false;
                 continue;
             }
@@ -189,7 +202,8 @@ impl AppState {
                     Ok(connection) => persistence = Some(connection),
                     Err(err) => {
                         let contended = err.chain().any(|cause| {
-                            cause.downcast_ref::<rusqlite::Error>()
+                            cause
+                                .downcast_ref::<rusqlite::Error>()
                                 .is_some_and(history_snapshot_is_busy)
                         });
                         let detail = format!("failed to open session history snapshot: {err:#}");
@@ -247,7 +261,10 @@ impl AppState {
             // Account for pinning and resident capture as well as retries.
             // Diagnostics never perform I/O while holding StateInner.
             observe_history_capture_budget(
-                elapsed(), &mut warned, &mut warn, "history capture completed after its budget",
+                elapsed(),
+                &mut warned,
+                &mut warn,
+                "history capture completed after its budget",
             )?;
             return Ok(snapshot);
         }
@@ -255,7 +272,7 @@ impl AppState {
 }
 
 impl LocalSessionHistorySnapshot {
-    fn page(
+    pub(crate) fn page(
         self,
         session_id: &str,
         selector: SessionHistorySelector<'_>,
@@ -288,7 +305,12 @@ impl LocalSessionHistorySnapshot {
         let resident_end = end_index
             .saturating_sub(self.start_index)
             .min(self.messages.len());
-        for (offset, message) in self.messages.window(resident_start..resident_end).into_iter().enumerate() {
+        for (offset, message) in self
+            .messages
+            .window(resident_start..resident_end)
+            .into_iter()
+            .enumerate()
+        {
             let global_index = self.start_index + resident_start + offset;
             page[global_index - start_index] = Some(message);
         }

@@ -28,72 +28,72 @@ const MAX_ACCEPTANCE_ASSESSMENT_PAGES: usize = 96;
 
 /// A row field longer than this is not rendered: the summary is marked
 /// incomplete instead, so that no row is ever shown cut.
-const MAX_ACCEPTANCE_ASSESSMENT_FIELD_CHARS: usize = 256;
+pub(crate) const MAX_ACCEPTANCE_ASSESSMENT_FIELD_CHARS: usize = 256;
 
 /// Where the independent brief's assessment section goes: before the evidence
 /// list, after the criterion evidence index.
-const ACCEPTANCE_ASSESSMENT_ANCHOR: &str = "Evidence recorded on the task";
+pub(crate) const ACCEPTANCE_ASSESSMENT_ANCHOR: &str = "Evidence recorded on the task";
 
 /// Where the same-session brief's assessment section goes.
 const ACCEPTANCE_SAME_SESSION_ASSESSMENT_ANCHOR: &str = "Evidence not shown in this brief:";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceObligationGroup {
-    status: String,
+pub(crate) struct AcceptanceObligationGroup {
+    pub(crate) status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
+    pub(crate) reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    recorded: Option<String>,
-    count: u64,
+    pub(crate) recorded: Option<String>,
+    pub(crate) count: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceObligationRow {
-    status: String,
+pub(crate) struct AcceptanceObligationRow {
+    pub(crate) status: String,
     /// The mismatch or left-out reason the tracker gave the row.
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-    rule: String,
+    pub(crate) reason: Option<String>,
+    pub(crate) rule: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rule_version: Option<u64>,
+    pub(crate) rule_version: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    criterion: Option<u64>,
+    pub(crate) criterion: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    check_kind: Option<String>,
+    pub(crate) check_kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    recorded: Option<String>,
+    pub(crate) recorded: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    trigger_position: Option<u64>,
-    pinned: bool,
+    pub(crate) trigger_position: Option<u64>,
+    pub(crate) pinned: bool,
 }
 
 /// One verification record's obligation assessment as the evaluator gets it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceObligationAssessment {
-    locator: String,
+pub(crate) struct AcceptanceObligationAssessment {
+    pub(crate) locator: String,
     /// The tracker's row count, when a page was read.
-    total: Option<u64>,
+    pub(crate) total: Option<u64>,
     /// The rows read: every row of the old shape, or the must_show rows of
     /// the summary view.
-    rows_read: u64,
+    pub(crate) rows_read: u64,
     /// The summary view's must_show row count; absent for the old shape.
     #[serde(skip_serializing_if = "Option::is_none")]
-    must_show_total: Option<u64>,
+    pub(crate) must_show_total: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    record_position: Option<u64>,
+    pub(crate) record_position: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    cut_position: Option<u64>,
+    pub(crate) cut_position: Option<u64>,
     /// Every row was read, at one cut.
-    complete: bool,
+    pub(crate) complete: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    incomplete_reason: Option<String>,
+    pub(crate) incomplete_reason: Option<String>,
     /// The tracker's own continuation where reading stopped, verbatim; it
     /// binds the captured cut.
     #[serde(skip_serializing_if = "Option::is_none")]
-    resume: Option<String>,
+    pub(crate) resume: Option<String>,
     /// When `resume` is the cursor that fetched the last page read, which
     /// page and rows resuming reads again.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -105,14 +105,14 @@ struct AcceptanceObligationAssessment {
     history_continuation: Option<String>,
     /// The cursorless command for the first page. It reads the record's
     /// assessment as it stands now, not at the captured cut.
-    full_history: String,
+    pub(crate) full_history: String,
     /// One count per (status, reason, recorded) group of the rows read.
-    groups: Vec<AcceptanceObligationGroup>,
+    pub(crate) groups: Vec<AcceptanceObligationGroup>,
     /// In full: every row read that another record did not close (old shape),
     /// or every must_show row read (summary view).
-    rows: Vec<AcceptanceObligationRow>,
+    pub(crate) rows: Vec<AcceptanceObligationRow>,
     /// The evaluator's brief carries this summary.
-    carried: bool,
+    pub(crate) carried: bool,
 }
 
 /// A page that resuming at the cursor which fetched it reads again.
@@ -242,7 +242,7 @@ fn acceptance_assessment_read_failure(error: &EngramTransportError) -> &'static 
 /// The shape a tracker serves an assessment page in. The history view keeps
 /// the old shape; the summary view carries counts and the must_show rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AcceptanceAssessmentShape {
+pub(crate) enum AcceptanceAssessmentShape {
     Rows,
     Summary,
 }
@@ -275,11 +275,11 @@ fn acceptance_obligation_count(entry: &Value) -> Result<AcceptanceObligationGrou
 }
 
 /// Accumulates one record's assessment pages at one cut.
-struct AcceptanceAssessmentPages {
-    assessment: AcceptanceObligationAssessment,
-    counts: BTreeMap<(u8, String, Option<String>, Option<String>), u64>,
+pub(crate) struct AcceptanceAssessmentPages {
+    pub(crate) assessment: AcceptanceObligationAssessment,
+    pub(crate) counts: BTreeMap<(u8, String, Option<String>, Option<String>), u64>,
     /// The shape of the first page; one record's read never mixes shapes.
-    shape: Option<AcceptanceAssessmentShape>,
+    pub(crate) shape: Option<AcceptanceAssessmentShape>,
     /// The summary view's counts, the same on every page of one cut.
     summary_groups: Option<Vec<AcceptanceObligationGroup>>,
     /// Pages accepted so far.
@@ -289,7 +289,7 @@ struct AcceptanceAssessmentPages {
 }
 
 impl AcceptanceAssessmentPages {
-    fn new(locator: &str, work_ref: &str) -> Self {
+    pub(crate) fn new(locator: &str, work_ref: &str) -> Self {
         Self {
             assessment: AcceptanceObligationAssessment {
                 locator: locator.to_owned(),
@@ -318,7 +318,7 @@ impl AcceptanceAssessmentPages {
 
     /// Adds one page in either shape; `Err` names why the page cannot extend
     /// the rows read. A page in another shape than the first is malformed.
-    fn add(&mut self, page: &Value) -> Result<(), &'static str> {
+    pub(crate) fn add(&mut self, page: &Value) -> Result<(), &'static str> {
         let shape = acceptance_assessment_shape(page)?;
         if *self.shape.get_or_insert(shape) != shape {
             return Err("malformed_page");
@@ -354,7 +354,7 @@ impl AcceptanceAssessmentPages {
     /// Records the page just accepted, and the first page's same-cut
     /// continuation for the full history: the old shape's own continuation,
     /// or the summary view's `history` command.
-    fn accepted(&mut self, page: &Value, earlier: u64, history_key: &str) {
+    pub(crate) fn accepted(&mut self, page: &Value, earlier: u64, history_key: &str) {
         self.pages_read += 1;
         self.last_page = Some(AcceptanceAssessmentReread {
             page: self.pages_read,
@@ -511,7 +511,7 @@ impl AcceptanceAssessmentPages {
         assessment
     }
 
-    fn finish(
+    pub(crate) fn finish(
         mut self,
         stopped: Option<&'static str>,
         resume: Option<String>,
@@ -597,7 +597,7 @@ fn acceptance_assessment_first_page(
 /// within `deadline`. A record whose assessment cannot be read whole gets an
 /// incomplete summary that says why and where to resume; a read failure here
 /// never fails the request. Records without an assessment get none.
-fn read_acceptance_obligation_assessments(
+pub(crate) fn read_acceptance_obligation_assessments(
     task: &mut AcceptanceEvaluationTask,
     connection: &EngramConnectionConfig,
     show_args: &[String],
@@ -837,7 +837,7 @@ fn acceptance_obligation_history_text(assessment: &AcceptanceObligationAssessmen
 }
 
 /// One record's summary as the brief carries it, whole.
-fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAssessment) -> String {
+pub(crate) fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAssessment) -> String {
     let positions = match (assessment.record_position, assessment.cut_position) {
         (Some(record), Some(cut)) => format!(" (record position {record}, cut position {cut})"),
         (Some(record), None) => format!(" (record position {record})"),
@@ -899,7 +899,7 @@ fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAsse
 /// The line that names a summary the brief has no room for. It keeps what
 /// the summary would have said of the read itself: whether it was whole, how
 /// many rows were read, why it stopped and where to resume.
-fn acceptance_obligation_not_carried_line(assessment: &AcceptanceObligationAssessment) -> String {
+pub(crate) fn acceptance_obligation_not_carried_line(assessment: &AcceptanceObligationAssessment) -> String {
     let state = if assessment.complete {
         format!(
             "{}, read whole, {} to be listed in full",
@@ -973,7 +973,7 @@ fn acceptance_obligation_section(
 
 /// `prompt` with the assessment section placed before `anchor`, using only the
 /// room left under `max_bytes`.
-fn acceptance_prompt_with_obligations(
+pub(crate) fn acceptance_prompt_with_obligations(
     prompt: String,
     anchor: &str,
     assessments: &mut [AcceptanceObligationAssessment],
@@ -997,7 +997,7 @@ fn acceptance_prompt_with_obligations(
 
 /// Where the host's `anchor` line starts: the last line that starts with it,
 /// outside verbatim proof blocks, which may contain the same phrase.
-fn acceptance_brief_anchor_offset(prompt: &str, anchor: &str) -> Option<usize> {
+pub(crate) fn acceptance_brief_anchor_offset(prompt: &str, anchor: &str) -> Option<usize> {
     let (mut offset, mut found, mut fence) = (0, None, None);
     for line in prompt.split_inclusive('\n') {
         let text = line.trim_end_matches('\n');
@@ -1119,7 +1119,7 @@ fn acceptance_prompt_naming_obligations(
 /// evidence index. So only the omission detail and the window entries of
 /// non-holders the requester did not cite give way; otherwise `base` stays as
 /// it is and the requester notice alone names the record.
-fn acceptance_independent_brief_with_obligations(
+pub(crate) fn acceptance_independent_brief_with_obligations(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     command_form: &str,
@@ -1196,7 +1196,7 @@ fn acceptance_independent_brief_with_obligations(
 /// detail, keeping its index detail, and kept only when the earlier checks it
 /// lists and its carried failure render exactly as before, so that only the
 /// omission wording gives way; otherwise the notice alone names it.
-fn acceptance_same_session_brief_with_obligations(
+pub(crate) fn acceptance_same_session_brief_with_obligations(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     base: (String, AcceptanceBriefCuts, AcceptanceOmissionDetail, AcceptanceOmissionDetail),
@@ -1258,7 +1258,7 @@ fn acceptance_same_session_brief_with_obligations(
 
 /// One sentence for the requester about assessments the evaluator does not
 /// get whole, or none.
-fn acceptance_obligation_assessment_notice(
+pub(crate) fn acceptance_obligation_assessment_notice(
     assessments: &[AcceptanceObligationAssessment],
 ) -> Option<String> {
     let parts = assessments

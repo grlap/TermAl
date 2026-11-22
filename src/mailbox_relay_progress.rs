@@ -2,13 +2,15 @@
 // in mailbox_current_status.rs and the relay routes/RPC. Owns no queue mutation,
 // receipt, acknowledgement, retry, provider dispatch or custody authority.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxRelayProgress {
+pub(crate) struct MailboxRelayProgress {
     home_observed_at: String,
     // The home's delivered bit records target queue admission, not a turn.
-    home_queue_admission_confirmed: Option<bool>,
-    target: MailboxRelayTargetProgress,
+    pub(crate) home_queue_admission_confirmed: Option<bool>,
+    pub(crate) target: MailboxRelayTargetProgress,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -17,7 +19,7 @@ struct MailboxRelayProgress {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-enum MailboxRelayTargetProgress {
+pub(crate) enum MailboxRelayTargetProgress {
     Observed {
         observed_at: String,
         // None means this target has no retained notification observation.
@@ -36,7 +38,7 @@ enum MailboxRelayTargetProgress {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum MailboxRelayTargetHold {
+pub(crate) enum MailboxRelayTargetHold {
     ActiveTurn,
     Approval,
     Stopping,
@@ -62,7 +64,10 @@ fn mailbox_relay_target_unavailable(reason: &str) -> MailboxRelayTargetProgress 
 }
 
 impl MailboxStore {
-    fn attach_mailbox_relay_home_progress(&self, message: &mut MailboxMessage) -> Result<()> {
+    pub(crate) fn attach_mailbox_relay_home_progress(
+        &self,
+        message: &mut MailboxMessage,
+    ) -> Result<()> {
         let connection = self.connection()?;
         let admitted = connection.query_row(
             "SELECT delivered FROM mailbox_relay_wakes WHERE message_id=?1 AND mailbox_id=?2 AND through_sequence=?3",
@@ -87,7 +92,7 @@ impl MailboxStore {
 }
 
 impl AppState {
-    fn observe_native_mailbox_relay_target(
+    pub(crate) fn observe_native_mailbox_relay_target(
         &self,
         actor: &MailboxRelayPrincipal,
         conversation: &MailboxRelayConversation,
@@ -231,7 +236,7 @@ impl AppState {
         }
     }
 
-    async fn attach_native_mailbox_relay_progress(
+    pub(crate) async fn attach_native_mailbox_relay_progress(
         &self,
         actor: &MailboxRelayPrincipal,
         home: &MailboxRelayHome,

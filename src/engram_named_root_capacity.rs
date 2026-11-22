@@ -13,22 +13,24 @@
 // (engram_root_authority.rs).
 // New module.
 
+use super::*;
+
 /// How long a lapsed claim keeps its root while its naming session is
 /// present: workers routinely let a claim lapse and recover it.
-const ENGRAM_ROOT_CLAIM_LAPSE_GRACE: Duration = Duration::from_secs(2 * 60 * 60);
+pub(crate) const ENGRAM_ROOT_CLAIM_LAPSE_GRACE: Duration = Duration::from_secs(2 * 60 * 60);
 
 /// How long a release waits for a running reclamation pass to finish before
 /// answering that nothing was applied.
-const ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT: Duration =
+pub(crate) const ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT: Duration =
     Duration::from_secs(ENGRAM_NAMED_ROOT_DISPOSITION_BUDGET.as_secs() + 10);
 
 /// The authority budget a release spends under the single reclamation flight.
-const ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET: Duration =
+pub(crate) const ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET: Duration =
     Duration::from_secs(ENGRAM_ROOT_RECLAMATION_BUDGET.as_secs() + 10);
 
 /// Engram's refusal of a named-root read whose claim is no longer its run's
 /// claim: a newer claim replaced it, so the root's claim is closed.
-const ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT: &str = "the claim does not belong to the run";
+pub(crate) const ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT: &str = "the claim does not belong to the run";
 
 /// The typed reason newer Engram builds give that same refusal.
 const ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT_REASON: &str = "claim_not_current_for_run";
@@ -37,7 +39,7 @@ const ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT_REASON: &str = "claim_not_current_for_
 const ENGRAM_NAMED_ROOT_AUTOMATIC_ROUTE: &str = "automatic";
 
 /// The audit route of a naming session's release of its own root.
-const ENGRAM_NAMED_ROOT_OWN_ROUTE: &str = "own";
+pub(crate) const ENGRAM_NAMED_ROOT_OWN_ROUTE: &str = "own";
 
 /// Why `proof` shows `root`'s claim closed, if it does: released or
 /// completed; or, only while no session holds a binding for the root's claim
@@ -46,7 +48,7 @@ const ENGRAM_NAMED_ROOT_OWN_ROUTE: &str = "own";
 /// own lapsed claim gets a new fence under the same claim, and a same-
 /// generation re-name keeps the root's recorded fence (it is recorded, not
 /// matched). An active claim that has not lapsed is live and keeps its root.
-fn engram_root_claim_retirement_reason(
+pub(crate) fn engram_root_claim_retirement_reason(
     root: &EngramWorkSourceRoot,
     proof: &EngramNamedRootReadResponse,
     now: chrono::DateTime<chrono::Utc>,
@@ -92,7 +94,7 @@ fn engram_root_claim_retirement_reason(
 /// longer its run's claim retires as displaced by that run's newer claim.
 /// Left alone while another retained root names the same claim, or while the
 /// journal needs reconciliation (a pending naming event, an unsettled read).
-fn engram_named_root_retire_claim_journal_locked(
+pub(crate) fn engram_named_root_retire_claim_journal_locked(
     inner: &mut StateInner,
     root: &EngramWorkSourceRoot,
     retirement: EngramRootRetirement,
@@ -117,14 +119,14 @@ fn engram_named_root_retire_claim_journal_locked(
 
 /// Whether a refused named-root read says the root's claim is no longer its
 /// run's claim: by its typed reason, or by the message older builds send.
-fn engram_named_root_read_refusal_closes_claim(message: &str) -> bool {
+pub(crate) fn engram_named_root_read_refusal_closes_claim(message: &str) -> bool {
     message.contains(ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT_REASON)
         || message.contains(ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT)
 }
 
 /// Whether `session_id` is still a session of this host, or one kept aside
 /// at restore that may load again.
-fn engram_named_root_session_present(inner: &StateInner, session_id: &str) -> bool {
+pub(crate) fn engram_named_root_session_present(inner: &StateInner, session_id: &str) -> bool {
     inner.find_session_index(session_id).is_some()
         || inner.quarantined_persisted_session_ids.contains(session_id)
 }
@@ -138,9 +140,15 @@ fn engram_named_root_disposition_blocked(inner: &StateInner, root: &EngramWorkSo
     // and activity cannot be read meanwhile: the operator route refuses it
     // for the same reason.
     engram_named_root_claim_holder(inner, root).is_some()
-        || inner.quarantined_persisted_session_ids.contains(&root.named_by_session)
-        || engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-            .is_some_and(|journal| journal.pending.is_some())
+        || inner
+            .quarantined_persisted_session_ids
+            .contains(&root.named_by_session)
+        || engram_root_journal(
+            &inner.engram_named_root_journal,
+            &root.store,
+            &root.claim_id,
+        )
+        .is_some_and(|journal| journal.pending.is_some())
 }
 
 /// Why a retained root may be disposed of automatically, if it may: a
@@ -149,7 +157,7 @@ fn engram_named_root_disposition_blocked(inner: &StateInner, root: &EngramWorkSo
 /// session holding its claim; or any root whose claim Engram refused as no
 /// longer its run's. Never a root a session holds a binding for, nor one with
 /// a pending naming event.
-fn engram_named_root_automatic_disposition(
+pub(crate) fn engram_named_root_automatic_disposition(
     inner: &StateInner,
     root: &EngramWorkSourceRoot,
     path_exists: bool,
@@ -161,9 +169,9 @@ fn engram_named_root_automatic_disposition(
     }
     if claim_refused {
         return Some(match engram_named_root_run_retired(inner, root) {
-            Some(EngramNamedRootReadRefusal::RunUnknown | EngramNamedRootReadRefusal::OtherProject) => {
-                "Engram definitively refused its run's canonical read"
-            }
+            Some(
+                EngramNamedRootReadRefusal::RunUnknown | EngramNamedRootReadRefusal::OtherProject,
+            ) => "Engram definitively refused its run's canonical read",
             _ => "Engram no longer counts its claim as its run's claim",
         });
     }
@@ -184,7 +192,7 @@ fn engram_named_root_automatic_disposition(
 
 /// The status view's account of what the disposition pass does with `root`,
 /// which has no canonical run association. Lock-only.
-fn engram_named_root_disposition_text(
+pub(crate) fn engram_named_root_disposition_text(
     inner: &StateInner,
     root: &EngramWorkSourceRoot,
     now: std::time::Instant,
@@ -245,7 +253,10 @@ fn engram_named_root_release_pending(
 /// a legacy or claim-refused root it has not examined lately. Test oracle for
 /// the snapshot scheduler; production disposition still revalidates its work.
 #[cfg(test)]
-fn engram_named_root_disposition_due_locked(inner: &StateInner, now: std::time::Instant) -> bool {
+pub(crate) fn engram_named_root_disposition_due_locked(
+    inner: &StateInner,
+    now: std::time::Instant,
+) -> bool {
     let schedule = &inner.engram_root_reclamation;
     inner
         .engram_named_root_release_audit
@@ -266,14 +277,17 @@ fn engram_named_root_disposition_due_locked(inner: &StateInner, now: std::time::
 // without a process.
 #[cfg(test)]
 thread_local! {
-    static TEST_ENGRAM_NAMED_ROOT_ITEM_LIFECYCLE: std::cell::RefCell<
+    pub(crate) static TEST_ENGRAM_NAMED_ROOT_ITEM_LIFECYCLE: std::cell::RefCell<
         Option<Box<dyn Fn(&EngramWorkSourceRoot) -> Option<String>>>,
     > = const { std::cell::RefCell::new(None) };
 }
 
 /// Whether a canonical read of `root`'s claim was refused as no longer its
 /// run's claim since the last restart.
-fn engram_named_root_claim_refused(inner: &StateInner, root: &EngramWorkSourceRoot) -> bool {
+pub(crate) fn engram_named_root_claim_refused(
+    inner: &StateInner,
+    root: &EngramWorkSourceRoot,
+) -> bool {
     inner
         .engram_root_reclamation
         .refused_claims
@@ -286,13 +300,17 @@ fn engram_named_root_claim_refused(inner: &StateInner, root: &EngramWorkSourceRo
 
 /// The definitive refusal that retired `root`'s own run, through the run its
 /// journal reads, when that run was retired.
-fn engram_named_root_run_retired(
+pub(crate) fn engram_named_root_run_retired(
     inner: &StateInner,
     root: &EngramWorkSourceRoot,
 ) -> Option<EngramNamedRootReadRefusal> {
-    let binding = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)?
-        .read_binding
-        .as_ref()?;
+    let binding = engram_root_journal(
+        &inner.engram_named_root_journal,
+        &root.store,
+        &root.claim_id,
+    )?
+    .read_binding
+    .as_ref()?;
     inner
         .engram_work_naming_history
         .iter()
@@ -304,13 +322,16 @@ fn engram_named_root_run_retired(
 
 /// Records that a canonical read of `claim_id` in `store` was refused as no
 /// longer its run's claim, for the disposition pass.
-fn engram_named_root_record_refused_claim_locked(
+pub(crate) fn engram_named_root_record_refused_claim_locked(
     inner: &mut StateInner,
     store: &EngramAuthorityStoreKey,
     claim_id: &str,
 ) {
     let refused = &mut inner.engram_root_reclamation.refused_claims;
-    if !refused.iter().any(|(known, claim)| known == store && claim == claim_id) {
+    if !refused
+        .iter()
+        .any(|(known, claim)| known == store && claim == claim_id)
+    {
         refused.push((store.clone(), claim_id.to_owned()));
     }
 }
@@ -319,18 +340,33 @@ fn engram_named_root_record_refused_claim_locked(
 /// route names; the MCP bridge always names its own serving session.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramNamedRootOwnReleaseRequest {
-    work: String,
-    generation: u64,
-    reason: String,
+pub(crate) struct EngramNamedRootOwnReleaseRequest {
+    pub(crate) work: String,
+    pub(crate) generation: u64,
+    pub(crate) reason: String,
 }
 
 /// Every required field of a release body that is missing or of the wrong
 /// type, in body order, so one answer names them all.
-fn engram_named_root_release_missing_fields(body: &Value) -> Vec<&'static str> {
-    const TEXT: [&str; 6] = ["projectId", "databasePath", "workId", "claimId", "root", "reason"];
+pub(crate) fn engram_named_root_release_missing_fields(body: &Value) -> Vec<&'static str> {
+    const TEXT: [&str; 6] = [
+        "projectId",
+        "databasePath",
+        "workId",
+        "claimId",
+        "root",
+        "reason",
+    ];
     let mut missing = Vec::new();
-    for field in ["projectId", "databasePath", "workId", "claimId", "generation", "root", "reason"] {
+    for field in [
+        "projectId",
+        "databasePath",
+        "workId",
+        "claimId",
+        "generation",
+        "root",
+        "reason",
+    ] {
         let value = body.get(field);
         let valid = if TEXT.contains(&field) {
             value.is_some_and(Value::is_string)
@@ -348,7 +384,7 @@ impl AppState {
     /// Takes the single reclamation flight for one release, waiting a bounded
     /// time for a running pass to finish; a pass that outlasts the wait means
     /// nothing was applied.
-    fn acquire_engram_named_root_release_flight(
+    pub(crate) fn acquire_engram_named_root_release_flight(
         &self,
     ) -> Result<EngramRootReclamationFlight, ApiError> {
         let clock = self.engram_budget_clock();
@@ -361,7 +397,10 @@ impl AppState {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
                 if inner.engram_root_reclamation.flight.is_none() {
                     inner.engram_root_reclamation.flight = Some(id.clone());
-                    return Ok(EngramRootReclamationFlight { state: self.clone(), id });
+                    return Ok(EngramRootReclamationFlight {
+                        state: self.clone(),
+                        id,
+                    });
                 }
             }
             if clock.now() >= deadline || std::time::Instant::now() >= wall_deadline {
@@ -378,28 +417,29 @@ impl AppState {
 
     /// Releases `session_id`'s own retained root of `request.work` at
     /// `request.generation`, even while that session is in a turn.
-    fn release_own_engram_named_root(
+    pub(crate) fn release_own_engram_named_root(
         &self,
         session_id: &str,
         request: EngramNamedRootOwnReleaseRequest,
     ) -> Result<EngramNamedRootReleaseResponse, ApiError> {
         let work = request.work.trim();
-        let full = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.find_session_index(session_id).is_none() {
-                return Err(ApiError::not_found("session not found"));
-            }
-            let names = |root: &EngramWorkSourceRoot| {
-                (root.work_id == work || root.short_ref == work)
-                    && root.generation == request.generation
-            };
-            // The caller's own retained root first (the same work or short
-            // reference may be retained in another store, or by another
-            // session); then any match, so a wrong caller learns whose it is;
-            // then an earlier release requested by this session. The common
-            // release path decides pending replay versus durable current state
-            // and still checks the exact selection, reason and naming owner.
-            let selection = inner
+        let full =
+            {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                if inner.find_session_index(session_id).is_none() {
+                    return Err(ApiError::not_found("session not found"));
+                }
+                let names = |root: &EngramWorkSourceRoot| {
+                    (root.work_id == work || root.short_ref == work)
+                        && root.generation == request.generation
+                };
+                // The caller's own retained root first (the same work or short
+                // reference may be retained in another store, or by another
+                // session); then any match, so a wrong caller learns whose it is;
+                // then an earlier release requested by this session. The common
+                // release path decides pending replay versus durable current state
+                // and still checks the exact selection, reason and naming owner.
+                let selection = inner
                 .engram_work_source_roots
                 .iter()
                 .find(|root| names(root) && root.named_by_session == session_id)
@@ -422,24 +462,24 @@ impl AppState {
                         request.generation
                     ))
                 })?;
-            if selection.named_by_session != session_id {
-                return Err(ApiError::conflict(format!(
-                    "only its naming session may release a root as its own; this root's naming \
+                if selection.named_by_session != session_id {
+                    return Err(ApiError::conflict(format!(
+                        "only its naming session may release a root as its own; this root's naming \
                      session is {}. Nothing was released",
-                    selection.named_by_session
-                )));
-            }
-            EngramNamedRootReleaseRequest {
-                project_id: selection.store.project_id.clone(),
-                database_path: selection.store.database_path.to_string_lossy().into_owned(),
-                work_id: selection.work_id.clone(),
-                claim_id: selection.claim_id.clone(),
-                generation: selection.generation,
-                root: selection.root.clone(),
-                reason: request.reason.clone(),
-                requested_by: Some(session_id.to_owned()),
-            }
-        };
+                        selection.named_by_session
+                    )));
+                }
+                EngramNamedRootReleaseRequest {
+                    project_id: selection.store.project_id.clone(),
+                    database_path: selection.store.database_path.to_string_lossy().into_owned(),
+                    work_id: selection.work_id.clone(),
+                    claim_id: selection.claim_id.clone(),
+                    generation: selection.generation,
+                    root: selection.root.clone(),
+                    reason: request.reason.clone(),
+                    requested_by: Some(session_id.to_owned()),
+                }
+            };
         self.release_engram_named_root_as(Some(session_id), Some(session_id), full)
     }
 
@@ -447,7 +487,10 @@ impl AppState {
     /// read off the lock through the Work host reader of the project whose
     /// established store is `root`'s; `None` whenever it cannot be read, so
     /// the root is kept.
-    fn read_engram_named_root_item_lifecycle(&self, root: &EngramWorkSourceRoot) -> Option<String> {
+    pub(crate) fn read_engram_named_root_item_lifecycle(
+        &self,
+        root: &EngramWorkSourceRoot,
+    ) -> Option<String> {
         #[cfg(test)]
         if let Some(lifecycle) = TEST_ENGRAM_NAMED_ROOT_ITEM_LIFECYCLE
             .with(|hook| hook.borrow().as_ref().map(|read| read(root)))
@@ -469,7 +512,9 @@ impl AppState {
             &self.engram_host_launch_workdir(),
         )
         .ok()?;
-        value["status"]["work"]["lifecycle"].as_str().map(str::to_owned)
+        value["status"]["work"]["lifecycle"]
+            .as_str()
+            .map(str::to_owned)
     }
 
     /// Confirms again the releases the writer has not acknowledged although
@@ -479,7 +524,7 @@ impl AppState {
     /// and keeps is left alone for a cooldown. `item_lifecycle` answers an
     /// item's tracker lifecycle when it can. `flight_started` is when the
     /// flight's pass began, which the budget runs from.
-    fn run_engram_named_root_disposition_pass(
+    pub(crate) fn run_engram_named_root_disposition_pass(
         &self,
         flight_started: std::time::Instant,
         item_lifecycle: &dyn Fn(&EngramWorkSourceRoot) -> Option<String>,
@@ -520,7 +565,8 @@ impl AppState {
                     let refused = engram_named_root_claim_refused(&inner, root);
                     let legacy = engram_named_root_association(&inner, root).is_none();
                     (refused || legacy).then(|| {
-                        let present = engram_named_root_session_present(&inner, &root.named_by_session);
+                        let present =
+                            engram_named_root_session_present(&inner, &root.named_by_session);
                         (root.clone(), refused, present)
                     })
                 })
@@ -546,8 +592,10 @@ impl AppState {
             };
             let audit = {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
-                let Some(index) =
-                    inner.engram_work_source_roots.iter().position(|current| *current == root)
+                let Some(index) = inner
+                    .engram_work_source_roots
+                    .iter()
+                    .position(|current| *current == root)
                 else {
                     continue;
                 };
@@ -657,7 +705,7 @@ impl AppState {
     }
 }
 
-async fn release_own_engram_named_root_route(
+pub(crate) async fn release_own_engram_named_root_route(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
     request: Result<Json<EngramNamedRootOwnReleaseRequest>, JsonRejection>,
@@ -665,7 +713,6 @@ async fn release_own_engram_named_root_route(
     let Json(request) = request
         .map_err(|rejection| api_json_rejection("own named-root release request", rejection))?;
     let response =
-        run_blocking_api(move || state.release_own_engram_named_root(&session_id, request))
-            .await?;
+        run_blocking_api(move || state.release_own_engram_named_root(&session_id, request)).await?;
     Ok(Json(response))
 }

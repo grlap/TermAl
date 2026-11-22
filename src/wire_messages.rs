@@ -23,10 +23,12 @@
 // `submit_mcp_elicitation`, `submit_codex_app_request`), but those
 // routes are thin; all the vocabulary lives here.
 
+use super::*;
+
 /// Enumerates parallel agent states.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum ParallelAgentStatus {
+pub(crate) enum ParallelAgentStatus {
     Initializing,
     Running,
     Completed,
@@ -36,35 +38,35 @@ enum ParallelAgentStatus {
 /// Represents user input question option.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UserInputQuestionOption {
+pub(crate) struct UserInputQuestionOption {
     /// Opaque protocol value when it differs from the displayed label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    id: Option<String>,
-    description: String,
-    label: String,
+    pub(crate) id: Option<String>,
+    pub(crate) description: String,
+    pub(crate) label: String,
 }
 
 /// Represents user input question.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UserInputQuestion {
-    header: String,
-    id: String,
+pub(crate) struct UserInputQuestion {
+    pub(crate) header: String,
+    pub(crate) id: String,
     #[serde(default, rename = "isOther")]
-    is_other: bool,
+    pub(crate) is_other: bool,
     #[serde(default, rename = "isSecret")]
-    is_secret: bool,
+    pub(crate) is_secret: bool,
     #[serde(default, rename = "multiSelect")]
-    multi_select: bool,
+    pub(crate) multi_select: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    options: Option<Vec<UserInputQuestionOption>>,
-    question: String,
+    pub(crate) options: Option<Vec<UserInputQuestionOption>>,
+    pub(crate) question: String,
 }
 
 /// Enumerates MCP elicitation actions.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum McpElicitationAction {
+pub(crate) enum McpElicitationAction {
     Accept,
     Decline,
     Cancel,
@@ -73,7 +75,7 @@ enum McpElicitationAction {
 /// Enumerates MCP elicitation request modes.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "mode")]
-enum McpElicitationRequestMode {
+pub(crate) enum McpElicitationRequestMode {
     Form {
         #[serde(default, rename = "_meta", skip_serializing_if = "Option::is_none")]
         meta: Option<Value>,
@@ -94,20 +96,20 @@ enum McpElicitationRequestMode {
 /// Represents the MCP elicitation request payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct McpElicitationRequestPayload {
+pub(crate) struct McpElicitationRequestPayload {
     #[serde(rename = "threadId")]
-    thread_id: String,
+    pub(crate) thread_id: String,
     #[serde(default, rename = "turnId", skip_serializing_if = "Option::is_none")]
-    turn_id: Option<String>,
-    server_name: String,
+    pub(crate) turn_id: Option<String>,
+    pub(crate) server_name: String,
     #[serde(flatten)]
-    mode: McpElicitationRequestMode,
+    pub(crate) mode: McpElicitationRequestMode,
 }
 
 /// Tracks interaction request state.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum InteractionRequestState {
+pub(crate) enum InteractionRequestState {
     Pending,
     Submitted,
     Interrupted,
@@ -122,16 +124,16 @@ enum InteractionRequestState {
 /// Represents parallel agent progress.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ParallelAgentProgress {
+pub(crate) struct ParallelAgentProgress {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
-    id: String,
+    pub(crate) detail: Option<String>,
+    pub(crate) id: String,
     /// Discriminates which subsystem owns `id`. Delegation rows carry a
     /// TermAl delegation id that can be routed to delegation APIs; tool rows
     /// carry an opaque tool-use id and must not be used as delegation ids.
-    source: ParallelAgentSource,
-    status: ParallelAgentStatus,
-    title: String,
+    pub(crate) source: ParallelAgentSource,
+    pub(crate) status: ParallelAgentStatus,
+    pub(crate) title: String,
 }
 
 /// Identifies the producer of a parallel-agent progress row.
@@ -142,7 +144,7 @@ struct ParallelAgentProgress {
 /// consumers.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum ParallelAgentSource {
+pub(crate) enum ParallelAgentSource {
     /// TermAl delegation id, routable through delegation status/result/cancel commands.
     Delegation,
     /// Agent-runtime tool id, shown as progress only and not routable as a delegation.
@@ -152,10 +154,10 @@ enum ParallelAgentSource {
 /// Represents message image attachment.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MessageImageAttachment {
-    byte_size: usize,
-    file_name: String,
-    media_type: String,
+pub(crate) struct MessageImageAttachment {
+    pub(crate) byte_size: usize,
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
 }
 
 /// Structured provenance for text delivered through
@@ -165,19 +167,19 @@ struct MessageImageAttachment {
 /// ordinary human/agent messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MessageSource {
+pub(crate) struct MessageSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    session_id: Option<String>,
-    name: String,
+    pub(crate) session_id: Option<String>,
+    pub(crate) name: String,
     #[serde(default, skip_serializing_if = "MessageSourceKind::is_peer")]
-    kind: MessageSourceKind,
+    pub(crate) kind: MessageSourceKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    mailbox: Option<MailboxMessageSource>,
+    pub(crate) mailbox: Option<MailboxMessageSource>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum MessageSourceKind {
+pub(crate) enum MessageSourceKind {
     #[default]
     Peer,
     PeerBatch,
@@ -185,13 +187,13 @@ enum MessageSourceKind {
 }
 
 impl MessageSourceKind {
-    fn is_peer(&self) -> bool {
+    pub(crate) fn is_peer(&self) -> bool {
         *self == Self::Peer
     }
 }
 
 impl MessageSource {
-    fn peer(session_id: String, name: String) -> Self {
+    pub(crate) fn peer(session_id: String, name: String) -> Self {
         Self {
             session_id: Some(session_id),
             name,
@@ -200,7 +202,7 @@ impl MessageSource {
         }
     }
 
-    fn mailbox(session_id: String, name: String, mailbox: MailboxMessageSource) -> Self {
+    pub(crate) fn mailbox(session_id: String, name: String, mailbox: MailboxMessageSource) -> Self {
         Self {
             session_id: Some(session_id),
             name,
@@ -209,7 +211,7 @@ impl MessageSource {
         }
     }
 
-    fn peer_batch(common_source: Option<&Self>) -> Self {
+    pub(crate) fn peer_batch(common_source: Option<&Self>) -> Self {
         Self {
             session_id: common_source.and_then(|source| source.session_id.clone()),
             name: "Peer queue".to_owned(),
@@ -218,62 +220,62 @@ impl MessageSource {
         }
     }
 
-    fn is_peer(&self) -> bool {
+    pub(crate) fn is_peer(&self) -> bool {
         self.kind == MessageSourceKind::Peer
     }
 
-    fn is_peer_batch(&self) -> bool {
+    pub(crate) fn is_peer_batch(&self) -> bool {
         self.kind == MessageSourceKind::PeerBatch
     }
 
-    fn is_mailbox(&self) -> bool {
+    pub(crate) fn is_mailbox(&self) -> bool {
         self.kind == MessageSourceKind::Mailbox
     }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct MailboxMessageSource {
-    mailbox_id: String,
-    message_id: String,
-    sequence: u64,
-    unread_count: u64,
+pub(crate) struct MailboxMessageSource {
+    pub(crate) mailbox_id: String,
+    pub(crate) message_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) unread_count: u64,
 }
 
 /// Represents pending prompt.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PendingPrompt {
+pub(crate) struct PendingPrompt {
     /// Derived queue recovery disposition, never part of the authorization input.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    engram_interrupted: bool,
+    pub(crate) engram_interrupted: bool,
     /// Exact derived retained-authorization fact. Queue pausing alone does not
     /// imply Engram ownership of this prompt.
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
-    is_engram_retained: bool,
+    pub(crate) is_engram_retained: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    attachments: Vec<MessageImageAttachment>,
-    id: String,
-    timestamp: String,
-    text: String,
+    pub(crate) attachments: Vec<MessageImageAttachment>,
+    pub(crate) id: String,
+    pub(crate) timestamp: String,
+    pub(crate) text: String,
     #[serde(
         default,
         rename = "expandedText",
         skip_serializing_if = "Option::is_none"
     )]
-    expanded_text: Option<String>,
+    pub(crate) expanded_text: Option<String>,
     /// Peer sender when this queued prompt arrived via `termal_send_to_session`;
     /// carried so a prompt queued while the target was busy keeps its
     /// attribution when it later becomes a `Message::Text`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source: Option<MessageSource>,
+    pub(crate) source: Option<MessageSource>,
 }
 
 /// Defines the message variants.
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-enum Message {
+pub(crate) enum Message {
     Text {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<MessageImageAttachment>,
@@ -486,7 +488,7 @@ enum Message {
 
 impl Message {
     /// Handles ID.
-    fn id(&self) -> &str {
+    pub(crate) fn id(&self) -> &str {
         match self {
             Self::Text { id, .. }
             | Self::Thinking { id, .. }
@@ -505,7 +507,7 @@ impl Message {
         }
     }
 
-    fn is_interaction_request(&self) -> bool {
+    pub(crate) fn is_interaction_request(&self) -> bool {
         matches!(
             self,
             Self::Approval { .. }
@@ -519,7 +521,7 @@ impl Message {
     /// recorded in an already-resolved state (for example an unattended
     /// AskUserQuestion TermAl self-resolved) is an interaction request but
     /// not a pending one, and must not park the session in Approval.
-    fn is_pending_interaction_request(&self) -> bool {
+    pub(crate) fn is_pending_interaction_request(&self) -> bool {
         matches!(
             self,
             Self::Approval {
@@ -538,7 +540,7 @@ impl Message {
         )
     }
 
-    fn user_prompt_text(&self) -> Option<&str> {
+    pub(crate) fn user_prompt_text(&self) -> Option<&str> {
         match self {
             Self::Text {
                 author: Author::You,
@@ -549,7 +551,7 @@ impl Message {
         }
     }
 
-    fn pending_interaction_request(&self) -> Option<PendingInteractionRequest<'_>> {
+    pub(crate) fn pending_interaction_request(&self) -> Option<PendingInteractionRequest<'_>> {
         match self {
             Self::Approval {
                 title,
@@ -603,7 +605,7 @@ impl Message {
     /// `parallel_agents_preview_text`. `None` means the variant
     /// has no meaningful preview text (placeholders, internal
     /// sync markers).
-    fn preview_text(&self) -> Option<String> {
+    pub(crate) fn preview_text(&self) -> Option<String> {
         match self {
             Self::Text {
                 text, attachments, ..
@@ -628,13 +630,13 @@ impl Message {
     }
 }
 
-struct PendingInteractionRequest<'a> {
-    child_waiting_prefix: &'static str,
-    title: &'a str,
-    detail: &'a str,
+pub(crate) struct PendingInteractionRequest<'a> {
+    pub(crate) child_waiting_prefix: &'static str,
+    pub(crate) title: &'a str,
+    pub(crate) detail: &'a str,
 }
 
-fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
+pub(crate) fn parallel_agents_preview_text(agents: &[ParallelAgentProgress]) -> String {
     let count = agents.len();
     let label = if count == 1 { "agent" } else { "agents" };
     let active_count = agents

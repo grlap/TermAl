@@ -1,21 +1,23 @@
 // Host capture for one typed send. Ordinary mail keeps its existing constructors
 // and path; custody is composed beside the send, then pinned in that same intent.
 
+use super::*;
+
 #[derive(Clone)]
-struct MailboxTestSendCustody {
-    payload: MailboxTestPayload,
-    service: Option<EngramBindingTarget>,
-    roots: Vec<EngramWorkSourceRoot>,
-    sender_scope: Option<MailboxTestSenderScope>,
+pub(crate) struct MailboxTestSendCustody {
+    pub(crate) payload: MailboxTestPayload,
+    pub(crate) service: Option<EngramBindingTarget>,
+    pub(crate) roots: Vec<EngramWorkSourceRoot>,
+    pub(crate) sender_scope: Option<MailboxTestSenderScope>,
 }
 
 // Host-private destination mapping, retained on the sender only. This is
 // never part of MailboxMessage, the relay payload, tool output or logs.
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", try_from = "MailboxTestSenderScopeWire")]
-struct MailboxTestSenderScope {
-    project_id: String,
-    store: EngramAuthorityStoreKey,
+pub(crate) struct MailboxTestSenderScope {
+    pub(crate) project_id: String,
+    pub(crate) store: EngramAuthorityStoreKey,
 }
 
 #[derive(Deserialize)]
@@ -59,7 +61,9 @@ impl std::fmt::Debug for MailboxTestSenderScope {
     }
 }
 
-fn validate_mailbox_test_sender_scope(scope: &MailboxTestSenderScope) -> Result<(), ApiError> {
+pub(crate) fn validate_mailbox_test_sender_scope(
+    scope: &MailboxTestSenderScope,
+) -> Result<(), ApiError> {
     let invalid =
         || ApiError::bad_request("invalid_request: malformed host-private test-request mapping");
     let encoded = serde_json::to_vec(scope).map_err(|_| invalid())?;
@@ -90,7 +94,10 @@ fn mailbox_test_payload_matches_request(
 }
 
 impl MailboxTestSendCustody {
-    fn for_recipient(&self, recipient: &MailboxRelayPrincipal) -> Result<Self, ApiError> {
+    pub(crate) fn for_recipient(
+        &self,
+        recipient: &MailboxRelayPrincipal,
+    ) -> Result<Self, ApiError> {
         if self
             .payload
             .recipient
@@ -109,7 +116,11 @@ impl MailboxTestSendCustody {
 
     // Runs while the ordinary native send admission guard holds StateInner.
     // All service I/O was completed before acquiring that guard.
-    fn validate_locked(&self, inner: &StateInner, session: &str) -> Result<(), ApiError> {
+    pub(crate) fn validate_locked(
+        &self,
+        inner: &StateInner,
+        session: &str,
+    ) -> Result<(), ApiError> {
         let record = federation_mailbox_root_locked(inner, session)?;
         if record.federation_native_creation_id != self.payload.requester.native_creation_id
             || session != self.payload.requester.native_session_id
@@ -149,7 +160,7 @@ impl MailboxTestSendCustody {
 }
 
 impl AppState {
-    fn prepare_mailbox_test_request(
+    pub(crate) fn prepare_mailbox_test_request(
         &self,
         session: &str,
         key: &str,
@@ -312,7 +323,7 @@ impl AppState {
 }
 
 impl MailboxStore {
-    fn retained_mailbox_test_payload(
+    pub(crate) fn retained_mailbox_test_payload(
         &self,
         sender: &str,
         key: &str,
@@ -359,7 +370,7 @@ impl MailboxStore {
     }
 }
 
-fn mailbox_test_payload_from_row(
+pub(crate) fn mailbox_test_payload_from_row(
     row: &rusqlite::Row<'_>,
     column: usize,
 ) -> rusqlite::Result<Option<MailboxTestPayload>> {
@@ -387,7 +398,7 @@ fn mailbox_test_payload_from_row(
         .transpose()
 }
 
-fn mailbox_test_scope_from_row(
+pub(crate) fn mailbox_test_scope_from_row(
     row: &rusqlite::Row<'_>,
     column: usize,
 ) -> rusqlite::Result<Option<MailboxTestSenderScope>> {

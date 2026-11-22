@@ -25,9 +25,11 @@
 // function, and no second decision tree for control traffic runs beside the
 // plan.
 
+use super::*;
+
 /// At most this many control requests' origins are kept per runtime, oldest
 /// dropped first.
-const CLAUDE_CONTROL_ORIGIN_LIMIT: usize = 256;
+pub(crate) const CLAUDE_CONTROL_ORIGIN_LIMIT: usize = 256;
 
 /// What one Claude runtime's stdout reader and stdin writer share with
 /// every frame and command they apply. It holds no sender of the runtime's
@@ -35,21 +37,21 @@ const CLAUDE_CONTROL_ORIGIN_LIMIT: usize = 256;
 /// only once every sender is gone, so the sender stays reader-side
 /// (`ClaudeReaderFrames::input_tx`).
 #[derive(Clone)]
-struct ClaudeRuntimeContext {
-    state: AppState,
-    session_id: String,
-    token: RuntimeToken,
-    ownership: ClaudeTurnOwnership,
-    replay_prompt: ClaudeReplayPrompt,
+pub(crate) struct ClaudeRuntimeContext {
+    pub(crate) state: AppState,
+    pub(crate) session_id: String,
+    pub(crate) token: RuntimeToken,
+    pub(crate) ownership: ClaudeTurnOwnership,
+    pub(crate) replay_prompt: ClaudeReplayPrompt,
     /// The session's own working directory, pre-normalized, for the
     /// read-only permission checker.
-    cwd: String,
+    pub(crate) cwd: String,
     /// The SessionStart compact hook this runtime registered at initialize,
     /// if any (`claude_compact_hook.rs`).
-    compact_hook: Option<Arc<ClaudeCompactHook>>,
+    pub(crate) compact_hook: Option<Arc<ClaudeCompactHook>>,
     /// What runs this runtime's Bash tool, decided once at spawn
     /// (`claude_bash_tool_shell`): unproven, and so strict, unless set.
-    bash_tool_shell: ClaudeBashToolShell,
+    pub(crate) bash_tool_shell: ClaudeBashToolShell,
 }
 
 /// The control requests this runtime sent, by request id, with the origin
@@ -84,20 +86,20 @@ impl ClaudeControlOrigins {
 }
 
 /// What one Claude runtime's stdout reader keeps between frames.
-struct ClaudeReaderFrames {
-    router: ClaudeFrameRouter,
+pub(crate) struct ClaudeReaderFrames {
+    pub(crate) router: ClaudeFrameRouter,
     /// The root turn's parser state.
-    root: ClaudeTurnState,
+    pub(crate) root: ClaudeTurnState,
     /// The subagents' parser state: their tool calls and their permission
     /// requests, apart from the root turn's.
-    nested: ClaudeTurnState,
-    resolved_session_id: Option<String>,
+    pub(crate) nested: ClaudeTurnState,
+    pub(crate) resolved_session_id: Option<String>,
     control_origins: ClaudeControlOrigins,
-    initialize_model_options_tx:
+    pub(crate) initialize_model_options_tx:
         Option<Sender<std::result::Result<Vec<SessionModelOption>, String>>>,
     /// The reader's sender of the runtime's command channel: permission
     /// responses and delayed retries go to the writer through it.
-    input_tx: Sender<ClaudeRuntimeCommand>,
+    pub(crate) input_tx: Sender<ClaudeRuntimeCommand>,
     /// The compaction under way already asked for a fresh Engram context
     /// through its hook callback, so its compact_boundary does not ask again.
     /// A registered callback always asks itself, whatever this flag says, so
@@ -108,7 +110,7 @@ struct ClaudeReaderFrames {
 }
 
 impl ClaudeReaderFrames {
-    fn new(
+    pub(crate) fn new(
         context: &ClaudeRuntimeContext,
         input_tx: Sender<ClaudeRuntimeCommand>,
         initialize_model_options_tx: Option<
@@ -134,7 +136,7 @@ impl ClaudeReaderFrames {
 
 /// What the reader does after a frame was applied.
 #[derive(Debug, PartialEq, Eq)]
-enum ClaudeFrameApplied {
+pub(crate) enum ClaudeFrameApplied {
     Continue,
     /// The turn failed (already recorded) and the reader stops.
     Stop,
@@ -144,7 +146,7 @@ enum ClaudeFrameApplied {
 }
 
 impl ClaudeRuntimeContext {
-    fn new(
+    pub(crate) fn new(
         state: AppState,
         session_id: String,
         token: RuntimeToken,
@@ -165,19 +167,22 @@ impl ClaudeRuntimeContext {
     }
 
     /// This runtime's SessionStart compact hook, decided before initialize.
-    fn with_compact_hook(mut self, compact_hook: Option<Arc<ClaudeCompactHook>>) -> Self {
+    pub(crate) fn with_compact_hook(
+        mut self,
+        compact_hook: Option<Arc<ClaudeCompactHook>>,
+    ) -> Self {
         self.compact_hook = compact_hook;
         self
     }
 
     /// What runs this runtime's Bash tool, decided at spawn.
-    fn with_bash_tool_shell(mut self, bash_tool_shell: ClaudeBashToolShell) -> Self {
+    pub(crate) fn with_bash_tool_shell(mut self, bash_tool_shell: ClaudeBashToolShell) -> Self {
         self.bash_tool_shell = bash_tool_shell;
         self
     }
 
     /// Records a turn failure for this runtime and tells the reader to stop.
-    fn fail(&self, detail: &str) -> ClaudeFrameApplied {
+    pub(crate) fn fail(&self, detail: &str) -> ClaudeFrameApplied {
         let _ = self
             .state
             .fail_turn_if_runtime_matches(&self.session_id, &self.token, detail);
@@ -198,15 +203,15 @@ fn send_claude_permission_response(
 
 /// One applied frame: what the reader does next, and the plan that was
 /// carried out (which the reader ignores and tests read).
-struct ClaudeFrameOutcome {
-    next: ClaudeFrameApplied,
+pub(crate) struct ClaudeFrameOutcome {
+    pub(crate) next: ClaudeFrameApplied,
     #[cfg_attr(not(test), allow(dead_code))]
-    plan: ClaudeFramePlan,
+    pub(crate) plan: ClaudeFramePlan,
 }
 
 /// Applies one stdout frame of the runtime `context` names: one decision for
 /// the frame, before anything acts on it, then its effects in order.
-fn apply_claude_frame(
+pub(crate) fn apply_claude_frame(
     context: &ClaudeRuntimeContext,
     frames: &mut ClaudeReaderFrames,
     recorder: &mut SessionRecorder,
@@ -219,7 +224,7 @@ fn apply_claude_frame(
     ClaudeFrameOutcome { next, plan }
 }
 
-fn apply_claude_frame_plan(
+pub(crate) fn apply_claude_frame_plan(
     context: &ClaudeRuntimeContext,
     frames: &mut ClaudeReaderFrames,
     recorder: &mut SessionRecorder,
@@ -475,14 +480,26 @@ fn apply_claude_frame_plan(
                     Some(owner.turn_generation)
                 }
                 ClaudeResultOwner::Runtime(owner) => owner.adopted_generation,
-                ClaudeResultOwner::Unresolved { adopted_interval, .. } => adopted_interval.as_ref()
+                ClaudeResultOwner::Unresolved {
+                    adopted_interval, ..
+                } => adopted_interval
+                    .as_ref()
                     .and_then(|owner| owner.adopted_generation)
-                    .filter(|generation| context.state.claude_adopted_generation_is_current(
-                        &context.session_id, &context.token, *generation)),
+                    .filter(|generation| {
+                        context.state.claude_adopted_generation_is_current(
+                            &context.session_id,
+                            &context.token,
+                            *generation,
+                        )
+                    }),
                 ClaudeResultOwner::Stale | ClaudeResultOwner::Uncorrelated { .. } => None,
             };
             if let Some(generation) = generation {
-                context.state.note_evaluator_usage_limit(&context.session_id, &context.token, generation);
+                context.state.note_evaluator_usage_limit(
+                    &context.session_id,
+                    &context.token,
+                    generation,
+                );
             }
         }
         if let Err(err) = context.state.finish_claude_result(

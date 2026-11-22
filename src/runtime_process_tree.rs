@@ -5,13 +5,17 @@
 // registry or lease lock. Only job ActiveProcesses==0 confirms completion.
 // Failed attempts retain the exact handles. Kill-on-close is a backstop, not
 // evidence; an unresolved launch continues to gate later dedicated launches.
-enum RuntimeResetPreparation {
+
+use super::*;
+pub(crate) enum RuntimeResetPreparation {
     Ready,
     Held,
 }
 
 fn ordinary_queue_reset_is_held(
-    inner: &StateInner, session_id: &str, owner: Option<&QueuedTurnOwner>,
+    inner: &StateInner,
+    session_id: &str,
+    owner: Option<&QueuedTurnOwner>,
     allow_blocked_dispatch: bool,
 ) -> bool {
     inner.find_session_index(session_id).is_none_or(|index| {
@@ -22,20 +26,20 @@ fn ordinary_queue_reset_is_held(
 }
 
 #[cfg(windows)]
-struct RuntimeProcessTree {
-    tree: TerminalProcessTree,
-    cleanup: Mutex<RuntimeCleanup>,
-    completion: Condvar,
+pub(crate) struct RuntimeProcessTree {
+    pub(crate) tree: TerminalProcessTree,
+    pub(crate) cleanup: Mutex<RuntimeCleanup>,
+    pub(crate) completion: Condvar,
     #[cfg(test)]
-    termination_failures: std::sync::atomic::AtomicUsize,
+    pub(crate) termination_failures: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    cleanup_gate: Mutex<Option<TestStopFenceGate>>,
+    pub(crate) cleanup_gate: Mutex<Option<TestStopFenceGate>>,
     #[cfg(test)]
-    cleanup_join_receipt: Mutex<Option<Sender<()>>>,
+    pub(crate) cleanup_join_receipt: Mutex<Option<Sender<()>>>,
 }
 
 #[cfg(windows)]
-enum RuntimeCleanupPhase {
+pub(crate) enum RuntimeCleanupPhase {
     Live,
     InProgress(Uuid),
     Unconfirmed { attempt: Uuid, detail: String },
@@ -43,35 +47,49 @@ enum RuntimeCleanupPhase {
 }
 
 #[cfg(windows)]
-struct RuntimeCleanup {
-    phase: RuntimeCleanupPhase,
+pub(crate) struct RuntimeCleanup {
+    pub(crate) phase: RuntimeCleanupPhase,
 }
 
 #[cfg(windows)]
 #[derive(Clone)]
-struct RetainedDedicatedOwner {
-    token: RuntimeToken,
-    tree: Arc<RuntimeProcessTree>,
-    process: Arc<SharedChild>,
-    label: &'static str,
+pub(crate) struct RetainedDedicatedOwner {
+    pub(crate) token: RuntimeToken,
+    pub(crate) tree: Arc<RuntimeProcessTree>,
+    pub(crate) process: Arc<SharedChild>,
+    pub(crate) label: &'static str,
 }
 
 impl SessionRecord {
-    fn dedicated_predecessor_pending(&self) -> bool {
+    pub(crate) fn dedicated_predecessor_pending(&self) -> bool {
         #[cfg(windows)]
-        return self.retained_dedicated_owners.iter().any(|owner|
-            !self.runtime.matches_runtime_token(&owner.token) && !owner.tree.is_confirmed());
+        return self.retained_dedicated_owners.iter().any(|owner| {
+            !self.runtime.matches_runtime_token(&owner.token) && !owner.tree.is_confirmed()
+        });
         #[cfg(not(windows))]
         false
     }
     // Called while attachment still owns Inner; no worker ordering is assumed.
-    fn register_dedicated_runtime(&mut self) {
+    pub(crate) fn register_dedicated_runtime(&mut self) {
         #[cfg(windows)]
         if let Some((tree, process, label)) = self.runtime.dedicated_tree_owner() {
-            let token = self.runtime.runtime_token().expect("attached dedicated token");
-            self.retained_dedicated_owners.retain(|owner| !owner.tree.is_confirmed());
-            if !self.retained_dedicated_owners.iter().any(|owner| owner.token == token && Arc::ptr_eq(&owner.tree, &tree)) {
-                self.retained_dedicated_owners.push(RetainedDedicatedOwner { token, tree, process, label });
+            let token = self
+                .runtime
+                .runtime_token()
+                .expect("attached dedicated token");
+            self.retained_dedicated_owners
+                .retain(|owner| !owner.tree.is_confirmed());
+            if !self
+                .retained_dedicated_owners
+                .iter()
+                .any(|owner| owner.token == token && Arc::ptr_eq(&owner.tree, &tree))
+            {
+                self.retained_dedicated_owners.push(RetainedDedicatedOwner {
+                    token,
+                    tree,
+                    process,
+                    label,
+                });
             }
         }
     }
@@ -79,33 +97,59 @@ impl SessionRecord {
 
 #[cfg(windows)]
 impl RuntimeProcessTree {
-    fn terminate(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    pub(crate) fn terminate(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
         self.terminate_with(label, |_| kill_child_process(process, label))
     }
 
-    fn terminate_with(&self, label: &str, stop_root: impl FnOnce(std::time::Instant) -> Result<()>) -> Result<()> {
+    pub(crate) fn terminate_with(
+        &self,
+        label: &str,
+        stop_root: impl FnOnce(std::time::Instant) -> Result<()>,
+    ) -> Result<()> {
         self.terminate_attempt(label, stop_root, true)
     }
 
-    fn terminate_attempt(&self, label: &str, stop_root: impl FnOnce(std::time::Instant) -> Result<()>, retry: bool) -> Result<()> {
+    pub(crate) fn terminate_attempt(
+        &self,
+        label: &str,
+        stop_root: impl FnOnce(std::time::Instant) -> Result<()>,
+        retry: bool,
+    ) -> Result<()> {
         self.terminate_attempt_after_claim(label, stop_root, retry, || {})
     }
 
-    fn terminate_attempt_after_claim(&self, label: &str, stop_root: impl FnOnce(std::time::Instant) -> Result<()>, retry: bool,
-        on_claim: impl FnOnce()) -> Result<()> {
+    pub(crate) fn terminate_attempt_after_claim(
+        &self,
+        label: &str,
+        stop_root: impl FnOnce(std::time::Instant) -> Result<()>,
+        retry: bool,
+        on_claim: impl FnOnce(),
+    ) -> Result<()> {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let attempt = {
             let mut cleanup = self.cleanup.lock().expect("runtime cleanup mutex poisoned");
             if let RuntimeCleanupPhase::InProgress(joined) = cleanup.phase {
                 #[cfg(test)]
-                if let Some(sender) = self.cleanup_join_receipt.lock().unwrap().take() { let _ = sender.send(()); }
+                if let Some(sender) = self.cleanup_join_receipt.lock().unwrap().take() {
+                    let _ = sender.send(());
+                }
                 #[cfg(test)]
-                TEST_DEDICATED_CLEANUP_JOIN.with(|sender| { if let Some(sender) = sender.borrow_mut().take() { let _ = sender.send(()); } });
-                while matches!(cleanup.phase, RuntimeCleanupPhase::InProgress(current) if current == joined) {
+                TEST_DEDICATED_CLEANUP_JOIN.with(|sender| {
+                    if let Some(sender) = sender.borrow_mut().take() {
+                        let _ = sender.send(());
+                    }
+                });
+                while matches!(cleanup.phase, RuntimeCleanupPhase::InProgress(current) if current == joined)
+                {
                     let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                    if remaining.is_zero() { bail!("{label} process tree cleanup remains in progress"); }
-                    cleanup = self.completion.wait_timeout(cleanup, remaining)
-                        .expect("runtime cleanup mutex poisoned").0;
+                    if remaining.is_zero() {
+                        bail!("{label} process tree cleanup remains in progress");
+                    }
+                    cleanup = self
+                        .completion
+                        .wait_timeout(cleanup, remaining)
+                        .expect("runtime cleanup mutex poisoned")
+                        .0;
                 }
                 return match &cleanup.phase {
                     RuntimeCleanupPhase::Confirmed => Ok(()),
@@ -113,8 +157,12 @@ impl RuntimeProcessTree {
                     _ => Err(anyhow!("{label} process tree cleanup attempt changed")),
                 };
             }
-            if matches!(cleanup.phase, RuntimeCleanupPhase::Confirmed) { return Ok(()); }
-            if !retry && let RuntimeCleanupPhase::Unconfirmed { detail, .. } = &cleanup.phase { return Err(anyhow!(detail.clone())); }
+            if matches!(cleanup.phase, RuntimeCleanupPhase::Confirmed) {
+                return Ok(());
+            }
+            if !retry && let RuntimeCleanupPhase::Unconfirmed { detail, .. } = &cleanup.phase {
+                return Err(anyhow!(detail.clone()));
+            }
             let attempt = Uuid::new_v4();
             cleanup.phase = RuntimeCleanupPhase::InProgress(attempt);
             attempt
@@ -126,57 +174,88 @@ impl RuntimeProcessTree {
         // The claimed attempt retains the exact lease while all OS operations
         // run outside its mutex. Root exit is never the descendant proof.
         let result = (|| {
-        #[cfg(test)]
-        let gate = self.cleanup_gate.lock().unwrap().take();
-        #[cfg(test)]
-        if let Some(gate) = gate {
-            let _ = gate.claimed_tx.send(());
-            let _ = gate.release_rx.recv();
-        }
-        self.terminate_job(label)?;
-        stop_root(deadline)?;
-        if std::time::Instant::now() >= deadline { bail!("{label} process tree cleanup deadline elapsed"); }
-        while !self.has_exited()? {
-            if std::time::Instant::now() >= deadline {
-                bail!("{label} process tree did not exit after termination");
+            #[cfg(test)]
+            let gate = self.cleanup_gate.lock().unwrap().take();
+            #[cfg(test)]
+            if let Some(gate) = gate {
+                let _ = gate.claimed_tx.send(());
+                let _ = gate.release_rx.recv();
             }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        Ok(())
+            self.terminate_job(label)?;
+            stop_root(deadline)?;
+            if std::time::Instant::now() >= deadline {
+                bail!("{label} process tree cleanup deadline elapsed");
+            }
+            while !self.has_exited()? {
+                if std::time::Instant::now() >= deadline {
+                    bail!("{label} process tree did not exit after termination");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(())
         })();
         let mut cleanup = self.cleanup.lock().expect("runtime cleanup mutex poisoned");
         if matches!(cleanup.phase, RuntimeCleanupPhase::InProgress(current) if current == attempt) {
             cleanup.phase = match &result {
                 Ok(()) => RuntimeCleanupPhase::Confirmed,
-                Err(error) => RuntimeCleanupPhase::Unconfirmed { attempt,
-                    detail: format!("{label} process tree cleanup failed: {error:#}") },
+                Err(error) => RuntimeCleanupPhase::Unconfirmed {
+                    attempt,
+                    detail: format!("{label} process tree cleanup failed: {error:#}"),
+                },
             };
         }
         self.completion.notify_all();
         result
     }
 
-    fn cleanup_failure(&self) -> Option<String> {
-        match &self.cleanup.lock().expect("runtime cleanup mutex poisoned").phase {
-            RuntimeCleanupPhase::InProgress(_) => Some("process tree cleanup remains in progress".to_owned()),
-            RuntimeCleanupPhase::Unconfirmed { attempt, detail } => { let _ = attempt; Some(detail.clone()) },
+    pub(crate) fn cleanup_failure(&self) -> Option<String> {
+        match &self
+            .cleanup
+            .lock()
+            .expect("runtime cleanup mutex poisoned")
+            .phase
+        {
+            RuntimeCleanupPhase::InProgress(_) => {
+                Some("process tree cleanup remains in progress".to_owned())
+            }
+            RuntimeCleanupPhase::Unconfirmed { attempt, detail } => {
+                let _ = attempt;
+                Some(detail.clone())
+            }
             _ => None,
         }
     }
 
     #[cfg(test)]
-    fn is_live(&self) -> bool {
-        matches!(self.cleanup.lock().expect("runtime cleanup mutex poisoned").phase, RuntimeCleanupPhase::Live)
+    pub(crate) fn is_live(&self) -> bool {
+        matches!(
+            self.cleanup
+                .lock()
+                .expect("runtime cleanup mutex poisoned")
+                .phase,
+            RuntimeCleanupPhase::Live
+        )
     }
 
-    fn is_in_progress(&self) -> bool {
-        matches!(self.cleanup.lock().expect("runtime cleanup mutex poisoned").phase, RuntimeCleanupPhase::InProgress(_))
+    pub(crate) fn is_in_progress(&self) -> bool {
+        matches!(
+            self.cleanup
+                .lock()
+                .expect("runtime cleanup mutex poisoned")
+                .phase,
+            RuntimeCleanupPhase::InProgress(_)
+        )
     }
 
-    fn is_confirmed(&self) -> bool {
-        matches!(self.cleanup.lock().expect("runtime cleanup mutex poisoned").phase, RuntimeCleanupPhase::Confirmed)
+    pub(crate) fn is_confirmed(&self) -> bool {
+        matches!(
+            self.cleanup
+                .lock()
+                .expect("runtime cleanup mutex poisoned")
+                .phase,
+            RuntimeCleanupPhase::Confirmed
+        )
     }
-
 
     fn terminate_job(&self, label: &str) -> Result<()> {
         #[cfg(test)]
@@ -194,7 +273,7 @@ impl RuntimeProcessTree {
         terminate_terminal_job(&self.tree.job, label)
     }
 
-    fn has_exited(&self) -> Result<bool> {
+    pub(crate) fn has_exited(&self) -> Result<bool> {
         use std::mem::size_of;
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::System::JobObjects::{
@@ -218,19 +297,22 @@ impl RuntimeProcessTree {
     }
 }
 
-struct DedicatedRuntimeChild {
-    process: Arc<SharedChild>,
-    stdin: std::process::ChildStdin,
-    stdout: std::process::ChildStdout,
-    stderr: std::process::ChildStderr,
+pub(crate) struct DedicatedRuntimeChild {
+    pub(crate) process: Arc<SharedChild>,
+    pub(crate) stdin: std::process::ChildStdin,
+    pub(crate) stdout: std::process::ChildStdout,
+    pub(crate) stderr: std::process::ChildStderr,
     #[cfg(windows)]
-    tree: Arc<RuntimeProcessTree>,
+    pub(crate) tree: Arc<RuntimeProcessTree>,
     #[cfg(windows)]
-    launch_guard: RuntimeLaunchGuard,
+    pub(crate) launch_guard: RuntimeLaunchGuard,
 }
 
 #[cfg(windows)]
-fn root_exit_provider_error(result: &io::Result<std::process::ExitStatus>, label: &str) -> Option<String> {
+pub(crate) fn root_exit_provider_error(
+    result: &io::Result<std::process::ExitStatus>,
+    label: &str,
+) -> Option<String> {
     match result {
         Ok(status) if status.success() => None,
         Ok(status) => Some(format!("{label} session exited with status {status}")),
@@ -242,25 +324,27 @@ fn root_exit_provider_error(result: &io::Result<std::process::ExitStatus>, label
 // thread-local seams replace only executable discovery and observe completion.
 #[cfg(test)]
 thread_local! {
-    static TEST_DEDICATED_COMMAND: std::cell::RefCell<Option<Command>> = const { std::cell::RefCell::new(None) };
-    static TEST_DEDICATED_COMMAND_INSPECTOR: std::cell::RefCell<Option<Box<dyn FnOnce(&Command) -> Result<()>>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_COMMAND: std::cell::RefCell<Option<Command>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_COMMAND_INSPECTOR: std::cell::RefCell<Option<Box<dyn FnOnce(&Command) -> Result<()>>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(all(test, windows))]
 thread_local! {
-    static TEST_DEDICATED_WAITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_DEDICATED_EXIT_GATE: std::cell::RefCell<Option<TestStopFenceGate>> = const { std::cell::RefCell::new(None) };
-    static TEST_DEDICATED_WRITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_DEDICATED_ACP_PENDING: std::cell::RefCell<Option<Sender<AcpPendingRequestMap>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_WAITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_EXIT_GATE: std::cell::RefCell<Option<TestStopFenceGate>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_WRITER: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_ACP_PENDING: std::cell::RefCell<Option<Sender<AcpPendingRequestMap>>> = const { std::cell::RefCell::new(None) };
     // Set only by a producer that ends initialize itself (an error reply, its
     // root's exit or its teardown); the next ACP writer then waits for that
     // end instead of the handshake's wall-clock deadline.
-    static TEST_DEDICATED_ACP_INITIALIZE_UNTIMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static TEST_DEDICATED_CLEANUP_JOIN: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_DEDICATED_READER_FRAMES: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_ACP_INITIALIZE_UNTIMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static TEST_DEDICATED_CLEANUP_JOIN: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_DEDICATED_READER_FRAMES: std::cell::RefCell<Option<Sender<()>>> = const { std::cell::RefCell::new(None) };
 }
 
-fn dedicated_provider_command(build: impl FnOnce() -> Result<Command>) -> Result<Command> {
+pub(crate) fn dedicated_provider_command(
+    build: impl FnOnce() -> Result<Command>,
+) -> Result<Command> {
     #[cfg(test)]
     if let Some(command) = TEST_DEDICATED_COMMAND.with(|command| command.borrow_mut().take()) {
         return Ok(command);
@@ -269,17 +353,26 @@ fn dedicated_provider_command(build: impl FnOnce() -> Result<Command>) -> Result
 }
 
 #[cfg(all(test, windows))]
-struct DedicatedWaiterTestCompletion(Option<Sender<()>>, Option<TestStopFenceGate>);
+pub(crate) struct DedicatedWaiterTestCompletion(
+    pub(crate) Option<Sender<()>>,
+    pub(crate) Option<TestStopFenceGate>,
+);
 
 #[cfg(all(test, windows))]
 impl DedicatedWaiterTestCompletion {
-    fn capture() -> Self {
-        Self(TEST_DEDICATED_WAITER.with(|sender| sender.borrow_mut().take()), TEST_DEDICATED_EXIT_GATE.with(|gate| gate.borrow_mut().take()))
+    pub(crate) fn capture() -> Self {
+        Self(
+            TEST_DEDICATED_WAITER.with(|sender| sender.borrow_mut().take()),
+            TEST_DEDICATED_EXIT_GATE.with(|gate| gate.borrow_mut().take()),
+        )
     }
-    fn capture_writer() -> Self {
-        Self(TEST_DEDICATED_WRITER.with(|sender| sender.borrow_mut().take()), None)
+    pub(crate) fn capture_writer() -> Self {
+        Self(
+            TEST_DEDICATED_WRITER.with(|sender| sender.borrow_mut().take()),
+            None,
+        )
     }
-    fn wait_before_cleanup(&mut self) {
+    pub(crate) fn wait_before_cleanup(&mut self) {
         if let Some(gate) = self.1.take() {
             let _ = gate.claimed_tx.send(());
             let _ = gate.release_rx.recv();
@@ -290,43 +383,49 @@ impl DedicatedWaiterTestCompletion {
 #[cfg(all(test, windows))]
 impl Drop for DedicatedWaiterTestCompletion {
     fn drop(&mut self) {
-        if let Some(sender) = self.0.take() { let _ = sender.send(()); }
+        if let Some(sender) = self.0.take() {
+            let _ = sender.send(());
+        }
     }
 }
 
 #[cfg(windows)]
-struct RuntimeLaunchGuard {
-    root: Option<std::os::windows::io::OwnedHandle>,
-    tree: Option<Arc<RuntimeProcessTree>>,
-    armed: bool,
+pub(crate) struct RuntimeLaunchGuard {
+    pub(crate) root: Option<std::os::windows::io::OwnedHandle>,
+    pub(crate) tree: Option<Arc<RuntimeProcessTree>>,
+    pub(crate) armed: bool,
 }
 
 #[cfg(windows)]
-enum FailedRuntimeLaunch {
+pub(crate) enum FailedRuntimeLaunch {
     Raw(std::process::Child),
     Attached(RuntimeLaunchGuard),
 }
 
 #[cfg(windows)]
-enum FailedLaunchPhase { Ready, InProgress(Uuid), Unconfirmed(String), Confirmed }
-
-#[cfg(windows)]
-struct FailedRuntimeLaunchEntry {
-    owner: Mutex<Option<FailedRuntimeLaunch>>,
-    phase: Mutex<FailedLaunchPhase>,
+pub(crate) enum FailedLaunchPhase {
+    Ready,
+    InProgress(Uuid),
+    Unconfirmed(String),
+    Confirmed,
 }
 
 #[cfg(windows)]
-type FailedRuntimeLaunchRegistry = Arc<Mutex<Vec<Arc<FailedRuntimeLaunchEntry>>>>;
+pub(crate) struct FailedRuntimeLaunchEntry {
+    pub(crate) owner: Mutex<Option<FailedRuntimeLaunch>>,
+    pub(crate) phase: Mutex<FailedLaunchPhase>,
+}
 
 #[cfg(windows)]
-fn failed_runtime_launches() -> FailedRuntimeLaunchRegistry {
+pub(crate) type FailedRuntimeLaunchRegistry = Arc<Mutex<Vec<Arc<FailedRuntimeLaunchEntry>>>>;
+
+#[cfg(windows)]
+pub(crate) fn failed_runtime_launches() -> FailedRuntimeLaunchRegistry {
     #[cfg(test)]
     if let Some(owners) = TEST_RUNTIME_LAUNCH_OWNERS.with(|owners| owners.borrow().clone()) {
         return owners;
     }
-    static OWNERS: std::sync::OnceLock<FailedRuntimeLaunchRegistry> =
-        std::sync::OnceLock::new();
+    static OWNERS: std::sync::OnceLock<FailedRuntimeLaunchRegistry> = std::sync::OnceLock::new();
     OWNERS
         .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
         .clone()
@@ -334,22 +433,22 @@ fn failed_runtime_launches() -> FailedRuntimeLaunchRegistry {
 
 #[cfg(all(test, windows))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RuntimeLaunchPhase {
+pub(crate) enum RuntimeLaunchPhase {
     BeforeContainment,
     BeforeShare,
     BeforeResume,
 }
 
 #[cfg(all(test, windows))]
-type RuntimeLaunchTestHook =
+pub(crate) type RuntimeLaunchTestHook =
     Box<dyn FnMut(RuntimeLaunchPhase, &RuntimeLaunchGuard) -> Result<()>>;
 
 #[cfg(all(test, windows))]
 thread_local! {
-    static TEST_RUNTIME_LAUNCH_HOOK: std::cell::RefCell<Option<RuntimeLaunchTestHook>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_RUNTIME_LAUNCH_HOOK: std::cell::RefCell<Option<RuntimeLaunchTestHook>> = const { std::cell::RefCell::new(None) };
     // Failure fixtures get a separate owner registry, while exercising the
     // same retention/retry code. Other tests' real launches cannot consume it.
-    static TEST_RUNTIME_LAUNCH_OWNERS: std::cell::RefCell<Option<FailedRuntimeLaunchRegistry>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_RUNTIME_LAUNCH_OWNERS: std::cell::RefCell<Option<FailedRuntimeLaunchRegistry>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(all(test, windows))]
@@ -367,7 +466,7 @@ fn runtime_launch_test_checkpoint(
 
 #[cfg(windows)]
 impl RuntimeLaunchGuard {
-    fn cleanup(&self) -> Result<()> {
+    pub(crate) fn cleanup(&self) -> Result<()> {
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
         use windows_sys::Win32::System::Threading::{TerminateProcess, WaitForSingleObject};
@@ -375,7 +474,10 @@ impl RuntimeLaunchGuard {
         if let Some(tree) = &self.tree {
             return tree.terminate_with("failed runtime launch", |deadline| {
                 let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                if unsafe { WaitForSingleObject(root.as_raw_handle(), remaining.as_millis() as u32) } != WAIT_OBJECT_0 {
+                if unsafe {
+                    WaitForSingleObject(root.as_raw_handle(), remaining.as_millis() as u32)
+                } != WAIT_OBJECT_0
+                {
                     bail!("failed runtime launch root cleanup is unconfirmed");
                 }
                 Ok(())
@@ -409,7 +511,9 @@ impl RuntimeLaunchGuard {
                     .as_ref()
                     .expect("launch root handle")
                     .as_raw_handle(),
-                deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as u32,
+                deadline
+                    .saturating_duration_since(std::time::Instant::now())
+                    .as_millis() as u32,
             )
         } != WAIT_OBJECT_0
         {
@@ -418,7 +522,11 @@ impl RuntimeLaunchGuard {
         Ok(())
     }
 
-    fn resume(&mut self, process: &Arc<SharedChild>, tree: &RuntimeProcessTree) -> Result<()> {
+    pub(crate) fn resume(
+        &mut self,
+        process: &Arc<SharedChild>,
+        tree: &RuntimeProcessTree,
+    ) -> Result<()> {
         #[cfg(test)]
         runtime_launch_test_checkpoint(RuntimeLaunchPhase::BeforeResume, self)?;
         tree.tree.resume_after_attach(process)?;
@@ -435,81 +543,141 @@ impl Drop for RuntimeLaunchGuard {
             // launch retries this owner first, never launches an uncontained
             // substitute or infers cleanup from the root's exit alone.
             retain_failed_runtime_launch(FailedRuntimeLaunch::Attached(Self {
-                    root: self.root.take(),
-                    tree: self.tree.take(),
-                    armed: false,
-                }));
+                root: self.root.take(),
+                tree: self.tree.take(),
+                armed: false,
+            }));
         }
     }
 }
 
 #[cfg(windows)]
-fn retry_failed_runtime_launch_cleanup() -> Result<()> {
+pub(crate) fn retry_failed_runtime_launch_cleanup() -> Result<()> {
     let registry = failed_runtime_launches();
-    let entries = registry.lock().expect("launch cleanup mutex poisoned").clone();
-    if entries.is_empty() { return Ok(()); }
-    for entry in entries { schedule_runtime_launch_cleanup(&registry, &entry); }
+    let entries = registry
+        .lock()
+        .expect("launch cleanup mutex poisoned")
+        .clone();
+    if entries.is_empty() {
+        return Ok(());
+    }
+    for entry in entries {
+        schedule_runtime_launch_cleanup(&registry, &entry);
+    }
     bail!("prior runtime launch cleanup remains pending")
 }
 
 #[cfg(windows)]
 fn retain_failed_runtime_launch(owner: FailedRuntimeLaunch) {
     let registry = failed_runtime_launches();
-    let entry = Arc::new(FailedRuntimeLaunchEntry { owner: Mutex::new(Some(owner)), phase: Mutex::new(FailedLaunchPhase::Ready) });
-    registry.lock().expect("launch cleanup mutex poisoned").push(entry.clone());
+    let entry = Arc::new(FailedRuntimeLaunchEntry {
+        owner: Mutex::new(Some(owner)),
+        phase: Mutex::new(FailedLaunchPhase::Ready),
+    });
+    registry
+        .lock()
+        .expect("launch cleanup mutex poisoned")
+        .push(entry.clone());
     schedule_runtime_launch_cleanup(&registry, &entry);
 }
 
 #[cfg(windows)]
-fn schedule_runtime_launch_cleanup(registry: &FailedRuntimeLaunchRegistry, entry: &Arc<FailedRuntimeLaunchEntry>) {
+pub(crate) fn schedule_runtime_launch_cleanup(
+    registry: &FailedRuntimeLaunchRegistry,
+    entry: &Arc<FailedRuntimeLaunchEntry>,
+) {
     let attempt = {
         let mut phase = entry.phase.lock().expect("launch attempt mutex poisoned");
-        if matches!(*phase, FailedLaunchPhase::InProgress(_) | FailedLaunchPhase::Confirmed) { return; }
-        if let FailedLaunchPhase::Unconfirmed(detail) = &*phase { eprintln!("retrying retained launch cleanup: {detail}"); }
+        if matches!(
+            *phase,
+            FailedLaunchPhase::InProgress(_) | FailedLaunchPhase::Confirmed
+        ) {
+            return;
+        }
+        if let FailedLaunchPhase::Unconfirmed(detail) = &*phase {
+            eprintln!("retrying retained launch cleanup: {detail}");
+        }
         let attempt = Uuid::new_v4();
         *phase = FailedLaunchPhase::InProgress(attempt);
         attempt
     };
     let worker_entry = entry.clone();
     let worker_registry = registry.clone();
-    let spawned = std::thread::Builder::new().name("runtime-launch-cleanup".to_owned()).spawn(move || {
-        // The in-flight entry stays visible while this worker owns its handles.
-        let mut owner = worker_entry.owner.lock().expect("launch owner mutex poisoned").take().expect("retained launch owner");
-        let result: Result<()> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &mut owner {
-            FailedRuntimeLaunch::Raw(child) => (|| {
-                let deadline = std::time::Instant::now() + Duration::from_secs(5);
-                if child.try_wait()?.is_none() { child.kill()?; }
-                while child.try_wait()?.is_none() {
-                    if std::time::Instant::now() >= deadline { bail!("raw runtime launch cleanup remains unconfirmed"); }
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-                Ok(())
-            })(),
-            FailedRuntimeLaunch::Attached(owner) => owner.cleanup(),
-        })).unwrap_or_else(|_| Err(anyhow!("runtime launch cleanup worker panicked; exact owner retained")));
-        if result.is_err() { *worker_entry.owner.lock().expect("launch owner mutex poisoned") = Some(owner); }
-        let mut phase = worker_entry.phase.lock().expect("launch attempt mutex poisoned");
-        if !matches!(*phase, FailedLaunchPhase::InProgress(current) if current == attempt) { return; }
-        match result {
-            Ok(()) => {
-                *phase = FailedLaunchPhase::Confirmed;
-                worker_registry.lock().expect("launch cleanup mutex poisoned").retain(|candidate| !Arc::ptr_eq(candidate, &worker_entry));
+    let spawned = std::thread::Builder::new()
+        .name("runtime-launch-cleanup".to_owned())
+        .spawn(move || {
+            // The in-flight entry stays visible while this worker owns its handles.
+            let mut owner = worker_entry
+                .owner
+                .lock()
+                .expect("launch owner mutex poisoned")
+                .take()
+                .expect("retained launch owner");
+            let result: Result<()> =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &mut owner {
+                    FailedRuntimeLaunch::Raw(child) => (|| {
+                        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                        if child.try_wait()?.is_none() {
+                            child.kill()?;
+                        }
+                        while child.try_wait()?.is_none() {
+                            if std::time::Instant::now() >= deadline {
+                                bail!("raw runtime launch cleanup remains unconfirmed");
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Ok(())
+                    })(),
+                    FailedRuntimeLaunch::Attached(owner) => owner.cleanup(),
+                }))
+                .unwrap_or_else(|_| {
+                    Err(anyhow!(
+                        "runtime launch cleanup worker panicked; exact owner retained"
+                    ))
+                });
+            if result.is_err() {
+                *worker_entry
+                    .owner
+                    .lock()
+                    .expect("launch owner mutex poisoned") = Some(owner);
             }
-            Err(error) => { eprintln!("runtime launch cleanup retained: {error:#}"); *phase = FailedLaunchPhase::Unconfirmed(format!("{error:#}")); }
-        }
-    });
+            let mut phase = worker_entry
+                .phase
+                .lock()
+                .expect("launch attempt mutex poisoned");
+            if !matches!(*phase, FailedLaunchPhase::InProgress(current) if current == attempt) {
+                return;
+            }
+            match result {
+                Ok(()) => {
+                    *phase = FailedLaunchPhase::Confirmed;
+                    worker_registry
+                        .lock()
+                        .expect("launch cleanup mutex poisoned")
+                        .retain(|candidate| !Arc::ptr_eq(candidate, &worker_entry));
+                }
+                Err(error) => {
+                    eprintln!("runtime launch cleanup retained: {error:#}");
+                    *phase = FailedLaunchPhase::Unconfirmed(format!("{error:#}"));
+                }
+            }
+        });
     if let Err(error) = spawned {
         // No worker took the owner. Thread creation failure cannot lose handles.
         let mut phase = entry.phase.lock().expect("launch attempt mutex poisoned");
         if matches!(*phase, FailedLaunchPhase::InProgress(current) if current == attempt) {
-            *phase = FailedLaunchPhase::Unconfirmed(format!("failed starting cleanup worker: {error}"));
+            *phase =
+                FailedLaunchPhase::Unconfirmed(format!("failed starting cleanup worker: {error}"));
         }
     }
 }
 
 // Attach while suspended, before even extracting the pipes. The raw child
 // guard and the kill-on-close job also cover failed SharedChild construction.
-fn spawn_dedicated_runtime(command: &mut Command, label: &str) -> Result<DedicatedRuntimeChild> {
+pub(crate) fn spawn_dedicated_runtime(
+    command: &mut Command,
+    label: &str,
+) -> Result<DedicatedRuntimeChild> {
     #[cfg(test)]
     if let Some(inspect) = TEST_DEDICATED_COMMAND_INSPECTOR.with(|slot| slot.borrow_mut().take()) {
         inspect(command)?;
@@ -564,7 +732,9 @@ fn spawn_dedicated_runtime(command: &mut Command, label: &str) -> Result<Dedicat
     #[cfg(windows)]
     let tree = Arc::new(RuntimeProcessTree {
         tree: TerminalProcessTree { job },
-        cleanup: Mutex::new(RuntimeCleanup { phase: RuntimeCleanupPhase::Live }),
+        cleanup: Mutex::new(RuntimeCleanup {
+            phase: RuntimeCleanupPhase::Live,
+        }),
         #[cfg(test)]
         cleanup_gate: Mutex::new(None),
         #[cfg(test)]
@@ -610,22 +780,33 @@ fn dedicated_reset_context(record: &SessionRecord) -> Vec<u8> {
 }
 
 impl AppState {
-    fn retry_retained_dedicated_cleanup(&self, session_id: &str) -> Result<()> {
+    pub(crate) fn retry_retained_dedicated_cleanup(&self, session_id: &str) -> Result<()> {
         #[cfg(windows)]
         {
             let owners = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                let Some(index) = inner.find_session_index(session_id) else { return Ok(()); };
+                let Some(index) = inner.find_session_index(session_id) else {
+                    return Ok(());
+                };
                 let record = &inner.sessions[index];
-                record.retained_dedicated_owners.iter().filter(|owner|
-                    !record.runtime.matches_runtime_token(&owner.token)).cloned().collect::<Vec<_>>()
+                record
+                    .retained_dedicated_owners
+                    .iter()
+                    .filter(|owner| !record.runtime.matches_runtime_token(&owner.token))
+                    .cloned()
+                    .collect::<Vec<_>>()
             };
             for owner in owners {
                 let outcome = owner.tree.terminate(&owner.process, owner.label);
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
                 if let Some(index) = inner.find_session_index(session_id) {
-                    inner.sessions[index].retained_dedicated_owners.retain(|current|
-                        !(current.token == owner.token && Arc::ptr_eq(&current.tree, &owner.tree) && current.tree.is_confirmed()));
+                    inner.sessions[index]
+                        .retained_dedicated_owners
+                        .retain(|current| {
+                            !(current.token == owner.token
+                                && Arc::ptr_eq(&current.tree, &owner.tree)
+                                && current.tree.is_confirmed())
+                        });
                 }
                 outcome?;
             }
@@ -635,30 +816,63 @@ impl AppState {
         Ok(())
     }
 
-    fn prepare_dedicated_runtime_reset_off_lock(&self, session_id: &str, model_refresh: bool) -> Result<()> {
-        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, model_refresh, None, None, None, None)
-            .map(|_| ())
+    pub(crate) fn prepare_dedicated_runtime_reset_off_lock(
+        &self,
+        session_id: &str,
+        model_refresh: bool,
+    ) -> Result<()> {
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(
+            session_id,
+            model_refresh,
+            None,
+            None,
+            None,
+            None,
+        )
+        .map(|_| ())
     }
 
-    fn prepare_dedicated_runtime_reset_for_human_off_lock(
-        &self, session_id: &str, prompt_id: &str, intent: &str, explicit: bool,
+    pub(crate) fn prepare_dedicated_runtime_reset_for_human_off_lock(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        intent: &str,
+        explicit: bool,
         selected: Option<&mut HumanResumeOwner>,
     ) -> Result<()> {
-        self.prepare_dedicated_runtime_reset_with_owner_off_lock(session_id, false, Some((prompt_id, intent, explicit)), selected, None, None)
-            .map(|_| ())
+        self.prepare_dedicated_runtime_reset_with_owner_off_lock(
+            session_id,
+            false,
+            Some((prompt_id, intent, explicit)),
+            selected,
+            None,
+            None,
+        )
+        .map(|_| ())
     }
 
-    fn prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
-        &self, session_id: &str, owner: Option<&mut QueuedTurnOwner>, automatic_queue: Option<bool>,
+    pub(crate) fn prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
+        &self,
+        session_id: &str,
+        owner: Option<&mut QueuedTurnOwner>,
+        automatic_queue: Option<bool>,
     ) -> Result<RuntimeResetPreparation> {
         self.prepare_dedicated_runtime_reset_with_owner_off_lock(
-            session_id, false, None, None, owner, automatic_queue,
+            session_id,
+            false,
+            None,
+            None,
+            owner,
+            automatic_queue,
         )
     }
 
     #[cfg_attr(not(windows), allow(unused_mut))]
     fn prepare_dedicated_runtime_reset_with_owner_off_lock(
-        &self, session_id: &str, model_refresh: bool, human: Option<(&str, &str, bool)>,
+        &self,
+        session_id: &str,
+        model_refresh: bool,
+        human: Option<(&str, &str, bool)>,
         mut selected: Option<&mut HumanResumeOwner>,
         mut ordinary: Option<&mut QueuedTurnOwner>,
         ordinary_queue: Option<bool>,
@@ -667,80 +881,153 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             // A connection release wakes the ordinary drain; it does not
             // authorize crossing a pause, reset or another Stop owner.
-            if ordinary_queue.is_some_and(|allow| ordinary_queue_reset_is_held(
-                &inner, session_id, ordinary.as_deref(), allow,
-            )) {
+            if ordinary_queue.is_some_and(|allow| {
+                ordinary_queue_reset_is_held(&inner, session_id, ordinary.as_deref(), allow)
+            }) {
                 return Ok(RuntimeResetPreparation::Held);
             }
-            if ordinary.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
-                .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+            if ordinary.as_ref().is_some_and(|owner| {
+                inner
+                    .find_session_index(session_id)
+                    .is_none_or(|index| !owner.matches(&inner.sessions[index]))
+            }) {
                 bail!("ordinary queue owner changed before runtime reset");
             }
-            if selected.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
-                .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+            if selected.as_ref().is_some_and(|owner| {
+                inner
+                    .find_session_index(session_id)
+                    .is_none_or(|index| !owner.matches(&inner.sessions[index]))
+            }) {
                 return Err(anyhow!(HumanPromptOwnerChanged));
             }
             if let Some((prompt, intent, explicit)) = human {
-                require_human_runtime_reset_owner(&inner, session_id, prompt, intent, &self.server_instance_id, explicit)?;
+                require_human_runtime_reset_owner(
+                    &inner,
+                    session_id,
+                    prompt,
+                    intent,
+                    &self.server_instance_id,
+                    explicit,
+                )?;
             }
         }
         self.retry_retained_dedicated_cleanup(session_id)?;
         #[cfg(not(windows))]
         {
             let _ = model_refresh;
-            if ordinary_queue.is_none() { return Ok(RuntimeResetPreparation::Ready); }
+            if ordinary_queue.is_none() {
+                return Ok(RuntimeResetPreparation::Ready);
+            }
             let inner = self.inner.lock().expect("state mutex poisoned");
-            return Ok(if ordinary_queue.is_some_and(|allow| ordinary_queue_reset_is_held(
-                &inner, session_id, ordinary.as_deref(), allow,
-            )) { RuntimeResetPreparation::Held } else { RuntimeResetPreparation::Ready });
+            return Ok(
+                if ordinary_queue.is_some_and(|allow| {
+                    ordinary_queue_reset_is_held(&inner, session_id, ordinary.as_deref(), allow)
+                }) {
+                    RuntimeResetPreparation::Held
+                } else {
+                    RuntimeResetPreparation::Ready
+                },
+            );
         }
         #[cfg(windows)]
         {
             let captured = {
                 let mut inner = self.inner.lock().expect("state mutex poisoned");
-                if ordinary_queue.is_some_and(|allow| ordinary_queue_reset_is_held(
-                    &inner, session_id, ordinary.as_deref(), allow,
-                )) {
+                if ordinary_queue.is_some_and(|allow| {
+                    ordinary_queue_reset_is_held(&inner, session_id, ordinary.as_deref(), allow)
+                }) {
                     return Ok(RuntimeResetPreparation::Held);
                 }
-                if ordinary.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
-                    .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+                if ordinary.as_ref().is_some_and(|owner| {
+                    inner
+                        .find_session_index(session_id)
+                        .is_none_or(|index| !owner.matches(&inner.sessions[index]))
+                }) {
                     bail!("ordinary queue owner changed before runtime reset");
                 }
-                if selected.as_ref().is_some_and(|owner| inner.find_session_index(session_id)
-                    .is_none_or(|index| !owner.matches(&inner.sessions[index]))) {
+                if selected.as_ref().is_some_and(|owner| {
+                    inner
+                        .find_session_index(session_id)
+                        .is_none_or(|index| !owner.matches(&inner.sessions[index]))
+                }) {
                     return Err(anyhow!(HumanPromptOwnerChanged));
                 }
                 if let Some((prompt, intent, explicit)) = human {
-                    require_human_runtime_reset_owner(&inner, session_id, prompt, intent, &self.server_instance_id, explicit)?;
+                    require_human_runtime_reset_owner(
+                        &inner,
+                        session_id,
+                        prompt,
+                        intent,
+                        &self.server_instance_id,
+                        explicit,
+                    )?;
                 }
-                let Some(index) = inner.find_session_index(session_id) else { return Ok(RuntimeResetPreparation::Ready); };
+                let Some(index) = inner.find_session_index(session_id) else {
+                    return Ok(RuntimeResetPreparation::Ready);
+                };
                 let record = &mut inner.sessions[index];
-                let refresh_restarts = model_refresh && matches!(record.session.agent, Agent::Claude | Agent::OpenCode | Agent::Kimi);
+                let refresh_restarts = model_refresh
+                    && matches!(
+                        record.session.agent,
+                        Agent::Claude | Agent::OpenCode | Agent::Kimi
+                    );
                 if !(record.runtime_reset_required || refresh_restarts)
-                    || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping) {
+                    || matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                    )
+                {
                     return Ok(RuntimeResetPreparation::Ready);
                 }
-                if record.runtime_stop_in_progress { bail!("session is stopping"); }
-                if let Some(detail) = record.runtime.dedicated_cleanup_failure() { bail!("{detail}; Stop must finish cleanup before reset"); }
-                let Some((tree, process, label)) = record.runtime.dedicated_tree_owner() else { return Ok(RuntimeResetPreparation::Ready); };
-                let token = record.runtime.runtime_token().expect("dedicated runtime token");
+                if record.runtime_stop_in_progress {
+                    bail!("session is stopping");
+                }
+                if let Some(detail) = record.runtime.dedicated_cleanup_failure() {
+                    bail!("{detail}; Stop must finish cleanup before reset");
+                }
+                let Some((tree, process, label)) = record.runtime.dedicated_tree_owner() else {
+                    return Ok(RuntimeResetPreparation::Ready);
+                };
+                let token = record
+                    .runtime
+                    .runtime_token()
+                    .expect("dedicated runtime token");
                 let context = dedicated_reset_context(record);
                 let installed = record.engram_mcp_installed.clone();
-                let human_resume = human.and_then(|(prompt, _, _)| capture_human_reset_resume(record, prompt));
-                let generation = record.claim_runtime_stop(RuntimeStopOwnerKind::DedicatedReset, token.clone());
-                (tree, process, label, token, context, installed, generation, human_resume)
+                let human_resume =
+                    human.and_then(|(prompt, _, _)| capture_human_reset_resume(record, prompt));
+                let generation =
+                    record.claim_runtime_stop(RuntimeStopOwnerKind::DedicatedReset, token.clone());
+                (
+                    tree,
+                    process,
+                    label,
+                    token,
+                    context,
+                    installed,
+                    generation,
+                    human_resume,
+                )
             };
-            let (tree, process, label, token, context, installed, generation, human_resume) = captured;
+            let (tree, process, label, token, context, installed, generation, human_resume) =
+                captured;
             let outcome = tree.terminate(&process, label);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return outcome.map(|_| RuntimeResetPreparation::Ready); };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return outcome.map(|_| RuntimeResetPreparation::Ready);
+            };
             let record = &mut inner.sessions[index];
             if !record.runtime.matches_runtime_token(&token)
-                || !record.runtime_stop_is_owned_by(RuntimeStopOwnerKind::DedicatedReset, &token, generation) {
+                || !record.runtime_stop_is_owned_by(
+                    RuntimeStopOwnerKind::DedicatedReset,
+                    &token,
+                    generation,
+                )
+            {
                 return Err(anyhow!("dedicated reset no longer owns the runtime"));
             }
-            let same_context = dedicated_reset_context(record) == context && record.engram_mcp_installed == installed;
+            let same_context = dedicated_reset_context(record) == context
+                && record.engram_mcp_installed == installed;
             record.clear_runtime_stop();
             if let Err(error) = outcome {
                 record.set_auto_dispatch_blocked(true);
@@ -756,13 +1043,20 @@ impl AppState {
                 record.set_auto_dispatch_blocked(true);
                 inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
-                return Err(anyhow!("dedicated reset configuration changed; callbacks retained for exact retry"));
+                return Err(anyhow!(
+                    "dedicated reset configuration changed; callbacks retained for exact retry"
+                ));
             }
-            if human_resume.as_ref().is_some_and(|saved| !transfer_human_reset_resume(record, saved, generation)) {
+            if human_resume
+                .as_ref()
+                .is_some_and(|saved| !transfer_human_reset_resume(record, saved, generation))
+            {
                 record.set_auto_dispatch_blocked(true);
                 inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
-                return Err(anyhow!("the exact human receipt or choice changed during dedicated reset"));
+                return Err(anyhow!(
+                    "the exact human receipt or choice changed during dedicated reset"
+                ));
             }
             if let Some(owner) = selected.as_deref_mut() {
                 // The receipt's own transfer above and this exact cleanup's
@@ -780,17 +1074,29 @@ impl AppState {
                 transferred.stop_generation = generation;
                 let mut probe = transferred.clone();
                 probe.receipt_resume = None;
-                if !probe.matches(record) { bail!("ordinary queue owner changed during runtime reset"); }
+                if !probe.matches(record) {
+                    bail!("ordinary queue owner changed during runtime reset");
+                }
                 if let Some(resume) = &mut transferred.receipt_resume {
-                    let Some(delivery) = record.prompt_deliveries.get_mut(&owner.prompt_id)
-                        .filter(|delivery| delivery.resume == owner.receipt_resume
-                            && delivery.write_ahead == resume.write_ahead
-                            && delivery.turn_generation.is_none() && delivery.write_ahead_acknowledged)
-                    else { bail!("ordinary delivery receipt changed during runtime reset"); };
+                    let Some(delivery) =
+                        record
+                            .prompt_deliveries
+                            .get_mut(&owner.prompt_id)
+                            .filter(|delivery| {
+                                delivery.resume == owner.receipt_resume
+                                    && delivery.write_ahead == resume.write_ahead
+                                    && delivery.turn_generation.is_none()
+                                    && delivery.write_ahead_acknowledged
+                            })
+                    else {
+                        bail!("ordinary delivery receipt changed during runtime reset");
+                    };
                     resume.stop_generation = generation;
                     delivery.resume = Some(resume.clone());
                 }
-                if !transferred.matches(record) { bail!("ordinary queue owner changed during runtime reset"); }
+                if !transferred.matches(record) {
+                    bail!("ordinary queue owner changed during runtime reset");
+                }
                 *owner = transferred;
             }
             // The reset runtime's turn, captured before it is retired.

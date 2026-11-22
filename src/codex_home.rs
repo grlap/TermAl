@@ -23,11 +23,13 @@
 // to tag every line with `[YYYY-MM-DDTHH:MM:SS label]` so interleaved
 // subprocess output is navigable.
 
-const TERMAL_CODEX_AGENTS_SECTION_START: &str =
+use super::*;
+
+pub(crate) const TERMAL_CODEX_AGENTS_SECTION_START: &str =
     "<!-- BEGIN TERMAL MANAGED COORDINATION INSTRUCTIONS -->";
-const TERMAL_CODEX_AGENTS_SECTION_END: &str =
+pub(crate) const TERMAL_CODEX_AGENTS_SECTION_END: &str =
     "<!-- END TERMAL MANAGED COORDINATION INSTRUCTIONS -->";
-fn termal_codex_agents_section() -> String {
+pub(crate) fn termal_codex_agents_section() -> String {
     format!(
         "{TERMAL_CODEX_AGENTS_SECTION_START}\n## TermAl coordination\n\n{}\n{TERMAL_CODEX_AGENTS_SECTION_END}",
         render_termal_host_guidance()
@@ -46,7 +48,7 @@ fn resolve_source_codex_home_dir() -> Result<PathBuf> {
 
 /// Resolves TermAl data dir.
 #[cfg(not(test))]
-fn resolve_termal_data_dir(default_workdir: &str) -> PathBuf {
+pub(crate) fn resolve_termal_data_dir(default_workdir: &str) -> PathBuf {
     let base = resolve_home_dir().unwrap_or_else(|| PathBuf::from(default_workdir));
     base.join(".termal")
 }
@@ -55,7 +57,7 @@ fn resolve_termal_data_dir(default_workdir: &str) -> PathBuf {
 /// through this owner (codex homes, stores, settings) lands in the test's own
 /// temporary tree instead of the user's real `~/.termal`.
 #[cfg(test)]
-fn resolve_termal_data_dir(_default_workdir: &str) -> PathBuf {
+pub(crate) fn resolve_termal_data_dir(_default_workdir: &str) -> PathBuf {
     test_temp_dir().join("termal-data")
 }
 
@@ -67,17 +69,17 @@ fn resolve_home_dir() -> Option<PathBuf> {
 }
 
 /// Returns the current stderr log timestamp.
-fn runtime_stderr_timestamp() -> String {
+pub(crate) fn runtime_stderr_timestamp() -> String {
     Local::now().format("%H:%M:%S").to_string()
 }
 
 /// Formats a runtime stderr log prefix.
-fn format_runtime_stderr_prefix(label: &str, timestamp: &str) -> String {
+pub(crate) fn format_runtime_stderr_prefix(label: &str, timestamp: &str) -> String {
     format!("{label} stderr [{timestamp}]>")
 }
 
 /// Returns whether a runtime stderr line should be forwarded to TermAl stderr.
-fn should_forward_runtime_stderr_line(label: &str, line: &str) -> bool {
+pub(crate) fn should_forward_runtime_stderr_line(label: &str, line: &str) -> bool {
     !(label == "codex" && is_codex_closed_stdin_tool_router_diagnostic(line))
 }
 
@@ -95,7 +97,7 @@ fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
 }
 
 /// Prepares TermAl Codex home.
-fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathBuf> {
+pub(crate) fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathBuf> {
     let target_home = resolve_termal_codex_home(default_workdir, scope);
     fs::create_dir_all(&target_home)
         .with_context(|| format!("failed to create `{}`", target_home.display()))?;
@@ -110,7 +112,10 @@ fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathB
 }
 
 /// Seeds TermAl Codex home from.
-fn seed_termal_codex_home_from(source_home: &FsPath, target_home: &FsPath) -> Result<()> {
+pub(crate) fn seed_termal_codex_home_from(
+    source_home: &FsPath,
+    target_home: &FsPath,
+) -> Result<()> {
     fs::create_dir_all(target_home)
         .with_context(|| format!("failed to create `{}`", target_home.display()))?;
     let source_exists = source_home.exists();

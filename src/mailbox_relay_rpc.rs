@@ -1,22 +1,24 @@
 // Authenticated native mailbox operations; principal claims originate on their host.
 // Owns no provider/executor entry point and performs no network I/O under state/SQL locks.
 
-const NATIVE_MAILBOX_RELAY_LINK_CHANGED: &str = "native mailbox relay link changed";
+use super::*;
 
-struct MailboxRelayAuthority {
-    app: AppState,
-    lease: FederationLinkLease,
-    native: Vec<MailboxRelayPrincipal>,
-    home: Option<MailboxRelayHome>,
+pub(crate) const NATIVE_MAILBOX_RELAY_LINK_CHANGED: &str = "native mailbox relay link changed";
+
+pub(crate) struct MailboxRelayAuthority {
+    pub(crate) app: AppState,
+    pub(crate) lease: FederationLinkLease,
+    pub(crate) native: Vec<MailboxRelayPrincipal>,
+    pub(crate) home: Option<MailboxRelayHome>,
 }
 
-struct MailboxRelayAdmission<'a> {
-    _link: std::sync::MutexGuard<'a, FederationLinkState>,
+pub(crate) struct MailboxRelayAdmission<'a> {
+    pub(crate) _link: std::sync::MutexGuard<'a, FederationLinkState>,
     new_send_refusal: Option<String>,
 }
 
 impl MailboxRelayAdmission<'_> {
-    fn authorize_new_send(&self) -> Result<()> {
+    pub(crate) fn authorize_new_send(&self) -> Result<()> {
         match &self.new_send_refusal {
             Some(reason) => Err(relay_store_error(reason)),
             None => Ok(()),
@@ -25,13 +27,13 @@ impl MailboxRelayAdmission<'_> {
 }
 
 impl MailboxRelayAuthority {
-    fn lock(&self) -> Result<MailboxRelayAdmission<'_>> {
+    pub(crate) fn lock(&self) -> Result<MailboxRelayAdmission<'_>> {
         self.lock_with(|_| Ok(())).map(|(admission, ())| admission)
     }
 
     // The callback may inspect in-memory state only. Its result is captured at
     // the same admission cut; the returned token owns no StateInner guard.
-    fn lock_with<T>(
+    pub(crate) fn lock_with<T>(
         &self,
         inspect: impl FnOnce(&StateInner) -> Result<T>,
     ) -> Result<(MailboxRelayAdmission<'_>, T)> {
@@ -94,13 +96,13 @@ impl MailboxRelayAuthority {
     }
 }
 
-fn mailbox_relay_rpc_routes() -> Router<FederationListenerState> {
+pub(crate) fn mailbox_relay_rpc_routes() -> Router<FederationListenerState> {
     Router::new()
         .route(MAILBOX_RELAY_RPC_ROUTE, post(serve_mailbox_relay))
         .layer(DefaultBodyLimit::max(FEDERATION_MAILBOX_REQUEST_BYTES))
 }
 
-async fn serve_mailbox_relay(
+pub(crate) async fn serve_mailbox_relay(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
     Json(request): Json<MailboxRelayRequest>,
 ) -> Result<Json<MailboxRelayResponse>, ApiError> {
@@ -130,7 +132,7 @@ async fn serve_mailbox_relay(
 }
 
 impl AppState {
-    fn native_mailbox_relay_descriptor(
+    pub(crate) fn native_mailbox_relay_descriptor(
         &self,
         session: &str,
     ) -> Result<MailboxRelayDescriptor, ApiError> {
@@ -158,11 +160,11 @@ impl AppState {
         })
     }
 
-    fn native_mailbox_relay_home(&self) -> Result<MailboxRelayHome, ApiError> {
+    pub(crate) fn native_mailbox_relay_home(&self) -> Result<MailboxRelayHome, ApiError> {
         self.native_mailbox_relay_home_checked(true)
     }
 
-    fn native_mailbox_relay_home_checked(
+    pub(crate) fn native_mailbox_relay_home_checked(
         &self,
         record_refusal: bool,
     ) -> Result<MailboxRelayHome, ApiError> {
@@ -177,7 +179,7 @@ impl AppState {
         })
     }
 
-    fn mailbox_relay_home_authority(
+    pub(crate) fn mailbox_relay_home_authority(
         &self,
         lease: &FederationLinkLease,
         home: &MailboxRelayHome,
@@ -207,7 +209,7 @@ impl AppState {
         })
     }
 
-    fn require_mailbox_relay_conversation(
+    pub(crate) fn require_mailbox_relay_conversation(
         &self,
         actor: &MailboxRelayPrincipal,
         mailbox: &str,
@@ -225,7 +227,7 @@ impl AppState {
         Ok(())
     }
 
-    fn execute_mailbox_relay(
+    pub(crate) fn execute_mailbox_relay(
         &self,
         operation: MailboxRelayOperation,
         lease: &FederationLinkLease,
@@ -466,7 +468,7 @@ impl AppState {
         value.map_err(|_| ApiError::internal("native mailbox relay response encoding failed"))
     }
 
-    async fn request_mailbox_relay<T: DeserializeOwned>(
+    pub(crate) async fn request_mailbox_relay<T: DeserializeOwned>(
         &self,
         handle: &FederationPeerHandle,
         lease: &FederationLinkLease,

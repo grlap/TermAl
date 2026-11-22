@@ -1,17 +1,19 @@
 // Terminal callbacks can dispatch a queued turn, whose reset detaches from the
 // same shared map. Carry owned work across an explicit map-guard release.
+
+use super::*;
 #[derive(Clone)]
-struct SharedCodexTerminalIdentity {
-    session_id: String,
-    runtime: RuntimeToken,
-    generation: u64,
+pub(crate) struct SharedCodexTerminalIdentity {
+    pub(crate) session_id: String,
+    pub(crate) runtime: RuntimeToken,
+    pub(crate) generation: u64,
     shared_generation: Option<u64>,
-    thread_id: Option<String>,
-    attachment: Arc<()>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) attachment: Arc<()>,
 }
 
 impl SharedCodexTerminalIdentity {
-    fn capture(
+    pub(crate) fn capture(
         state: &AppState,
         session_id: &str,
         runtime: &RuntimeToken,
@@ -36,13 +38,13 @@ impl SharedCodexTerminalIdentity {
         })
     }
 
-    fn matches_attachment(&self, shared: &SharedCodexSessionState) -> bool {
+    pub(crate) fn matches_attachment(&self, shared: &SharedCodexSessionState) -> bool {
         Arc::ptr_eq(&self.attachment, &shared.attachment)
             && self.shared_generation == shared.active_turn_generation
             && self.thread_id == shared.thread_id
     }
 
-    fn is_current(&self, state: &AppState) -> bool {
+    pub(crate) fn is_current(&self, state: &AppState) -> bool {
         let inner = state.inner.lock().expect("state mutex poisoned");
         inner
             .find_session_index(&self.session_id)
@@ -54,7 +56,7 @@ impl SharedCodexTerminalIdentity {
     }
 }
 
-enum SharedCodexTerminalOutcome {
+pub(crate) enum SharedCodexTerminalOutcome {
     Completed {
         turn_id: Option<String>,
     },
@@ -68,15 +70,15 @@ enum SharedCodexTerminalOutcome {
     },
 }
 
-struct SharedCodexTerminalEffect {
-    owner: SharedCodexTerminalIdentity,
-    outcome: SharedCodexTerminalOutcome,
+pub(crate) struct SharedCodexTerminalEffect {
+    pub(crate) owner: SharedCodexTerminalIdentity,
+    pub(crate) outcome: SharedCodexTerminalOutcome,
 }
 
 impl SharedCodexTerminalEffect {
     /// No caller may retain the sessions guard here. Preparation is short and
     /// cannot dispatch; lifecycle effects below can detach and replace entries.
-    fn apply(self, state: &AppState, sessions: &SharedCodexSessionMap) -> Result<()> {
+    pub(crate) fn apply(self, state: &AppState, sessions: &SharedCodexSessionMap) -> Result<()> {
         let Self { owner, outcome } = self;
         let (capacity, deferred) = {
             let mut shared = sessions
@@ -90,12 +92,22 @@ impl SharedCodexTerminalEffect {
             };
             // The provider's typed quota terminal is independent of the
             // reviewer's later MCP settlement. A duplicate finish owns nothing.
-            if let SharedCodexTerminalOutcome::Failed { usage_limit_refusal, .. } = &outcome {
+            if let SharedCodexTerminalOutcome::Failed {
+                usage_limit_refusal,
+                ..
+            } = &outcome
+            {
                 if *usage_limit_refusal
-                    && !session.reviewer_mcp_gate.as_deref()
+                    && !session
+                        .reviewer_mcp_gate
+                        .as_deref()
                         .is_some_and(|gate| gate.starts_with("finish:"))
                 {
-                    state.note_evaluator_usage_limit(&owner.session_id, &owner.runtime, owner.generation);
+                    state.note_evaluator_usage_limit(
+                        &owner.session_id,
+                        &owner.runtime,
+                        owner.generation,
+                    );
                 }
             }
             let capacity = match &outcome {

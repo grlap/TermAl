@@ -38,6 +38,8 @@
 // fragments, which is how this flat backend module is assembled. tests
 // pinning these behaviors live in `src/tests/codex_threads.rs`.
 
+use super::*;
+
 impl AppState {
     /// Branches a new local session off an existing codex thread.
     ///
@@ -58,7 +60,7 @@ impl AppState {
     /// mid-turn, awaiting approval, has queued prompts, or has never
     /// started a thread — all cases where the source thread id or
     /// transcript would be inconsistent with the fork result.
-    fn fork_codex_thread(
+    pub(crate) fn fork_codex_thread(
         &self,
         session_id: &str,
     ) -> std::result::Result<CreateSessionResponse, ApiError> {
@@ -184,9 +186,9 @@ impl AppState {
             .find_session_index(&record.session.id)
             .and_then(|index| inner.sessions.get(index))
             .expect("just-created Codex session must be present in the index");
-        let session = AppState::wire_session_from_record( &self.server_instance_id, created_record);
+        let session = AppState::wire_session_from_record(&self.server_instance_id, created_record);
         let delta_session =
-            AppState::wire_session_summary_from_record( &self.server_instance_id, created_record);
+            AppState::wire_session_summary_from_record(&self.server_instance_id, created_record);
         self.publish_delta_locked(
             &inner,
             DeltaEvent::SessionCreated {
@@ -217,7 +219,7 @@ impl AppState {
     /// flight — archiving mid-turn would let a turn complete against a
     /// thread the ui has already hidden. an already-archived thread
     /// is an idempotent success. A failed RPC requires positive reconciliation.
-    fn archive_codex_thread(
+    pub(crate) fn archive_codex_thread(
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
@@ -445,7 +447,7 @@ impl AppState {
 
     // Absence is normal; probe failure is operational evidence and gets its
     // own diagnostic on every automatic/manual/retry reconciliation path.
-    fn probe_codex_archive_state(
+    pub(crate) fn probe_codex_archive_state(
         &self,
         profile: SharedCodexProfile,
         thread_id: &str,
@@ -464,7 +466,7 @@ impl AppState {
 
     // Local Active may be stale. Only a matching inventory entry confirms
     // non-archive; missing/partial pages never establish the opposite state.
-    fn confirm_codex_thread_in_inventory(
+    pub(crate) fn confirm_codex_thread_in_inventory(
         &self,
         profile: SharedCodexProfile,
         thread_id: &str,
@@ -519,14 +521,14 @@ impl AppState {
     /// the live-idle-thread guard still applies — the source session
     /// must be idle with no queued prompts so the state transition
     /// cannot race a concurrent turn or dispatch.
-    fn unarchive_codex_thread(
+    pub(crate) fn unarchive_codex_thread(
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
         self.unarchive_codex_thread_with_owner(session_id, CodexRestoreOwner::Manual)
     }
 
-    fn unarchive_codex_thread_with_owner(
+    pub(crate) fn unarchive_codex_thread_with_owner(
         &self,
         session_id: &str,
         owner: CodexRestoreOwner,
@@ -603,7 +605,7 @@ impl AppState {
     /// the live-idle-thread guard prevents compacting while a turn is
     /// in flight — compacting mid-turn would change the context the
     /// turn is running against.
-    fn compact_codex_thread(
+    pub(crate) fn compact_codex_thread(
         &self,
         session_id: &str,
     ) -> std::result::Result<StateResponse, ApiError> {
@@ -667,7 +669,7 @@ impl AppState {
     /// the live-idle-thread guard rejects rollbacks from a session that
     /// is running, awaiting approval, or has queued prompts, so the
     /// truncation cannot race an in-flight turn.
-    fn rollback_codex_thread(
+    pub(crate) fn rollback_codex_thread(
         &self,
         session_id: &str,
         num_turns: usize,

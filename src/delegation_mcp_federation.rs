@@ -13,7 +13,7 @@ fn federation_status_tool_definition() -> Value {
 }
 
 impl TermalDelegationMcpBridge {
-    fn tool_federation_status(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_federation_status(&self, arguments: Value) -> Result<Value> {
         if !arguments
             .as_object()
             .is_some_and(|object| object.is_empty())

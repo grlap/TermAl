@@ -13,6 +13,8 @@
 // offer lets that owner act. New module beside test_run_waits.rs and
 // queued_prompt_durability.rs.
 
+use super::*;
+
 /// How often the watchdog looks at the ledger.
 #[cfg_attr(test, allow(dead_code))]
 const HANDOFF_WATCHDOG_TICK: Duration = Duration::from_secs(2);
@@ -59,7 +61,7 @@ const HANDOFFS_SCHEMA_SQL: &str = "
 /// What must hold before a handoff is ready.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind", deny_unknown_fields)]
-enum HandoffPrerequisite {
+pub(crate) enum HandoffPrerequisite {
     /// The registered test run reached a terminal result.
     #[serde(rename_all = "camelCase")]
     Terminal { run_id: String },
@@ -70,7 +72,7 @@ enum HandoffPrerequisite {
 }
 
 impl HandoffPrerequisite {
-    fn run_id(&self) -> &str {
+    pub(crate) fn run_id(&self) -> &str {
         match self {
             Self::Terminal { run_id } | Self::Credited { run_id } => run_id,
         }
@@ -79,7 +81,7 @@ impl HandoffPrerequisite {
 
 /// What the prerequisite reader reports for one handoff.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum HandoffPrerequisiteOutcome {
+pub(crate) enum HandoffPrerequisiteOutcome {
     /// Not yet: the run is still going, or its credit is still owed.
     Pending,
     /// The run passed and its credit is owed to the original owner's next
@@ -96,14 +98,14 @@ enum HandoffPrerequisiteOutcome {
 /// owner session does the work in its own turn.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum HandoffActionKind {
+pub(crate) enum HandoffActionKind {
     Settle,
     Inspect,
     Prepare,
 }
 
 impl HandoffActionKind {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Settle => "settle",
             Self::Inspect => "inspect",
@@ -114,25 +116,25 @@ impl HandoffActionKind {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct HandoffAction {
-    kind: HandoffActionKind,
-    text: String,
+pub(crate) struct HandoffAction {
+    pub(crate) kind: HandoffActionKind,
+    pub(crate) text: String,
 }
 
 /// One registered next step, immutable once registered.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct HandoffSpec {
-    idempotency_key: String,
-    prerequisite: HandoffPrerequisite,
-    next_action: HandoffAction,
-    primary_owner: String,
-    recovery_owner: String,
+pub(crate) struct HandoffSpec {
+    pub(crate) idempotency_key: String,
+    pub(crate) prerequisite: HandoffPrerequisite,
+    pub(crate) next_action: HandoffAction,
+    pub(crate) primary_owner: String,
+    pub(crate) recovery_owner: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum HandoffState {
+pub(crate) enum HandoffState {
     WaitingPrerequisite,
     Ready,
     Offered,
@@ -141,7 +143,7 @@ enum HandoffState {
 }
 
 impl HandoffState {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::WaitingPrerequisite => "waitingPrerequisite",
             Self::Ready => "ready",
@@ -154,46 +156,46 @@ impl HandoffState {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HandoffHistoryEntry {
-    at: String,
-    event: String,
+pub(crate) struct HandoffHistoryEntry {
+    pub(crate) at: String,
+    pub(crate) event: String,
 }
 
 /// A handoff as the ledger holds it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HandoffRecord {
-    handoff_id: String,
-    producer_session: String,
-    spec: HandoffSpec,
+pub(crate) struct HandoffRecord {
+    pub(crate) handoff_id: String,
+    pub(crate) producer_session: String,
+    pub(crate) spec: HandoffSpec,
     spec_digest: String,
-    state: HandoffState,
-    version: u64,
-    offer_generation: u64,
-    offered_to: Option<String>,
+    pub(crate) state: HandoffState,
+    pub(crate) version: u64,
+    pub(crate) offer_generation: u64,
+    pub(crate) offered_to: Option<String>,
     /// The exact queued prompt the current offer woke its owner with.
-    offered_prompt_id: Option<String>,
-    registered_at: String,
+    pub(crate) offered_prompt_id: Option<String>,
+    pub(crate) registered_at: String,
     ready_at: Option<String>,
     #[serde(default)]
-    offered_at: Option<String>,
+    pub(crate) offered_at: Option<String>,
     /// When the current offer's prompt reached its owner's turn; the
     /// acceptance clock starts here, not when the prompt was queued.
     #[serde(default)]
-    delivered_at: Option<String>,
+    pub(crate) delivered_at: Option<String>,
     /// Why the current offer's prompt is not delivered yet (queued behind a
     /// running turn, earlier prompts or its save acknowledgement).
     #[serde(default)]
-    waiting: Option<String>,
+    pub(crate) waiting: Option<String>,
     /// The offer generation whose lost prompt was already queued again; a
     /// second loss of the same offer blocks it instead.
     #[serde(default)]
     requeued_generation: Option<u64>,
-    accepted_by: Option<String>,
-    accept_fence: Option<String>,
-    completion: Option<Value>,
-    diagnostic: Option<String>,
-    blocked: Option<String>,
+    pub(crate) accepted_by: Option<String>,
+    pub(crate) accept_fence: Option<String>,
+    pub(crate) completion: Option<Value>,
+    pub(crate) diagnostic: Option<String>,
+    pub(crate) blocked: Option<String>,
     #[serde(default)]
     settle_requested_at: Option<String>,
     /// The run owner the settlement wake goes to, and the exact id of its
@@ -201,11 +203,11 @@ struct HandoffRecord {
     #[serde(default)]
     settle_owner: Option<String>,
     #[serde(default)]
-    settle_prompt_id: Option<String>,
+    pub(crate) settle_prompt_id: Option<String>,
     /// The settlement wake's lost prompt was already queued again once.
     #[serde(default)]
     settle_requeued: bool,
-    history: Vec<HandoffHistoryEntry>,
+    pub(crate) history: Vec<HandoffHistoryEntry>,
 }
 
 fn handoff_time(at: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
@@ -237,12 +239,15 @@ impl HandoffRecord {
     /// bound. None once it is accepted, completed, or with the recovery owner.
     fn primary_accept_due(&self) -> Option<chrono::DateTime<chrono::Utc>> {
         match self.state {
-            HandoffState::Ready => self.ready_time().map(|ready| ready + HANDOFF_PRIMARY_ACCEPT_DUE),
+            HandoffState::Ready => self
+                .ready_time()
+                .map(|ready| ready + HANDOFF_PRIMARY_ACCEPT_DUE),
             HandoffState::Offered if self.offered_to_primary() => {
                 if let Some(delivered) = self.delivered_time() {
                     Some(delivered + HANDOFF_PRIMARY_ACCEPT_DUE)
                 } else if self.blocked.is_some() {
-                    self.ready_time().map(|ready| ready + HANDOFF_PRIMARY_ACCEPT_DUE)
+                    self.ready_time()
+                        .map(|ready| ready + HANDOFF_PRIMARY_ACCEPT_DUE)
                 } else {
                     self.offered_time()
                         .map(|offered| offered + HANDOFF_UNDELIVERED_RECOVERY_AFTER)
@@ -282,7 +287,11 @@ impl HandoffRecord {
 
     /// The next version of this record: the version moves on and the event
     /// joins its history.
-    fn next(&self, now: chrono::DateTime<chrono::Utc>, event: impl Into<String>) -> Self {
+    pub(crate) fn next(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        event: impl Into<String>,
+    ) -> Self {
         let mut next = self.clone();
         next.version += 1;
         next.history.push(HandoffHistoryEntry {
@@ -296,19 +305,19 @@ impl HandoffRecord {
 /// A handoff as the list shows it, with how overdue it is now.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HandoffView {
+pub(crate) struct HandoffView {
     #[serde(flatten)]
-    record: HandoffRecord,
-    overdue: bool,
+    pub(crate) record: HandoffRecord,
+    pub(crate) overdue: bool,
     overdue_seconds: Option<i64>,
 }
 
 /// What one watchdog pass did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct HandoffTickReport {
+pub(crate) struct HandoffTickReport {
     readied: Vec<String>,
-    offered: Vec<(String, String, u64)>,
-    blocked: Vec<(String, String)>,
+    pub(crate) offered: Vec<(String, String, u64)>,
+    pub(crate) blocked: Vec<(String, String)>,
 }
 
 /// Where the current offer's prompt is, read from its owner's session by the
@@ -380,7 +389,7 @@ fn handoff_offer_delivery_locked(
 /// (recovered or re-fenced, as a restart does). None when nothing shows that,
 /// including a released claim (no binding), which takes the credit grace
 /// route instead.
-fn handoff_credit_claim_changed(
+pub(crate) fn handoff_credit_claim_changed(
     run_binding: &EngramControlWorkBinding,
     owner_binding: Option<&EngramControlWorkBinding>,
 ) -> Option<String> {
@@ -404,7 +413,7 @@ fn handoff_storage_error(action: &str, error: impl std::fmt::Display) -> ApiErro
 
 /// Runs `op` on a writable connection under the state writer admission, with
 /// the ledger's table in place. Never call with the state lock held.
-fn with_handoff_writer<T>(
+pub(crate) fn with_handoff_writer<T>(
     path: &FsPath,
     op: impl FnOnce(&rusqlite::Connection) -> std::result::Result<T, ApiError>,
 ) -> std::result::Result<T, ApiError> {
@@ -439,7 +448,10 @@ fn handoff_on(
 
 /// Every handoff in registration order, read without the writer admission.
 /// A ledger whose table was never created is empty.
-fn read_handoffs(path: &FsPath, open_only: bool) -> std::result::Result<Vec<HandoffRecord>, ApiError> {
+fn read_handoffs(
+    path: &FsPath,
+    open_only: bool,
+) -> std::result::Result<Vec<HandoffRecord>, ApiError> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -452,12 +464,11 @@ fn read_handoffs(path: &FsPath, open_only: bool) -> std::result::Result<Vec<Hand
     } else {
         "SELECT value_json FROM handoffs ORDER BY rowid ASC"
     };
-    let mut statement =
-        match connection.prepare(sql) {
-            Ok(statement) => statement,
-            Err(err) if err.to_string().contains("no such table") => return Ok(Vec::new()),
-            Err(err) => return Err(handoff_storage_error("read", err)),
-        };
+    let mut statement = match connection.prepare(sql) {
+        Ok(statement) => statement,
+        Err(err) if err.to_string().contains("no such table") => return Ok(Vec::new()),
+        Err(err) => return Err(handoff_storage_error("read", err)),
+    };
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))
         .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
@@ -467,7 +478,7 @@ fn read_handoffs(path: &FsPath, open_only: bool) -> std::result::Result<Vec<Hand
 
 /// Writes `next` only if the stored record is still at `next.version - 1`;
 /// returns whether it was written. Under the writer admission.
-fn cas_handoff_on(
+pub(crate) fn cas_handoff_on(
     connection: &rusqlite::Connection,
     next: &HandoffRecord,
 ) -> std::result::Result<bool, ApiError> {
@@ -571,7 +582,7 @@ fn handoff_settle_text(record: &HandoffRecord) -> String {
 /// What `prerequisite` reports now, from the test-run index and the host's
 /// recorded verification associations. A PASS alone never meets a
 /// credit-dependent prerequisite.
-fn handoff_prerequisite_outcome_locked(
+pub(crate) fn handoff_prerequisite_outcome_locked(
     inner: &StateInner,
     prerequisite: &HandoffPrerequisite,
     now: chrono::DateTime<chrono::Utc>,
@@ -579,7 +590,8 @@ fn handoff_prerequisite_outcome_locked(
     if !inner.test_runs.scanned_once {
         return HandoffPrerequisiteOutcome::Pending;
     }
-    let Some((summary, observations)) = handoff_run_facts_locked(inner, prerequisite.run_id()) else {
+    let Some((summary, observations)) = handoff_run_facts_locked(inner, prerequisite.run_id())
+    else {
         return HandoffPrerequisiteOutcome::Pending;
     };
     let owner_binding = summary
@@ -587,7 +599,13 @@ fn handoff_prerequisite_outcome_locked(
         .as_deref()
         .and_then(|owner| inner.find_session_index(owner))
         .and_then(|index| inner.sessions[index].engram.work_binding.as_ref());
-    handoff_prerequisite_outcome(prerequisite, Some(&summary), &observations, owner_binding, now)
+    handoff_prerequisite_outcome(
+        prerequisite,
+        Some(&summary),
+        &observations,
+        owner_binding,
+        now,
+    )
 }
 
 /// The run `run_id` names and its command observations, wherever the host
@@ -601,7 +619,8 @@ fn handoff_run_facts_locked<'a>(
     run_id: &str,
 ) -> Option<(TestRunSummary, Vec<&'a TestRunCommandObservation>)> {
     if let Some(entry) = inner.test_runs.find(run_id) {
-        let observations = handoff_run_observations(inner, &entry.summary, Some(entry.disk.as_ref()));
+        let observations =
+            handoff_run_observations(inner, &entry.summary, Some(entry.disk.as_ref()));
         return Some((entry.summary.clone(), observations));
     }
     if let Some(retained) = inner.test_run_compacted.get(run_id) {
@@ -619,7 +638,7 @@ fn handoff_run_facts_locked<'a>(
 /// association names exactly (an observation carries its own `observed-…`
 /// id and names the launcher run only through its artifact), and the row
 /// that is the run itself when the host observed it.
-fn handoff_run_observations<'a>(
+pub(crate) fn handoff_run_observations<'a>(
     inner: &'a StateInner,
     run: &TestRunSummary,
     disk: Option<&TestRunDisk>,
@@ -628,7 +647,8 @@ fn handoff_run_observations<'a>(
         .test_run_observations
         .values()
         .filter(|row| {
-            row.execution_id == run.run_id || test_run_observation_matches_run(inner, run, disk, row)
+            row.execution_id == run.run_id
+                || test_run_observation_matches_run(inner, run, disk, row)
         })
         .collect()
 }
@@ -636,7 +656,7 @@ fn handoff_run_observations<'a>(
 /// The production prerequisite decision over the run's indexed summary, the
 /// command observations associated with that run, and the run owner's
 /// current work binding.
-fn handoff_prerequisite_outcome(
+pub(crate) fn handoff_prerequisite_outcome(
     prerequisite: &HandoffPrerequisite,
     summary: Option<&TestRunSummary>,
     run_observations: &[&TestRunCommandObservation],
@@ -714,7 +734,7 @@ impl AppState {
     /// Registers a next step for `producer_session`, durably, before anything
     /// depends on it. The same key and body return the same record; the same
     /// key with another body is refused.
-    fn register_handoff(
+    pub(crate) fn register_handoff(
         &self,
         producer_session: &str,
         spec: HandoffSpec,
@@ -726,7 +746,9 @@ impl AppState {
             ));
         }
         if spec.prerequisite.run_id().trim().is_empty() {
-            return Err(ApiError::bad_request("a handoff prerequisite names its test run"));
+            return Err(ApiError::bad_request(
+                "a handoff prerequisite names its test run",
+            ));
         }
         let text = spec.next_action.text.trim();
         if text.is_empty() || text.len() > 4000 {
@@ -811,8 +833,8 @@ impl AppState {
                     event: format!("registered by `{producer_session}`"),
                 }],
             };
-            let json =
-                serde_json::to_string(&record).map_err(|err| handoff_storage_error("encode", err))?;
+            let json = serde_json::to_string(&record)
+                .map_err(|err| handoff_storage_error("encode", err))?;
             connection
                 .execute(
                     "INSERT INTO handoffs (handoff_id, producer_session, idempotency_key, version, state, value_json)
@@ -837,7 +859,7 @@ impl AppState {
     /// generation can, and the acceptance returns the fence every later
     /// change presents. A retry by the same owner returns the same
     /// acceptance.
-    fn accept_handoff(
+    pub(crate) fn accept_handoff(
         &self,
         session_id: &str,
         handoff_id: &str,
@@ -871,7 +893,10 @@ impl AppState {
                     "handoff `{handoff_id}` is offered to another session"
                 )));
             }
-            let mut next = record.next(now, format!("offer {offer_generation} accepted by `{session_id}`"));
+            let mut next = record.next(
+                now,
+                format!("offer {offer_generation} accepted by `{session_id}`"),
+            );
             next.state = HandoffState::Accepted;
             next.accepted_by = Some(session_id.to_owned());
             next.accept_fence = Some(Uuid::new_v4().to_string());
@@ -888,14 +913,17 @@ impl AppState {
     /// The accepted owner completes the handoff with its evidence, presenting
     /// the acceptance fence. A retry with the same evidence returns the same
     /// completion; anything else is refused.
-    fn complete_handoff(
+    pub(crate) fn complete_handoff(
         &self,
         session_id: &str,
         handoff_id: &str,
         fence: &str,
         evidence: Value,
     ) -> std::result::Result<HandoffRecord, ApiError> {
-        if !evidence.as_object().is_some_and(|object| !object.is_empty()) {
+        if !evidence
+            .as_object()
+            .is_some_and(|object| !object.is_empty())
+        {
             return Err(ApiError::bad_request(
                 "a handoff completes with an evidence object that names what was done",
             ));
@@ -936,7 +964,7 @@ impl AppState {
     /// of readiness, when it could not be offered), or whose offer was never
     /// delivered within the undelivered bound. A queued offer shows why it
     /// waits instead.
-    fn list_handoffs_at(
+    pub(crate) fn list_handoffs_at(
         &self,
         now: chrono::DateTime<chrono::Utc>,
     ) -> std::result::Result<Vec<HandoffView>, ApiError> {
@@ -974,7 +1002,7 @@ impl AppState {
     /// One watchdog pass at `now`, reading prerequisites through `reader`.
     /// Each open handoff advances at most one step of readiness and one
     /// offer. Never call with the state lock held.
-    fn handoff_watchdog_tick_with(
+    pub(crate) fn handoff_watchdog_tick_with(
         &self,
         now: chrono::DateTime<chrono::Utc>,
         reader: &dyn Fn(&HandoffPrerequisite) -> HandoffPrerequisiteOutcome,
@@ -991,10 +1019,12 @@ impl AppState {
         // Every open handoff is looked at on every pass, so none is starved
         // by others that stay pending; a pass reads the ledger once and
         // writes only the rows that change.
-        for record in records
-            .into_iter()
-            .filter(|record| !matches!(record.state, HandoffState::Accepted | HandoffState::Completed))
-        {
+        for record in records.into_iter().filter(|record| {
+            !matches!(
+                record.state,
+                HandoffState::Accepted | HandoffState::Completed
+            )
+        }) {
             if let Err(error) = self.advance_handoff(&path, record, now, reader, &mut report) {
                 eprintln!("handoff> could not advance a handoff: {}", error.message);
             }
@@ -1124,7 +1154,10 @@ impl AppState {
         };
         let next = match delivery {
             HandoffOfferDelivery::Delivered => {
-                let mut next = record.next(now, format!("offer {} delivered to `{owner}`", record.offer_generation));
+                let mut next = record.next(
+                    now,
+                    format!("offer {} delivered to `{owner}`", record.offer_generation),
+                );
                 next.delivered_at = Some(now.to_rfc3339());
                 next.waiting = None;
                 next.blocked = None;
@@ -1134,14 +1167,19 @@ impl AppState {
                 if record.waiting.as_deref() == Some(reason.as_str()) {
                     return Ok(record);
                 }
-                let mut next = record.next(now, format!("offer {} waiting: {reason}", record.offer_generation));
+                let mut next = record.next(
+                    now,
+                    format!("offer {} waiting: {reason}", record.offer_generation),
+                );
                 next.waiting = Some(reason);
                 next.blocked = None;
                 next
             }
             HandoffOfferDelivery::Missing => match block {
                 Some(reason) => {
-                    report.blocked.push((record.handoff_id.clone(), reason.clone()));
+                    report
+                        .blocked
+                        .push((record.handoff_id.clone(), reason.clone()));
                     // Already shown as blocked (by this owner, or by the
                     // recovery owner it waits for): never rewritten every
                     // pass, so two blocked owners cannot flap the row.
@@ -1150,7 +1188,10 @@ impl AppState {
                     }
                     let mut next = record.next(
                         now,
-                        format!("offer {} cleared; blocked: {reason}", record.offer_generation),
+                        format!(
+                            "offer {} cleared; blocked: {reason}",
+                            record.offer_generation
+                        ),
                     );
                     next.waiting = None;
                     next.blocked = Some(reason);
@@ -1163,7 +1204,9 @@ impl AppState {
                          again",
                         record.offer_generation
                     );
-                    report.blocked.push((record.handoff_id.clone(), reason.clone()));
+                    report
+                        .blocked
+                        .push((record.handoff_id.clone(), reason.clone()));
                     if record.blocked.is_some() {
                         return Ok(record);
                     }
@@ -1177,7 +1220,10 @@ impl AppState {
                     // second removal can never turn into a re-queue loop.
                     let mut next = record.next(
                         now,
-                        format!("offer {} prompt lost; queued again once", record.offer_generation),
+                        format!(
+                            "offer {} prompt lost; queued again once",
+                            record.offer_generation
+                        ),
                     );
                     next.requeued_generation = Some(record.offer_generation);
                     next.waiting = None;
@@ -1191,16 +1237,27 @@ impl AppState {
                 }
             },
         };
-        Ok(if cas_handoff(path, &next)? { next } else { record })
+        Ok(if cas_handoff(path, &next)? {
+            next
+        } else {
+            record
+        })
     }
 
     /// Enqueues the wake of `record`'s current offer under the exact prompt
     /// id the row holds, held until its exact content is durable.
     fn enqueue_handoff_offer(&self, record: &HandoffRecord) -> std::result::Result<(), String> {
         let (Some(owner), Some(prompt_id)) = (&record.offered_to, &record.offered_prompt_id) else {
-            return Err(format!("handoff `{}` has no current offer", record.handoff_id));
+            return Err(format!(
+                "handoff `{}` has no current offer",
+                record.handoff_id
+            ));
         };
-        self.enqueue_held_handoff_prompt(owner, Some(prompt_id.clone()), handoff_offer_text(record, owner))
+        self.enqueue_held_handoff_prompt(
+            owner,
+            Some(prompt_id.clone()),
+            handoff_offer_text(record, owner),
+        )
     }
 
     /// Wakes the run's original owner so its next checkpoint settles the
@@ -1327,7 +1384,7 @@ impl AppState {
     /// the prompts it enqueues reach runtimes whose bridges can call back.
     /// Tests drive the tick directly with their own time.
     #[cfg(not(test))]
-    fn spawn_handoff_watchdog(&self) {
+    pub(crate) fn spawn_handoff_watchdog(&self) {
         let state = self.clone();
         let shutdown = self.subscribe_shutdown_signal();
         let spawned = std::thread::Builder::new()
@@ -1353,25 +1410,25 @@ impl AppState {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AcceptHandoffRequest {
-    offer_generation: u64,
+pub(crate) struct AcceptHandoffRequest {
+    pub(crate) offer_generation: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CompleteHandoffRequest {
-    fence: String,
-    evidence: Value,
+pub(crate) struct CompleteHandoffRequest {
+    pub(crate) fence: String,
+    pub(crate) evidence: Value,
 }
 
-async fn get_handoffs(
+pub(crate) async fn get_handoffs(
     State(state): State<AppState>,
 ) -> std::result::Result<Json<Vec<HandoffView>>, ApiError> {
     let views = run_blocking_api(move || state.list_handoffs_at(chrono::Utc::now())).await?;
     Ok(Json(views))
 }
 
-async fn register_session_handoff(
+pub(crate) async fn register_session_handoff(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: std::result::Result<Json<HandoffSpec>, JsonRejection>,
@@ -1381,7 +1438,7 @@ async fn register_session_handoff(
     Ok((StatusCode::CREATED, Json(record)))
 }
 
-async fn accept_session_handoff(
+pub(crate) async fn accept_session_handoff(
     AxumPath((session_id, handoff_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     request: std::result::Result<Json<AcceptHandoffRequest>, JsonRejection>,
@@ -1394,7 +1451,7 @@ async fn accept_session_handoff(
     Ok(Json(record))
 }
 
-async fn complete_session_handoff(
+pub(crate) async fn complete_session_handoff(
     AxumPath((session_id, handoff_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     request: std::result::Result<Json<CompleteHandoffRequest>, JsonRejection>,

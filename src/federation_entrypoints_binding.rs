@@ -1,7 +1,9 @@
 // Pair-authenticated satellite commands. Only INSTALL mutates the native root;
 // PREPARE and the existing native-binding proof cannot create an association.
 
-async fn serve_federation_binding_command(
+use super::*;
+
+pub(crate) async fn serve_federation_binding_command(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
     Json(command): Json<FederationBindingCommand>,
 ) -> Result<Json<Value>, ApiError> {

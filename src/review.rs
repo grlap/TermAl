@@ -6,8 +6,10 @@
 // api.rs. This file owns the on-disk review document lifecycle; everything
 // is visible across the flat `include!()`-assembled module.
 
+use super::*;
+
 /// Resolves review storage root.
-fn resolve_review_storage_root(
+pub(crate) fn resolve_review_storage_root(
     state: &AppState,
     session_id: Option<&str>,
     project_id: Option<&str>,
@@ -16,7 +18,7 @@ fn resolve_review_storage_root(
 }
 
 /// Resolves review document path.
-fn resolve_review_document_path(
+pub(crate) fn resolve_review_document_path(
     review_root: &FsPath,
     change_set_id: &str,
 ) -> Result<PathBuf, ApiError> {
@@ -28,7 +30,10 @@ fn resolve_review_document_path(
 }
 
 /// Loads review document.
-fn load_review_document(path: &FsPath, change_set_id: &str) -> Result<ReviewDocument, ApiError> {
+pub(crate) fn load_review_document(
+    path: &FsPath,
+    change_set_id: &str,
+) -> Result<ReviewDocument, ApiError> {
     if !path.exists() {
         return Ok(default_review_document(change_set_id));
     }
@@ -50,11 +55,14 @@ fn load_review_document(path: &FsPath, change_set_id: &str) -> Result<ReviewDocu
 }
 
 /// Persists review document.
-fn persist_review_document(path: &FsPath, review: &ReviewDocument) -> Result<(), ApiError> {
+pub(crate) fn persist_review_document(
+    path: &FsPath,
+    review: &ReviewDocument,
+) -> Result<(), ApiError> {
     persist_review_document_with_directory_sync(path, review, sync_review_document_directory)
 }
 
-fn persist_review_document_with_directory_sync<F>(
+pub(crate) fn persist_review_document_with_directory_sync<F>(
     path: &FsPath,
     review: &ReviewDocument,
     sync_directory: F,
@@ -135,19 +143,26 @@ where
 }
 
 #[cfg(windows)]
-const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+pub(crate) const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
 
 #[cfg(windows)]
-const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+pub(crate) const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
 
 #[cfg(windows)]
 #[link(name = "Kernel32")]
 unsafe extern "system" {
-    fn MoveFileExW(existing_file_name: *const u16, new_file_name: *const u16, flags: u32) -> i32;
+    pub(crate) fn MoveFileExW(
+        existing_file_name: *const u16,
+        new_file_name: *const u16,
+        flags: u32,
+    ) -> i32;
 }
 
 #[cfg(not(windows))]
-fn replace_review_document_file(temp_path: &FsPath, path: &FsPath) -> Result<(), ApiError> {
+pub(crate) fn replace_review_document_file(
+    temp_path: &FsPath,
+    path: &FsPath,
+) -> Result<(), ApiError> {
     fs::rename(temp_path, path).map_err(|err| {
         ApiError::internal(format!(
             "failed to replace review file {}: {err}",
@@ -157,7 +172,10 @@ fn replace_review_document_file(temp_path: &FsPath, path: &FsPath) -> Result<(),
 }
 
 #[cfg(windows)]
-fn replace_review_document_file(temp_path: &FsPath, path: &FsPath) -> Result<(), ApiError> {
+pub(crate) fn replace_review_document_file(
+    temp_path: &FsPath,
+    path: &FsPath,
+) -> Result<(), ApiError> {
     use std::os::windows::ffi::OsStrExt as _;
 
     let temp_path_wide = temp_path
@@ -211,7 +229,7 @@ fn sync_review_document_directory(_path: &FsPath) -> Result<(), ApiError> {
 }
 
 /// Prepares review document for write.
-fn prepare_review_document_for_write(
+pub(crate) fn prepare_review_document_for_write(
     path: &FsPath,
     change_set_id: &str,
     review: ReviewDocument,
@@ -235,7 +253,7 @@ fn prepare_review_document_for_write(
 }
 
 /// Returns the default review document.
-fn default_review_document(change_set_id: &str) -> ReviewDocument {
+pub(crate) fn default_review_document(change_set_id: &str) -> ReviewDocument {
     ReviewDocument {
         version: REVIEW_DOCUMENT_VERSION,
         revision: 0,
@@ -247,7 +265,7 @@ fn default_review_document(change_set_id: &str) -> ReviewDocument {
 }
 
 /// Summarizes review document.
-fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
+pub(crate) fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
     let mut summary = ReviewDocumentSummary::default();
     summary.thread_count = review.threads.len();
 
@@ -263,10 +281,10 @@ fn summarize_review_document(review: &ReviewDocument) -> ReviewDocumentSummary {
     summary
 }
 
-const MAX_REVIEW_CHANGE_SET_ID_LEN: usize = 200;
+pub(crate) const MAX_REVIEW_CHANGE_SET_ID_LEN: usize = 200;
 
 /// Validates review change set ID.
-fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_review_change_set_id(change_set_id: &str) -> Result<(), ApiError> {
     let trimmed = change_set_id.trim();
     if trimmed.is_empty() {
         return Err(ApiError::bad_request("changeSetId cannot be empty"));

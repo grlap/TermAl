@@ -5,23 +5,25 @@
 // No durable queue or filesystem authority is introduced. Publication anchors
 // live only as long as the turn or its captures.
 
-struct FileChangeTrackingLifetime {
-    incarnation: Uuid,
+use super::*;
+
+pub(crate) struct FileChangeTrackingLifetime {
+    pub(crate) incarnation: Uuid,
     prompt_anchor: Option<(String, usize)>,
     // Accessed only while StateInner is held. Captures retain this Arc after a
     // successor replaces the record's lifetime, without retaining the session.
-    publication: Mutex<FileChangeTrackingPublication>,
+    pub(crate) publication: Mutex<FileChangeTrackingPublication>,
 }
 
 #[derive(Default)]
-struct FileChangeTrackingPublication {
-    completed: bool,
+pub(crate) struct FileChangeTrackingPublication {
+    pub(crate) completed: bool,
     // The observation close consumes the live trace before file tracking
     // completes. Keep its scope for in-flight captures and debounced events.
     closed_scope: Option<FileChangeTrackingScope>,
-    late_summary_id: Option<String>,
-    observed_changes: usize,
-    bounded: bool,
+    pub(crate) late_summary_id: Option<String>,
+    pub(crate) observed_changes: usize,
+    pub(crate) bounded: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -57,7 +59,7 @@ impl FileChangeTrackingScope {
     }
 }
 
-fn freeze_active_turn_file_change_scope(record: &mut SessionRecord) {
+pub(crate) fn freeze_active_turn_file_change_scope(record: &mut SessionRecord) {
     if record.file_change_tracking.is_none() && record.active_turn_start_message_count.is_none() {
         return;
     }
@@ -73,7 +75,7 @@ fn freeze_active_turn_file_change_scope(record: &mut SessionRecord) {
 }
 
 impl FileChangeTrackingLifetime {
-    fn new(prompt_anchor: Option<(String, usize)>) -> Self {
+    pub(crate) fn new(prompt_anchor: Option<(String, usize)>) -> Self {
         Self {
             incarnation: Uuid::new_v4(),
             prompt_anchor,
@@ -193,11 +195,20 @@ fn prepare_file_change_capture(
     ignore_cache: &mut HashMap<String, HashSet<String>>,
     project_roots: &[PathBuf],
 ) -> PreparedFileChangeCapture {
-    let ignored_workdir = ignore_cache.entry(owner.workdir.clone())
-        .or_insert_with(|| workspace_ignored_changes(&owner.workdir, changes, project_roots)).clone();
-    let ignored_source = owner.source_root.as_ref()
-        .map(|root| ignore_cache.entry(root.root.clone())
-            .or_insert_with(|| workspace_ignored_changes(&root.root, changes, project_roots)).clone()).unwrap_or_default();
+    let ignored_workdir = ignore_cache
+        .entry(owner.workdir.clone())
+        .or_insert_with(|| workspace_ignored_changes(&owner.workdir, changes, project_roots))
+        .clone();
+    let ignored_source = owner
+        .source_root
+        .as_ref()
+        .map(|root| {
+            ignore_cache
+                .entry(root.root.clone())
+                .or_insert_with(|| workspace_ignored_changes(&root.root, changes, project_roots))
+                .clone()
+        })
+        .unwrap_or_default();
     let root_key = owner
         .source_root
         .as_ref()
@@ -233,9 +244,10 @@ fn prepare_file_change_capture(
             let candidate = normalized
                 .entry(path.to_owned())
                 .or_insert_with(|| normalize_path_best_effort(FsPath::new(path)));
-            !ignored_workdir.contains(path) && (*candidate == root
-                || candidate.starts_with(&root)
-                || subtree && (path.is_empty() || root.starts_with(&*candidate)))
+            !ignored_workdir.contains(path)
+                && (*candidate == root
+                    || candidate.starts_with(&root)
+                    || subtree && (path.is_empty() || root.starts_with(&*candidate)))
         };
         prepared.push(PreparedFileChange {
             // An empty subtree covers both the captured workdir and source
@@ -276,9 +288,17 @@ fn merge_captured_file_changes(
     let oversized = target.len() > WORKSPACE_PUBLICATION_ENTRIES
         || target.keys().map(String::len).sum::<usize>() > WORKSPACE_PUBLICATION_PATH_BYTES;
     if oversized {
-        let changes = std::mem::take(target).into_iter().map(|(path, kind)| WorkspaceFileChangeEvent {
-            path, kind, root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
-        }).collect();
+        let changes = std::mem::take(target)
+            .into_iter()
+            .map(|(path, kind)| WorkspaceFileChangeEvent {
+                path,
+                kind,
+                root_path: None,
+                session_id: None,
+                mtime_ms: None,
+                size_bytes: None,
+            })
+            .collect();
         let (bounded, _) = bound_workspace_publication(changes);
         target.extend(bounded.into_iter().map(|change| (change.path, change.kind)));
     }
@@ -306,7 +326,11 @@ fn amend_late_file_change_summary(
         .collect();
     let bounded = merge_captured_file_changes(&mut merged, captured);
     if let Some(tracking) = &record.file_change_tracking {
-        tracking.publication.lock().expect("file tracking mutex poisoned").bounded |= bounded;
+        tracking
+            .publication
+            .lock()
+            .expect("file tracking mutex poisoned")
+            .bounded |= bounded;
     }
     *files = merged
         .into_iter()
@@ -352,7 +376,7 @@ fn publish_unresolved_file_change_capture(
 }
 
 impl AppState {
-    fn record_file_change_captures(&self, changes: &[WorkspaceFileChangeEvent]) {
+    pub(crate) fn record_file_change_captures(&self, changes: &[WorkspaceFileChangeEvent]) {
         if changes.is_empty() {
             return;
         }
@@ -378,8 +402,12 @@ impl AppState {
         let scan_started = std::time::Instant::now();
         let now = std::time::Instant::now();
         let mut owners = Vec::new();
-        let project_roots = inner.projects.iter().filter(|project| project.remote_id == LOCAL_REMOTE_ID)
-            .map(|project| normalize_user_facing_path(FsPath::new(&project.root_path))).collect::<Vec<_>>();
+        let project_roots = inner
+            .projects
+            .iter()
+            .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
+            .map(|project| normalize_user_facing_path(FsPath::new(&project.root_path)))
+            .collect::<Vec<_>>();
         for record in &mut inner.sessions {
             diagnostic.visited_sessions += 1;
             if !record.is_local_session() || record.hidden {
@@ -407,7 +435,14 @@ impl AppState {
         let captures = owners
             .into_iter()
             .map(|owner| {
-                prepare_file_change_capture(owner, changes, &scoped_paths, &mut normalized, &mut ignore_cache, &project_roots)
+                prepare_file_change_capture(
+                    owner,
+                    changes,
+                    &scoped_paths,
+                    &mut normalized,
+                    &mut ignore_cache,
+                    &project_roots,
+                )
             })
             .collect::<Vec<_>>();
         diagnostic.preparation += preparation_started.elapsed();
@@ -457,15 +492,25 @@ impl AppState {
             let still_owns = owner.still_owns(record);
             if still_owns {
                 if let Some(tracking) = &record.file_change_tracking {
-                    let mut publication = tracking.publication.lock().expect("file tracking mutex poisoned");
-                    publication.observed_changes = publication.observed_changes.saturating_add(matched.len());
+                    let mut publication = tracking
+                        .publication
+                        .lock()
+                        .expect("file tracking mutex poisoned");
+                    publication.observed_changes =
+                        publication.observed_changes.saturating_add(matched.len());
                 }
             }
             if !still_owns {
                 publications.push((index, owner, matched, false));
             } else if record.active_turn_start_message_count.is_some() {
-                let bounded = merge_captured_file_changes(&mut record.active_turn_file_changes, matched);
-                owner.tracking.publication.lock().expect("file tracking mutex poisoned").bounded |= bounded;
+                let bounded =
+                    merge_captured_file_changes(&mut record.active_turn_file_changes, matched);
+                owner
+                    .tracking
+                    .publication
+                    .lock()
+                    .expect("file tracking mutex poisoned")
+                    .bounded |= bounded;
             } else {
                 // Eligibility was fixed at capture, not at delayed apply. A
                 // concurrent capture may have consumed grace in the meantime.
@@ -539,6 +584,6 @@ impl AppState {
 
 #[cfg(test)]
 thread_local! {
-    static FILE_CHANGE_DELETED_OWNER_TEST_HOOK: std::cell::RefCell<Option<Box<dyn Fn(usize)>>> =
+    pub(crate) static FILE_CHANGE_DELETED_OWNER_TEST_HOOK: std::cell::RefCell<Option<Box<dyn Fn(usize)>>> =
         const { std::cell::RefCell::new(None) };
 }

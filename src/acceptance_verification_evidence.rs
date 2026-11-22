@@ -1,6 +1,8 @@
 // Complete private verification metadata for the evaluator's source markers.
 // This read enumerates recorded facts; it grants no eligibility or credit.
 
+use super::*;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AcceptanceVerificationEvidencePage {
@@ -16,7 +18,7 @@ struct AcceptanceVerificationEvidencePage {
 }
 
 impl AppState {
-    fn read_acceptance_verification_evidence(
+    pub(crate) fn read_acceptance_verification_evidence(
         &self,
         store: &EngramAuthorityStoreKey,
         task: &mut AcceptanceEvaluationTask,

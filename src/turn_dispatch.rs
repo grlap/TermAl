@@ -39,51 +39,58 @@
 // A deferred Codex MCP config refresh uses that same next-turn detach path,
 // while leaving the current turn's live approval recovery available.
 
-struct StartedTurn {
-    dispatch: TurnDispatch,
-    message_delta: StartedTurnMessageDelta,
+use super::*;
+
+pub(crate) struct StartedTurn {
+    pub(crate) dispatch: TurnDispatch,
+    pub(crate) message_delta: StartedTurnMessageDelta,
 }
 
-enum CodexServiceTierPreparation {
+pub(crate) enum CodexServiceTierPreparation {
     Ready(Option<String>),
     PendingStop,
     Superseded,
 }
 
-struct StartedTurnMessageDelta {
-    session_id: String,
-    message_id: String,
-    message_index: usize,
-    message_count: u32,
-    message: Message,
-    preview: String,
-    status: SessionStatus,
-    session_mutation_stamp: u64,
-    session_seq: u64,
+pub(crate) struct StartedTurnMessageDelta {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
+    pub(crate) message_index: usize,
+    pub(crate) message_count: u32,
+    pub(crate) message: Message,
+    pub(crate) preview: String,
+    pub(crate) status: SessionStatus,
+    pub(crate) session_mutation_stamp: u64,
+    pub(crate) session_seq: u64,
 }
 
-struct OrphanedWorkflowDispatch {
-    dispatch: TurnDispatch,
-    queued: QueuedPromptRecord,
+pub(crate) struct OrphanedWorkflowDispatch {
+    pub(crate) dispatch: TurnDispatch,
+    pub(crate) queued: QueuedPromptRecord,
 }
 
-fn engram_context_runtime_prompt(context: &str, runtime_prompt: &str) -> String {
+pub(crate) fn engram_context_runtime_prompt(context: &str, runtime_prompt: &str) -> String {
     format!("{}\n\n{runtime_prompt}", engram_context_fence(context))
 }
 
-struct StartedQueuedTurn {
-    dispatch: TurnDispatch,
-    queued: QueuedPromptRecord,
+pub(crate) struct StartedQueuedTurn {
+    pub(crate) dispatch: TurnDispatch,
+    pub(crate) queued: QueuedPromptRecord,
 }
 
-fn ordinary_queue_dispatch_is_held(
-    inner: &StateInner, record: &SessionRecord, allow_blocked_dispatch: bool,
+pub(crate) fn ordinary_queue_dispatch_is_held(
+    inner: &StateInner,
+    record: &SessionRecord,
+    allow_blocked_dispatch: bool,
 ) -> bool {
     engram_named_selection_capture_pending(record)
         || session_resource_reset_in_progress(inner, record)
         || record.engram.observation_delete_requested
         || record.runtime_stop_in_progress
-        || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+        || matches!(
+            record.session.status,
+            SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+        )
         || (record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch)
 }
 
@@ -111,7 +118,7 @@ impl AppState {
     /// and waits outside StateInner; its result belongs only to the same
     /// runtime and turn generation. Publishing capabilities never changes Fast
     /// authority or re-normalizes the admitted command's model/settings.
-    fn prepare_codex_service_tier_off_lock(
+    pub(crate) fn prepare_codex_service_tier_off_lock(
         &self,
         session_id: &str,
         runtime_token: &RuntimeToken,
@@ -182,7 +189,11 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn install_test_acp_runtime_override(&self, agent: AcpAgent, runtime: AcpRuntimeHandle) {
+    pub(crate) fn install_test_acp_runtime_override(
+        &self,
+        agent: AcpAgent,
+        runtime: AcpRuntimeHandle,
+    ) {
         self.test_acp_runtime_overrides
             .lock()
             .expect("test ACP runtime overrides mutex poisoned")
@@ -190,7 +201,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn has_test_acp_runtime_override(&self, agent: AcpAgent) -> bool {
+    pub(crate) fn has_test_acp_runtime_override(&self, agent: AcpAgent) -> bool {
         self.test_acp_runtime_overrides
             .lock()
             .expect("test ACP runtime overrides mutex poisoned")
@@ -198,7 +209,7 @@ impl AppState {
             .any(|override_runtime| override_runtime.agent == agent)
     }
 
-    fn start_acp_runtime_for_turn(
+    pub(crate) fn start_acp_runtime_for_turn(
         &self,
         session_id: String,
         workdir: String,
@@ -234,7 +245,7 @@ impl AppState {
         )
     }
 
-    fn publish_started_turn_message_delta(
+    pub(crate) fn publish_started_turn_message_delta(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -263,7 +274,7 @@ impl AppState {
     /// lock. Keeping selection, turn start, and removal in one critical
     /// section prevents a concurrent sender or lifecycle drain from stealing
     /// the prompt between a queue commit and its dispatch.
-    fn start_next_queued_turn_locked(
+    pub(crate) fn start_next_queued_turn_locked(
         &self,
         inner: &mut StateInner,
         index: usize,
@@ -274,12 +285,17 @@ impl AppState {
             || session_resource_reset_in_progress(inner, record)
             || record.engram.observation_delete_requested
             || record.runtime_stop_in_progress
-            || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+            || matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
             || (record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch)
         {
             return Ok(None);
         }
-        let Some(position) = ordinary_queue_position(record) else { return Ok(None); };
+        let Some(position) = ordinary_queue_position(record) else {
+            return Ok(None);
+        };
         let queued = record.queued_prompts[position].clone();
         // Human sends retain their off-lock reset and exact selected owner.
         if queued.source == QueuedPromptSource::Human
@@ -290,7 +306,8 @@ impl AppState {
         }
         let session_id = inner.sessions[index].session.id.clone();
         let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
-        let host_mcp_servers_only = session_is_acceptance_evaluator_child_locked(inner, &session_id);
+        let host_mcp_servers_only =
+            session_is_acceptance_evaluator_child_locked(inner, &session_id);
         let host_shutdown = self.shutdown_signal_tx.borrow();
         if *host_shutdown {
             return Ok(None);
@@ -299,7 +316,9 @@ impl AppState {
         let project_environment = project_environment_for_session_locked(inner, &session_id);
         let mut started = self
             .start_turn_on_record_with_environment(
-                inner.session_mut_by_index(index).expect("session index should be valid"),
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
                 queued.pending_prompt.id.clone(),
                 queued.pending_prompt.text.clone(),
                 queued.attachments.clone(),
@@ -319,11 +338,20 @@ impl AppState {
             })?;
         drop(host_shutdown);
         EngramHost::turn_started(inner, index);
-        let record = inner.session_mut_by_index(index).expect("session index should be valid");
-        mark_prompt_delivery_promoted(record, &queued, &mut started.dispatch,
-            &started.message_delta.message_id, &self.server_instance_id);
-        if queued.engram_bind.is_some() || queued.engram_evaluate.is_some()
-            || queued.engram_interrupted || queued.engram_waiting
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        mark_prompt_delivery_promoted(
+            record,
+            &queued,
+            &mut started.dispatch,
+            &started.message_delta.message_id,
+            &self.server_instance_id,
+        );
+        if queued.engram_bind.is_some()
+            || queued.engram_evaluate.is_some()
+            || queued.engram_interrupted
+            || queued.engram_waiting
         {
             // Keep the original stored record as history after its own newly
             // proven-unsent content runs once. It cannot be selected again.
@@ -368,7 +396,7 @@ impl AppState {
     /// (it needs the whole state, which this record-level helper does not
     /// hold): it forgets the commands of the session's earlier turn and marks
     /// another session's open Engram checks in its worktree as overlapped.
-    fn start_turn_on_record_with_environment(
+    pub(crate) fn start_turn_on_record_with_environment(
         &self,
         record: &mut SessionRecord,
         message_id: String,
@@ -390,7 +418,9 @@ impl AppState {
             ));
         }
         if let Some(detail) = record.runtime.dedicated_cleanup_failure() {
-            return Err(ApiError::conflict(format!("{detail}; Stop or Delete must finish cleanup before a new turn")));
+            return Err(ApiError::conflict(format!(
+                "{detail}; Stop or Delete must finish cleanup before a new turn"
+            )));
         }
         match record.remote_proxy_identity() {
             Ok(None) => {}
@@ -526,7 +556,9 @@ impl AppState {
                                     "failed to build Claude delegation MCP config: {err:#}"
                                 ))
                             })?;
-                        let applied = AppliedProjectEnvironment { values: project_environment.clone() };
+                        let applied = AppliedProjectEnvironment {
+                            values: project_environment.clone(),
+                        };
                         let handle = spawn_claude_runtime_with_environment(
                             self.clone(),
                             record.session.id.clone(),
@@ -713,7 +745,9 @@ impl AppState {
                         ));
                     }
                     SessionRuntime::None => {
-                        let applied = AppliedProjectEnvironment { values: project_environment.clone() };
+                        let applied = AppliedProjectEnvironment {
+                            values: project_environment.clone(),
+                        };
                         let handle = self
                             .start_acp_runtime_for_turn(
                                 record.session.id.clone(),
@@ -772,7 +806,9 @@ impl AppState {
         record.set_auto_dispatch_blocked(false);
         record.active_turn_file_changes.clear();
         record.active_turn_file_change_grace_deadline = None;
-        let observation_source = record.queued_prompts.iter()
+        let observation_source = record
+            .queued_prompts
+            .iter()
             .find(|head| head.pending_prompt.id == message_id)
             .map(|head| head.source)
             .unwrap_or(if source.as_ref().is_some_and(MessageSource::is_mailbox) {
@@ -858,7 +894,7 @@ impl AppState {
     /// so that queue stays dormant until a genuine activation. An eligible
     /// interrupted root has a separate durable restart recovery opening ahead
     /// of ordinary saved work; its ACK may activate the preceding mailbox wakes.
-    fn dispatch_orphaned_workflow_prompts(&self) {
+    pub(crate) fn dispatch_orphaned_workflow_prompts(&self) {
         let session_ids: Vec<String> = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -933,7 +969,7 @@ impl AppState {
     /// only an optimization. Queue shape, status, runtime ownership, and prompt
     /// promotion are checked together under the state lock here so a concurrent
     /// activation cannot turn the startup pass into a second live dispatch.
-    fn start_orphaned_workflow_turn(
+    pub(crate) fn start_orphaned_workflow_turn(
         &self,
         session_id: &str,
     ) -> Result<Option<OrphanedWorkflowDispatch>> {
@@ -959,7 +995,7 @@ impl AppState {
     /// handoff. The new message id prevents the eventual retry from duplicating
     /// the failed turn's transcript id, while `push_front` preserves the
     /// workflow's original ordering ahead of prompts queued concurrently.
-    fn requeue_rejected_orphaned_workflow_prompt(
+    pub(crate) fn requeue_rejected_orphaned_workflow_prompt(
         &self,
         session_id: &str,
         queued: QueuedPromptRecord,
@@ -1077,7 +1113,7 @@ impl AppState {
     ///
     /// On success, promotes the queue head to an active turn and calls
     /// [`Self::dispatch_turn`] to actually hand it to the agent runner.
-    fn dispatch_next_queued_turn(
+    pub(crate) fn dispatch_next_queued_turn(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
@@ -1090,7 +1126,7 @@ impl AppState {
     /// A queued recovery rejected before send stays owned by its persisted
     /// marker. All other prompts and uncertain/accepted handoffs keep their
     /// existing outcome; restoration never recursively drains the queue.
-    fn deliver_queued_turn_dispatch(
+    pub(crate) fn deliver_queued_turn_dispatch(
         &self,
         started: StartedQueuedTurn,
     ) -> TurnDispatchDeliveryOutcome {
@@ -1110,7 +1146,7 @@ impl AppState {
 
     /// Keeps the prompt actually admitted after mailbox revalidation, so a
     /// Resume can report a delivery hold against that prompt's identity.
-    fn dispatch_next_queued_turn_with_prompt(
+    pub(crate) fn dispatch_next_queued_turn_with_prompt(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
@@ -1126,28 +1162,43 @@ impl AppState {
         self.start_next_queued_turn_off_lock(session_id, allow_blocked_dispatch, false)
     }
 
-    fn dispatch_next_queued_turn_for_mailbox_relay(
-        &self, session_id: &str, owner: MailboxRelayDrainOwner,
+    pub(crate) fn dispatch_next_queued_turn_for_mailbox_relay(
+        &self,
+        session_id: &str,
+        owner: MailboxRelayDrainOwner,
     ) -> Result<Option<TurnDispatch>> {
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
-        Ok(self.start_next_queued_turn_off_lock_for_owner(
-            session_id, false, false, Some(QueuedDrainOwner::MailboxRelay(owner)),
-        )?.map(|started| started.dispatch))
+        Ok(self
+            .start_next_queued_turn_off_lock_for_owner(
+                session_id,
+                false,
+                false,
+                Some(QueuedDrainOwner::MailboxRelay(owner)),
+            )?
+            .map(|started| started.dispatch))
     }
 
-    fn dispatch_next_queued_turn_for_activation(&self, session_id: &str,
-        owner: QueuedTurnOwner) -> Result<Option<TurnDispatch>> {
+    pub(crate) fn dispatch_next_queued_turn_for_activation(
+        &self,
+        session_id: &str,
+        owner: QueuedTurnOwner,
+    ) -> Result<Option<TurnDispatch>> {
         self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
-        Ok(self.start_next_queued_turn_off_lock_for_owner(
-            session_id, false, false, Some(QueuedDrainOwner::Activation(owner)),
-        )?.map(|started| started.dispatch))
+        Ok(self
+            .start_next_queued_turn_off_lock_for_owner(
+                session_id,
+                false,
+                false,
+                Some(QueuedDrainOwner::Activation(owner)),
+            )?
+            .map(|started| started.dispatch))
     }
 
     /// An explicit Resume bound to the queue head its caller checked (a held
     /// delegation's retained prompt): it bypasses the paused queue only for
     /// `owner`, so a successor exposed by a concurrent cancellation is never
     /// admitted in its place.
-    fn dispatch_next_queued_turn_for_resume(
+    pub(crate) fn dispatch_next_queued_turn_for_resume(
         &self,
         session_id: &str,
         owner: QueuedTurnOwner,
@@ -1157,7 +1208,7 @@ impl AppState {
             .map(|started| started.dispatch))
     }
 
-    fn dispatch_next_queued_turn_for_resume_with_prompt(
+    pub(crate) fn dispatch_next_queued_turn_for_resume_with_prompt(
         &self,
         session_id: &str,
         owner: QueuedTurnOwner,
@@ -1180,7 +1231,7 @@ impl AppState {
     /// generation are captured under the state mutex; all Engram work happens
     /// after releasing it; the same queue head/generation is then revalidated
     /// before `start_turn_on_record` mutates the session.
-    fn start_next_queued_turn_off_lock(
+    pub(crate) fn start_next_queued_turn_off_lock(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
@@ -1196,17 +1247,21 @@ impl AppState {
 
     /// `start_next_queued_turn_off_lock`; with an `owner`, the paused-queue
     /// bypass is that owner's alone.
-    fn start_next_queued_turn_off_lock_for_owner(
+    pub(crate) fn start_next_queued_turn_off_lock_for_owner(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
-        if let Some(QueuedDrainOwner::Resume(expected) | QueuedDrainOwner::Activation(expected)) = &owner {
+        if let Some(QueuedDrainOwner::Resume(expected) | QueuedDrainOwner::Activation(expected)) =
+            &owner
+        {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            if inner.find_session_index(session_id)
-                .is_none_or(|index| !expected.matches(&inner.sessions[index])) {
+            if inner
+                .find_session_index(session_id)
+                .is_none_or(|index| !expected.matches(&inner.sessions[index]))
+            {
                 return Ok(None);
             }
         }
@@ -1217,10 +1272,13 @@ impl AppState {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 inner.find_session_index(session_id).is_some_and(|index| {
                     let record = &inner.sessions[index];
-                    let eligible = owner.matches(record) && dispatch_queue_position(&inner, index)
-                        .and_then(|position| record.queued_prompts.get(position)).is_some_and(|head|
-                        head.source == QueuedPromptSource::Human);
-                    if eligible { selected_human = HumanResumeOwner::capture(record, owner.clone()); }
+                    let eligible = owner.matches(record)
+                        && dispatch_queue_position(&inner, index)
+                            .and_then(|position| record.queued_prompts.get(position))
+                            .is_some_and(|head| head.source == QueuedPromptSource::Human);
+                    if eligible {
+                        selected_human = HumanResumeOwner::capture(record, owner.clone());
+                    }
                     selected_human.is_some()
                 })
             }
@@ -1228,16 +1286,27 @@ impl AppState {
         };
         if human_owner && !orphaned_workflow_only {
             #[cfg(test)]
-            let _drain_completion = selected_human.as_ref().and_then(|_| run_test_human_drain_capture_hook(self, session_id));
+            let _drain_completion = selected_human
+                .as_ref()
+                .and_then(|_| run_test_human_drain_capture_hook(self, session_id));
             // Ordinary/peer Send also uses allow_blocked_dispatch for its own
             // legacy queue policy. It is not an explicit Human Resume. Only
             // the exact receipted Resume owner may carry that pause bypass;
             // explicit Human UI actions call their own promotion path.
             let human_resume = allow_blocked_dispatch
                 && matches!(owner.as_ref(), Some(QueuedDrainOwner::Resume(_)));
-            let drained = self.start_human_queued_turn_with_selection(session_id, human_resume, selected_human.as_mut());
+            let drained = self.start_human_queued_turn_with_selection(
+                session_id,
+                human_resume,
+                selected_human.as_mut(),
+            );
             let drained = match drained {
-                Err(error) if selected_human.is_some() && error.downcast_ref::<HumanPromptOwnerChanged>().is_some() => return Ok(None),
+                Err(error)
+                    if selected_human.is_some()
+                        && error.downcast_ref::<HumanPromptOwnerChanged>().is_some() =>
+                {
+                    return Ok(None);
+                }
                 other => other?,
             };
             match drained {
@@ -1250,17 +1319,26 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.find_session_index(session_id).is_none_or(|index| {
                 let record = &inner.sessions[index];
-                !owner.matches(record) || record.orchestrator_auto_dispatch_blocked
-                    || matches!(record.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
+                !owner.matches(record)
+                    || record.orchestrator_auto_dispatch_blocked
+                    || matches!(
+                        record.session.status,
+                        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+                    )
                     || record.runtime_stop_in_progress
                     || session_resource_reset_in_progress(&inner, record)
-            }) { return Ok(None) }
+            }) {
+                return Ok(None);
+            }
         }
         // Where the session writes, for the overlap marks its turn start
         // makes under the lock.
         self.engram_host().turn_starting(session_id);
         let result = self.start_next_queued_turn_inner_off_lock(
-            session_id, allow_blocked_dispatch, orphaned_workflow_only, owner,
+            session_id,
+            allow_blocked_dispatch,
+            orphaned_workflow_only,
+            owner,
         );
         let result = self.settle_unstarted_queued_turn(consume_mailbox_relay_hold(result));
         // A promotion that started nothing may have left a delegation child
@@ -1293,7 +1371,7 @@ impl AppState {
     // Direct dispatch already committed the enqueue before promoting its head.
     // A failed second commit must restore that durable queue even when the
     // original follow-up request (and its reservation) has long since returned.
-    fn start_and_commit_queued_dispatch_locked(
+    pub(crate) fn start_and_commit_queued_dispatch_locked(
         &self,
         inner: &mut StateInner,
         index: usize,
@@ -1304,12 +1382,17 @@ impl AppState {
         // and the prompt just committed behind it, queued; the
         // acknowledgement dispatches them (queued_prompt_durability.rs).
         if engram_named_selection_capture_pending(&inner.sessions[index])
-            || queued_head_held_for_durability(&inner.sessions[index]) {
+            || queued_head_held_for_durability(&inner.sessions[index])
+        {
             return Ok(None);
         }
-        let Some(position) = ordinary_queue_position(&inner.sessions[index]) else { return Ok(None); };
+        let Some(position) = ordinary_queue_position(&inner.sessions[index]) else {
+            return Ok(None);
+        };
         let queued = inner.sessions[index].queued_prompts[position].clone();
-        if queued.source == QueuedPromptSource::Human { return Ok(None); }
+        if queued.source == QueuedPromptSource::Human {
+            return Ok(None);
+        }
         let snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
         let receipted_head = inner.sessions[index]
             .prompt_deliveries
@@ -1328,7 +1411,13 @@ impl AppState {
             return Err(anyhow!("queued prompt disappeared before dispatch"));
         };
         let session_id = inner.sessions[index].session.id.clone();
-        match self.commit_followup_prompt_locked_for_session(inner, followup, prompt_id, false, Some(&session_id)) {
+        match self.commit_followup_prompt_locked_for_session(
+            inner,
+            followup,
+            prompt_id,
+            false,
+            Some(&session_id),
+        ) {
             Ok(revision) => {
                 finish_engram_named_root_selection_locked(inner, index);
                 Ok(Some((revision, started)))
@@ -1372,7 +1461,7 @@ impl AppState {
 
     // Implementation detail: all callers use the wrapper above so tagged
     // delegation failures are settled before returning to queue drainers.
-    fn start_next_queued_turn_inner_off_lock(
+    pub(crate) fn start_next_queued_turn_inner_off_lock(
         &self,
         session_id: &str,
         allow_blocked_dispatch: bool,
@@ -1384,16 +1473,24 @@ impl AppState {
         let automatic_queue = (owner.is_none() && !allow_blocked_dispatch).then_some(false);
         let mut automatic_owner = automatic_queue.and_then(|_| {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner.find_session_index(session_id)
+            inner
+                .find_session_index(session_id)
                 .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
         });
         let ordinary_owner = match owner.as_mut() {
-            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner)) => Some(owner),
+            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner)) => {
+                Some(owner)
+            }
             _ => automatic_owner.as_mut(),
         };
-        if matches!(self.prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
-            session_id, ordinary_owner, automatic_queue,
-        )?, RuntimeResetPreparation::Held) {
+        if matches!(
+            self.prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
+                session_id,
+                ordinary_owner,
+                automatic_queue,
+            )?,
+            RuntimeResetPreparation::Held
+        ) {
             return Ok(None);
         }
         let activation_owner = match &owner {
@@ -1411,11 +1508,14 @@ impl AppState {
         let bypass_owner = match owner {
             Some(QueuedDrainOwner::Resume(owner)) => Some(owner),
             Some(_) => None,
-            None => allow_blocked_dispatch.then(|| {
-                let inner = self.inner.lock().expect("state mutex poisoned");
-                inner.find_session_index(session_id)
-                    .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
-            }).flatten(),
+            None => allow_blocked_dispatch
+                .then(|| {
+                    let inner = self.inner.lock().expect("state mutex poisoned");
+                    inner
+                        .find_session_index(session_id)
+                        .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
+                })
+                .flatten(),
         };
         // Runtime descriptors need the current local declaration before spawn;
         // this filesystem probe performs no Engram/context transport read.
@@ -1424,25 +1524,46 @@ impl AppState {
         // Context is advisory. Only already available local context is composed
         // into this prompt; no refresh or ownership wait precedes enqueue.
         {
-            let relay_authority = self.prepare_front_mailbox_relay_authority(session_id).map_err(|error|mailbox_relay_admission_held(error.message))?;
-            let _relay_link = relay_authority.as_ref().map(|(_, authority)| authority.lock_link()).transpose()
+            let relay_authority = self
+                .prepare_front_mailbox_relay_authority(session_id)
+                .map_err(|error| mailbox_relay_admission_held(error.message))?;
+            let _relay_link = relay_authority
+                .as_ref()
+                .map(|(_, authority)| authority.lock_link())
+                .transpose()
                 .map_err(mailbox_relay_admission_held)?;
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return Ok(None);
             };
-            self.validate_front_mailbox_relay_authority_locked(&inner, session_id, relay_authority.as_ref())
-                .map_err(|error|mailbox_relay_admission_held(error.message))?;
-            if live_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+            self.validate_front_mailbox_relay_authority_locked(
+                &inner,
+                session_id,
+                relay_authority.as_ref(),
+            )
+            .map_err(|error| mailbox_relay_admission_held(error.message))?;
+            if live_owner
+                .as_ref()
+                .is_some_and(|owner| !owner.matches(&inner.sessions[index]))
+            {
                 return Ok(None);
             }
-            if relay_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+            if relay_owner
+                .as_ref()
+                .is_some_and(|owner| !owner.matches(&inner.sessions[index]))
+            {
                 return Ok(None);
             }
-            if activation_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+            if activation_owner
+                .as_ref()
+                .is_some_and(|owner| !owner.matches(&inner.sessions[index]))
+            {
                 return Ok(None);
             }
-            if automatic_owner.as_ref().is_some_and(|owner| !owner.matches(&inner.sessions[index])) {
+            if automatic_owner
+                .as_ref()
+                .is_some_and(|owner| !owner.matches(&inner.sessions[index]))
+            {
                 return Ok(None);
             }
             if allow_blocked_dispatch
@@ -1458,88 +1579,92 @@ impl AppState {
             }
             if orphaned_workflow_only
                 && !(record.is_local_session()
-                    && matches!(record.session.status, SessionStatus::Idle | SessionStatus::Error)
+                    && matches!(
+                        record.session.status,
+                        SessionStatus::Idle | SessionStatus::Error
+                    )
                     && matches!(record.runtime, SessionRuntime::None)
                     && queue_has_orphaned_workflow(record))
             {
                 return Ok(None);
             }
-        let Some(queued) = dispatch_queue_position(&inner, index)
-            .and_then(|position| record.queued_prompts.get(position)).cloned() else {
-            return Ok(None);
-        };
-        // Write-ahead acknowledgement belongs to this exact prompt;
-        // a held entry never writes or consumes a handoff.
-        if !queued_prompt_held_for_durability(record, &queued)
-            && !self.prompt_delivery_gate_locked(
-                &mut inner,
-                index,
-                &queued.pending_prompt.id,
-                false,
-            )
-        {
-            return Ok(None);
-        }
-        let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
-        let Some(started) = self.start_next_queued_turn_locked(
-            &mut inner,
-            index,
-            allow_blocked_dispatch,
-        )?
-        else {
-            return Ok(None);
-        };
-        let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id) {
-            Ok(revision) => revision,
-            Err(err) => {
-                // The promotion is only real once it is durable. Put
-                // the record back so the head, the latch, and the
-                // transcript match what the runtime actually saw:
-                // nothing.
-                inner
-                    .session_mut_by_index(index)
-                    .expect("session index should be valid")
-                    .restore_queue_promotion(
-                        promotion_snapshot,
-                        queued,
-                        &started.message_delta.message_id,
-                    );
-                let restore_error = self.persist_internal_locked(&inner).err();
-                self.publish_state_locked(&inner);
-                let err = match restore_error {
-                    Some(restore_error) => anyhow!(
-                        "{err:#}; failed to persist restored queued promotion: {restore_error:#}"
-                    ),
-                    None => err,
-                };
-                return Err(annotate_queued_followup_start_failure(
-                    &inner,
+            let Some(queued) = dispatch_queue_position(&inner, index)
+                .and_then(|position| record.queued_prompts.get(position))
+                .cloned()
+            else {
+                return Ok(None);
+            };
+            // Write-ahead acknowledgement belongs to this exact prompt;
+            // a held entry never writes or consumes a handoff.
+            if !queued_prompt_held_for_durability(record, &queued)
+                && !self.prompt_delivery_gate_locked(
+                    &mut inner,
                     index,
-                    err.context("failed to persist the promoted queue head"),
-                ));
+                    &queued.pending_prompt.id,
+                    false,
+                )
+            {
+                return Ok(None);
             }
-        };
-        finish_engram_named_root_selection_locked(&mut inner, index);
-        let StartedTurn {
-            dispatch,
-            message_delta,
-        } = started;
-        self.publish_started_turn_message_delta(&inner, revision, message_delta);
-        drop(inner);
-        return Ok(Some(StartedQueuedTurn { dispatch, queued }));
+            let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
+            let Some(started) =
+                self.start_next_queued_turn_locked(&mut inner, index, allow_blocked_dispatch)?
+            else {
+                return Ok(None);
+            };
+            let revision = match self.commit_persisted_session_delta_locked(&mut inner, session_id)
+            {
+                Ok(revision) => revision,
+                Err(err) => {
+                    // The promotion is only real once it is durable. Put
+                    // the record back so the head, the latch, and the
+                    // transcript match what the runtime actually saw:
+                    // nothing.
+                    inner
+                        .session_mut_by_index(index)
+                        .expect("session index should be valid")
+                        .restore_queue_promotion(
+                            promotion_snapshot,
+                            queued,
+                            &started.message_delta.message_id,
+                        );
+                    let restore_error = self.persist_internal_locked(&inner).err();
+                    self.publish_state_locked(&inner);
+                    let err = match restore_error {
+                        Some(restore_error) => anyhow!(
+                            "{err:#}; failed to persist restored queued promotion: {restore_error:#}"
+                        ),
+                        None => err,
+                    };
+                    return Err(annotate_queued_followup_start_failure(
+                        &inner,
+                        index,
+                        err.context("failed to persist the promoted queue head"),
+                    ));
+                }
+            };
+            finish_engram_named_root_selection_locked(&mut inner, index);
+            let StartedTurn {
+                dispatch,
+                message_delta,
+            } = started;
+            self.publish_started_turn_message_delta(&inner, revision, message_delta);
+            drop(inner);
+            return Ok(Some(StartedQueuedTurn { dispatch, queued }));
         }
     }
 
-    fn dispatch_turn(
+    pub(crate) fn dispatch_turn(
         &self,
         session_id: &str,
         request: SendMessageRequest,
     ) -> std::result::Result<DispatchTurnResult, ApiError> {
-        let _acceptance_guard = self.reserve_direct_requester_acceptance_prompt(session_id, &request)?;
+        let _acceptance_guard =
+            self.reserve_direct_requester_acceptance_prompt(session_id, &request)?;
         self.dispatch_turn_with_followup(session_id, request, None)
     }
 
-    fn dispatch_turn_with_followup(
+    pub(crate) fn dispatch_turn_with_followup(
         &self,
         session_id: &str,
         request: SendMessageRequest,
@@ -1612,46 +1737,69 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner.find_session_index(session_id).and_then(|index| {
                 let record = &inner.sessions[index];
-                ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position))
+                ordinary_queue_position(record)
+                    .and_then(|position| record.queued_prompts.get(position))
                     .and_then(|head| head.pending_prompt.source.as_ref())
                     .and_then(|source| source.mailbox.as_ref())
                     .filter(|source| source.mailbox_id.starts_with("relay-mailbox-"))
                     .and_then(|_| QueuedTurnOwner::capture(record))
             })
         };
-        let mut refused_relay_head = match self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id) {
+        let mut refused_relay_head = match self
+            .revalidate_queued_mailbox_wakeups_before_dispatch(session_id)
+        {
             Ok(()) => None,
             Err(error) if request.source_mailbox.is_none() => {
-                eprintln!("native relay> preserving fenced carrier during ordinary prompt admission: {error:#}");
+                eprintln!(
+                    "native relay> preserving fenced carrier during ordinary prompt admission: {error:#}"
+                );
                 relay_before_revalidation
             }
             Err(error) => return Err(mailbox_api_error(error)),
         };
         #[cfg(test)]
-        if let Some(hook) = TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION.with(|hook| hook.borrow_mut().take()) { hook(); }
+        if let Some(hook) =
+            TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION.with(|hook| hook.borrow_mut().take())
+        {
+            hook();
+        }
         self.refresh_engram_project_declaration_for_session_off_lock(session_id);
         self.schedule_engram_context_nudge(session_id);
         // Capture outside StateInner, then hold link -> state through all
         // direct promotions. A pre-context proof alone cannot authorize them.
         let relay_authority = self.prepare_front_mailbox_relay_authority(session_id);
-        let relay_link = relay_authority.as_ref().ok().and_then(|authority|authority.as_ref())
-            .map(|(_,authority)| authority.lock_link()).transpose();
+        let relay_link = relay_authority
+            .as_ref()
+            .ok()
+            .and_then(|authority| authority.as_ref())
+            .map(|(_, authority)| authority.lock_link())
+            .transpose();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(|| ApiError::not_found("session not found"))?;
-        let late_relay_refused = relay_authority.is_err() || relay_link.is_err()
-            || self.validate_front_mailbox_relay_authority_locked(
-                &inner, session_id, relay_authority.as_ref().ok().and_then(|authority|authority.as_ref()),
-            ).is_err();
+        let late_relay_refused = relay_authority.is_err()
+            || relay_link.is_err()
+            || self
+                .validate_front_mailbox_relay_authority_locked(
+                    &inner,
+                    session_id,
+                    relay_authority
+                        .as_ref()
+                        .ok()
+                        .and_then(|authority| authority.as_ref()),
+                )
+                .is_err();
         if late_relay_refused {
             // Qualify the refusal against the exact current metadata carrier;
             // the existing ordinary-user path keeps it and preserves FIFO.
             let record = &inner.sessions[index];
-            if ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position))
-                .and_then(|queued|queued.pending_prompt.source.as_ref())
-                .and_then(|source|source.mailbox.as_ref())
-                .is_some_and(|source|source.mailbox_id.starts_with("relay-mailbox-")) {
+            if ordinary_queue_position(record)
+                .and_then(|position| record.queued_prompts.get(position))
+                .and_then(|queued| queued.pending_prompt.source.as_ref())
+                .and_then(|source| source.mailbox.as_ref())
+                .is_some_and(|source| source.mailbox_id.starts_with("relay-mailbox-"))
+            {
                 refused_relay_head = QueuedTurnOwner::capture(&inner.sessions[index]);
             }
         }
@@ -1683,19 +1831,26 @@ impl AppState {
         // name. An unknown id (e.g. a sender deleted before a queued prompt
         // drains) drops to `None`, so the message simply stays "You".
         let source = request.source_session_id.as_deref().and_then(|source_id| {
-            inner.find_session_index(source_id).map(|source_index| {
-                let source_name = inner.sessions[source_index].session.name.clone();
-                match request.source_mailbox.clone() {
-                    Some(mailbox) => {
-                        MessageSource::mailbox(source_id.to_owned(), source_name, mailbox)
+            inner
+                .find_session_index(source_id)
+                .map(|source_index| {
+                    let source_name = inner.sessions[source_index].session.name.clone();
+                    match request.source_mailbox.clone() {
+                        Some(mailbox) => {
+                            MessageSource::mailbox(source_id.to_owned(), source_name, mailbox)
+                        }
+                        None => MessageSource::peer(source_id.to_owned(), source_name),
                     }
-                    None => MessageSource::peer(source_id.to_owned(), source_name),
-                }
-            }).or_else(|| {
-                let mailbox=request.source_mailbox.clone()?;
-                let participant=inner.federation.mailbox_directory.get(source_id)?;
-                Some(MessageSource::mailbox(source_id.to_owned(),participant.name.clone(),mailbox))
-            })
+                })
+                .or_else(|| {
+                    let mailbox = request.source_mailbox.clone()?;
+                    let participant = inner.federation.mailbox_directory.get(source_id)?;
+                    Some(MessageSource::mailbox(
+                        source_id.to_owned(),
+                        participant.name.clone(),
+                        mailbox,
+                    ))
+                })
         });
         // Only a genuine user turn replaces automatic capacity recovery.
         if inner.sessions[index].codex_terminal_identity_unresolved {
@@ -1704,7 +1859,8 @@ impl AppState {
             ));
         }
         // Peer/mailbox provenance is resolved above; their wakes stay queued.
-        if source.is_none() && request.source_mailbox.is_none()
+        if source.is_none()
+            && request.source_mailbox.is_none()
             && clear_provider_capacity_retry(&mut inner.sessions[index])
         {
             inner.stamp_session_at_index(index);
@@ -1746,24 +1902,30 @@ impl AppState {
                 prompt = rendered_prompt;
             }
         }
-        let session_is_busy = engram_named_selection_capture_pending(&inner.sessions[index]) || matches!(
-            inner.sessions[index].session.status,
-            SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
-        ) || inner.sessions[index].runtime_stop_in_progress
+        let session_is_busy = engram_named_selection_capture_pending(&inner.sessions[index])
+            || matches!(
+                inner.sessions[index].session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            )
+            || inner.sessions[index].runtime_stop_in_progress
             || inner.sessions[index].engram.observation_delete_requested
             || session_resource_reset_in_progress(&inner, &inner.sessions[index]);
         let has_queued_prompts = !inner.sessions[index].queued_prompts.is_empty();
-        let blocked_queue_contains_user_prompt = inner.sessions[index]
-            .queued_prompts
-            .iter()
-            .any(|queued| ordinary_queue_entry_is_runnable(&inner.sessions[index], queued)
-                && matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human));
+        let blocked_queue_contains_user_prompt =
+            inner.sessions[index].queued_prompts.iter().any(|queued| {
+                ordinary_queue_entry_is_runnable(&inner.sessions[index], queued)
+                    && matches!(
+                        queued.source,
+                        QueuedPromptSource::User | QueuedPromptSource::Human
+                    )
+            });
         let orchestrator_auto_dispatch_blocked =
             inner.sessions[index].orchestrator_auto_dispatch_blocked;
         let paused_human_queue = orchestrator_auto_dispatch_blocked
-            && inner.sessions[index].queued_prompts.iter()
-                .any(|queued| ordinary_queue_entry_is_runnable(&inner.sessions[index], queued)
-                    && queued.source == QueuedPromptSource::Human);
+            && inner.sessions[index].queued_prompts.iter().any(|queued| {
+                ordinary_queue_entry_is_runnable(&inner.sessions[index], queued)
+                    && queued.source == QueuedPromptSource::Human
+            });
         let queued_prompt_source = if source
             .as_ref()
             .is_some_and(|message_source| message_source.is_mailbox())
@@ -1779,46 +1941,80 @@ impl AppState {
         // the moment of Stop; only a later user prompt may lift the latch.
         let blocked_automatic_prompt = orchestrator_auto_dispatch_blocked
             && (queued_prompt_source == QueuedPromptSource::Mailbox
-                || capacity_automatic_prompt || paused_human_queue);
+                || capacity_automatic_prompt
+                || paused_human_queue);
 
         let mut message_id = inner.next_message_id();
-        let still_refused = refused_relay_head.as_ref().is_some_and(|owner| owner.matches(&inner.sessions[index]));
+        let still_refused = refused_relay_head
+            .as_ref()
+            .is_some_and(|owner| owner.matches(&inner.sessions[index]));
         let record = &inner.sessions[index];
         let ordinary_head = ordinary_queue_position(record)
             .and_then(|position| record.queued_prompts.get(position));
-        let ordinary_head_held_for_durability = ordinary_head
-            .is_some_and(|head| queued_prompt_held_for_durability(record, head));
+        let ordinary_head_held_for_durability =
+            ordinary_head.is_some_and(|head| queued_prompt_held_for_durability(record, head));
         // Non-runnable history keeps the ordinary pause boundary. Only the
         // exact refused-relay bypass below may pass that retained front row.
-        let non_runnable_front = record.queued_prompts.front().is_some_and(|head|
-            !ordinary_queue_entry_is_runnable(record, head));
-        let bypass_refused_carrier = still_refused && !session_is_busy
-            && !capacity_automatic_prompt && record.provider_capacity_retry.is_none()
+        let non_runnable_front = record
+            .queued_prompts
+            .front()
+            .is_some_and(|head| !ordinary_queue_entry_is_runnable(record, head));
+        let bypass_refused_carrier = still_refused
+            && !session_is_busy
+            && !capacity_automatic_prompt
+            && record.provider_capacity_retry.is_none()
             && queued_prompt_source == QueuedPromptSource::User
             && !ordinary_head_held_for_durability
             && ordinary_head.is_some();
         // Scheduling isolation only: use the existing explicit-user priority
         // paths without changing the persisted Stop/pause latch. The exact
         // refused carrier remains queued; ordinary-user FIFO is preserved.
-        let orchestrator_auto_dispatch_blocked = orchestrator_auto_dispatch_blocked || bypass_refused_carrier;
-        let manual_can_overtake = bypass_refused_carrier || (!session_is_busy && orchestrator_auto_dispatch_blocked
-            && !blocked_queue_contains_user_prompt && !capacity_automatic_prompt
-            && queued_prompt_source == QueuedPromptSource::User
-            && !ordinary_head_held_for_durability && !non_runnable_front);
+        let orchestrator_auto_dispatch_blocked =
+            orchestrator_auto_dispatch_blocked || bypass_refused_carrier;
+        let manual_can_overtake = bypass_refused_carrier
+            || (!session_is_busy
+                && orchestrator_auto_dispatch_blocked
+                && !blocked_queue_contains_user_prompt
+                && !capacity_automatic_prompt
+                && queued_prompt_source == QueuedPromptSource::User
+                && !ordinary_head_held_for_durability
+                && !non_runnable_front);
         if still_refused && !manual_can_overtake {
             // Admission of ordinary work is separate from authority to promote
             // the retained relay carrier. Keep FIFO/durability and resume gates;
             // the relay worker will re-drive the carrier when authority returns.
             queue_prompt_on_record_with_source(
-                inner.session_mut_by_index(index).expect("session index should be valid"),
+                inner
+                    .session_mut_by_index(index)
+                    .expect("session index should be valid"),
                 PendingPrompt {
-                engram_interrupted:false, is_engram_retained:false,
-                attachments:attachments.iter().map(|attachment|attachment.metadata.clone()).collect(),
-                id:message_id.clone(), timestamp:stamp_now(), text:prompt,
-                expanded_text:expanded_prompt, source,
-            }, attachments, queued_prompt_source);
-            self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                .map_err(|error|ApiError::internal(format!("failed to persist ordinary prompt behind retained relay: {error:#}")))?;
+                    engram_interrupted: false,
+                    is_engram_retained: false,
+                    attachments: attachments
+                        .iter()
+                        .map(|attachment| attachment.metadata.clone())
+                        .collect(),
+                    id: message_id.clone(),
+                    timestamp: stamp_now(),
+                    text: prompt,
+                    expanded_text: expanded_prompt,
+                    source,
+                },
+                attachments,
+                queued_prompt_source,
+            );
+            self.commit_followup_prompt_locked_for_session(
+                &mut inner,
+                followup,
+                &message_id,
+                true,
+                Some(session_id),
+            )
+            .map_err(|error| {
+                ApiError::internal(format!(
+                    "failed to persist ordinary prompt behind retained relay: {error:#}"
+                ))
+            })?;
             return Ok(DispatchTurnResult::Queued);
         }
         if session_is_busy || has_queued_prompts || blocked_automatic_prompt {
@@ -1865,12 +2061,18 @@ impl AppState {
                     message_id = existing.pending_prompt.id.clone();
                     note_mailbox_continuation_boundary(record, &message_id);
                     sync_pending_prompts(record);
-                    self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                        .map_err(|err| {
-                            ApiError::internal(format!(
-                                "failed to persist mailbox notification: {err:#}"
-                            ))
-                        })?;
+                    self.commit_followup_prompt_locked_for_session(
+                        &mut inner,
+                        followup,
+                        &message_id,
+                        true,
+                        Some(session_id),
+                    )
+                    .map_err(|err| {
+                        ApiError::internal(format!(
+                            "failed to persist mailbox notification: {err:#}"
+                        ))
+                    })?;
                     if session_is_busy || orchestrator_auto_dispatch_blocked {
                         return Ok(DispatchTurnResult::Queued);
                     }
@@ -1881,18 +2083,15 @@ impl AppState {
                                 .expect("session index should be valid"),
                         );
                     }
-                    let (revision, started) = match self
-                        .start_and_commit_queued_dispatch_locked(
-                            &mut inner,
-                            index,
-                            followup,
-                            &message_id,
-                        ) {
+                    let (revision, started) = match self.start_and_commit_queued_dispatch_locked(
+                        &mut inner,
+                        index,
+                        followup,
+                        &message_id,
+                    ) {
                         Ok(Some(started)) => started,
                         Ok(None) => {
-                            return Ok(
-                                self.queued_after_direct_enqueue(inner, index, session_id)
-                            );
+                            return Ok(self.queued_after_direct_enqueue(inner, index, session_id));
                         }
                         Err(error) => {
                             drop(inner);
@@ -1969,10 +2168,16 @@ impl AppState {
                     .session_mut_by_index(index)
                     .expect("session index should be valid"),
             );
-            self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to persist session state: {err:#}"))
-                })?;
+            self.commit_followup_prompt_locked_for_session(
+                &mut inner,
+                followup,
+                &message_id,
+                true,
+                Some(session_id),
+            )
+            .map_err(|err| {
+                ApiError::internal(format!("failed to persist session state: {err:#}"))
+            })?;
             let (revision, started) = match self.start_and_commit_queued_dispatch_locked(
                 &mut inner,
                 index,
@@ -2016,7 +2221,13 @@ impl AppState {
             EngramHost::turn_started(&mut inner, index);
             started.message_delta.session_mutation_stamp = inner.sessions[index].mutation_stamp;
             let revision = self
-                .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
+                .commit_followup_prompt_locked_for_session(
+                    &mut inner,
+                    followup,
+                    &message_id,
+                    false,
+                    Some(session_id),
+                )
                 .map_err(|err| {
                     ApiError::internal(format!("failed to persist session state: {err:#}"))
                 })?;
@@ -2047,10 +2258,16 @@ impl AppState {
                 attachments,
                 queued_prompt_source,
             );
-            self.commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, true, Some(session_id))
-                .map_err(|err| {
-                    ApiError::internal(format!("failed to persist session state: {err:#}"))
-                })?;
+            self.commit_followup_prompt_locked_for_session(
+                &mut inner,
+                followup,
+                &message_id,
+                true,
+                Some(session_id),
+            )
+            .map_err(|err| {
+                ApiError::internal(format!("failed to persist session state: {err:#}"))
+            })?;
             // Only the explicit priority branches above may release a pause.
             // Appending new input cannot resume an unknown provider handoff.
             if session_is_busy || blocked_automatic_prompt || orchestrator_auto_dispatch_blocked {
@@ -2098,7 +2315,13 @@ impl AppState {
         EngramHost::turn_started(&mut inner, index);
         started.message_delta.session_mutation_stamp = inner.sessions[index].mutation_stamp;
         let revision = self
-            .commit_followup_prompt_locked_for_session(&mut inner, followup, &message_id, false, Some(session_id))
+            .commit_followup_prompt_locked_for_session(
+                &mut inner,
+                followup,
+                &message_id,
+                false,
+                Some(session_id),
+            )
             .map_err(|err| {
                 ApiError::internal(format!("failed to persist session state: {err:#}"))
             })?;
@@ -2112,7 +2335,7 @@ impl AppState {
 /// Whose queue head a paused-queue drain may admit, when its caller fixed it
 /// in advance.
 #[derive(Clone)]
-enum QueuedDrainOwner {
+pub(crate) enum QueuedDrainOwner {
     /// Ordinary service of an exact head; never permission to bypass a pause.
     Activation(QueuedTurnOwner),
     /// A metadata wake can re-drive only its captured boundary, never a successor.

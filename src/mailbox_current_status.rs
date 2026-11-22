@@ -7,6 +7,8 @@
 // call it, or the routes (src/mailboxes.rs, src/mailbox_relay_routes.rs).
 // New module beside src/mailboxes.rs, written with this change.
 
+use super::*;
+
 /// What an exact read observed about one message at `observed_at`: its
 /// current wake state, whether its recipient has acknowledged it (the
 /// recipient's own cursor reached it; the sender's never counts), and the
@@ -17,19 +19,19 @@
 /// read time; nothing is stored.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxMessageCurrentStatus {
-    observed_at: String,
-    notification_state: String,
-    recipient_acknowledged: bool,
-    summary: String,
+pub(crate) struct MailboxMessageCurrentStatus {
+    pub(crate) observed_at: String,
+    pub(crate) notification_state: String,
+    pub(crate) recipient_acknowledged: bool,
+    pub(crate) summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    relay_progress: Option<MailboxRelayProgress>,
+    pub(crate) relay_progress: Option<MailboxRelayProgress>,
 }
 
 /// Adds the current projection to a message just read on `connection`, from
 /// the same read: the message's own wake state and its recipient's cursor.
 /// Reading issues no page receipt and moves no cursor.
-fn attach_mailbox_message_current_status(
+pub(crate) fn attach_mailbox_message_current_status(
     connection: &rusqlite::Connection,
     message: &mut MailboxMessage,
 ) -> Result<()> {
@@ -64,7 +66,7 @@ fn attach_mailbox_message_current_status(
 /// message's current status is unavailable. It keeps the error's status and
 /// cause, and never substitutes the send receipt or a cached state, nor
 /// reads the outage as a failed delivery.
-fn mailbox_current_status_unavailable(mut error: ApiError) -> ApiError {
+pub(crate) fn mailbox_current_status_unavailable(mut error: ApiError) -> ApiError {
     if matches!(
         error.status,
         StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT

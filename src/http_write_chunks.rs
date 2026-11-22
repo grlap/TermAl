@@ -1,10 +1,12 @@
 // Hyper constructs IoSlice values before calling the socket writer. Split at
 // its body boundary, not inside AsyncWrite, where that construction is too late.
+
+use super::*;
 const HTTP_WRITE_CHUNK_BYTES: std::num::NonZeroUsize =
     std::num::NonZeroUsize::new(1024 * 1024 * 1024).unwrap();
 const NATIVE_WRITE_REPORT_BAND: u64 = 1024 * 1024 * 1024;
 
-async fn chunk_http_response_writes(
+pub(crate) async fn chunk_http_response_writes(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {
@@ -33,17 +35,17 @@ async fn chunk_http_response_writes(
 
 /// One retained frame, sliced without copying or waiting for more input.
 /// Headers, trailers, errors and the total body length are not changed.
-struct HttpWriteChunks {
-    inner: axum::body::Body,
-    pending: axum::body::Bytes,
-    limit: std::num::NonZeroUsize,
-    diagnostics: Option<(Option<u64>, HttpPanicContext)>,
-    observation: NativeWriteObservation,
+pub(crate) struct HttpWriteChunks {
+    pub(crate) inner: axum::body::Body,
+    pub(crate) pending: axum::body::Bytes,
+    pub(crate) limit: std::num::NonZeroUsize,
+    pub(crate) diagnostics: Option<(Option<u64>, HttpPanicContext)>,
+    pub(crate) observation: NativeWriteObservation,
     encoded_len: Option<u64>,
 }
 
 impl HttpWriteChunks {
-    fn new(inner: axum::body::Body, limit: std::num::NonZeroUsize) -> Self {
+    pub(crate) fn new(inner: axum::body::Body, limit: std::num::NonZeroUsize) -> Self {
         let encoded_len = http_body::Body::size_hint(&inner).exact();
         Self {
             inner,
@@ -67,7 +69,7 @@ impl HttpWriteChunks {
         self
     }
 
-    fn with_output_metadata(mut self, metadata: OutputSizeObserved) -> Self {
+    pub(crate) fn with_output_metadata(mut self, metadata: OutputSizeObserved) -> Self {
         self.observation.metadata = metadata;
         self
     }
@@ -144,11 +146,11 @@ impl http_body::Body for HttpWriteChunks {
 }
 
 #[derive(Clone, Copy)]
-struct NativeWriteSize {
-    metadata: OutputSizeObserved,
-    bytes: u64,
-    complete: bool,
-    saturated: bool,
+pub(crate) struct NativeWriteSize {
+    pub(crate) metadata: OutputSizeObserved,
+    pub(crate) bytes: u64,
+    pub(crate) complete: bool,
+    pub(crate) saturated: bool,
 }
 
 fn report_native_write_size(size: NativeWriteSize) {
@@ -162,16 +164,20 @@ fn report_native_write_size(size: NativeWriteSize) {
     );
 }
 
-struct NativeWriteObservation {
-    metadata: OutputSizeObserved,
-    count: OutputByteCount,
-    band: u64,
-    emitted: bool,
-    report: Option<fn(NativeWriteSize)>,
+pub(crate) struct NativeWriteObservation {
+    pub(crate) metadata: OutputSizeObserved,
+    pub(crate) count: OutputByteCount,
+    pub(crate) band: u64,
+    pub(crate) emitted: bool,
+    pub(crate) report: Option<fn(NativeWriteSize)>,
 }
 
 impl NativeWriteObservation {
-    fn new(metadata: OutputSizeObserved, band: u64, report: Option<fn(NativeWriteSize)>) -> Self {
+    pub(crate) fn new(
+        metadata: OutputSizeObserved,
+        band: u64,
+        report: Option<fn(NativeWriteSize)>,
+    ) -> Self {
         Self {
             metadata,
             count: OutputByteCount::default(),
@@ -195,7 +201,7 @@ impl NativeWriteObservation {
         }
     }
 
-    fn observe(&mut self, bytes: u64, complete: bool) {
+    pub(crate) fn observe(&mut self, bytes: u64, complete: bool) {
         self.count.add(bytes);
         if !self.emitted && self.count.bytes >= self.band {
             self.emitted = true;

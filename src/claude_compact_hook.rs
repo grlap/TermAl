@@ -30,41 +30,43 @@
 // answers within a budget well under that timeout: a slow context read ends in
 // an empty answer, and the next prompt carries the context instead.
 
+use super::*;
+
 /// How long the host takes at most to answer a compact callback: the context
 /// command's own timeout and four seconds more, counted from the callback's
 /// arrival to the end of the answer's write. A slow read, or an answer that
 /// waits too long for the writer, ends in the empty answer, and its page waits
 /// for the next prompt.
-const CLAUDE_COMPACT_HOOK_ANSWER_BUDGET: Duration =
+pub(crate) const CLAUDE_COMPACT_HOOK_ANSWER_BUDGET: Duration =
     Duration::from_secs(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT.as_secs() + 4);
 
 /// The hook timeout registered with Claude Code: the answer budget with room
 /// to spare, so the host's own empty answer always comes before a cancel.
-const CLAUDE_COMPACT_HOOK_REGISTERED_TIMEOUT_SECS: u64 =
+pub(crate) const CLAUDE_COMPACT_HOOK_REGISTERED_TIMEOUT_SECS: u64 =
     CLAUDE_COMPACT_HOOK_ANSWER_BUDGET.as_secs() + 20;
 
 /// Settled request ids kept so a duplicate cannot reopen one.
-const CLAUDE_COMPACT_HOOK_SETTLED_LIMIT: usize = 64;
+pub(crate) const CLAUDE_COMPACT_HOOK_SETTLED_LIMIT: usize = 64;
 
 /// The SessionStart compact hook a runtime registered at initialize.
-struct ClaudeCompactHook {
-    callback_id: String,
-    requests: Mutex<ClaudeHookRequests>,
+pub(crate) struct ClaudeCompactHook {
+    pub(crate) callback_id: String,
+    pub(crate) requests: Mutex<ClaudeHookRequests>,
     /// How long a callback's context read may take before the empty answer:
     /// `CLAUDE_COMPACT_HOOK_ANSWER_BUDGET`, which a test may shorten.
-    answer_budget: Duration,
+    pub(crate) answer_budget: Duration,
 }
 
 /// Where each registered callback request is in its single lifecycle.
 #[derive(Default)]
-struct ClaudeHookRequests {
-    states: HashMap<String, ClaudeHookRequestState>,
+pub(crate) struct ClaudeHookRequests {
+    pub(crate) states: HashMap<String, ClaudeHookRequestState>,
     /// Settled ids, oldest first, at most `CLAUDE_COMPACT_HOOK_SETTLED_LIMIT`.
-    settled: VecDeque<String>,
+    pub(crate) settled: VecDeque<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeHookRequestState {
+pub(crate) enum ClaudeHookRequestState {
     /// Its context is being read.
     Reading,
     /// Its answer waits in the writer's queue; `expired` once its deadline
@@ -78,7 +80,7 @@ enum ClaudeHookRequestState {
 }
 
 impl ClaudeHookRequests {
-    fn settle(&mut self, request_id: &str) {
+    pub(crate) fn settle(&mut self, request_id: &str) {
         self.states
             .insert(request_id.to_owned(), ClaudeHookRequestState::Settled);
         self.settled.push_back(request_id.to_owned());
@@ -92,7 +94,7 @@ impl ClaudeHookRequests {
 
 /// What the host answers one hook callback with.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeHookAnswer {
+pub(crate) enum ClaudeHookAnswer {
     /// The session's Engram work context for the compaction, and the ticket
     /// (generation and settings identity) whose delivery the written answer
     /// acknowledges.
@@ -108,29 +110,29 @@ enum ClaudeHookAnswer {
 
 /// One hook callback's answer, for the runtime's writer.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeHookResponse {
-    request_id: String,
-    answer: ClaudeHookAnswer,
+pub(crate) struct ClaudeHookResponse {
+    pub(crate) request_id: String,
+    pub(crate) answer: ClaudeHookAnswer,
     /// The answer of a request of this runtime's compact hook: the writer
     /// writes it only if it can still take that request.
-    registered: bool,
+    pub(crate) registered: bool,
     /// When the registered request's answer budget ends, counted from the
     /// callback's arrival: context still queued then is written as the empty
     /// answer, and context whose write ends after it is not delivered.
-    deadline: Option<std::time::Instant>,
+    pub(crate) deadline: Option<std::time::Instant>,
 }
 
 /// What the writer settles once its write of a hook answer is over.
-struct ClaudeHookWrite {
-    request_id: String,
-    registered: bool,
-    deadline: Option<std::time::Instant>,
+pub(crate) struct ClaudeHookWrite {
+    pub(crate) request_id: String,
+    pub(crate) registered: bool,
+    pub(crate) deadline: Option<std::time::Instant>,
     /// The context's ticket, when the answer written carries context.
-    ticket: Option<EngramCompactHookTicket>,
+    pub(crate) ticket: Option<EngramCompactHookTicket>,
 }
 
 impl ClaudeHookResponse {
-    fn write_record(&self) -> ClaudeHookWrite {
+    pub(crate) fn write_record(&self) -> ClaudeHookWrite {
         ClaudeHookWrite {
             request_id: self.request_id.clone(),
             registered: self.registered,
@@ -144,7 +146,7 @@ impl ClaudeHookResponse {
 }
 
 impl ClaudeCompactHook {
-    fn new(runtime_id: &str) -> Self {
+    pub(crate) fn new(runtime_id: &str) -> Self {
         Self {
             callback_id: format!("termal-session-start-compact-{runtime_id}"),
             requests: Mutex::new(ClaudeHookRequests::default()),
@@ -152,7 +154,7 @@ impl ClaudeCompactHook {
         }
     }
 
-    fn requests(&self) -> std::sync::MutexGuard<'_, ClaudeHookRequests> {
+    pub(crate) fn requests(&self) -> std::sync::MutexGuard<'_, ClaudeHookRequests> {
         self.requests
             .lock()
             .expect("Claude compact hook mutex poisoned")
@@ -160,7 +162,7 @@ impl ClaudeCompactHook {
 
     /// Opens `request_id`'s lifecycle; `false` for an id already known,
     /// pending or settled.
-    fn begin(&self, request_id: &str) -> bool {
+    pub(crate) fn begin(&self, request_id: &str) -> bool {
         let mut requests = self.requests();
         if requests.states.contains_key(request_id) {
             return false;
@@ -173,7 +175,7 @@ impl ClaudeCompactHook {
 
     /// The read is over and its answer goes to the writer; `false` when the
     /// request was cancelled meanwhile.
-    fn queue(&self, request_id: &str) -> bool {
+    pub(crate) fn queue(&self, request_id: &str) -> bool {
         let mut requests = self.requests();
         match requests.states.get_mut(request_id) {
             Some(state @ ClaudeHookRequestState::Reading) => {
@@ -187,7 +189,7 @@ impl ClaudeCompactHook {
     /// The writer takes the answer to write: `Some(in_time)`, `false` when
     /// its deadline passed while it was queued; `None` when the request was
     /// cancelled after it was queued, or was already taken.
-    fn take_for_write(&self, request_id: &str) -> Option<bool> {
+    pub(crate) fn take_for_write(&self, request_id: &str) -> Option<bool> {
         let mut requests = self.requests();
         let state = requests.states.get_mut(request_id)?;
         let ClaudeHookRequestState::Queued { expired } = *state else {
@@ -199,7 +201,7 @@ impl ClaudeCompactHook {
 
     /// The writer's write is over; `true` when the request was neither
     /// cancelled nor expired while it was written. Its lifecycle ends.
-    fn finish_write(&self, request_id: &str) -> bool {
+    pub(crate) fn finish_write(&self, request_id: &str) -> bool {
         let mut requests = self.requests();
         if requests.states.get(request_id) != Some(&ClaudeHookRequestState::Writing) {
             return false;
@@ -211,7 +213,7 @@ impl ClaudeCompactHook {
     /// The request's answer budget ended. Queued, its context will be
     /// written as the empty answer; being written, its write delivers
     /// nothing. A request still read is the worker's to end.
-    fn expire(&self, request_id: &str) {
+    pub(crate) fn expire(&self, request_id: &str) {
         let mut requests = self.requests();
         match requests.states.get_mut(request_id) {
             Some(ClaudeHookRequestState::Queued { expired }) => *expired = true,
@@ -223,7 +225,7 @@ impl ClaudeCompactHook {
     /// Ends the request without a delivered answer: Claude Code cancelled
     /// it, or its runtime is no longer the session's. A write under way
     /// still completes, but delivers nothing.
-    fn settle_unanswered(&self, request_id: &str) {
+    pub(crate) fn settle_unanswered(&self, request_id: &str) {
         let mut requests = self.requests();
         if requests
             .states
@@ -238,7 +240,7 @@ impl ClaudeCompactHook {
 /// The hook a runtime registers: one when its session is Engram-enabled at
 /// spawn, as the Engram MCP configuration the caller resolved under its state
 /// lock says. It takes no lock itself.
-fn claude_compact_hook_for_runtime(
+pub(crate) fn claude_compact_hook_for_runtime(
     engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     runtime_id: &str,
 ) -> Option<ClaudeCompactHook> {
@@ -246,7 +248,7 @@ fn claude_compact_hook_for_runtime(
 }
 
 /// The `hooks` object of the initialize request.
-fn claude_initialize_hooks(hook: Option<&ClaudeCompactHook>) -> Value {
+pub(crate) fn claude_initialize_hooks(hook: Option<&ClaudeCompactHook>) -> Value {
     match hook {
         Some(hook) => json!({
             "SessionStart": [{
@@ -260,7 +262,7 @@ fn claude_initialize_hooks(hook: Option<&ClaudeCompactHook>) -> Value {
 }
 
 /// The control response for `response`, as the writer writes it.
-fn claude_hook_response_message(response: &ClaudeHookResponse) -> Value {
+pub(crate) fn claude_hook_response_message(response: &ClaudeHookResponse) -> Value {
     match &response.answer {
         ClaudeHookAnswer::Context { text, .. } => json!({
             "type": "control_response",
@@ -295,7 +297,7 @@ fn claude_hook_response_message(response: &ClaudeHookResponse) -> Value {
 }
 
 /// Whether `message` is a `hook_callback` control request.
-fn claude_message_is_hook_callback(message: &Value) -> bool {
+pub(crate) fn claude_message_is_hook_callback(message: &Value) -> bool {
     message.get("type").and_then(Value::as_str) == Some("control_request")
         && message.pointer("/request/subtype").and_then(Value::as_str) == Some("hook_callback")
 }
@@ -325,7 +327,7 @@ fn send_claude_hook_response(
 /// registered compact callback always records its compaction's request for a
 /// fresh context, whatever an earlier compaction left; the caller records that
 /// this compaction asked, so its boundary does not ask again.
-fn answer_claude_hook_callback(
+pub(crate) fn answer_claude_hook_callback(
     context: &ClaudeRuntimeContext,
     input_tx: &Sender<ClaudeRuntimeCommand>,
     message: &Value,
@@ -469,7 +471,7 @@ fn read_claude_compact_hook_answer(
 
 /// What answering a hook callback meant for the compaction under way.
 #[derive(Debug, PartialEq, Eq)]
-enum ClaudeHookCallbackApplied {
+pub(crate) enum ClaudeHookCallbackApplied {
     /// The callback of this runtime's compact hook: the compaction asked for
     /// a fresh context.
     Compaction,
@@ -479,7 +481,7 @@ enum ClaudeHookCallbackApplied {
 
 /// Claude Code abandoned a hook callback request: no answer is written for
 /// it, even one already queued, and its context counts as not delivered.
-fn cancel_claude_hook_callback(context: &ClaudeRuntimeContext, request_id: &str) {
+pub(crate) fn cancel_claude_hook_callback(context: &ClaudeRuntimeContext, request_id: &str) {
     if let Some(hook) = context.compact_hook.as_ref() {
         hook.settle_unanswered(request_id);
     }
@@ -490,7 +492,7 @@ fn cancel_claude_hook_callback(context: &ClaudeRuntimeContext, request_id: &str)
 /// context is written only before the request's deadline and while that page
 /// is still the session's current one for this runtime and settings, and an
 /// empty answer replaces it otherwise.
-fn claude_hook_response_to_write(
+pub(crate) fn claude_hook_response_to_write(
     context: &ClaudeRuntimeContext,
     mut response: ClaudeHookResponse,
 ) -> Option<ClaudeHookResponse> {
@@ -524,7 +526,11 @@ fn claude_hook_response_to_write(
 /// delivered only when it was written, its write ended before the deadline,
 /// and Claude Code did not cancel it nor did it expire while it was written;
 /// otherwise the page stays for the next prompt.
-fn finish_claude_hook_write(context: &ClaudeRuntimeContext, write: ClaudeHookWrite, written: bool) {
+pub(crate) fn finish_claude_hook_write(
+    context: &ClaudeRuntimeContext,
+    write: ClaudeHookWrite,
+    written: bool,
+) {
     let unrevoked = !write.registered
         || context
             .compact_hook

@@ -2,20 +2,22 @@
 // Does not start processes, transport messages or activate peers. New O1 state
 // uses federation_mutations.rs and its existing writer/durability fence.
 
+use super::*;
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationOnboardingData {
+pub(crate) struct FederationOnboardingData {
     // Latest attempt per enrolled peer; no unbounded per-attempt payload log.
-    reports: BTreeMap<String, FederationOnboardingReport>,
-    probes: BTreeMap<String, FederationProbeSession>,
+    pub(crate) reports: BTreeMap<String, FederationOnboardingReport>,
+    pub(crate) probes: BTreeMap<String, FederationProbeSession>,
     #[serde(default)]
-    retired_probes: BTreeMap<String, Vec<FederationRetiredProbe>>,
-    engram_enabled: BTreeSet<String>,
-    engram_commands: BTreeMap<String, FederationEngramProbeCommand>,
+    pub(crate) retired_probes: BTreeMap<String, Vec<FederationRetiredProbe>>,
+    pub(crate) engram_enabled: BTreeSet<String>,
+    pub(crate) engram_commands: BTreeMap<String, FederationEngramProbeCommand>,
 }
 
 impl AppState {
-    fn save_federation_onboarding_report(
+    pub(crate) fn save_federation_onboarding_report(
         &self,
         report: FederationOnboardingReport,
     ) -> Result<(), ApiError> {
@@ -34,7 +36,7 @@ impl AppState {
         })
     }
 
-    fn prepare_federation_probe(
+    pub(crate) fn prepare_federation_probe(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: &str,
@@ -102,7 +104,7 @@ impl AppState {
         })
     }
 
-    fn accept_federation_probe_wake(
+    pub(crate) fn accept_federation_probe_wake(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: &str,
@@ -150,7 +152,7 @@ impl AppState {
         .ok_or_else(federation_stale_link)
     }
 
-    fn finish_federation_probe_wake(
+    pub(crate) fn finish_federation_probe_wake(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: &str,
@@ -240,7 +242,7 @@ impl AppState {
     }
 }
 
-fn validate_federation_probe_id(id: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_federation_probe_id(id: &str) -> Result<(), ApiError> {
     if Uuid::parse_str(id)
         .ok()
         .filter(|id| !id.is_nil())

@@ -7,20 +7,24 @@
 // project settings routes, transcript mutation, or delegation lifecycle. Those
 // call this seam only after releasing the global state mutex.
 
+use super::*;
+
 #[cfg(test)]
-const ENGRAM_CONTROL_SCHEMA_VERSION: u16 = 1;
+pub(crate) const ENGRAM_CONTROL_SCHEMA_VERSION: u16 = 1;
 /// Ordinary Engram operations get at least one minute. A slow operation is
 /// diagnosed after ten seconds without interrupting it.
 // Shared with the launcher's budget owner: operation minimum, process delivery.
-const ENGRAM_CALL_BUDGET_MS: [u64; 2] = include!("../scripts/engram-call-budget-ms.json");
-const ENGRAM_MIN_CALL_TIMEOUT: Duration = Duration::from_millis(ENGRAM_CALL_BUDGET_MS[0]);
-const ENGRAM_CALL_WARNING_AFTER: Duration = Duration::from_secs(10);
-const ENGRAM_MAX_CALL_TIMEOUT_MS: u64 = 60_000;
-const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = ENGRAM_MAX_CALL_TIMEOUT_MS;
+pub(crate) const ENGRAM_CALL_BUDGET_MS: [u64; 2] =
+    include!("../scripts/engram-call-budget-ms.json");
+pub(crate) const ENGRAM_MIN_CALL_TIMEOUT: Duration =
+    Duration::from_millis(ENGRAM_CALL_BUDGET_MS[0]);
+pub(crate) const ENGRAM_CALL_WARNING_AFTER: Duration = Duration::from_secs(10);
+pub(crate) const ENGRAM_MAX_CALL_TIMEOUT_MS: u64 = 60_000;
+pub(crate) const ENGRAM_DEFAULT_CALL_TIMEOUT_MS: u64 = ENGRAM_MAX_CALL_TIMEOUT_MS;
 /// Test process startup allows the call bound plus one second for cleanup
 /// ownership to publish its terminal state.
 #[cfg(test)]
-const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration =
+pub(crate) const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration =
     Duration::from_millis(ENGRAM_MAX_CALL_TIMEOUT_MS + 1_000);
 // Only explicit Full Audit runs `engram doctor --json`; that audit is the
 // only consumer of this bound — it is not an ordinary Engram call timeout and
@@ -43,19 +47,19 @@ const ENGRAM_CONTROL_SETTLE_TIMEOUT: Duration =
 // each migration. Re-measure when a store's record count has grown severalfold,
 // and raise this from a measurement rather than a guess.
 #[cfg(not(test))]
-const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+pub(crate) const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 // The Windows fixture launches through powershell.exe, and the full Rust suite
 // starts several process-heavy tests concurrently. Fixtures answer immediately,
 // so tests keep a much shorter bound: a hung fixture must fail the suite
 // quickly instead of holding it for the production window.
 #[cfg(test)]
-const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
-const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
-const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
+pub(crate) const ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+pub(crate) const ENGRAM_WORK_BINDING_COMMAND_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+pub(crate) const ENGRAM_WORK_BINDING_LOCK_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 // Outer budgets decide whether to admit another call. Once admitted, a call
 // retains its minimum operation window even near the end of that budget.
-fn engram_operation_timeout(requested: Duration) -> Duration {
+pub(crate) fn engram_operation_timeout(requested: Duration) -> Duration {
     if requested.is_zero() {
         requested
     } else {
@@ -63,15 +67,22 @@ fn engram_operation_timeout(requested: Duration) -> Duration {
     }
 }
 
-fn warn_slow_engram_call(started: std::time::Instant, warned: &mut bool, operation: &str) {
+pub(crate) fn warn_slow_engram_call(
+    started: std::time::Instant,
+    warned: &mut bool,
+    operation: &str,
+) {
     let elapsed = started.elapsed();
     if !*warned && elapsed >= ENGRAM_CALL_WARNING_AFTER {
         *warned = true;
-        eprintln!("engram warning> {operation} still running after {} ms", elapsed.as_millis());
+        eprintln!(
+            "engram warning> {operation} still running after {} ms",
+            elapsed.as_millis()
+        );
     }
 }
 
-fn receive_engram_call<T>(
+pub(crate) fn receive_engram_call<T>(
     receiver: &mpsc::Receiver<T>,
     started: std::time::Instant,
     timeout: Duration,
@@ -81,7 +92,9 @@ fn receive_engram_call<T>(
     loop {
         warn_slow_engram_call(started, &mut warned, operation);
         let remaining = timeout.saturating_sub(started.elapsed());
-        let wait = if warned { remaining } else {
+        let wait = if warned {
+            remaining
+        } else {
             remaining.min(ENGRAM_CALL_WARNING_AFTER.saturating_sub(started.elapsed()))
         };
         match receiver.recv_timeout(wait) {
@@ -91,36 +104,36 @@ fn receive_engram_call<T>(
     }
 }
 
-const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
+pub(crate) const ENGRAM_CONTROL_MAX_FRAME_BYTES: usize = 256 * 1_024;
 // Resource policy, not a measured upper bound on reports. Doctor reports
 // are independent of control frames; cap each of stdout/stderr at 8 MiB.
-const ENGRAM_DOCTOR_MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
-const ENGRAM_GLOBAL_DISABLE_ENV: &str = "TERMAL_ENGRAM_DISABLED";
+pub(crate) const ENGRAM_DOCTOR_MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const ENGRAM_GLOBAL_DISABLE_ENV: &str = "TERMAL_ENGRAM_DISABLED";
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramAuthorityStoreKey {
-    database_path: PathBuf,
-    project_id: String,
+pub(crate) struct EngramAuthorityStoreKey {
+    pub(crate) database_path: PathBuf,
+    pub(crate) project_id: String,
 }
 
 #[derive(Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramRetiredWorkAuthorityGrant {
-    home: String,
+pub(crate) struct EngramRetiredWorkAuthorityGrant {
+    pub(crate) home: String,
     /// Raw project root retained even when `.engram-project` cannot be read.
     /// Retained as historical data; no revocation or ingress route reads it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    project_root: String,
+    pub(crate) project_root: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    store_key: Option<EngramAuthorityStoreKey>,
+    pub(crate) store_key: Option<EngramAuthorityStoreKey>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    project_id: String,
-    grant_hash: String,
-    retired_at: String,
-    reason: String,
+    pub(crate) project_id: String,
+    pub(crate) grant_hash: String,
+    pub(crate) retired_at: String,
+    pub(crate) reason: String,
     #[serde(default)]
-    revoke_confirmed: bool,
+    pub(crate) revoke_confirmed: bool,
 }
 
 impl std::fmt::Debug for EngramRetiredWorkAuthorityGrant {
@@ -139,30 +152,30 @@ impl std::fmt::Debug for EngramRetiredWorkAuthorityGrant {
     }
 }
 
-fn default_engram_execution_observability() -> bool {
+pub(crate) fn default_engram_execution_observability() -> bool {
     true
 }
 
 #[derive(Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramProjectSettings {
+pub(crate) struct EngramProjectSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    acceptance_evaluation: Option<AcceptanceEvaluatorDefaults>,
+    pub(crate) acceptance_evaluation: Option<AcceptanceEvaluatorDefaults>,
     #[serde(default)]
-    enabled: bool,
+    pub(crate) enabled: bool,
     /// Controls new automatic execution observations, never turn admission.
     #[serde(default = "default_engram_execution_observability")]
-    execution_observability: bool,
+    pub(crate) execution_observability: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    binary_path: Option<String>,
+    pub(crate) binary_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    home: Option<String>,
+    pub(crate) home: Option<String>,
     /// Host-private connection identity; omitted from client snapshots and
     /// MCP composition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    authority_store_key: Option<EngramAuthorityStoreKey>,
+    pub(crate) authority_store_key: Option<EngramAuthorityStoreKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    deadline_ms: Option<u64>,
+    pub(crate) deadline_ms: Option<u64>,
 }
 
 impl std::fmt::Debug for EngramProjectSettings {
@@ -195,11 +208,11 @@ impl Default for EngramProjectSettings {
 }
 
 impl EngramProjectSettings {
-    fn is_base_enabled(&self) -> bool {
+    pub(crate) fn is_base_enabled(&self) -> bool {
         self.enabled && !engram_globally_disabled()
     }
 
-    fn call_timeout(&self) -> Duration {
+    pub(crate) fn call_timeout(&self) -> Duration {
         Duration::from_millis(
             self.deadline_ms
                 .unwrap_or(ENGRAM_DEFAULT_CALL_TIMEOUT_MS)
@@ -208,20 +221,20 @@ impl EngramProjectSettings {
     }
 }
 
-fn engram_globally_disabled() -> bool {
+pub(crate) fn engram_globally_disabled() -> bool {
     std::env::var(ENGRAM_GLOBAL_DISABLE_ENV)
         .ok()
         .is_some_and(|value| engram_disable_env_value_is_truthy(&value))
 }
 
-fn engram_disable_env_value_is_truthy(value: &str) -> bool {
+pub(crate) fn engram_disable_env_value_is_truthy(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
 }
 
-fn validate_engram_project_enablement(
+pub(crate) fn validate_engram_project_enablement(
     project: &Project,
     settings: &EngramProjectSettings,
     host_workdir: &FsPath,
@@ -230,12 +243,16 @@ fn validate_engram_project_enablement(
         validate_engram_project_connection_paths(project, settings)?;
     let project_root = FsPath::new(&project.root_path);
     let result = run_engram_readiness(
-        &binary_path, &project_file, &home, project_root, host_workdir,
+        &binary_path,
+        &project_file,
+        &home,
+        project_root,
+        host_workdir,
     )?;
     validate_engram_readiness(&result, &project_file, &home)
 }
 
-fn validate_engram_project_connection_paths(
+pub(crate) fn validate_engram_project_connection_paths(
     project: &Project,
     settings: &EngramProjectSettings,
 ) -> std::result::Result<(PathBuf, PathBuf, PathBuf), ApiError> {
@@ -257,7 +274,7 @@ fn validate_engram_project_connection_paths(
     Ok((binary_path, project_file, home))
 }
 
-fn validate_engram_host_connection_paths(
+pub(crate) fn validate_engram_host_connection_paths(
     settings: &EngramProjectSettings,
 ) -> std::result::Result<(PathBuf, PathBuf), ApiError> {
     let binary_path = settings
@@ -294,7 +311,7 @@ fn validate_engram_host_connection_paths(
 /// without waiting out the production window. Callers outside tests always pass
 /// [`ENGRAM_ENABLEMENT_DOCTOR_TIMEOUT`].
 #[cfg(test)]
-fn run_engram_doctor_result_within(
+pub(crate) fn run_engram_doctor_result_within(
     binary_path: &FsPath,
     project_file: &FsPath,
     home: &FsPath,
@@ -327,7 +344,7 @@ fn run_engram_doctor_result_within(
 }
 
 // Shared bounded process transport; callers retain distinct admission contracts.
-fn run_engram_diagnostic_within(
+pub(crate) fn run_engram_diagnostic_within(
     binary_path: &FsPath,
     project_file: &FsPath,
     home: &FsPath,
@@ -373,7 +390,7 @@ fn run_engram_diagnostic_args_within(
 
 // The absolute deadline includes process startup and pipe collection. Callers
 // sharing a budget across subprocesses must not restart it for each child.
-fn run_engram_diagnostic_args_until(
+pub(crate) fn run_engram_diagnostic_args_until(
     binary_path: &FsPath,
     project_file: &FsPath,
     home: &FsPath,
@@ -419,8 +436,9 @@ fn run_engram_diagnostic_args_until(
     let mut command = engram_host_command_for_program(&resolved, project_root, host_workdir)
         .map_err(|error| ApiError::bad_request(error.message))?;
     #[cfg(not(windows))]
-    let mut command = engram_host_command(binary_path, project_root, project_file, home, host_workdir)
-        .map_err(|error| ApiError::bad_request(error.message))?;
+    let mut command =
+        engram_host_command(binary_path, project_root, project_file, home, host_workdir)
+            .map_err(|error| ApiError::bad_request(error.message))?;
     command
         .arg("--project-file")
         .arg(project_file)
@@ -549,27 +567,27 @@ fn run_engram_diagnostic_args_until(
 }
 
 #[derive(Clone, Deserialize)]
-struct EngramDoctorControl {
+pub(crate) struct EngramDoctorControl {
     #[serde(default)]
-    schema_version: Option<u16>,
+    pub(crate) schema_version: Option<u16>,
     #[serde(default)]
-    epoch: Option<i64>,
+    pub(crate) epoch: Option<i64>,
     #[serde(default)]
-    policy: Option<String>,
+    pub(crate) policy: Option<String>,
     #[serde(default)]
-    obligation_rules: Option<String>,
+    pub(crate) obligation_rules: Option<String>,
 }
 
 #[cfg(test)]
 #[derive(Clone, Deserialize)]
-struct EngramDoctorResult {
-    healthy: bool,
-    database: PathBuf,
-    project_id: String,
+pub(crate) struct EngramDoctorResult {
+    pub(crate) healthy: bool,
+    pub(crate) database: PathBuf,
+    pub(crate) project_id: String,
 }
 
 #[cfg(any(not(windows), test))]
-fn engram_command(binary_path: &FsPath) -> Command {
+pub(crate) fn engram_command(binary_path: &FsPath) -> Command {
     let extension = binary_path
         .extension()
         .and_then(|value| value.to_str())
@@ -603,7 +621,7 @@ fn engram_command(binary_path: &FsPath) -> Command {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramEffect {
+pub(crate) enum EngramEffect {
     Observe,
     Communicate,
     MutateLocal,
@@ -611,7 +629,7 @@ enum EngramEffect {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramNextIntent {
+pub(crate) enum EngramNextIntent {
     Continue,
     Wait,
     Exit,
@@ -619,7 +637,7 @@ enum EngramNextIntent {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
-enum EngramControlRequest {
+pub(crate) enum EngramControlRequest {
     WorkSessionRead {},
     ExecutionObserve {
         #[serde(flatten)]
@@ -695,7 +713,7 @@ enum EngramControlRequest {
 }
 
 impl EngramControlRequest {
-    fn operation(&self) -> &'static str {
+    pub(crate) fn operation(&self) -> &'static str {
         match self {
             Self::WorkSessionRead { .. } => "work_session_read",
             Self::ExecutionObserve { .. } => "execution_observe",
@@ -712,69 +730,74 @@ impl EngramControlRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramControlWorkBinding {
-    root_execution_id: String,
-    work_id: String,
-    run_id: String,
-    work_revision: i64,
-    claim_id: String,
-    claim_fence: i64,
+pub(crate) struct EngramControlWorkBinding {
+    pub(crate) root_execution_id: String,
+    pub(crate) work_id: String,
+    pub(crate) run_id: String,
+    pub(crate) work_revision: i64,
+    pub(crate) claim_id: String,
+    pub(crate) claim_fence: i64,
 }
 
-fn describe_engram_work_binding(binding: Option<&EngramControlWorkBinding>) -> String {
+pub(crate) fn describe_engram_work_binding(binding: Option<&EngramControlWorkBinding>) -> String {
     binding.map_or_else(
         || "none".to_owned(),
-        |binding| format!("work {} revision {} fence {}", binding.work_id, binding.work_revision, binding.claim_fence),
+        |binding| {
+            format!(
+                "work {} revision {} fence {}",
+                binding.work_id, binding.work_revision, binding.claim_fence
+            )
+        },
     )
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramExecutionObservationInput {
-    observation_id: String,
-    action_fingerprint: String,
-    effect: EngramEffect,
-    outcome: EngramExecutionOutcome,
-    source_changed: bool,
+pub(crate) struct EngramExecutionObservationInput {
+    pub(crate) observation_id: String,
+    pub(crate) action_fingerprint: String,
+    pub(crate) effect: EngramEffect,
+    pub(crate) outcome: EngramExecutionOutcome,
+    pub(crate) source_changed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_basis: Option<EngramExecutionSourceBasis>,
+    pub(crate) source_basis: Option<EngramExecutionSourceBasis>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    observed_at: Option<String>,
+    pub(crate) observed_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramExecutionOutcome {
+pub(crate) enum EngramExecutionOutcome {
     Succeeded,
     Failed,
     Unknown,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramExecutionSourceBasis {
-    workspace_id: String,
+pub(crate) struct EngramExecutionSourceBasis {
+    pub(crate) workspace_id: String,
     // Legacy records keep their original text; owner-backed observations use
     // only source_id. Naming and admission retain their separate contracts.
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    source_revision: String,
+    pub(crate) source_revision: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_id: Option<EngramSourceId>,
+    pub(crate) source_id: Option<EngramSourceId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_root_generation: Option<i64>,
+    pub(crate) source_root_generation: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_root_state: Option<EngramSourceRootState>,
+    pub(crate) source_root_state: Option<EngramSourceRootState>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
-enum EngramControlResponse {
+pub(crate) enum EngramControlResponse {
     Ok { result: Value },
     Error { error: EngramControlErrorWire },
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct EngramControlErrorBody {
-    code: String,
-    message: String,
+pub(crate) struct EngramControlErrorBody {
+    pub(crate) code: String,
+    pub(crate) message: String,
 }
 
 /// An error as Engram sends it. Newer builds add a typed `reason` beside
@@ -782,13 +805,13 @@ struct EngramControlErrorBody {
 /// message, so every reader of the error sees it and older builds read as
 /// before.
 #[derive(Clone, Debug, Deserialize)]
-struct EngramControlErrorWire {
-    code: String,
-    message: String,
+pub(crate) struct EngramControlErrorWire {
+    pub(crate) code: String,
+    pub(crate) message: String,
     #[serde(default)]
-    reason: Option<String>,
+    pub(crate) reason: Option<String>,
     #[serde(default)]
-    details: Value,
+    pub(crate) details: Value,
 }
 
 impl EngramControlErrorWire {
@@ -802,22 +825,22 @@ impl EngramControlErrorWire {
         let field = self.details.get("field").and_then(Value::as_str)?;
         (!field.is_empty()
             && field.len() <= 64
-            && field
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'.'))
+            && field.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'.'
+            }))
         .then(|| field.to_owned())
     }
 
     /// The transport error this answer is, with its refused field kept as a
     /// typed label beside the message.
-    fn into_transport_error(self) -> EngramTransportError {
+    pub(crate) fn into_transport_error(self) -> EngramTransportError {
         let refused_field = self.verification_refused_field();
         let mut error = EngramTransportError::remote(self.into_body());
         error.refused_field = refused_field;
         error
     }
 
-    fn into_body(self) -> EngramControlErrorBody {
+    pub(crate) fn into_body(self) -> EngramControlErrorBody {
         let message = match self.reason {
             Some(reason) if !reason.trim().is_empty() => {
                 format!("{} (reason: {})", self.message, reason.trim())
@@ -828,21 +851,33 @@ impl EngramControlErrorWire {
         // details. Keep those labels through the existing error message; do
         // not expose other details or the rejected request's values.
         let message = if self.code == "verification_record_refused" {
-            match (self.details.get("field").and_then(Value::as_str),
-                self.details.get("reason").and_then(Value::as_str)) {
-                (Some(field), Some(reason)) if [field, reason].iter().all(|text|
-                    !text.is_empty() && text.len() <= 4096 && !text.chars().any(char::is_control)) =>
-                    format!("{message} (field: {field}; reason: {reason})"),
+            match (
+                self.details.get("field").and_then(Value::as_str),
+                self.details.get("reason").and_then(Value::as_str),
+            ) {
+                (Some(field), Some(reason))
+                    if [field, reason].iter().all(|text| {
+                        !text.is_empty()
+                            && text.len() <= 4096
+                            && !text.chars().any(char::is_control)
+                    }) =>
+                {
+                    format!("{message} (field: {field}; reason: {reason})")
+                }
                 _ => message,
             }
-        } else { message };
-        EngramControlErrorBody { code: self.code, message,
+        } else {
+            message
+        };
+        EngramControlErrorBody {
+            code: self.code,
+            message,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramTransportErrorKind {
+pub(crate) enum EngramTransportErrorKind {
     LocalState,
     Deadline,
     Transport,
@@ -853,47 +888,47 @@ enum EngramTransportErrorKind {
 }
 
 #[derive(Clone, Debug)]
-struct EngramTransportError {
-    causal_failure: Option<EngramCausalFailure>,
-    kind: EngramTransportErrorKind,
-    code: Option<String>,
+pub(crate) struct EngramTransportError {
+    pub(crate) causal_failure: Option<EngramCausalFailure>,
+    pub(crate) kind: EngramTransportErrorKind,
+    pub(crate) code: Option<String>,
     /// Engram's own refusal code, when a failed CLI call printed its JSON
     /// error (`decode_engram_cli_json`). It sits beside `code`, which stays
     /// the transport's own code, so that callers matching on `code` are
     /// unchanged. Read by `engram_store_transient`.
-    refusal_code: Option<String>,
+    pub(crate) refusal_code: Option<String>,
     /// Structured store-open cause, qualified by the readiness decoder.
     /// CLI error prose and control reply messages never populate this field.
-    refusal_kind: Option<String>,
-    message: String,
+    pub(crate) refusal_kind: Option<String>,
+    pub(crate) message: String,
     /// The request field a registered-verification refusal names
     /// (`verification_record_refused` with `details.field`), as a safe label
     /// kept out of `message` (`EngramControlErrorWire::into_transport_error`).
-    refused_field: Option<String>,
+    pub(crate) refused_field: Option<String>,
     /// The process this call meant to run never started, so it cannot have
     /// written anything. Only a failed spawn says so: every later failure
     /// leaves a write's outcome open. It also marks Engram control as
     /// unavailable (`EngramCausalFailure::control_availability`).
-    process_never_started: bool,
+    pub(crate) process_never_started: bool,
     /// The control transport failed before it handed any byte of this
     /// call's request frame to the control worker, the only writer to the
     /// process (`engram_control_transport.rs`). The request provably never
     /// reached Engram, so its remote application is "not started"; unlike
     /// `process_never_started` it says nothing about control availability,
     /// so an exhausted budget or a worker race stays a hold.
-    request_never_sent: bool,
+    pub(crate) request_never_sent: bool,
     /// The control sidecar this failure was observed on, when the transport
     /// saw one (`engram_control_transport.rs`); `None` is never filled in.
-    control_process: Option<EngramControlProcessEvidence>,
+    pub(crate) control_process: Option<EngramControlProcessEvidence>,
 }
 
 impl EngramTransportError {
-    fn with_control_process(mut self, evidence: EngramControlProcessEvidence) -> Self {
+    pub(crate) fn with_control_process(mut self, evidence: EngramControlProcessEvidence) -> Self {
         self.control_process = Some(evidence);
         self
     }
 
-    fn local_state(message: impl Into<String>) -> Self {
+    pub(crate) fn local_state(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::LocalState,
             causal_failure: None,
@@ -908,7 +943,7 @@ impl EngramTransportError {
         }
     }
 
-    fn deadline(message: impl Into<String>) -> Self {
+    pub(crate) fn deadline(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Deadline,
             causal_failure: None,
@@ -923,7 +958,7 @@ impl EngramTransportError {
         }
     }
 
-    fn deadline_before_launch(message: impl Into<String>) -> Self {
+    pub(crate) fn deadline_before_launch(message: impl Into<String>) -> Self {
         Self {
             process_never_started: true,
             request_never_sent: true,
@@ -931,7 +966,7 @@ impl EngramTransportError {
         }
     }
 
-    fn transport(message: impl Into<String>) -> Self {
+    pub(crate) fn transport(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Transport,
             causal_failure: None,
@@ -952,7 +987,7 @@ impl EngramTransportError {
     /// Engram. The error's kind is kept for `counts_for_circuit_breaker`
     /// and `disables_session`, and control availability is unchanged; only
     /// the remote application becomes "not started".
-    fn request_never_sent(mut self) -> Self {
+    pub(crate) fn request_never_sent(mut self) -> Self {
         self.request_never_sent = true;
         self
     }
@@ -964,7 +999,7 @@ impl EngramTransportError {
     /// is not one: it still counts for the circuit and backoff, and a
     /// protocol failure still disables the session.
     #[cfg(test)]
-    fn stopped_before_transport(&self) -> bool {
+    pub(crate) fn stopped_before_transport(&self) -> bool {
         !self.request_never_sent
             && self.causal_failure.as_ref().is_some_and(|cause| {
                 cause.remote_application == EngramRemoteApplication::NotStarted
@@ -973,7 +1008,7 @@ impl EngramTransportError {
     }
 
     /// A transport failure before any process existed.
-    fn spawn_failed(message: impl Into<String>) -> Self {
+    pub(crate) fn spawn_failed(message: impl Into<String>) -> Self {
         Self {
             process_never_started: true,
             control_process: None,
@@ -981,7 +1016,7 @@ impl EngramTransportError {
         }
     }
 
-    fn protocol(message: impl Into<String>) -> Self {
+    pub(crate) fn protocol(message: impl Into<String>) -> Self {
         Self {
             kind: EngramTransportErrorKind::Protocol,
             causal_failure: None,
@@ -996,7 +1031,7 @@ impl EngramTransportError {
         }
     }
 
-    fn remote(error: EngramControlErrorBody) -> Self {
+    pub(crate) fn remote(error: EngramControlErrorBody) -> Self {
         Self {
             kind: EngramTransportErrorKind::Remote,
             causal_failure: None,
@@ -1012,7 +1047,7 @@ impl EngramTransportError {
     }
 
     #[cfg(test)]
-    fn counts_for_circuit_breaker(&self) -> bool {
+    pub(crate) fn counts_for_circuit_breaker(&self) -> bool {
         matches!(
             self.kind,
             EngramTransportErrorKind::Deadline | EngramTransportErrorKind::Transport
@@ -1020,7 +1055,7 @@ impl EngramTransportError {
     }
 
     #[cfg(test)]
-    fn disables_session(&self) -> bool {
+    pub(crate) fn disables_session(&self) -> bool {
         self.kind == EngramTransportErrorKind::Protocol
             || (self.kind == EngramTransportErrorKind::Remote
                 && matches!(
@@ -1036,7 +1071,7 @@ impl EngramTransportError {
                 ))
     }
 
-    fn keeps_control_process_alive(&self) -> bool {
+    pub(crate) fn keeps_control_process_alive(&self) -> bool {
         self.kind == EngramTransportErrorKind::Remote && !self.is_terminal_control_startup()
     }
 
@@ -1074,17 +1109,17 @@ impl std::fmt::Display for EngramTransportError {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramConnectionConfig {
-    binary_path: PathBuf,
-    project_file: PathBuf,
-    home: PathBuf,
-    project_root: PathBuf,
-    actor_id: String,
-    actor_context: Option<String>,
-    session_id: String,
+pub(crate) struct EngramConnectionConfig {
+    pub(crate) binary_path: PathBuf,
+    pub(crate) project_file: PathBuf,
+    pub(crate) home: PathBuf,
+    pub(crate) project_root: PathBuf,
+    pub(crate) actor_id: String,
+    pub(crate) actor_context: Option<String>,
+    pub(crate) session_id: String,
 }
 
-trait EngramControlTransport: Send + Sync {
+pub(crate) trait EngramControlTransport: Send + Sync {
     fn request(
         &self,
         connection: &EngramConnectionConfig,
@@ -1116,7 +1151,6 @@ trait EngramControlTransport: Send + Sync {
     ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
         Ok(None)
     }
-
 
     /// Every claim the session holds (`read_engram_held_claims_from_cli`),
     /// which a work's source root is named against and ended by
@@ -1151,41 +1185,47 @@ trait EngramControlTransport: Send + Sync {
 
     /// The reset's shared budget does not certify process cleanup. Production
     /// retains the exact retiring child in its existing registry on timeout.
-    fn shutdown_session_until(&self, _session_id: &str, _clock: &EngramBudgetClock,
-        _deadline: std::time::Instant) -> Result<(), EngramTransportError> {
-        Err(EngramTransportError::local_state("This control transport has no bounded cleanup owner"))
+    fn shutdown_session_until(
+        &self,
+        _session_id: &str,
+        _clock: &EngramBudgetClock,
+        _deadline: std::time::Instant,
+    ) -> Result<(), EngramTransportError> {
+        Err(EngramTransportError::local_state(
+            "This control transport has no bounded cleanup owner",
+        ))
     }
 }
 
 #[cfg(test)]
 #[derive(Clone, Debug)]
-struct RecordedEngramControlRequest {
-    connection: EngramConnectionConfig,
-    request: Value,
+pub(crate) struct RecordedEngramControlRequest {
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) request: Value,
 }
 
 #[cfg(test)]
 thread_local! {
-    static TEST_ENGRAM_BOOT_TRANSPORT: std::cell::RefCell<Option<Arc<dyn EngramControlTransport>>> =
+    pub(crate) static TEST_ENGRAM_BOOT_TRANSPORT: std::cell::RefCell<Option<Arc<dyn EngramControlTransport>>> =
         std::cell::RefCell::new(None);
     /// The budget clock a test boot chooses before its own recovery runs.
-    static TEST_ENGRAM_BOOT_BUDGET_CLOCK: std::cell::RefCell<Option<EngramBudgetClock>> =
+    pub(crate) static TEST_ENGRAM_BOOT_BUDGET_CLOCK: std::cell::RefCell<Option<EngramBudgetClock>> =
         std::cell::RefCell::new(None);
 }
 
 #[cfg(test)]
 #[derive(Clone, Debug)]
-enum ScriptedEngramControlResponse {
+pub(crate) enum ScriptedEngramControlResponse {
     Reply(std::result::Result<Value, EngramTransportError>),
 }
 
 #[cfg(test)]
 #[derive(Default)]
-struct ScriptedEngramControlTransport {
-    named_roots: Mutex<Option<TestEngramNamedRoots>>,
-    requests: Mutex<Vec<RecordedEngramControlRequest>>,
-    responses: Mutex<VecDeque<ScriptedEngramControlResponse>>,
-    work_bindings: Mutex<
+pub(crate) struct ScriptedEngramControlTransport {
+    pub(crate) named_roots: Mutex<Option<TestEngramNamedRoots>>,
+    pub(crate) requests: Mutex<Vec<RecordedEngramControlRequest>>,
+    pub(crate) responses: Mutex<VecDeque<ScriptedEngramControlResponse>>,
+    pub(crate) work_bindings: Mutex<
         VecDeque<std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError>>,
     >,
     /// Explicit fixture claim association used after any scripted reads.
@@ -1193,17 +1233,18 @@ struct ScriptedEngramControlTransport {
     current_work_binding: Mutex<Option<EngramControlWorkBinding>>,
     /// What each held-claims read returns, in order; the last one repeats,
     /// and none scripted fails the read.
-    held_claims: Mutex<VecDeque<std::result::Result<EngramHeldClaims, EngramTransportError>>>,
-    held_claim_reads: std::sync::atomic::AtomicUsize,
+    pub(crate) held_claims:
+        Mutex<VecDeque<std::result::Result<EngramHeldClaims, EngramTransportError>>>,
+    pub(crate) held_claim_reads: std::sync::atomic::AtomicUsize,
     held_claim_hook: Mutex<Option<Box<dyn FnOnce(Duration) + Send>>>,
     /// What each `named_root_sighting_read` returns, in order; with none
     /// scripted, the read answers that no root is bound
     /// (`scripted_no_root_sighting`).
-    sighting_reads: Mutex<VecDeque<std::result::Result<Value, EngramTransportError>>>,
-    shutdowns: Mutex<Vec<String>>,
+    pub(crate) sighting_reads: Mutex<VecDeque<std::result::Result<Value, EngramTransportError>>>,
+    pub(crate) shutdowns: Mutex<Vec<String>>,
     /// Errors the next `read_observation_policy` probes return, in order,
     /// before the readiness model answers; and how many probes it answered.
-    observation_policy_errors: Mutex<VecDeque<EngramTransportError>>,
+    pub(crate) observation_policy_errors: Mutex<VecDeque<EngramTransportError>>,
     observation_policy_reads: std::sync::atomic::AtomicUsize,
 }
 
@@ -1211,7 +1252,7 @@ struct ScriptedEngramControlTransport {
 /// work, run and cut the read asked about, in the project its connection's
 /// declaration names, as the real control process routes it.
 #[cfg(test)]
-fn scripted_no_root_sighting(
+pub(crate) fn scripted_no_root_sighting(
     connection: &EngramConnectionConfig,
     work_ref: &str,
     run_id: &str,
@@ -1230,7 +1271,9 @@ fn scripted_no_root_sighting(
 
 #[cfg(test)]
 impl ScriptedEngramControlTransport {
-    fn new(responses: impl IntoIterator<Item = ScriptedEngramControlResponse>) -> Arc<Self> {
+    pub(crate) fn new(
+        responses: impl IntoIterator<Item = ScriptedEngramControlResponse>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             named_roots: Mutex::new(None),
             requests: Mutex::new(Vec::new()),
@@ -1248,7 +1291,7 @@ impl ScriptedEngramControlTransport {
     }
 
     /// Scripts what the next `named_root_sighting_read`s return, in order.
-    fn script_sighting_reads(
+    pub(crate) fn script_sighting_reads(
         &self,
         reads: impl IntoIterator<Item = std::result::Result<Value, EngramTransportError>>,
     ) {
@@ -1258,14 +1301,15 @@ impl ScriptedEngramControlTransport {
             .extend(reads);
     }
 
-
-    fn set_current_work_binding(&self, binding: Option<EngramControlWorkBinding>) {
-        *self.current_work_binding.lock().expect("scripted current binding mutex poisoned") = binding;
+    pub(crate) fn set_current_work_binding(&self, binding: Option<EngramControlWorkBinding>) {
+        *self
+            .current_work_binding
+            .lock()
+            .expect("scripted current binding mutex poisoned") = binding;
     }
 
-
     /// Replaces earlier held-claim reads; the last read repeats until more are scripted.
-    fn replace_held_claims(
+    pub(crate) fn replace_held_claims(
         &self,
         reads: impl IntoIterator<Item = std::result::Result<EngramHeldClaims, EngramTransportError>>,
     ) {
@@ -1277,37 +1321,44 @@ impl ScriptedEngramControlTransport {
         held_claims.extend(reads);
     }
 
-    fn held_claim_reads(&self) -> usize {
-        self.held_claim_reads.load(std::sync::atomic::Ordering::SeqCst)
+    pub(crate) fn held_claim_reads(&self) -> usize {
+        self.held_claim_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn on_next_held_claim_read(&self, hook: impl FnOnce(Duration) + Send + 'static) {
-        *self.held_claim_hook.lock().expect("scripted held hook mutex poisoned") = Some(Box::new(hook));
+    pub(crate) fn on_next_held_claim_read(&self, hook: impl FnOnce(Duration) + Send + 'static) {
+        *self
+            .held_claim_hook
+            .lock()
+            .expect("scripted held hook mutex poisoned") = Some(Box::new(hook));
     }
 
-    fn requests(&self) -> Vec<RecordedEngramControlRequest> {
+    pub(crate) fn requests(&self) -> Vec<RecordedEngramControlRequest> {
         self.requests
             .lock()
             .expect("scripted Engram requests mutex poisoned")
             .clone()
     }
 
-    fn shutdowns(&self) -> Vec<String> {
+    pub(crate) fn shutdowns(&self) -> Vec<String> {
         self.shutdowns
             .lock()
             .expect("scripted Engram shutdowns mutex poisoned")
             .clone()
     }
-
 }
 
 #[cfg(test)]
 impl EngramControlTransport for ScriptedEngramControlTransport {
     fn read_observation_policy(
-        &self, _connection: &EngramConnectionConfig, expected_store: &EngramAuthorityStoreKey, _timeout: Duration,
+        &self,
+        _connection: &EngramConnectionConfig,
+        expected_store: &EngramAuthorityStoreKey,
+        _timeout: Duration,
         _host_workdir: &FsPath,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.observation_policy_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.observation_policy_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(error) = self.observation_policy_errors.lock().unwrap().pop_front() {
             return Err(error);
         }
@@ -1315,12 +1366,20 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
         let roots = roots.as_mut().ok_or_else(|| {
             EngramTransportError::protocol("no observation readiness model configured")
         })?;
-        if roots.project_id.as_deref().unwrap_or("github.com/example/source-root") != expected_store.project_id {
-            return Err(EngramTransportError::protocol("observation readiness model belongs to another project",
+        if roots
+            .project_id
+            .as_deref()
+            .unwrap_or("github.com/example/source-root")
+            != expected_store.project_id
+        {
+            return Err(EngramTransportError::protocol(
+                "observation readiness model belongs to another project",
             ));
         }
         Ok(EngramObservationPolicyBasis::AccountIfEligible {
-            project_policy_epoch: 1, policy: "a".repeat(32), obligation_rule_set: "b".repeat(32),
+            project_policy_epoch: 1,
+            policy: "a".repeat(32),
+            obligation_rule_set: "b".repeat(32),
         })
     }
 
@@ -1359,7 +1418,10 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
                 return reply;
             }
         }
-        if matches!(request, EngramControlRequest::AcceptanceVerificationRead { .. }) {
+        if matches!(
+            request,
+            EngramControlRequest::AcceptanceVerificationRead { .. }
+        ) {
             // This general fixture models the historical producer. Complete
             // private reads use their own explicitly scripted page transport.
             return Err(EngramTransportError::remote(EngramControlErrorBody {
@@ -1391,8 +1453,13 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
             .lock()
             .expect("scripted Engram work bindings mutex poisoned")
             .pop_front()
-            .unwrap_or_else(|| Ok(self.current_work_binding.lock()
-                .expect("scripted current binding mutex poisoned").clone()))
+            .unwrap_or_else(|| {
+                Ok(self
+                    .current_work_binding
+                    .lock()
+                    .expect("scripted current binding mutex poisoned")
+                    .clone())
+            })
     }
 
     fn read_held_claims(
@@ -1400,9 +1467,16 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
         _connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
-        self.held_claim_reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let hook = self.held_claim_hook.lock().expect("scripted held hook mutex poisoned").take();
-        if let Some(hook) = hook { hook(timeout); }
+        self.held_claim_reads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let hook = self
+            .held_claim_hook
+            .lock()
+            .expect("scripted held hook mutex poisoned")
+            .take();
+        if let Some(hook) = hook {
+            hook(timeout);
+        }
         let mut reads = self
             .held_claims
             .lock()
@@ -1423,29 +1497,33 @@ impl EngramControlTransport for ScriptedEngramControlTransport {
             .push(session_id.to_owned());
     }
 
-    fn shutdown_session_until(&self, session_id: &str, _clock: &EngramBudgetClock,
-        _deadline: std::time::Instant) -> Result<(), EngramTransportError> {
+    fn shutdown_session_until(
+        &self,
+        session_id: &str,
+        _clock: &EngramBudgetClock,
+        _deadline: std::time::Instant,
+    ) -> Result<(), EngramTransportError> {
         self.shutdown_session(session_id);
         Ok(())
     }
 }
 
-struct EngramProcessTree {
-    inner: TerminalProcessTree,
+pub(crate) struct EngramProcessTree {
+    pub(crate) inner: TerminalProcessTree,
     /// Whether the tree has been signalled, and what that signal left to
     /// confirm after the reap (`TerminalGroupSignal`).
-    terminated: Mutex<Option<TerminalGroupSignal>>,
+    pub(crate) terminated: Mutex<Option<TerminalGroupSignal>>,
 }
 
 impl EngramProcessTree {
-    fn attach(process: &Arc<SharedChild>) -> Result<Self> {
+    pub(crate) fn attach(process: &Arc<SharedChild>) -> Result<Self> {
         Ok(Self {
             inner: TerminalProcessTree::attach(process)?,
             terminated: Mutex::new(None),
         })
     }
 
-    fn terminate(&self, process: &Arc<SharedChild>) -> Result<()> {
+    pub(crate) fn terminate(&self, process: &Arc<SharedChild>) -> Result<()> {
         let mut terminated = self
             .terminated
             .lock()
@@ -1460,7 +1538,7 @@ impl EngramProcessTree {
     /// Whether the tree, terminated and then reaped by its worker, is gone. A
     /// group that refused its signal because every member had already exited
     /// must be absent now; any other terminated tree is.
-    fn confirmed_after_reap(&self) -> bool {
+    pub(crate) fn confirmed_after_reap(&self) -> bool {
         match *self
             .terminated
             .lock()
@@ -1477,19 +1555,20 @@ impl EngramProcessTree {
         }
     }
 
-    fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
+    pub(crate) fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
         self.inner.resume_after_attach(process)
     }
 }
 
-fn run_engram_json_command_with_lock_retry(
+pub(crate) fn run_engram_json_command_with_lock_retry(
     connection: &EngramConnectionConfig,
     args: &[&str],
     timeout: Duration,
     label: &str,
     host_workdir: &FsPath,
 ) -> std::result::Result<Value, EngramTransportError> {
-    let output = run_engram_cli_command_with_lock_retry(connection, args, timeout, label, host_workdir)?;
+    let output =
+        run_engram_cli_command_with_lock_retry(connection, args, timeout, label, host_workdir)?;
     decode_engram_cli_json(output, label)
 }
 
@@ -1498,20 +1577,20 @@ fn run_engram_json_command_with_lock_retry(
 /// Engram's refusal needs the text, and one that only wants JSON folds it into
 /// an error itself.
 #[derive(Clone, Debug)]
-struct EngramCliOutput {
-    success: bool,
+pub(crate) struct EngramCliOutput {
+    pub(crate) success: bool,
     /// How the process ended, as data. `status` below is only for messages.
-    exit: EngramCliExit,
-    status: String,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+    pub(crate) exit: EngramCliExit,
+    pub(crate) status: String,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
 /// How a CLI process ended. Only a process that ran to its own exit can be
 /// taken at its word about what it did; one that was killed or crashed may
 /// have stopped anywhere, a committed write included.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramCliExit {
+pub(crate) enum EngramCliExit {
     /// A byte-sized exit code; this includes runtime failures such as panic
     /// code 101 and does not by itself prove a transactional refusal.
     Code(u8),
@@ -1521,7 +1600,7 @@ enum EngramCliExit {
 }
 
 impl EngramCliExit {
-    fn from_status(status: &std::process::ExitStatus) -> Self {
+    pub(crate) fn from_status(status: &std::process::ExitStatus) -> Self {
         // `code()` is `None` for a Unix signal; a crash status does not fit a byte.
         status
             .code()
@@ -1529,7 +1608,7 @@ impl EngramCliExit {
             .map_or(Self::Abnormal, Self::Code)
     }
 
-    fn code(self) -> Option<u8> {
+    pub(crate) fn code(self) -> Option<u8> {
         match self {
             Self::Code(code) => Some(code),
             Self::Abnormal => None,
@@ -1539,7 +1618,7 @@ impl EngramCliExit {
 
 impl EngramCliOutput {
     /// What the process said about a failure: stderr, else stdout.
-    fn failure_detail(&self) -> String {
+    pub(crate) fn failure_detail(&self) -> String {
         let detail = String::from_utf8_lossy(&self.stderr).trim().to_owned();
         if detail.is_empty() {
             String::from_utf8_lossy(&self.stdout).trim().to_owned()
@@ -1551,7 +1630,7 @@ impl EngramCliOutput {
     /// A lock diagnostic is eligible for retry only with Engram's ordinary
     /// failure exit. Runtime failures (including Rust panic code 101) can
     /// mention a lock after a write and must not imply that nothing ran.
-    fn reports_locked_store(&self) -> bool {
+    pub(crate) fn reports_locked_store(&self) -> bool {
         !self.success
             && self.exit.code() == Some(1)
             && self
@@ -1564,7 +1643,7 @@ impl EngramCliOutput {
 /// The same one-retry SQLite lock policy as the JSON reader, for a caller that
 /// keeps the exit observation. Only safe for reads and for writes Engram
 /// replays under an idempotency key.
-fn run_engram_cli_command_with_lock_retry(
+pub(crate) fn run_engram_cli_command_with_lock_retry(
     connection: &EngramConnectionConfig,
     args: &[&str],
     timeout: Duration,
@@ -1573,13 +1652,23 @@ fn run_engram_cli_command_with_lock_retry(
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
     let timeout = engram_operation_timeout(timeout);
     if timeout.is_zero() {
-        return Err(EngramTransportError::deadline_before_launch("Engram admission budget exhausted before process launch"));
+        return Err(EngramTransportError::deadline_before_launch(
+            "Engram admission budget exhausted before process launch",
+        ));
     }
     let started = std::time::Instant::now();
     let mut warned = false;
     retry_engram_cli_command_with_budget(
         |_| {
-            run_engram_cli_command_until(connection, args, started, timeout, label, host_workdir, &mut warned)
+            run_engram_cli_command_until(
+                connection,
+                args,
+                started,
+                timeout,
+                label,
+                host_workdir,
+                &mut warned,
+            )
         },
         || started.elapsed(),
         timeout,
@@ -1587,23 +1676,30 @@ fn run_engram_cli_command_with_lock_retry(
     )
 }
 
-fn retry_engram_cli_command_with_budget(
+pub(crate) fn retry_engram_cli_command_with_budget(
     mut run: impl FnMut(Duration) -> std::result::Result<EngramCliOutput, EngramTransportError>,
     mut elapsed: impl FnMut() -> Duration,
     timeout: Duration,
     sleep: impl FnOnce(Duration),
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
-    retry_engram_cli_command_on_locked_store(|| {
-        let remaining = timeout.checked_sub(elapsed()).filter(|remaining| !remaining.is_zero())
-            .ok_or_else(|| EngramTransportError::deadline("Engram call budget exhausted during lock retry"))?;
-        run(remaining)
-    }, sleep)
+    retry_engram_cli_command_on_locked_store(
+        || {
+            let remaining = timeout
+                .checked_sub(elapsed())
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or_else(|| {
+                    EngramTransportError::deadline("Engram call budget exhausted during lock retry")
+                })?;
+            run(remaining)
+        },
+        sleep,
+    )
 }
 
 /// The retry policy apart from the process it runs: exactly one more attempt,
 /// after the delay, and only when the first reported a locked store. The
 /// second result stands whatever it is.
-fn retry_engram_cli_command_on_locked_store(
+pub(crate) fn retry_engram_cli_command_on_locked_store(
     mut run: impl FnMut() -> std::result::Result<EngramCliOutput, EngramTransportError>,
     sleep: impl FnOnce(Duration),
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
@@ -1616,7 +1712,7 @@ fn retry_engram_cli_command_on_locked_store(
 }
 
 #[cfg(all(test, windows))]
-fn run_engram_json_command(
+pub(crate) fn run_engram_json_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
     timeout: Duration,
@@ -1627,7 +1723,10 @@ fn run_engram_json_command(
     decode_engram_cli_json(output, label)
 }
 
-fn decode_engram_cli_json(output: EngramCliOutput, label: &str) -> std::result::Result<Value, EngramTransportError> {
+pub(crate) fn decode_engram_cli_json(
+    output: EngramCliOutput,
+    label: &str,
+) -> std::result::Result<Value, EngramTransportError> {
     if !output.success {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_owned();
         let mut error = EngramTransportError::transport(if detail.is_empty() {
@@ -1653,7 +1752,9 @@ fn engram_cli_refusal_code(output: &EngramCliOutput) -> Option<String> {
     let code = value.get("error")?.get("code")?.as_str()?;
     (!code.is_empty()
         && code.len() <= 64
-        && code.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'))
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'))
     .then(|| code.to_owned())
 }
 
@@ -1664,13 +1765,13 @@ fn engram_cli_refusal_code(output: &EngramCliOutput) -> Option<String> {
 /// spawn itself (`spawn_failed`). Every later failure, from attaching the
 /// process tree to reading its output, is a transport or deadline error with
 /// an unknown outcome: on Unix the child already runs before the attach.
-fn engram_cli_command_never_ran(error: &EngramTransportError) -> bool {
+pub(crate) fn engram_cli_command_never_ran(error: &EngramTransportError) -> bool {
     error.process_never_started || error.kind == EngramTransportErrorKind::LocalState
 }
 
 // The process wait remains in the CLI owner; injectable clock and polling
 // boundaries let fixture calls exercise slow responses without real delays.
-fn wait_engram_cli_command<T>(
+pub(crate) fn wait_engram_cli_command<T>(
     mut poll: impl FnMut() -> std::io::Result<Option<T>>,
     mut elapsed: impl FnMut() -> Duration,
     mut pause: impl FnMut(),
@@ -1689,24 +1790,37 @@ fn wait_engram_cli_command<T>(
         match poll() {
             Ok(Some(status)) => return Ok(status),
             Ok(None) if spent < timeout => pause(),
-            Ok(None) => return Err(EngramTransportError::deadline(format!(
-                "Engram {label} exceeded {} ms", timeout.as_millis()
-            ))),
-            Err(error) => return Err(EngramTransportError::transport(format!(
-                "failed waiting for Engram {label}: {error}"
-            ))),
+            Ok(None) => {
+                return Err(EngramTransportError::deadline(format!(
+                    "Engram {label} exceeded {} ms",
+                    timeout.as_millis()
+                )));
+            }
+            Err(error) => {
+                return Err(EngramTransportError::transport(format!(
+                    "failed waiting for Engram {label}: {error}"
+                )));
+            }
         }
     }
 }
 
-fn run_engram_cli_command(
+pub(crate) fn run_engram_cli_command(
     connection: &EngramConnectionConfig,
     args: &[&str],
     timeout: Duration,
     label: &str,
     host_workdir: &FsPath,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
-    run_engram_cli_command_until(connection, args, std::time::Instant::now(), engram_operation_timeout(timeout), label, host_workdir, &mut false)
+    run_engram_cli_command_until(
+        connection,
+        args,
+        std::time::Instant::now(),
+        engram_operation_timeout(timeout),
+        label,
+        host_workdir,
+        &mut false,
+    )
 }
 
 fn run_engram_cli_command_until(
@@ -1719,7 +1833,9 @@ fn run_engram_cli_command_until(
     warned: &mut bool,
 ) -> std::result::Result<EngramCliOutput, EngramTransportError> {
     if started.elapsed() >= timeout {
-        return Err(EngramTransportError::deadline_before_launch("Engram admission budget exhausted before process launch"));
+        return Err(EngramTransportError::deadline_before_launch(
+            "Engram admission budget exhausted before process launch",
+        ));
     }
     let mut command = engram_host_command(
         &connection.binary_path,
@@ -1769,7 +1885,11 @@ fn run_engram_cli_command_until(
         })?;
     let stdout_reader = spawn_engram_cli_output_reader(stdout, label);
     let stderr_reader = spawn_engram_cli_output_reader(stderr, label);
-    let warning_after = if *warned { Duration::MAX } else { ENGRAM_CALL_WARNING_AFTER };
+    let warning_after = if *warned {
+        Duration::MAX
+    } else {
+        ENGRAM_CALL_WARNING_AFTER
+    };
     let status = wait_engram_cli_command(
         || process.try_wait(),
         || started.elapsed(),
@@ -1779,7 +1899,10 @@ fn run_engram_cli_command_until(
         label,
         |elapsed| {
             *warned = true;
-            eprintln!("engram warning> {label} still running after {} ms", elapsed.as_millis());
+            eprintln!(
+                "engram warning> {label} still running after {} ms",
+                elapsed.as_millis()
+            );
         },
     );
     if status.is_err() {
@@ -1798,7 +1921,10 @@ fn run_engram_cli_command_until(
     })
 }
 
-fn apply_engram_connection_environment(command: &mut Command, connection: &EngramConnectionConfig) {
+pub(crate) fn apply_engram_connection_environment(
+    command: &mut Command,
+    connection: &EngramConnectionConfig,
+) {
     command
         .env(ENGRAM_HOME_ENV, &connection.home)
         .env(ENGRAM_ACTOR_ID_ENV, &connection.actor_id)
@@ -1834,7 +1960,7 @@ fn reap_engram_doctor_in_background(process: &Arc<SharedChild>) {
     });
 }
 
-fn read_engram_doctor_output(reader: impl std::io::Read) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_engram_doctor_output(reader: impl std::io::Read) -> std::io::Result<Vec<u8>> {
     let mut output = Vec::new();
     std::io::Read::take(reader, (ENGRAM_DOCTOR_MAX_OUTPUT_BYTES + 1) as u64)
         .read_to_end(&mut output)?;
@@ -1865,7 +1991,7 @@ fn start_engram_doctor_reader(
     receiver
 }
 
-fn collect_engram_doctor_output(
+pub(crate) fn collect_engram_doctor_output(
     receiver: mpsc::Receiver<std::io::Result<Vec<u8>>>,
     stream: &str,
     deadline: std::time::Instant,
@@ -1885,7 +2011,10 @@ fn collect_engram_doctor_output(
 
 /// `label` names the operation in the overflow diagnostic, as it does in every
 /// other failure of the same call.
-fn read_engram_cli_output(reader: impl std::io::Read, label: &str) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_engram_cli_output(
+    reader: impl std::io::Read,
+    label: &str,
+) -> std::io::Result<Vec<u8>> {
     let mut output = Vec::new();
     std::io::Read::take(reader, (ENGRAM_CONTROL_MAX_FRAME_BYTES + 1) as u64)
         .read_to_end(&mut output)?;
@@ -1898,7 +2027,7 @@ fn read_engram_cli_output(reader: impl std::io::Read, label: &str) -> std::io::R
     Ok(output)
 }
 
-fn spawn_engram_cli_output_reader(
+pub(crate) fn spawn_engram_cli_output_reader(
     reader: impl std::io::Read + Send + 'static,
     label: &str,
 ) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
@@ -1906,7 +2035,7 @@ fn spawn_engram_cli_output_reader(
     std::thread::spawn(move || read_engram_cli_output(reader, &label))
 }
 
-fn join_engram_cli_output(
+pub(crate) fn join_engram_cli_output(
     reader: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
     label: &str,
     stream: &str,
@@ -1924,12 +2053,12 @@ fn join_engram_cli_output(
 }
 
 #[derive(Clone)]
-struct EngramHostAdapter {
-    host_workdir: PathBuf,
-    transport: Arc<dyn EngramControlTransport>,
+pub(crate) struct EngramHostAdapter {
+    pub(crate) host_workdir: PathBuf,
+    pub(crate) transport: Arc<dyn EngramControlTransport>,
     /// What each connection's last ordinary work-session answer supports
     /// (`engram_capabilities.rs`).
-    capabilities: Arc<EngramConnectionCapabilities>,
+    pub(crate) capabilities: Arc<EngramConnectionCapabilities>,
 }
 
 impl Default for EngramHostAdapter {
@@ -1939,7 +2068,7 @@ impl Default for EngramHostAdapter {
 }
 
 impl EngramHostAdapter {
-    fn new(host_workdir: PathBuf) -> Self {
+    pub(crate) fn new(host_workdir: PathBuf) -> Self {
         Self {
             transport: Arc::new(ProcessEngramControlTransport::new(host_workdir.clone())),
             host_workdir,
@@ -1949,17 +2078,21 @@ impl EngramHostAdapter {
 }
 
 impl EngramHostAdapter {
-    fn read_observation_policy(
+    pub(crate) fn read_observation_policy(
         &self,
         connection: &EngramConnectionConfig,
         store: &EngramAuthorityStoreKey,
         timeout: Duration,
     ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.transport
-            .read_observation_policy(connection, store, engram_operation_timeout(timeout), &self.host_workdir)
+        self.transport.read_observation_policy(
+            connection,
+            store,
+            engram_operation_timeout(timeout),
+            &self.host_workdir,
+        )
     }
 
-    fn request(
+    pub(crate) fn request(
         &self,
         connection: &EngramConnectionConfig,
         request: &EngramControlRequest,
@@ -1978,14 +2111,14 @@ impl EngramHostAdapter {
         // first start, which no earlier reading names) leaves the answer
         // unattributed, so the connection is read afresh.
         let before = self.transport.connection_generation(&connection.session_id);
-        let reply = self.transport.request(connection, request, engram_operation_timeout(timeout));
+        let reply = self
+            .transport
+            .request(connection, request, engram_operation_timeout(timeout));
         let after = self.transport.connection_generation(&connection.session_id);
         if before.is_some() && before == after {
-            self.capabilities.note_reply(connection, after, request, &reply);
-        } else if matches!(
-            request,
-            EngramControlRequest::WorkSessionRead { .. }
-        ) {
+            self.capabilities
+                .note_reply(connection, after, request, &reply);
+        } else if matches!(request, EngramControlRequest::WorkSessionRead { .. }) {
             self.capabilities.forget(&connection.session_id);
         }
         reply.map_err(|mut error| {
@@ -1994,7 +2127,7 @@ impl EngramHostAdapter {
         })
     }
 
-    fn read_work_binding(
+    pub(crate) fn read_work_binding(
         &self,
         connection: &EngramConnectionConfig,
         preference: EngramBindingPreference<'_>,
@@ -2006,7 +2139,7 @@ impl EngramHostAdapter {
 
     // A pure identity/capability read on the ordinary child, never a control
     // bind/status fallback. The caller owns the exact store and bounded budget.
-    fn read_work_session(
+    pub(crate) fn read_work_session(
         &self,
         connection: &EngramConnectionConfig,
         store: &EngramAuthorityStoreKey,
@@ -2017,68 +2150,90 @@ impl EngramHostAdapter {
         let read = || {
             let remaining = timeout.saturating_sub(started.elapsed());
             if remaining.is_zero() {
-                return Err(EngramTransportError::deadline("ordinary work-session read expired"));
+                return Err(EngramTransportError::deadline(
+                    "ordinary work-session read expired",
+                ));
             }
-            let value = self.request(connection, &EngramControlRequest::WorkSessionRead {}, remaining)?;
+            let value = self.request(
+                connection,
+                &EngramControlRequest::WorkSessionRead {},
+                remaining,
+            )?;
             if value.get("work_session").and_then(Value::as_bool) != Some(true)
                 || !engram_reply_supports_host_work(&value)
-                || value.get("project_id").and_then(Value::as_str) != Some(store.project_id.as_str())
-                || value.get("session_id").and_then(Value::as_str) != Some(connection.session_id.as_str())
+                || value.get("project_id").and_then(Value::as_str)
+                    != Some(store.project_id.as_str())
+                || value.get("session_id").and_then(Value::as_str)
+                    != Some(connection.session_id.as_str())
             {
                 self.capabilities.forget(&connection.session_id);
-                return Err(EngramTransportError::protocol("ordinary work-session identity differs from its connection/store"));
+                return Err(EngramTransportError::protocol(
+                    "ordinary work-session identity differs from its connection/store",
+                ));
             }
             Ok(connection.session_id.clone())
         };
         let session = read()?;
         // A cold spawn's first answer is intentionally not attributed to a
         // previously absent child. Read again under its now-known generation.
-        if !self.capabilities.work_session(connection, self.transport.connection_generation(&connection.session_id)) {
+        if !self.capabilities.work_session(
+            connection,
+            self.transport.connection_generation(&connection.session_id),
+        ) {
             return read();
         }
         Ok(session)
     }
 
-
-    fn read_held_claims(
+    pub(crate) fn read_held_claims(
         &self,
         connection: &EngramConnectionConfig,
         timeout: Duration,
     ) -> std::result::Result<EngramHeldClaims, EngramTransportError> {
-        self.transport.read_held_claims(connection, engram_operation_timeout(timeout))
+        self.transport
+            .read_held_claims(connection, engram_operation_timeout(timeout))
     }
 
-    fn verification_record_route_support(
-        &self, connection: &EngramConnectionConfig,
+    pub(crate) fn verification_record_route_support(
+        &self,
+        connection: &EngramConnectionConfig,
     ) -> EngramVerificationRecordSupport {
         self.capabilities.work_session_verification_record(
-            connection, self.transport.connection_generation(&connection.session_id),
+            connection,
+            self.transport.connection_generation(&connection.session_id),
         )
     }
 
     #[allow(dead_code)] // Capability read alone never activates delivery.
-    fn remote_verification_record_route_support(
-        &self, connection: &EngramConnectionConfig,
+    pub(crate) fn remote_verification_record_route_support(
+        &self,
+        connection: &EngramConnectionConfig,
     ) -> EngramVerificationRecordSupport {
         self.capabilities.work_session_remote_verification_record(
-            connection, self.transport.connection_generation(&connection.session_id),
+            connection,
+            self.transport.connection_generation(&connection.session_id),
         )
     }
 
-    fn shutdown_session(&self, session_id: &str) {
+    pub(crate) fn shutdown_session(&self, session_id: &str) {
         self.capabilities.forget(session_id);
         self.transport.shutdown_session(session_id);
     }
 
-    fn shutdown_session_until(&self, session_id: &str, claim: &EngramProjectResetClaim) -> Result<(), EngramTransportError> {
+    pub(crate) fn shutdown_session_until(
+        &self,
+        session_id: &str,
+        claim: &EngramProjectResetClaim,
+    ) -> Result<(), EngramTransportError> {
         self.capabilities.forget(session_id);
-        self.transport.shutdown_session_until(session_id, &claim.clock, claim.deadline)
+        self.transport
+            .shutdown_session_until(session_id, &claim.clock, claim.deadline)
     }
 }
 
 #[cfg(test)]
 impl AppState {
-    fn install_test_engram_transport(&self, transport: Arc<dyn EngramControlTransport>) {
+    pub(crate) fn install_test_engram_transport(&self, transport: Arc<dyn EngramControlTransport>) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         inner.engram_host_adapter = Arc::new(EngramHostAdapter {
             host_workdir: engram_host_workdir(self.persistence_path.as_ref())
@@ -2088,7 +2243,7 @@ impl AppState {
         });
     }
 
-    fn new_with_paths_and_engram_transport_for_test(
+    pub(crate) fn new_with_paths_and_engram_transport_for_test(
         default_workdir: String,
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
@@ -2106,10 +2261,9 @@ impl AppState {
         })
     }
 
-
     /// As `new_with_paths_and_engram_transport_for_test`, with the state's
     /// budget clock chosen before the boot's own recovery takes a snapshot.
-    fn new_with_paths_engram_transport_and_clock_for_test(
+    pub(crate) fn new_with_paths_engram_transport_and_clock_for_test(
         default_workdir: String,
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,
@@ -2131,28 +2285,28 @@ impl AppState {
 }
 
 #[derive(Clone)]
-struct EngramSessionState {
+pub(crate) struct EngramSessionState {
     /// Original persisted control metadata retained only for inspection and
     /// round-trip integrity. It never creates work or authorizes execution.
-    historical_control: BTreeMap<String, Value>,
+    pub(crate) historical_control: BTreeMap<String, Value>,
     /// An actual pending session deletion, independent of observation enablement.
-    observation_delete_requested: bool,
+    pub(crate) observation_delete_requested: bool,
     /// The ordinary work-session association, refreshed independently of turns.
-    work_binding: Option<EngramControlWorkBinding>,
+    pub(crate) work_binding: Option<EngramControlWorkBinding>,
     /// An acknowledged explicit name selects only a later opening. Like
     /// work_binding, this selection is runtime-only and is not restored.
-    pending_naming_selection: Option<EngramPendingNamingSelection>,
+    pub(crate) pending_naming_selection: Option<EngramPendingNamingSelection>,
     // Process-local exact report readbacks; bounded by retained reports.
-    durable_runtime_captures: BTreeSet<String>,
+    pub(crate) durable_runtime_captures: BTreeSet<String>,
     /// Command facts observed under the exact ordinary trace owner.
-    active_turn_checks: Vec<EngramTurnCheck>,
+    pub(crate) active_turn_checks: Vec<EngramTurnCheck>,
     // Pre-prompt native evidence is process-local. Restart never adopts it.
-    declared_run_turn: Option<DeclaredRunTurn>,
+    pub(crate) declared_run_turn: Option<DeclaredRunTurn>,
     /// Launcher full gates whose result marked only their launch, carried
     /// past the turn that launched them until they settle
     /// (`engram_carried_checks.rs`). In memory; a marker of each is persisted
     /// so a restart can tell the holder the run lost its credit.
-    carried_checks: Vec<EngramCarriedCheck>,
+    pub(crate) carried_checks: Vec<EngramCarriedCheck>,
     /// The Codex tests of this session still running when their turn closed,
     /// carried or not (`engram_reported_ends.rs`). Kept apart from
     /// `carried_checks`: refusing or dropping a test's evidence does not end
@@ -2162,19 +2316,19 @@ struct EngramSessionState {
     /// host can then no longer observe the process. A runtime's exit, clear
     /// or replacement does not prove the command ended either: a stated
     /// limitation (`EngramRunningCodexTest`).
-    running_codex_tests: Vec<EngramRunningCodexTest>,
+    pub(crate) running_codex_tests: Vec<EngramRunningCodexTest>,
     /// The run directories carried checks of this session settled or
     /// dropped used, newest last (`engram_note_consumed_runs`). In memory.
-    carried_consumed_runs: Vec<PathBuf>,
+    pub(crate) carried_consumed_runs: Vec<PathBuf>,
     /// Background full-gate launches of this session that left without a
     /// run found for them, by root key and launch time, newest last
     /// (`engram_note_unmatched_launch`), including independently observed
     /// command locations that cannot supply a source check. In memory.
-    carried_unmatched_launches: Vec<(String, String)>,
+    pub(crate) carried_unmatched_launches: Vec<(String, String)>,
     /// Commands running in that turn, so a check knows whether another
     /// command ran beside it, each with the directory its runtime reported,
     /// which a repeated start may leave out. In memory only.
-    running_command_keys: BTreeMap<String, Option<String>>,
+    pub(crate) running_command_keys: BTreeMap<String, Option<String>>,
     /// The worktrees each running command of the session may write in, by
     /// its runtime key, `None` for one TermAl could not name
     /// (`engram_turn_checks.rs`): its reported directory's, or the ones its
@@ -2183,140 +2337,147 @@ struct EngramSessionState {
     /// when that is not the session's workdir. Kept whether or not a turn
     /// is mediated, until the command ends or the session starts its next
     /// turn; bounded (`ENGRAM_RUNNING_COMMAND_LIMIT`). In memory only.
-    running_command_worktrees: Vec<(String, Vec<Option<String>>)>,
+    pub(crate) running_command_worktrees: Vec<(String, Vec<Option<String>>)>,
     /// The key of the worktree the session's workdir lies in, with the
     /// workdir it was resolved for (`engram_session_worktree`): resolved off
     /// the state lock whenever the session reports a command or an edit, so
     /// overlap marking under the lock knows where the session writes without
     /// a process-wide cache that other sessions' paths could evict. In memory
     /// only.
-    workdir_worktree: Option<(String, String)>,
+    pub(crate) workdir_worktree: Option<(String, String)>,
     /// Capture workers of the session's checks running now (source snapshots
     /// and toolchain probes, `EngramCapture::spawn`), counted by each worker
     /// until it finishes, whether or not its check is still kept. A new check
     /// starts only while fewer than `ENGRAM_CAPTURE_WORKER_LIMIT` run. In
     /// memory only.
-    capture_workers: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) capture_workers: Arc<std::sync::atomic::AtomicUsize>,
     /// Running commands whose check a repeated start invalidated: they
     /// start no check again until they end, since a new one would begin
     /// its record after writes the old one saw. In memory only; cleared with
     /// `running_command_keys`.
-    withheld_command_keys: BTreeSet<String>,
+    pub(crate) withheld_command_keys: BTreeSet<String>,
     /// Running commands already given an uncredited-check notice. Separate
     /// from withholding: invalidating a check need not publish a notice.
     /// In memory only; cleared with `running_command_keys`.
-    uncredited_command_notice_keys: BTreeSet<String>,
+    pub(crate) uncredited_command_notice_keys: BTreeSet<String>,
     /// Checks a turn boundary closed with outcome Unknown because no end was
     /// reported for them, newest last, so an end reported later is told to
     /// the holder once (`engram_close_unended_checks`). Bounded
     /// (`ENGRAM_UNENDED_CLOSURE_LIMIT`); in memory only.
-    unended_check_closures: std::collections::VecDeque<EngramUnendedClosure>,
+    pub(crate) unended_check_closures: std::collections::VecDeque<EngramUnendedClosure>,
     /// The place in the turn the next check takes, so check ids stay unique
     /// after a check is dropped. Reset with `active_turn_checks`.
-    next_turn_check_sequence: usize,
+    pub(crate) next_turn_check_sequence: usize,
     /// Where the shell of the session's runtime is presumed to be, for
     /// commands whose runtime reports no directory (Claude's shell keeps a
     /// `cd`), after a command moved it (`EngramShellDirectory`). In memory
     /// only; kept across turns, as the shell is.
-    shell_directory: Option<EngramShellDirectory>,
+    pub(crate) shell_directory: Option<EngramShellDirectory>,
     /// Historical checkpoint endpoint for unadmitted reporting only. Does
     /// not change the ordinary mediated comparison after a host restart.
-    runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
+    pub(crate) runtime_checkpoint: Option<EngramRuntimeCheckpointBasis>,
     /// Measurement taken for an evaluation request, consumed at that turn's
     /// first ordinary close. It cannot bridge a later missing baseline and
     /// creates neither an admitted turn nor an evaluation receipt.
-    evaluation_checkpoint: Option<EngramEvaluationCheckpoint>,
+    pub(crate) evaluation_checkpoint: Option<EngramEvaluationCheckpoint>,
     /// Observation-only history is independent of grants and admission.
-    unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
-    unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
-    unadmitted_reports: Vec<EngramRuntimeObservationReport>,
+    pub(crate) unadmitted_active_turn: Option<EngramRuntimeObservedTurn>,
+    pub(crate) unadmitted_closing_jobs: Vec<EngramRuntimeClosingJob>,
+    pub(crate) unadmitted_reports: Vec<EngramRuntimeObservationReport>,
     /// Process-local coalescing flag, never restored as a live worker.
-    unadmitted_worker_running: bool,
+    pub(crate) unadmitted_worker_running: bool,
     /// The unique turn reference of the last observed turn this process
     /// closed. In memory only, and never a generation number: those restart
     /// with the host, so a report from before a restart cannot pass for a
     /// later turn that reached the same number.
-    runtime_closed_turn_ref: Option<String>,
-    named_root: Option<EngramNamedRootState>,
+    pub(crate) runtime_closed_turn_ref: Option<String>,
+    pub(crate) named_root: Option<EngramNamedRootState>,
     /// The new names this session gave during its current turn, one per
     /// claim, each with that turn's grant (`engram_source_roots.rs`): while
     /// the grant is still active and its turn did not open in the root, no
     /// turn has (`acceptance_named_root_sighting.rs`). In memory only.
-    roots_named_in_turn: Vec<EngramRootNamedInTurn>,
+    pub(crate) roots_named_in_turn: Vec<EngramRootNamedInTurn>,
     /// Host lines put before the agent's prompt about where its turns on
     /// claimed work are measured (`engram_source_root_line`), one per line,
     /// until the runtime accepts a prompt that carried them: a dispatch
     /// refused before that keeps them, and a line set after the prompt was
     /// built waits for the next one. Set only through
     /// `set_pending_source_root_line`. In memory only.
-    pending_source_root_line: Option<String>,
+    pub(crate) pending_source_root_line: Option<String>,
     /// In-memory order of optional reads and published command feedback.
     /// An older asynchronous notice cannot replace a newer refusal.
-    uncredited_feedback_revision: u64,
+    pub(crate) uncredited_feedback_revision: u64,
     /// For each retained-history repair line given to the pending lines, the
     /// authority store and work whose history it tells about
     /// (`set_pending_retained_history_repair_line`), so that only an
     /// acknowledged forward name of exactly that store and work retires it.
     /// In memory only, like the pending lines.
-    retained_history_repair_origins: Vec<(String, EngramAuthorityStoreKey, String)>,
+    pub(crate) retained_history_repair_origins: Vec<(String, EngramAuthorityStoreKey, String)>,
     /// Opt-in witness of complete notices before the prompt summary merges them.
     /// Armed only by a fixture for its own session and taken after the close.
     #[cfg(test)]
-    test_source_root_lines: Option<Vec<String>>,
+    pub(crate) test_source_root_lines: Option<Vec<String>>,
     /// The lines the prompt of the given turn generation carried, set as the
     /// prompt is built (`turn_dispatch.rs`), less any given again since
     /// (`set_pending_source_root_line`); when the runtime accepts it,
     /// exactly those lines leave the pending ones
     /// (`acknowledge_engram_source_root_line_delivery`).
-    source_root_line_delivery: Option<(String, u64)>,
+    pub(crate) source_root_line_delivery: Option<(String, u64)>,
     /// The disabled declaration last told to the agent, as its hash and line
     /// (`engram_declared_tests.rs`), so one is told once per content. In
     /// memory only.
-    declaration_disabled_told: Option<String>,
+    pub(crate) declaration_disabled_told: Option<String>,
     /// Current scoped status, projected again at provider handoff. Unrelated
     /// undelivered scopes remain pending for a later return to their claim.
-    source_root_notices: Vec<EngramSourceRootNotice>,
+    pub(crate) source_root_notices: Vec<EngramSourceRootNotice>,
     // Runtime owner of the grant-free naming bind. A settings reset may
     // replace the session state; an old reply must not release a new owner.
-    source_root_bind_owner: Option<Uuid>,
+    pub(crate) source_root_bind_owner: Option<Uuid>,
     /// Base-tier context is injected on the first prompt in this TermAl
     /// process and again after an observed agent compaction.
-    context_nudge_pending: bool,
-    context_nudge_in_progress: bool,
-    context_nudge_in_progress_generation: Option<u64>,
-    context_nudge_generation: u64,
-    pending_context_nudge: Option<String>,
-    context_nudge_delivery_generation: Option<u64>,
-    context_nudge_delivery_turn_generation: Option<u64>,
+    pub(crate) context_nudge_pending: bool,
+    pub(crate) context_nudge_in_progress: bool,
+    pub(crate) context_nudge_in_progress_generation: Option<u64>,
+    pub(crate) context_nudge_generation: u64,
+    pub(crate) pending_context_nudge: Option<String>,
+    pub(crate) context_nudge_delivery_generation: Option<u64>,
+    pub(crate) context_nudge_delivery_turn_generation: Option<u64>,
     /// A compaction requests fresh orientation after any previously fetched
     /// peek snapshot has reached the runtime. This is local prompt buffering,
     /// not Engram delivery state. Cleared when that fresh read starts.
-    context_refresh_needed: bool,
+    pub(crate) context_refresh_needed: bool,
     /// Best-effort dedup of the last 64 item ids, each at most 256 bytes.
     /// Evicted, missing or oversized ids can signal again; delivery safety
     /// must therefore not depend on deduplication.
-    signalled_compaction_item_ids: VecDeque<String>,
+    pub(crate) signalled_compaction_item_ids: VecDeque<String>,
     /// A user Stop left the queue paused for an explicit Resume: an operator
     /// queue pause. No automatic retry passes it. Saved with the session;
     /// cleared when the pause is lifted.
-    operator_paused: bool,
+    pub(crate) operator_paused: bool,
     /// The exact queue head held by user Stop. This is a local Stop fact,
     /// independent of historical control or provider delivery evidence.
     /// Saved with the session; a different head makes it stale.
-    stopped_prompt_id: Option<String>,
+    pub(crate) stopped_prompt_id: Option<String>,
 }
 
 // Raw history may contain original credentials. Diagnostics expose counts,
 // never the JSON or retained request bodies.
 impl std::fmt::Debug for EngramSessionState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("EngramSessionState")
+        formatter
+            .debug_struct("EngramSessionState")
             .field("historical_entries", &self.historical_control.len())
             .field("work_binding", &self.work_binding)
-            .field("has_active_observation", &self.unadmitted_active_turn.is_some())
+            .field(
+                "has_active_observation",
+                &self.unadmitted_active_turn.is_some(),
+            )
             .field("closing_observations", &self.unadmitted_closing_jobs.len())
             .field("observation_reports", &self.unadmitted_reports.len())
-            .field("observation_delete_requested", &self.observation_delete_requested)
+            .field(
+                "observation_delete_requested",
+                &self.observation_delete_requested,
+            )
             .field("operator_paused", &self.operator_paused)
             .finish_non_exhaustive()
     }
@@ -2361,7 +2522,7 @@ impl Default for EngramSessionState {
             test_source_root_lines: None,
             source_root_line_delivery: None,
             declaration_disabled_told: None,
-                    source_root_notices: Vec::new(),
+            source_root_notices: Vec::new(),
             source_root_bind_owner: None,
             context_nudge_pending: true,
             context_nudge_in_progress: false,
@@ -2379,23 +2540,30 @@ impl Default for EngramSessionState {
 }
 
 impl EngramSessionState {
-    fn observed_turn_ref(&self) -> Option<&str> {
-        self.unadmitted_active_turn.as_ref().map(|trace| trace.host_turn_ref.as_str())
+    pub(crate) fn observed_turn_ref(&self) -> Option<&str> {
+        self.unadmitted_active_turn
+            .as_ref()
+            .map(|trace| trace.host_turn_ref.as_str())
     }
 
-    fn observed_opening(&self) -> Option<&EngramRuntimeOpeningRoot> {
+    pub(crate) fn observed_opening(&self) -> Option<&EngramRuntimeOpeningRoot> {
         self.unadmitted_active_turn.as_ref()?.opening_root.as_ref()
     }
 
-    fn observed_source_root(&self) -> Option<&EngramTurnSourceRoot> {
+    pub(crate) fn observed_source_root(&self) -> Option<&EngramTurnSourceRoot> {
         self.observed_opening()?.source_root.as_ref()
     }
 
-    fn observed_source_root_mut(&mut self) -> Option<&mut EngramTurnSourceRoot> {
-        self.unadmitted_active_turn.as_mut()?.opening_root.as_mut()?.source_root.as_mut()
+    pub(crate) fn observed_source_root_mut(&mut self) -> Option<&mut EngramTurnSourceRoot> {
+        self.unadmitted_active_turn
+            .as_mut()?
+            .opening_root
+            .as_mut()?
+            .source_root
+            .as_mut()
     }
 
-    fn observed_naming_identity(&self) -> Option<(EngramAuthorityStoreKey, String)> {
+    pub(crate) fn observed_naming_identity(&self) -> Option<(EngramAuthorityStoreKey, String)> {
         let opening = self.observed_opening()?;
         Some((opening.store.clone(), opening.binding.work_id.clone()))
     }
@@ -2403,19 +2571,19 @@ impl EngramSessionState {
     /// A cached orientation is ready for admission even with a deferred refresh.
     /// Runtime acceptance releases this local buffer; it never acknowledges an
     /// Engram page. All host orientation reads use non-advancing peek.
-    fn context_needs_refresh(&self) -> bool {
+    pub(crate) fn context_needs_refresh(&self) -> bool {
         self.pending_context_nudge.is_none()
             && (self.context_nudge_pending || self.context_nudge_in_progress)
     }
 
-    fn invalidate_context_nudge(&mut self) {
+    pub(crate) fn invalidate_context_nudge(&mut self) {
         self.context_nudge_generation = self.context_nudge_generation.saturating_add(1);
         self.context_nudge_pending = true;
         self.pending_context_nudge = None;
         self.context_refresh_needed = false;
     }
 
-    fn mark_context_refresh_needed(&mut self, compaction_item_id: Option<&str>) -> bool {
+    pub(crate) fn mark_context_refresh_needed(&mut self, compaction_item_id: Option<&str>) -> bool {
         if let Some(id) = compaction_item_id.filter(|id| id.len() <= 256) {
             if self
                 .signalled_compaction_item_ids
@@ -2433,29 +2601,28 @@ impl EngramSessionState {
         self.context_nudge_pending = true;
         true
     }
-
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramDeliveredRange {
-    from: i64,
-    to: i64,
-    head: i64,
+pub(crate) struct EngramDeliveredRange {
+    pub(crate) from: i64,
+    pub(crate) to: i64,
+    pub(crate) head: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramControlDirectiveCard {
+pub(crate) struct EngramControlDirectiveCard {
     directive_id: String,
-    kind: String,
-    audience: String,
-    satisfaction: String,
+    pub(crate) kind: String,
+    pub(crate) audience: String,
+    pub(crate) satisfaction: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramControlStage {
+pub(crate) enum EngramControlStage {
     Dispatch,
     Checkpoint,
     Restart,
@@ -2463,7 +2630,7 @@ enum EngramControlStage {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramControlCardDecision {
+pub(crate) enum EngramControlCardDecision {
     Grant,
     Defer,
     Refuse,
@@ -2472,7 +2639,7 @@ enum EngramControlCardDecision {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramControlCardDispatch {
+pub(crate) enum EngramControlCardDispatch {
     SentOnGrant,
     /// Ordinary root dispatch after optional control became unavailable
     /// before Begin; also decodes historical shadow-mode cards.
@@ -2483,7 +2650,7 @@ enum EngramControlCardDispatch {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramControlFailMode {
+pub(crate) enum EngramControlFailMode {
     Enforced,
     Shadow,
     Degraded,
@@ -2491,57 +2658,57 @@ enum EngramControlFailMode {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramControlLatencyCard {
+pub(crate) struct EngramControlLatencyCard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    evaluate: Option<u64>,
+    pub(crate) evaluate: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    begin: Option<u64>,
+    pub(crate) begin: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    checkpoint: Option<u64>,
+    pub(crate) checkpoint: Option<u64>,
     /// The wait for the durable acknowledgement of the retained evaluate
     /// before it was sent, inside `evaluate`'s span.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    admission_fence: Option<u64>,
+    pub(crate) admission_fence: Option<u64>,
     /// The wait for the durable acknowledgement of the prepared begin, after
     /// evaluate and before the begin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    preparation_fence: Option<u64>,
-    total: u64,
+    pub(crate) preparation_fence: Option<u64>,
+    pub(crate) total: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramControlCard {
+pub(crate) struct EngramControlCard {
     #[serde(default, skip_serializing_if = "engram_causal_unpublished")]
-    causal_failure: Option<EngramCausalFailure>,
-    schema_version: u16,
-    stage: EngramControlStage,
-    assurance: String,
-    decision: EngramControlCardDecision,
-    dispatch: EngramControlCardDispatch,
+    pub(crate) causal_failure: Option<EngramCausalFailure>,
+    pub(crate) schema_version: u16,
+    pub(crate) stage: EngramControlStage,
+    pub(crate) assurance: String,
+    pub(crate) decision: EngramControlCardDecision,
+    pub(crate) dispatch: EngramControlCardDispatch,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    refusal_code: Option<String>,
+    pub(crate) refusal_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    defer_code: Option<String>,
+    pub(crate) defer_code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    grant_id: Option<String>,
+    pub(crate) grant_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    directives: Vec<EngramControlDirectiveCard>,
+    pub(crate) directives: Vec<EngramControlDirectiveCard>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    delivered_range: Option<EngramDeliveredRange>,
-    latency_ms: EngramControlLatencyCard,
-    fail_mode: EngramControlFailMode,
+    pub(crate) delivered_range: Option<EngramDeliveredRange>,
+    pub(crate) latency_ms: EngramControlLatencyCard,
+    pub(crate) fail_mode: EngramControlFailMode,
     #[serde(default)]
-    repair_armed: bool,
+    pub(crate) repair_armed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    next_intent: Option<EngramNextIntent>,
+    pub(crate) next_intent: Option<EngramNextIntent>,
     /// On the checkpoint of a turn bound to claimed work: where its source
     /// basis was taken (`engram_source_roots.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_root: Option<EngramControlSourceRootCard>,
+    pub(crate) source_root: Option<EngramControlSourceRootCard>,
 }
 
-fn parse_engram_result<T: for<'de> Deserialize<'de>>(
+pub(crate) fn parse_engram_result<T: for<'de> Deserialize<'de>>(
     value: Value,
 ) -> std::result::Result<T, EngramTransportError> {
     engram_decode_value(value, "invalid Engram result schema")
@@ -2564,8 +2731,7 @@ fn engram_value_free_decode_error(
             break;
         }
         match segment {
-            serde_path_to_error::Segment::Seq { index } =>
-                location.push_str(&format!("[{index}]")),
+            serde_path_to_error::Segment::Seq { index } => location.push_str(&format!("[{index}]")),
             serde_path_to_error::Segment::Map { .. } => location.push_str("[field]"),
             serde_path_to_error::Segment::Enum { .. } => location.push_str("[variant]"),
             serde_path_to_error::Segment::Unknown => location.push_str("[unknown]"),
@@ -2576,7 +2742,7 @@ fn engram_value_free_decode_error(
     ))
 }
 
-fn engram_decode_value<T: for<'de> Deserialize<'de>>(
+pub(crate) fn engram_decode_value<T: for<'de> Deserialize<'de>>(
     value: Value,
     label: &str,
 ) -> std::result::Result<T, EngramTransportError> {
@@ -2586,7 +2752,7 @@ fn engram_decode_value<T: for<'de> Deserialize<'de>>(
 }
 
 // As serde_json::from_slice, including its trailing-input check.
-fn engram_decode_slice<T: for<'de> Deserialize<'de>>(
+pub(crate) fn engram_decode_slice<T: for<'de> Deserialize<'de>>(
     bytes: &[u8],
     label: &str,
 ) -> std::result::Result<T, EngramTransportError> {
@@ -2603,7 +2769,7 @@ fn engram_decode_slice<T: for<'de> Deserialize<'de>>(
 /// Builds the Engram principal for one hosted agent kind. Display names and
 /// model aliases are never identity inputs; exact runtime detail is carried in
 /// the separate actor context.
-fn engram_seat_id(developer_name: &str, session: &Session) -> String {
+pub(crate) fn engram_seat_id(developer_name: &str, session: &Session) -> String {
     format!(
         "{developer_name}/{}",
         engram_agent_context_kind(session.agent)
@@ -2621,7 +2787,7 @@ fn engram_agent_context_kind(agent: Agent) -> &'static str {
     }
 }
 
-const ENGRAM_ACTOR_CONTEXT_MAX_BYTES: usize = 200;
+pub(crate) const ENGRAM_ACTOR_CONTEXT_MAX_BYTES: usize = 200;
 
 fn normalize_engram_actor_context_value(value: &str) -> String {
     let mut normalized = String::new();
@@ -2666,7 +2832,7 @@ fn append_engram_actor_context_field(context: &mut String, key: &str, value: &st
 /// Renders exact agent/model/reasoning detail separately from the stable agent
 /// principal. The 200-byte local limit stays below Engram's 256-byte boundary,
 /// and fields that do not fit are omitted instead of being cut mid-value.
-fn engram_actor_context(session: &Session) -> Option<String> {
+pub(crate) fn engram_actor_context(session: &Session) -> Option<String> {
     let mut context = String::new();
     append_engram_actor_context_field(
         &mut context,
@@ -2704,7 +2870,7 @@ fn engram_actor_context(session: &Session) -> Option<String> {
 /// handshake later resolves `session.model` to a more specific display value.
 /// Once rotation is pending, the next runtime's identity is derived from the
 /// newly committed session settings instead.
-fn engram_runtime_actor_identity(
+pub(crate) fn engram_runtime_actor_identity(
     developer_name: &str,
     record: &SessionRecord,
 ) -> (String, Option<String>) {
@@ -2719,48 +2885,60 @@ fn engram_runtime_actor_identity(
     )
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     format!("{digest:x}")
 }
 
 #[derive(Clone)]
-struct EngramBindingTarget {
-    runtime_snapshot: Option<RuntimeToken>,
-    work_binding: Option<EngramControlWorkBinding>,
-    source_root_read_fence: EngramRootReadFence,
-    adapter: Arc<EngramHostAdapter>,
-    budget_clock: EngramBudgetClock,
+pub(crate) struct EngramBindingTarget {
+    pub(crate) runtime_snapshot: Option<RuntimeToken>,
+    pub(crate) work_binding: Option<EngramControlWorkBinding>,
+    pub(crate) source_root_read_fence: EngramRootReadFence,
+    pub(crate) adapter: Arc<EngramHostAdapter>,
+    pub(crate) budget_clock: EngramBudgetClock,
     #[cfg(test)]
-    test_root_setup_deadline: Option<std::time::Instant>,
-    connection: EngramConnectionConfig,
-    settings: EngramProjectSettings,
-    project_id: String,
-    project_reset_owner_generation: Option<u64>,
-    external_ref: String,
+    pub(crate) test_root_setup_deadline: Option<std::time::Instant>,
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) settings: EngramProjectSettings,
+    pub(crate) project_id: String,
+    pub(crate) project_reset_owner_generation: Option<u64>,
+    pub(crate) external_ref: String,
 }
 
 impl EngramBindingTarget {
     #[cfg(test)]
-    fn root_operation_deadline(&self, started: std::time::Instant) -> std::time::Instant {
-        if let Some(deadline) = self.test_root_setup_deadline { return deadline; }
+    pub(crate) fn root_operation_deadline(
+        &self,
+        started: std::time::Instant,
+    ) -> std::time::Instant {
+        if let Some(deadline) = self.test_root_setup_deadline {
+            return deadline;
+        }
         started + self.settings.call_timeout()
     }
 
-    fn rpc_timeout_until(&self, deadline: std::time::Instant) -> Result<Duration, EngramTransportError> {
+    pub(crate) fn rpc_timeout_until(
+        &self,
+        deadline: std::time::Instant,
+    ) -> Result<Duration, EngramTransportError> {
         let remaining = deadline.saturating_duration_since(self.budget_clock.now());
         if remaining.is_zero() {
-            return Err(EngramTransportError::deadline("Engram operation budget exhausted before transport"));
+            return Err(EngramTransportError::deadline(
+                "Engram operation budget exhausted before transport",
+            ));
         }
         Ok(self.settings.call_timeout().min(remaining))
     }
 }
 
-fn engram_project_for_session_locked<'a>(
+pub(crate) fn engram_project_for_session_locked<'a>(
     inner: &'a StateInner,
     session_id: &str,
 ) -> Option<&'a Project> {
-    if !inner.delegation_inventory_complete() { return None; }
+    if !inner.delegation_inventory_complete() {
+        return None;
+    }
     let mut current_session_id = session_id.to_owned();
     let mut visited = HashSet::new();
     loop {
@@ -2781,25 +2959,28 @@ fn engram_project_for_session_locked<'a>(
     }
 }
 
-fn is_lowercase_hex(value: &str) -> bool {
+pub(crate) fn is_lowercase_hex(value: &str) -> bool {
     value
         .bytes()
         .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// A content fingerprint, such as the review-freeze fingerprint.
-fn is_lowercase_sha256(value: &str) -> bool {
+pub(crate) fn is_lowercase_sha256(value: &str) -> bool {
     value.len() == 64 && is_lowercase_hex(value)
 }
 
 /// An Engram record id. Engram mints a record's id as a random UUID written as
 /// 32 hex digits; ids stored before that are 64 hex digits. Both are opaque.
-fn is_engram_record_id(value: &str) -> bool {
+pub(crate) fn is_engram_record_id(value: &str) -> bool {
     matches!(value.len(), 32 | 64) && is_lowercase_hex(value)
 }
 
 impl AppState {
-    fn engram_session_has_child_binding_shape_locked(inner: &StateInner, session_id: &str) -> bool {
+    pub(crate) fn engram_session_has_child_binding_shape_locked(
+        inner: &StateInner,
+        session_id: &str,
+    ) -> bool {
         inner
             .delegations
             .iter()
@@ -2810,7 +2991,7 @@ impl AppState {
                 .is_some_and(|record| record.session.parent_delegation_id.is_some())
     }
 
-    fn engram_binding_target_for_session_shape_locked(
+    pub(crate) fn engram_binding_target_for_session_shape_locked(
         inner: &StateInner,
         session_id: &str,
         require_runtime_enabled: bool,
@@ -2851,7 +3032,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn engram_session_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
+    pub(crate) fn engram_session_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
         engram_source_root_base_is_enabled_locked(inner, session_id)
     }
 
@@ -2909,7 +3090,6 @@ impl AppState {
         }))
     }
 
-
     fn engram_binding_target_for_parent_with_reset_access_locked(
         inner: &StateInner,
         parent_session_id: &str,
@@ -2961,19 +3141,23 @@ impl AppState {
         }))
     }
 
-    fn shutdown_engram_session_process(&self, session_id: &str) {
-        let adapter = self.inner.lock().expect("state mutex poisoned").engram_host_adapter.clone();
+    pub(crate) fn shutdown_engram_session_process(&self, session_id: &str) {
+        let adapter = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_host_adapter
+            .clone();
         adapter.shutdown_session(session_id);
     }
-
 }
 
-fn duration_millis(duration: Duration) -> u64 {
+pub(crate) fn duration_millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 impl EngramProjectSettings {
-    fn same_work_service_settings(&self, other: &Self) -> bool {
+    pub(crate) fn same_work_service_settings(&self, other: &Self) -> bool {
         let mut left = self.clone();
         let mut right = other.clone();
         left.acceptance_evaluation = None;

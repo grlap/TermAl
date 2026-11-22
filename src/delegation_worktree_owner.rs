@@ -8,6 +8,8 @@
 // automatically, which continues separately; only the owner record and the
 // follow-up refusal were kept.
 
+use super::*;
+
 /// File in a linked worktree's Git administrative directory naming the
 /// delegation that created it. Git keeps it out of status and deletes it with
 /// the worktree, so a later worktree at the same path never carries it.
@@ -16,7 +18,7 @@ const DELEGATION_WORKTREE_OWNER_FILE: &str = "termal-delegation";
 #[cfg(test)]
 thread_local! {
     /// Makes the next owner record on this thread fail, as a full disk would.
-    static TEST_FAIL_NEXT_DELEGATION_WORKTREE_OWNER_RECORD: std::cell::Cell<bool> =
+    pub(crate) static TEST_FAIL_NEXT_DELEGATION_WORKTREE_OWNER_RECORD: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }
 
@@ -65,7 +67,7 @@ fn delegation_worktree_admin_dir(worktree: &FsPath) -> io::Result<Option<PathBuf
 }
 
 /// Records which delegation created the worktree at this path.
-fn record_delegation_worktree_owner(
+pub(crate) fn record_delegation_worktree_owner(
     worktree: &FsPath,
     delegation_id: &str,
 ) -> Result<(), ApiError> {
@@ -113,7 +115,7 @@ fn record_delegation_worktree_owner(
 
 /// What the owner record of the worktree at a path says.
 #[derive(Debug, PartialEq, Eq)]
-enum DelegationWorktreeOwner {
+pub(crate) enum DelegationWorktreeOwner {
     /// The delegation that created it. A worktree another delegation made at
     /// a reused path names that one.
     Recorded(String),
@@ -163,7 +165,7 @@ fn delegation_worktree_link(worktree: &FsPath) -> io::Result<Option<PathBuf>> {
 /// boundary's bounded, non-blocking reads of regular files. It touches the
 /// file system, so it never runs under the state lock: a path lookup on an
 /// unreachable share could wait.
-fn delegation_worktree_owner(worktree: &FsPath) -> DelegationWorktreeOwner {
+pub(crate) fn delegation_worktree_owner(worktree: &FsPath) -> DelegationWorktreeOwner {
     // Nothing there, a path under a file, or a file that is not text is no
     // worktree of ours; any other read error may pass, as a sharing violation
     // on Windows does.
@@ -204,7 +206,7 @@ impl AppState {
     /// state lock, before restoration and again just before the lock that
     /// admits the follow-up; returns the worktree it checked, for that lock
     /// to confirm unchanged.
-    fn check_followup_worktree(
+    pub(crate) fn check_followup_worktree(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -242,7 +244,7 @@ impl AppState {
 
 /// Under the state lock, with no file access: the delegation's worktree is
 /// still the one its follow-up checked just before.
-fn confirm_followup_worktree_locked(
+pub(crate) fn confirm_followup_worktree_locked(
     inner: &StateInner,
     delegation_index: usize,
     checked: Option<&str>,

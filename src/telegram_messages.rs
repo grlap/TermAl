@@ -4,7 +4,7 @@ Telegram send-message helpers shared by digest and assistant forwarding paths.
 
 /// Telegram's `sendMessage` rejects bodies over 4096 UTF-16 code
 /// units. Stay below that limit using the same unit Telegram counts.
-const TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS: usize = 3500;
+pub(crate) const TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS: usize = 3500;
 
 /// Splits `text` into chunks no longer than
 /// `TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS`, preferring to break at the
@@ -13,7 +13,7 @@ const TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS: usize = 3500;
 /// Falls back to a hard UTF-16-unit split when a single
 /// line exceeds the limit (e.g., a giant URL or one-line code
 /// dump).
-fn chunk_telegram_message_text(text: &str) -> Vec<String> {
+pub(crate) fn chunk_telegram_message_text(text: &str) -> Vec<String> {
     if text.encode_utf16().count() <= TELEGRAM_MESSAGE_CHUNK_UTF16_UNITS {
         return vec![text.to_owned()];
     }

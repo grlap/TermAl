@@ -2,26 +2,28 @@
 // Owns minimal durable identities/proofs and content-fenced compaction;
 // does not delete artifacts, mint credit, poll work or introduce an archive.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCompacted {
-    compacted: bool,
-    request_identity: Option<String>,
-    summary: TestRunSummary,
-    registration: Option<TestRunRegistration>,
-    observations: Vec<TestRunCommandObservation>,
-    request_stamp: TestRunFileStamp,
-    results_stamp: TestRunFileStamp,
-    reason: String,
+pub(crate) struct TestRunCompacted {
+    pub(crate) compacted: bool,
+    pub(crate) request_identity: Option<String>,
+    pub(crate) summary: TestRunSummary,
+    pub(crate) registration: Option<TestRunRegistration>,
+    pub(crate) observations: Vec<TestRunCommandObservation>,
+    pub(crate) request_stamp: TestRunFileStamp,
+    pub(crate) results_stamp: TestRunFileStamp,
+    pub(crate) reason: String,
     #[serde(default)]
-    artifact_conflict: bool,
+    pub(crate) artifact_conflict: bool,
     #[serde(default)]
-    artifact_unavailable: bool,
+    pub(crate) artifact_unavailable: bool,
 }
 
 #[derive(Clone, Default)]
-struct TestRunCompactionPersistence(
-    Arc<Mutex<BTreeMap<String, (TestRunCompacted, PersistFenceWaiter)>>>,
+pub(crate) struct TestRunCompactionPersistence(
+    pub(crate) Arc<Mutex<BTreeMap<String, (TestRunCompacted, PersistFenceWaiter)>>>,
 );
 
 impl std::fmt::Debug for TestRunCompactionPersistence {
@@ -34,14 +36,14 @@ impl std::fmt::Debug for TestRunCompactionPersistence {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunHistory {
+pub(crate) struct TestRunHistory {
     detail_history_limit: usize,
-    compacted_count: usize,
-    omitted_count: usize,
+    pub(crate) compacted_count: usize,
+    pub(crate) omitted_count: usize,
     unresolved_backlog: usize,
 }
 
-fn test_run_minimal_summary(mut summary: TestRunSummary) -> TestRunSummary {
+pub(crate) fn test_run_minimal_summary(mut summary: TestRunSummary) -> TestRunSummary {
     summary.command = None;
     summary.command_truncated = false;
     summary.current_stage = None;
@@ -53,12 +55,14 @@ fn test_run_minimal_summary(mut summary: TestRunSummary) -> TestRunSummary {
     summary
 }
 
-fn test_run_minimal_observation(mut row: TestRunCommandObservation) -> TestRunCommandObservation {
+pub(crate) fn test_run_minimal_observation(
+    mut row: TestRunCommandObservation,
+) -> TestRunCommandObservation {
     row.summary = test_run_minimal_summary(row.summary);
     row
 }
 
-fn test_run_unavailable_artifact(mut run: TestRunSummary) -> TestRunSummary {
+pub(crate) fn test_run_unavailable_artifact(mut run: TestRunSummary) -> TestRunSummary {
     run.registration.artifact_unavailable = Some(true);
     if matches!(run.state, TestRunState::Running | TestRunState::Unknown) {
         run.state = TestRunState::Unknown;
@@ -69,7 +73,7 @@ fn test_run_unavailable_artifact(mut run: TestRunSummary) -> TestRunSummary {
     run
 }
 
-fn test_run_summary_ids(run: &TestRunSummary) -> impl Iterator<Item = &str> {
+pub(crate) fn test_run_summary_ids(run: &TestRunSummary) -> impl Iterator<Item = &str> {
     std::iter::once(run.run_id.as_str()).chain(
         run.registration
             .superseded_run_ids
@@ -78,15 +82,16 @@ fn test_run_summary_ids(run: &TestRunSummary) -> impl Iterator<Item = &str> {
     )
 }
 
-fn test_run_compact_is_installed(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> bool {
-    test_run_compact_is_installed_with(inner, row, |id| {
-        inner.projection_index().find(id).is_some()
-    })
+pub(crate) fn test_run_compact_is_installed(
+    inner: &impl TestRunProjectionSource,
+    row: &TestRunCompacted,
+) -> bool {
+    test_run_compact_is_installed_with(inner, row, |id| inner.projection_index().find(id).is_some())
 }
 
 /// The run ids of the indexed entries, built once by a pass over history rows
 /// so each row's installation check is not a linear entry lookup.
-fn test_run_indexed_ids(index: &TestRunIndex) -> HashSet<&str> {
+pub(crate) fn test_run_indexed_ids(index: &TestRunIndex) -> HashSet<&str> {
     index
         .entries
         .iter()
@@ -96,7 +101,7 @@ fn test_run_indexed_ids(index: &TestRunIndex) -> HashSet<&str> {
 
 /// `indexed(run_id)` answers whether the run is an indexed entry, exactly as
 /// `TestRunIndex::find(run_id).is_some()` would.
-fn test_run_compact_is_installed_with(
+pub(crate) fn test_run_compact_is_installed_with(
     inner: &impl TestRunProjectionSource,
     row: &TestRunCompacted,
     indexed: impl FnOnce(&str) -> bool,
@@ -113,7 +118,10 @@ fn test_run_compact_is_installed_with(
             .all(|observation| !inner.projection_has_observation(&observation.execution_id))
 }
 
-fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRunCompacted) -> TestRunSummary {
+pub(crate) fn test_run_compacted_summary(
+    inner: &impl TestRunProjectionSource,
+    row: &TestRunCompacted,
+) -> TestRunSummary {
     let index = inner.projection_index();
     let mut summary = row.summary.clone();
     summary.registration.history_compacted = Some(row.compacted);
@@ -164,13 +172,13 @@ fn test_run_compacted_summary(inner: &impl TestRunProjectionSource, row: &TestRu
     summary
 }
 
-fn test_run_compaction_eligible(inner: &StateInner, run: &TestRunSummary) -> bool {
+pub(crate) fn test_run_compaction_eligible(inner: &StateInner, run: &TestRunSummary) -> bool {
     test_run_compaction_eligible_with(inner, run, &test_run_waited_ids(inner))
 }
 
 /// Every run id some wait names, read once per selection pass rather than
 /// once per candidate run.
-fn test_run_waited_ids(inner: &StateInner) -> HashSet<String> {
+pub(crate) fn test_run_waited_ids(inner: &StateInner) -> HashSet<String> {
     inner
         .test_run_waits
         .iter()
@@ -222,7 +230,10 @@ fn test_run_compaction_eligible_with(
         })
 }
 
-fn test_run_compact_artifact_matches(row: &TestRunCompacted, disk: &TestRunDisk) -> bool {
+pub(crate) fn test_run_compact_artifact_matches(
+    row: &TestRunCompacted,
+    disk: &TestRunDisk,
+) -> bool {
     disk.run_id == row.summary.run_id
         && disk.owner == row.summary.owner_session_id
         && test_run_path_key(&disk.worktree) == test_run_path_key(&row.summary.worktree)
@@ -243,11 +254,11 @@ fn test_run_compact_artifact_matches(row: &TestRunCompacted, disk: &TestRunDisk)
 }
 
 #[cfg(test)]
-fn test_run_history_locked(inner: &StateInner, project: Option<&str>) -> TestRunHistory {
+pub(crate) fn test_run_history_locked(inner: &StateInner, project: Option<&str>) -> TestRunHistory {
     test_run_history_from_projection(inner, &test_run_summaries_locked(inner), project)
 }
 
-fn test_run_history_from_projection(
+pub(crate) fn test_run_history_from_projection(
     inner: &impl TestRunProjectionSource,
     runs: &[TestRunSummary],
     project: Option<&str>,
@@ -284,14 +295,14 @@ fn test_run_history_from_projection(
 }
 
 #[derive(Default)]
-struct TestRunCompactionTrace {
-    population: usize,
-    eligible: usize,
-    persistence: TestRunTracePersistence,
+pub(crate) struct TestRunCompactionTrace {
+    pub(crate) population: usize,
+    pub(crate) eligible: usize,
+    pub(crate) persistence: TestRunTracePersistence,
 }
 
 impl AppState {
-    fn persist_test_run_compacted_locked(
+    pub(crate) fn persist_test_run_compacted_locked(
         &self,
         inner: &mut StateInner,
         row: TestRunCompacted,
@@ -314,7 +325,11 @@ impl AppState {
             Ok(false)
         }
     }
-    fn queue_test_run_compaction_fence(&self, inner: &StateInner, row: TestRunCompacted) {
+    pub(crate) fn queue_test_run_compaction_fence(
+        &self,
+        inner: &StateInner,
+        row: TestRunCompacted,
+    ) {
         let pending = &inner.test_runs.compaction_persistence;
         let (fence, waiter) = PersistFence::new(
             PersistFenceTarget::TestRunCompaction(Box::new(row.clone())),
@@ -332,11 +347,14 @@ impl AppState {
                 .insert(row.summary.run_id.clone(), (row, waiter));
         }
     }
-    fn compact_test_runs_locked(&self, inner: &mut StateInner) {
+    pub(crate) fn compact_test_runs_locked(&self, inner: &mut StateInner) {
         self.compact_test_runs_traced_locked(inner);
     }
 
-    fn compact_test_runs_traced_locked(&self, inner: &mut StateInner) -> TestRunCompactionTrace {
+    pub(crate) fn compact_test_runs_traced_locked(
+        &self,
+        inner: &mut StateInner,
+    ) -> TestRunCompactionTrace {
         // One canonical population, terminal time + stable identity, including
         // the explicit null-project bucket. Unknown obligations are unbounded.
         let mut runs = test_run_full_summaries_locked(inner);
@@ -496,7 +514,7 @@ impl AppState {
         true
     }
 
-    fn step_test_run_compaction(&self) {
+    pub(crate) fn step_test_run_compaction(&self) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let pending = inner.test_runs.compaction_persistence.clone();
         let completed: Vec<_> = pending
@@ -541,7 +559,11 @@ impl AppState {
         }
     }
 
-    fn publish_test_run_compact_risk_locked(&self, inner: &mut StateInner, row: &TestRunCompacted) {
+    pub(crate) fn publish_test_run_compact_risk_locked(
+        &self,
+        inner: &mut StateInner,
+        row: &TestRunCompacted,
+    ) {
         if !test_run_compact_is_installed(inner, row) {
             return;
         }
@@ -559,7 +581,7 @@ impl AppState {
         }
     }
 
-    fn revalidate_test_run_compacted_locked(
+    pub(crate) fn revalidate_test_run_compacted_locked(
         &self,
         inner: &mut StateInner,
         store: &EngramAuthorityStoreKey,
@@ -572,36 +594,47 @@ impl AppState {
         // The exact lifecycle's compacted bucket, in key order, replaces the
         // full compacted scan; the original predicates still decide.
         let key = TestRunLifecycleKey::new(
-            store, &binding.root_execution_id, &binding.work_id, &binding.run_id, &binding.claim_id,
+            store,
+            &binding.root_execution_id,
+            &binding.work_id,
+            &binding.run_id,
+            &binding.claim_id,
         );
-        let rows: Vec<String> = inner.test_run_compacted.index().lifecycle(&key).cloned().collect();
+        let rows: Vec<String> = inner
+            .test_run_compacted
+            .index()
+            .lifecycle(&key)
+            .cloned()
+            .collect();
         #[cfg(test)]
         TEST_TEST_RUN_INDEXED_CANDIDATES.with(|count| count.set(count.get() + rows.len()));
         for row_key in &rows {
             // Revalidation fills only nested lifecycle reads: no indexed field.
-            let revalidated = inner.test_run_compacted.update_unindexed_fields(row_key, |row| {
-                let mut updated = false;
-                for observation in &mut row.observations {
-                    let Some(first) = observation.evidence.iter().position(|association| {
-                        test_run_lifecycle_binding_matches(association, store, binding)
-                    }) else {
-                        continue;
-                    };
-                    for association in &mut observation.evidence[first..] {
-                        if test_run_lifecycle_binding_matches(association, store, binding)
-                            && generation == association.source_basis.source_root_generation
-                        {
-                            association.lifecycle_read = Some(Arc::clone(read));
-                            validated.push((
-                                observation.execution_id.clone(),
-                                association.producer_observation_id.clone(),
-                            ));
-                            updated = true;
+            let revalidated = inner
+                .test_run_compacted
+                .update_unindexed_fields(row_key, |row| {
+                    let mut updated = false;
+                    for observation in &mut row.observations {
+                        let Some(first) = observation.evidence.iter().position(|association| {
+                            test_run_lifecycle_binding_matches(association, store, binding)
+                        }) else {
+                            continue;
+                        };
+                        for association in &mut observation.evidence[first..] {
+                            if test_run_lifecycle_binding_matches(association, store, binding)
+                                && generation == association.source_basis.source_root_generation
+                            {
+                                association.lifecycle_read = Some(Arc::clone(read));
+                                validated.push((
+                                    observation.execution_id.clone(),
+                                    association.producer_observation_id.clone(),
+                                ));
+                                updated = true;
+                            }
                         }
                     }
-                }
-                updated.then(|| row.clone())
-            });
+                    updated.then(|| row.clone())
+                });
             if let Some(Some(row)) = revalidated {
                 changed.push(row);
             }

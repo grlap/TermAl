@@ -2,10 +2,12 @@
 // Does not synthesize provider facts or manage lifecycle. Recovered from projection ABI3.
 // Bounded read-only projections of the existing executor/PromptDelivery owner.
 // Decoding these values supplies no permission, runtime event or state change.
-const REMOTE_PROMPT_STATUS_BYTES: usize = 16_384;
+
+use super::*;
+pub(crate) const REMOTE_PROMPT_STATUS_BYTES: usize = 16_384;
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_projection_uuid<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn remote_prompt_projection_uuid<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<Uuid, D::Error> {
     let value = String::deserialize(deserializer)?;
@@ -16,7 +18,7 @@ fn remote_prompt_projection_uuid<'de, D: serde::Deserializer<'de>>(
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
-fn remote_prompt_projection_optional<'de, D, T>(
+pub(crate) fn remote_prompt_projection_optional<'de, D, T>(
     deserializer: D,
 ) -> std::result::Result<Option<T>, D::Error>
 where
@@ -29,53 +31,53 @@ where
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptStatus {
-    protocol_version: u16,
+pub(crate) struct RemotePromptStatus {
+    pub(crate) protocol_version: u16,
     #[serde(deserialize_with = "remote_prompt_projection_uuid")]
-    operation_id: Uuid,
-    intent_digest: String,
-    duplicate: bool,
+    pub(crate) operation_id: Uuid,
+    pub(crate) intent_digest: String,
+    pub(crate) duplicate: bool,
     local_intent_durable: bool,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    receiver: Option<RemotePromptReceiverStatus>,
+    pub(crate) receiver: Option<RemotePromptReceiverStatus>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptReceiverStatus {
-    received: bool,
+pub(crate) struct RemotePromptReceiverStatus {
+    pub(crate) received: bool,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    queue_entry_id: Option<String>,
+    pub(crate) queue_entry_id: Option<String>,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    queue_position: Option<u64>,
-    root_paused: bool,
-    root_stopping: bool,
+    pub(crate) queue_position: Option<u64>,
+    pub(crate) root_paused: bool,
+    pub(crate) root_stopping: bool,
     cancelled_unstarted: bool,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    delivery: Option<RemotePromptDeliveryStatus>,
+    pub(crate) delivery: Option<RemotePromptDeliveryStatus>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptDeliveryStatus {
-    disposition: PromptDeliveryDisposition,
-    attempt: u32,
+pub(crate) struct RemotePromptDeliveryStatus {
+    pub(crate) disposition: PromptDeliveryDisposition,
+    pub(crate) attempt: u32,
     #[serde(deserialize_with = "remote_prompt_projection_uuid")]
-    write_ahead: Uuid,
+    pub(crate) write_ahead: Uuid,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    turn_generation: Option<u64>,
+    pub(crate) turn_generation: Option<u64>,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    accepted: Option<RemotePromptCorrelatedObservation>,
+    pub(crate) accepted: Option<RemotePromptCorrelatedObservation>,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    completed: Option<RemotePromptCorrelatedObservation>,
+    pub(crate) completed: Option<RemotePromptCorrelatedObservation>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(not(test), allow(dead_code))]
-enum RemotePromptObservationKind {
+pub(crate) enum RemotePromptObservationKind {
     CodexTurnStartResponse,
     ClaudeOwnedCommand,
     AcpPromptResponse,
@@ -85,22 +87,24 @@ enum RemotePromptObservationKind {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(not(test), allow(dead_code))]
-struct RemotePromptCorrelatedObservation {
-    kind: RemotePromptObservationKind,
-    prompt_id: String,
-    attempt: u32,
+pub(crate) struct RemotePromptCorrelatedObservation {
+    pub(crate) kind: RemotePromptObservationKind,
+    pub(crate) prompt_id: String,
+    pub(crate) attempt: u32,
     #[serde(deserialize_with = "remote_prompt_projection_uuid")]
-    write_ahead: Uuid,
-    runtime_id: String,
-    turn_generation: u64,
+    pub(crate) write_ahead: Uuid,
+    pub(crate) runtime_id: String,
+    pub(crate) turn_generation: u64,
     #[serde(deserialize_with = "remote_prompt_projection_optional")]
-    correlation: Option<String>,
+    pub(crate) correlation: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 fn remote_prompt_projection_error() -> ApiError {
-    ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE,
-        "direct prompt status is invalid or unavailable; original outcome remains unknown; do not resend automatically")
+    ApiError::from_status(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "direct prompt status is invalid or unavailable; original outcome remains unknown; do not resend automatically",
+    )
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -110,7 +114,11 @@ fn remote_prompt_projection_string(value: &str, limit: usize) -> bool {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptCorrelatedObservation {
-    fn validate(&self, queue: &str, delivery: &RemotePromptDeliveryStatus) -> Result<(), ApiError> {
+    pub(crate) fn validate(
+        &self,
+        queue: &str,
+        delivery: &RemotePromptDeliveryStatus,
+    ) -> Result<(), ApiError> {
         if !remote_prompt_projection_string(&self.prompt_id, 256)
             || self.prompt_id != queue
             || !remote_prompt_projection_string(&self.runtime_id, 256)
@@ -133,7 +141,7 @@ impl RemotePromptCorrelatedObservation {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptReceiverStatus {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if !self.received
             || self
                 .queue_entry_id
@@ -202,7 +210,7 @@ impl RemotePromptReceiverStatus {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl RemotePromptStatus {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         if self.protocol_version != 1
             || self.operation_id.is_nil()
             || self.intent_digest.len() != 64
@@ -220,7 +228,7 @@ impl RemotePromptStatus {
         Ok(())
     }
 
-    fn decode_bounded(bytes: &[u8]) -> Result<Self, ApiError> {
+    pub(crate) fn decode_bounded(bytes: &[u8]) -> Result<Self, ApiError> {
         if bytes.len() > REMOTE_PROMPT_STATUS_BYTES {
             return Err(remote_prompt_projection_error());
         }
@@ -232,7 +240,7 @@ impl RemotePromptStatus {
 
     // Reconciliation observes a retained source row. JSON null reports no
     // observation; it never establishes remote non-entry or permits a resend.
-    fn decode_optional_bounded(bytes: &[u8]) -> Result<Option<Self>, ApiError> {
+    pub(crate) fn decode_optional_bounded(bytes: &[u8]) -> Result<Option<Self>, ApiError> {
         if bytes.len() > REMOTE_PROMPT_STATUS_BYTES {
             return Err(remote_prompt_projection_error());
         }
@@ -244,7 +252,7 @@ impl RemotePromptStatus {
         Ok(status)
     }
 
-    fn encode_bounded(&self) -> Result<Vec<u8>, ApiError> {
+    pub(crate) fn encode_bounded(&self) -> Result<Vec<u8>, ApiError> {
         self.validate()?;
         let bytes = serde_json::to_vec(self).map_err(|_| remote_prompt_projection_error())?;
         if bytes.len() > REMOTE_PROMPT_STATUS_BYTES {
@@ -255,7 +263,7 @@ impl RemotePromptStatus {
 
     // The caller obtains these expected values from the retained source row,
     // never a newly resolved reference or a new permission generation.
-    fn validate_for_operation(
+    pub(crate) fn validate_for_operation(
         &self,
         operation_id: Uuid,
         intent_digest: &str,

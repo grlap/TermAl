@@ -3,13 +3,13 @@
 // query; this projection never truncates or changes durable run evidence.
 
 #[derive(Deserialize)]
-struct TestRunDetailQuery {
-    view: Option<TestRunDetailView>,
+pub(crate) struct TestRunDetailQuery {
+    pub(crate) view: Option<TestRunDetailView>,
 }
 
 #[derive(Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum TestRunDetailView {
+pub(crate) enum TestRunDetailView {
     Detail,
     Registration,
 }
@@ -64,7 +64,7 @@ fn test_run_registration_confirmation(
         .into_response())
 }
 
-fn serialize_test_run_detail_summary<S: serde::Serializer>(
+pub(crate) fn serialize_test_run_detail_summary<S: serde::Serializer>(
     run: &TestRunSummary,
     serializer: S,
 ) -> std::result::Result<S::Ok, S::Error> {

@@ -2,40 +2,48 @@
 // work in one authority store. Protocol callers submit facts; captures and
 // evaluations consume only acknowledged authority. Uses the existing writer.
 
-const ENGRAM_NAMING_HISTORY_EPOCH: u64 = 1;
+use super::*;
+
+pub(crate) const ENGRAM_NAMING_HISTORY_EPOCH: u64 = 1;
 
 /// The refusal when another owner replaced a work's authority image before
 /// this one was acknowledged. A caller may prepare a fresh image and try
 /// again when what it acts on is unchanged.
-const ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR: &str =
+pub(crate) const ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR: &str =
     "named-root acknowledgement belongs to a superseded authority image";
 const ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR: &str =
     "named-root response belongs to a superseded work owner";
 
 /// How many times a naming prepares a fresh authority image after another
 /// owner superseded the previous one, within the naming's own budget.
-const ENGRAM_NAMING_SUPERSEDED_RETRIES: usize = 3;
+pub(crate) const ENGRAM_NAMING_SUPERSEDED_RETRIES: usize = 3;
 
 /// Local facts a naming read is allowed to confirm. Kept names capture these
 /// before dropping the state lock, so recovery cannot adopt a rival selection.
-struct EngramNamingReadContext {
-    selection: Option<EngramWorkSourceRoot>,
-    journal: Option<EngramNamedRootJournal>,
+pub(crate) struct EngramNamingReadContext {
+    pub(crate) selection: Option<EngramWorkSourceRoot>,
+    pub(crate) journal: Option<EngramNamedRootJournal>,
 }
 
 impl EngramNamingReadContext {
-    fn capture(
+    pub(crate) fn capture(
         inner: &StateInner,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
     ) -> Self {
         Self {
             selection: engram_work_source_root_for_work(
-                &inner.engram_work_source_roots, store, &binding.work_id,
-            ).cloned(),
+                &inner.engram_work_source_roots,
+                store,
+                &binding.work_id,
+            )
+            .cloned(),
             journal: engram_root_journal(
-                &inner.engram_named_root_journal, store, &binding.claim_id,
-            ).cloned(),
+                &inner.engram_named_root_journal,
+                store,
+                &binding.claim_id,
+            )
+            .cloned(),
         }
     }
 }
@@ -53,7 +61,7 @@ const ENGRAM_RETAINED_HISTORY_REPAIR_LINE_PREFIX: &str =
 /// transition, no unresolved run or journal). A line given for another store
 /// or another work, every other pending line, a prompt's own text and any
 /// trace stay as they are. Makes no Engram call.
-fn retire_engram_retained_history_repair_lines_locked(
+pub(crate) fn retire_engram_retained_history_repair_lines_locked(
     inner: &mut StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
@@ -62,7 +70,9 @@ fn retire_engram_retained_history_repair_lines_locked(
         return;
     }
     for record in &mut inner.sessions {
-        record.engram.retire_retained_history_repair_lines(store, work);
+        record
+            .engram
+            .retire_retained_history_repair_lines(store, work);
     }
 }
 
@@ -70,10 +80,10 @@ fn retire_engram_retained_history_repair_lines_locked(
 thread_local! {
     // Manual AppState fixtures explicitly lack the production persist worker.
     // Tests can disable this allowance to exercise the stopped-writer refusal.
-    static TEST_ENGRAM_AUTHORITY_MANUAL_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    pub(crate) static TEST_ENGRAM_AUTHORITY_MANUAL_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
-fn engram_authority_manual_writer_allowed() -> bool {
+pub(crate) fn engram_authority_manual_writer_allowed() -> bool {
     #[cfg(test)]
     {
         TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.get())
@@ -86,7 +96,7 @@ fn engram_authority_manual_writer_allowed() -> bool {
 
 /// The turn that manual writes of the store at `path` take.
 #[cfg(test)]
-fn engram_authority_manual_write_turn(path: &FsPath) -> Arc<std::sync::Mutex<()>> {
+pub(crate) fn engram_authority_manual_write_turn(path: &FsPath) -> Arc<std::sync::Mutex<()>> {
     static TURNS: std::sync::OnceLock<
         std::sync::Mutex<HashMap<PathBuf, Arc<std::sync::Mutex<()>>>>,
     > = std::sync::OnceLock::new();
@@ -116,18 +126,25 @@ impl AppState {
     ///
     /// Manual writes of one store take turns. An off-lock capture is the one
     /// writer that could commit an image older than another's change.
-    fn engram_authority_manual_write(
+    pub(crate) fn engram_authority_manual_write(
         &self,
         committed: impl Fn(&rusqlite::Connection) -> Result<bool>,
     ) -> Result<bool> {
         let path = self.persistence_path.as_path();
         let turn = engram_authority_manual_write_turn(path);
-        let _turn = turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _turn = turn
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let delta = collect_persist_delta_from_shared_state(&self.inner, 0);
         self.test_engram_authority_ack_boundary("after_delta_capture");
         let mut cache = SqlitePersistConnectionCache::new();
         match persist_delta_via_cache(&mut cache, path, &delta) {
-            Ok(_) => committed(cache.connection.as_ref().expect("committed writer connection")),
+            Ok(_) => committed(
+                cache
+                    .connection
+                    .as_ref()
+                    .expect("committed writer connection"),
+            ),
             // A refused write invalidates its cached connection.
             Err(refused) if refused.is::<PersistMetadataSnapshotStale>() => {
                 self.test_engram_authority_ack_boundary("after_stale_capture_refused");
@@ -144,7 +161,7 @@ impl AppState {
 
 // A renewed view changes revision and fence, but not the canonical run that
 // still needs reconciliation. Keep the newest view for that exact association.
-fn engram_same_recovery_run(
+pub(crate) fn engram_same_recovery_run(
     left: &EngramControlWorkBinding,
     right: &EngramControlWorkBinding,
 ) -> bool {
@@ -156,7 +173,7 @@ fn engram_same_recovery_run(
 
 /// The canonical proofs the naming history of `work_id` in `store` holds:
 /// one per recovery run (`engram_same_recovery_run`), none without a history.
-fn engram_work_naming_proofs<'a>(
+pub(crate) fn engram_work_naming_proofs<'a>(
     histories: &'a [EngramWorkNamingHistory],
     store: &'a EngramAuthorityStoreKey,
     work_id: &'a str,
@@ -168,7 +185,7 @@ fn engram_work_naming_proofs<'a>(
         .flat_map(|history| history.proofs.iter())
 }
 
-fn engram_retain_recovery_run(
+pub(crate) fn engram_retain_recovery_run(
     runs: &mut Vec<EngramControlWorkBinding>,
     binding: &EngramControlWorkBinding,
 ) {
@@ -185,8 +202,11 @@ fn engram_discover_recovery_run(
     if history.run_is_retired(binding) {
         return;
     }
-    if let Some(known) = history.unresolved_runs.iter_mut()
-        .find(|known| engram_same_recovery_run(known, binding)) {
+    if let Some(known) = history
+        .unresolved_runs
+        .iter_mut()
+        .find(|known| engram_same_recovery_run(known, binding))
+    {
         // A renewal still refreshes revision/fence, without moving this run.
         *known = binding.clone();
     } else {
@@ -196,13 +216,14 @@ fn engram_discover_recovery_run(
 
 /// Order candidates from the shared off-lock reader projection. Preserve
 /// the namer's preference and original session order without building targets.
-fn engram_root_recovery_readers<'a>(
+pub(crate) fn engram_root_recovery_readers<'a>(
     readers: &[(&'a EngramReclamationSession, &EngramAuthorityStoreKey)],
     store: &EngramAuthorityStoreKey,
     namer: Option<&str>,
 ) -> Vec<&'a str> {
     let mut seen = HashSet::new();
-    let mut candidates = readers.iter()
+    let mut candidates = readers
+        .iter()
         .filter(|(_, current)| {
             #[cfg(test)]
             engram_root_reclamation_planning_boundary("recovery_candidate", &[]);
@@ -224,39 +245,42 @@ fn engram_root_recovery_readers<'a>(
 
 // Parity control for ordered candidates and current target validation.
 #[cfg(test)]
-fn engram_root_recovery_reader_target_locked(
+pub(crate) fn engram_root_recovery_reader_target_locked(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     namer: Option<&str>,
 ) -> Option<EngramBindingTarget> {
     let snapshot = EngramRootReaderSnapshot::capture(inner);
     let readers = snapshot.readers();
-    engram_root_recovery_readers(&readers, store, namer).into_iter()
+    engram_root_recovery_readers(&readers, store, namer)
+        .into_iter()
         .find_map(|session| {
-            AppState::engram_source_root_target_locked(inner, session).ok().flatten()
+            AppState::engram_source_root_target_locked(inner, session)
+                .ok()
+                .flatten()
                 .filter(|target| target.settings.authority_store_key.as_ref() == Some(store))
         })
 }
 
-struct EngramRootEventReply {
-    receipt: EngramNamedRootReceipt,
-    owner: EngramAuthorityTransition,
-    proof: EngramNamedRootReadResponse,
+pub(crate) struct EngramRootEventReply {
+    pub(crate) receipt: EngramNamedRootReceipt,
+    pub(crate) owner: EngramAuthorityTransition,
+    pub(crate) proof: EngramNamedRootReadResponse,
 }
 
 /// Issued only after the existing exact-image fence acknowledged Prepared.
 /// The current owner and admission identities must still be checked at use.
 #[derive(Clone)]
-struct EngramAcknowledgedRootGuard {
-    store: EngramAuthorityStoreKey,
-    owner: EngramAuthorityTransition,
-    runtime: Option<RuntimeToken>,
-    connection: EngramConnectionConfig,
-    settings: EngramProjectSettings,
+pub(crate) struct EngramAcknowledgedRootGuard {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) owner: EngramAuthorityTransition,
+    pub(crate) runtime: Option<RuntimeToken>,
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) settings: EngramProjectSettings,
 }
 
 impl EngramAcknowledgedRootGuard {
-    fn still_withholding(&self, inner: &StateInner) -> bool {
+    pub(crate) fn still_withholding(&self, inner: &StateInner) -> bool {
         inner.engram_work_naming_history.iter().any(|history| {
             history.store == self.store
                 && history.work_id == self.owner.binding.work_id
@@ -270,7 +294,7 @@ impl EngramAcknowledgedRootGuard {
     }
 }
 
-enum EngramRootEvidenceUncertainty {
+pub(crate) enum EngramRootEvidenceUncertainty {
     UnverifiedStore,
     UnknownProjection,
     OwnerChanged,
@@ -279,8 +303,10 @@ enum EngramRootEvidenceUncertainty {
     Publication(ApiError),
 }
 
-enum EngramRootReconcileOutcome {
-    Confirmed { fence: EngramRootReadFence },
+pub(crate) enum EngramRootReconcileOutcome {
+    Confirmed {
+        fence: EngramRootReadFence,
+    },
     NoClaim,
     EvidenceWithheld {
         guard: Option<EngramAcknowledgedRootGuard>,
@@ -288,7 +314,7 @@ enum EngramRootReconcileOutcome {
     },
 }
 
-enum EngramRootReconcileFailure {
+pub(crate) enum EngramRootReconcileFailure {
     AdmissionInvalid(EngramTransportError),
     Infrastructure(ApiError),
     // Keep the uncertainty's origin so legacy callers retain protocol errors,
@@ -296,7 +322,7 @@ enum EngramRootReconcileFailure {
     EvidenceWithheld(EngramRootEvidenceUncertainty),
 }
 
-enum EngramAuthorityReadFailure {
+pub(crate) enum EngramAuthorityReadFailure {
     Source(ApiError),
     /// A source failure that is Engram's definitive refusal of the read
     /// (`engram_retained_run_settlement.rs`). Every reader but the recovery
@@ -316,7 +342,7 @@ const ENGRAM_NAMED_ROOT_STATE_CONTRADICTS_HISTORY: &str =
     "named-root state contradicts its canonical event history";
 
 impl EngramAuthorityReadFailure {
-    fn into_api(self) -> ApiError {
+    pub(crate) fn into_api(self) -> ApiError {
         match self {
             Self::Source(error) | Self::Refused(_, error) | Self::Damaged(error) => error,
             Self::AdmissionInvalid(error) => ApiError::conflict(error.to_string()),
@@ -325,7 +351,7 @@ impl EngramAuthorityReadFailure {
 }
 
 impl EngramRootReconcileFailure {
-    fn into_transport(self) -> EngramTransportError {
+    pub(crate) fn into_transport(self) -> EngramTransportError {
         match self {
             Self::AdmissionInvalid(error) => error,
             Self::Infrastructure(error) => EngramTransportError::transport(error.message),
@@ -341,7 +367,7 @@ impl From<EngramTransportError> for EngramRootReconcileFailure {
 }
 
 impl EngramRootEvidenceUncertainty {
-    fn into_transport(self) -> EngramTransportError {
+    pub(crate) fn into_transport(self) -> EngramTransportError {
         match self {
             Self::UnverifiedStore => {
                 EngramTransportError::local_state("claimed source-root store is unverified")
@@ -361,28 +387,28 @@ impl EngramRootEvidenceUncertainty {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramAuthorityProof {
-    binding: EngramControlWorkBinding,
-    read: EngramNamedRootReadResponse,
+pub(crate) struct EngramAuthorityProof {
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) read: EngramNamedRootReadResponse,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramNamingFrontier {
-    run_id: String,
-    run_generation: i64,
-    claim_id: String,
-    event_id: String,
-    position: EngramNamedRootReadPosition,
-    workspace_id: String,
-    root_generation: i64,
-    named_at: String,
-    kind: EngramNamedRootKind,
+pub(crate) struct EngramNamingFrontier {
+    pub(crate) run_id: String,
+    pub(crate) run_generation: i64,
+    pub(crate) claim_id: String,
+    pub(crate) event_id: String,
+    pub(crate) position: EngramNamedRootReadPosition,
+    pub(crate) workspace_id: String,
+    pub(crate) root_generation: i64,
+    pub(crate) named_at: String,
+    pub(crate) kind: EngramNamedRootKind,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramAuthorityPhase {
+pub(crate) enum EngramAuthorityPhase {
     Prepared,
     Candidate,
     Published,
@@ -390,26 +416,26 @@ enum EngramAuthorityPhase {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramAuthorityTransition {
-    id: String,
-    version: u64,
-    binding: EngramControlWorkBinding,
-    phase: EngramAuthorityPhase,
+pub(crate) struct EngramAuthorityTransition {
+    pub(crate) id: String,
+    pub(crate) version: u64,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) phase: EngramAuthorityPhase,
 }
 
 /// Exact materialized metadata for the entire work. In particular an absent
 /// selection or journal is part of the expected content, not a missing check.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramAuthorityImage {
-    store: EngramAuthorityStoreKey,
-    work_id: String,
-    history: EngramWorkNamingHistory,
-    selection: Option<EngramWorkSourceRoot>,
-    journals: Vec<EngramNamedRootJournal>,
+pub(crate) struct EngramAuthorityImage {
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) work_id: String,
+    pub(crate) history: EngramWorkNamingHistory,
+    pub(crate) selection: Option<EngramWorkSourceRoot>,
+    pub(crate) journals: Vec<EngramNamedRootJournal>,
     allocation_floor: u64,
 }
 
-fn engram_journal_names_work(journal: &EngramNamedRootJournal, work: &str) -> bool {
+pub(crate) fn engram_journal_names_work(journal: &EngramNamedRootJournal, work: &str) -> bool {
     journal
         .read_binding
         .as_ref()
@@ -428,7 +454,7 @@ fn engram_journal_names_work(journal: &EngramNamedRootJournal, work: &str) -> bo
             .is_some_and(|read| read.intent.root.work_id == work)
 }
 
-fn engram_authority_work_unresolved(
+pub(crate) fn engram_authority_work_unresolved(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
@@ -438,7 +464,7 @@ fn engram_authority_work_unresolved(
 
 /// Which condition leaves the work's authority unresolved, in the order
 /// `engram_authority_work_unresolved` has always tested them.
-fn engram_authority_work_unresolved_reason(
+pub(crate) fn engram_authority_work_unresolved_reason(
     inner: &StateInner,
     store: &EngramAuthorityStoreKey,
     work: &str,
@@ -515,7 +541,7 @@ impl EngramAuthorityImage {
         })
     }
 
-    fn capture(
+    pub(crate) fn capture(
         inner: &StateInner,
         store: &EngramAuthorityStoreKey,
         work: &str,
@@ -548,7 +574,7 @@ impl EngramAuthorityImage {
         })
     }
 
-    fn matches_metadata(&self, metadata: &PersistedState) -> bool {
+    pub(crate) fn matches_metadata(&self, metadata: &PersistedState) -> bool {
         metadata.engram_work_naming_history.iter()
             .find(|history| history.store == self.store && history.work_id == self.work_id) == Some(&self.history)
             && engram_work_source_root_for_work(&metadata.engram_work_source_roots, &self.store, &self.work_id) == self.selection.as_ref()
@@ -564,7 +590,7 @@ impl EngramAuthorityImage {
     /// so no write can ever match the image again: owner versions only grow.
     /// A phase change at the same version is not one, and neither is an
     /// absent history, which proves no later owner; that fence keeps waiting.
-    fn is_superseded_by_metadata(&self, metadata: &PersistedState) -> bool {
+    pub(crate) fn is_superseded_by_metadata(&self, metadata: &PersistedState) -> bool {
         metadata
             .engram_work_naming_history
             .iter()
@@ -572,7 +598,7 @@ impl EngramAuthorityImage {
             .is_some_and(|current| current.owner_version > self.history.owner_version)
     }
 
-    fn still_owned(&self, inner: &StateInner) -> bool {
+    pub(crate) fn still_owned(&self, inner: &StateInner) -> bool {
         Self::capture(inner, &self.store, &self.work_id).is_ok_and(|current| {
             current.history == self.history
                 && current.selection == self.selection
@@ -583,7 +609,7 @@ impl EngramAuthorityImage {
 }
 
 impl EngramNamedRootReadResponse {
-    fn validate_authority(
+    pub(crate) fn validate_authority(
         &self,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
@@ -648,12 +674,14 @@ impl EngramNamedRootReadResponse {
             }),
         };
         if !consistent {
-            return Err(ApiError::bad_gateway(ENGRAM_NAMED_ROOT_STATE_CONTRADICTS_HISTORY));
+            return Err(ApiError::bad_gateway(
+                ENGRAM_NAMED_ROOT_STATE_CONTRADICTS_HISTORY,
+            ));
         }
         Ok(())
     }
 
-    fn frontier(&self) -> Option<EngramNamingFrontier> {
+    pub(crate) fn frontier(&self) -> Option<EngramNamingFrontier> {
         self.latest_event
             .as_ref()
             .map(|event| EngramNamingFrontier {
@@ -673,7 +701,7 @@ impl EngramNamedRootReadResponse {
 /// The event position orders only this run; the run ordinal orders only this
 /// work/store. Neither is the local historical invalidation revision.
 /// What a new proof of `binding`'s run must keep of the one already acknowledged.
-fn engram_proof_keeps_acknowledged_history(
+pub(crate) fn engram_proof_keeps_acknowledged_history(
     history: &EngramWorkNamingHistory,
     binding: &EngramControlWorkBinding,
     proof: &EngramNamedRootReadResponse,
@@ -702,7 +730,7 @@ fn engram_proof_keeps_acknowledged_history(
     Ok(())
 }
 
-fn engram_learn_canonical_history(
+pub(crate) fn engram_learn_canonical_history(
     history: &mut EngramWorkNamingHistory,
     read: &EngramNamedRootReadResponse,
 ) -> Result<(), ApiError> {
@@ -798,7 +826,7 @@ impl AppState {
     // Stop may temporarily borrow the exact runtime while its outcome is
     // unknown. This is identity only: the existing Stop/admission handoff
     // barrier still decides whether delivery can proceed after it settles.
-    fn engram_root_runtime_is_current(
+    pub(crate) fn engram_root_runtime_is_current(
         record: &SessionRecord,
         expected: &Option<RuntimeToken>,
     ) -> bool {
@@ -813,7 +841,7 @@ impl AppState {
                 }))
     }
 
-    fn engram_root_work_is_current_locked(
+    pub(crate) fn engram_root_work_is_current_locked(
         inner: &StateInner,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
@@ -826,23 +854,23 @@ impl AppState {
         // Root evidence belongs to this exact connection, runtime and work
         // association. Observation settings grant no naming authority.
         let current = Self::engram_source_root_target_locked(inner, &target.connection.session_id)
-        .ok()
-        .flatten();
+            .ok()
+            .flatten();
         current.as_ref().is_some_and(|current| {
             current.connection == target.connection
-                && current.settings.same_work_service_settings(&target.settings)
-        })
-            && Self::engram_root_runtime_is_current(record, &target.runtime_snapshot)
+                && current
+                    .settings
+                    .same_work_service_settings(&target.settings)
+        }) && Self::engram_root_runtime_is_current(record, &target.runtime_snapshot)
             && record.engram.work_binding.as_ref() == binding
             && guard.is_none_or(|guard| {
                 Self::engram_root_runtime_is_current(record, &guard.runtime)
                     && guard.connection == target.connection
                     && guard.settings.same_work_service_settings(&target.settings)
             })
-
     }
 
-    fn apply_engram_root_withholding_until(
+    pub(crate) fn apply_engram_root_withholding_until(
         &self,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
@@ -850,12 +878,7 @@ impl AppState {
         deadline: std::time::Instant,
     ) -> Result<(), EngramRootReconcileFailure> {
         let identity_current = |inner: &StateInner, guard: Option<&EngramAcknowledgedRootGuard>| {
-            Self::engram_root_work_is_current_locked(
-                inner,
-                target,
-                binding,
-                guard,
-            )
+            Self::engram_root_work_is_current_locked(inner, target, binding, guard)
         };
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -900,7 +923,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn guard_engram_root_read(
+    pub(crate) fn guard_engram_root_read(
         &self,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
@@ -912,7 +935,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn guard_engram_root_read_until(
+    pub(crate) fn guard_engram_root_read_until(
         &self,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
@@ -929,7 +952,7 @@ impl AppState {
     /// yet, and the naming's own budget bounds the retries. Failures stay
     /// classified, as the other guard reads' are, so the caller can keep a
     /// typed durability outcome.
-    fn guard_engram_root_read_for_naming_classified_until(
+    pub(crate) fn guard_engram_root_read_for_naming_classified_until(
         &self,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
@@ -938,7 +961,7 @@ impl AppState {
         self.guard_engram_root_read_inner_until(target, binding, deadline, true)
     }
 
-    fn guard_engram_root_read_classified_until(
+    pub(crate) fn guard_engram_root_read_classified_until(
         &self,
         target: &EngramBindingTarget,
         binding: Option<&EngramControlWorkBinding>,
@@ -983,12 +1006,12 @@ impl AppState {
                 deadline,
                 |inner| {
                     Self::engram_source_root_target_locked(inner, &target.connection.session_id)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|current| {
-                        current.connection == target.connection
-                            && current.work_binding == target.work_binding
-                    })
+                        .ok()
+                        .flatten()
+                        .is_some_and(|current| {
+                            current.connection == target.connection
+                                && current.work_binding == target.work_binding
+                        })
                 },
             )
         } else {
@@ -997,8 +1020,8 @@ impl AppState {
         let owner = prepared.map_err(EngramRootReconcileFailure::Infrastructure)?;
         let inner = self.inner.lock().expect("state mutex poisoned");
         let current = Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
-        .ok()
-        .flatten();
+            .ok()
+            .flatten();
         let index = inner
             .find_session_index(&target.connection.session_id)
             .ok_or_else(|| {
@@ -1006,7 +1029,9 @@ impl AppState {
             })?;
         if current.as_ref().is_none_or(|current| {
             current.connection != target.connection
-                || !current.settings.same_work_service_settings(&target.settings)
+                || !current
+                    .settings
+                    .same_work_service_settings(&target.settings)
         }) || !Self::engram_root_runtime_is_current(&inner.sessions[index], &runtime)
         {
             return Err(EngramTransportError::local_state(
@@ -1023,7 +1048,7 @@ impl AppState {
         }))
     }
 
-    fn learn_engram_authority_locked(
+    pub(crate) fn learn_engram_authority_locked(
         inner: &mut StateInner,
         store: &EngramAuthorityStoreKey,
         owner: &EngramAuthorityTransition,
@@ -1039,7 +1064,9 @@ impl AppState {
             .as_ref()
             .is_none_or(|current| current.id != owner.id || current.version != owner.version)
         {
-            return Err(ApiError::conflict(ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR));
+            return Err(ApiError::conflict(
+                ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR,
+            ));
         }
         let binding = history
             .unresolved_runs
@@ -1077,7 +1104,7 @@ impl AppState {
     /// All retained associations participate, even if the original session
     /// disappeared before creating a journal. One owner and one eventual
     /// complete-image ACK cover this bounded batch; reads never adopt focus.
-    fn recover_engram_authority_batch_until(
+    pub(crate) fn recover_engram_authority_batch_until(
         &self,
         store: &EngramAuthorityStoreKey,
         owner: &EngramAuthorityTransition,
@@ -1086,7 +1113,12 @@ impl AppState {
         reclamation: Option<(&EngramWorkSourceRoot, &EngramRootReclamationRoute)>,
     ) -> Result<(), ApiError> {
         self.recover_engram_authority_batch_admitting_until(
-            store, owner, deadline, None, settle_abandoned_writes, reclamation,
+            store,
+            owner,
+            deadline,
+            None,
+            settle_abandoned_writes,
+            reclamation,
         )
     }
 
@@ -1146,22 +1178,30 @@ impl AppState {
                 })
                 .map(|root| root.named_by_session.clone());
             let pending = if settle_abandoned_writes {
-                inner.engram_named_root_journal.iter()
+                inner
+                    .engram_named_root_journal
+                    .iter()
                     .inspect(|_| {
                         #[cfg(test)]
                         engram_root_reclamation_planning_boundary("recovery_pending_journal", &[]);
                     })
-                    .filter(|journal| &journal.store == store
-                        && journal.read_binding.as_ref().is_some_and(|binding| {
-                            runs.iter().any(|run| engram_same_recovery_run(run, binding))
-                        }))
+                    .filter(|journal| {
+                        &journal.store == store
+                            && journal.read_binding.as_ref().is_some_and(|binding| {
+                                runs.iter()
+                                    .any(|run| engram_same_recovery_run(run, binding))
+                            })
+                    })
                     .filter_map(|journal| journal.pending.clone())
                     .collect::<Vec<_>>()
             } else {
                 Vec::new()
             };
             (
-                EngramRootReaderSnapshot::capture(&inner), namer, runs, pending,
+                EngramRootReaderSnapshot::capture(&inner),
+                namer,
+                runs,
+                pending,
             )
         };
         // Cross-table indexing and all candidate decisions happen without
@@ -1172,12 +1212,15 @@ impl AppState {
         engram_root_reclamation_planning_boundary("recovery_selected", &[]);
         let require_current_owner = |inner: &StateInner| {
             if !inner.engram_work_naming_history.iter().any(|history| {
-                &history.store == store && history.work_id == owner.binding.work_id
+                &history.store == store
+                    && history.work_id == owner.binding.work_id
                     && history.transition.as_ref().is_some_and(|current| {
                         current.id == owner.id && current.version == owner.version
                     })
             }) {
-                return Err(ApiError::conflict("recovery batch was superseded during reader selection"));
+                return Err(ApiError::conflict(
+                    "recovery batch was superseded during reader selection",
+                ));
             }
             Ok(())
         };
@@ -1192,7 +1235,9 @@ impl AppState {
                 require_current_owner(&inner)?;
                 // A candidate is not authority. Rebuild once per candidate,
                 // releasing state before trying a successor on refusal.
-                Self::engram_source_root_target_locked(&inner, session).ok().flatten()
+                Self::engram_source_root_target_locked(&inner, session)
+                    .ok()
+                    .flatten()
                     .filter(|target| target.settings.authority_store_key.as_ref() == Some(store))
             };
             if current.is_some() {
@@ -1202,14 +1247,20 @@ impl AppState {
         }
         // Raw snapshot membership cannot establish reporter availability.
         // Revalidate each bounded intent separately, including exclusions.
-        let abandoned = pending.into_iter().filter(|intent| {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            !Self::engram_root_reporter_available(&inner, intent)
-        }).collect::<Vec<_>>();
+        let abandoned = pending
+            .into_iter()
+            .filter(|intent| {
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                !Self::engram_root_reporter_available(&inner, intent)
+            })
+            .collect::<Vec<_>>();
         let reserve = budget / 4;
         // Console lines are written after the state guard is released:
         // a slow console must not extend the lock every session waits on.
-        let mut console = EngramRetainedRunConsole { state: self, lines: Vec::new() };
+        let mut console = EngramRetainedRunConsole {
+            state: self,
+            lines: Vec::new(),
+        };
         for (index, binding) in runs.into_iter().enumerate() {
             // The outer maintenance owner already admitted the first run.
             // Additional associations are new work, not completion of it.
@@ -1239,7 +1290,10 @@ impl AppState {
                         .iter()
                         .inspect(|_| {
                             #[cfg(test)]
-                            engram_root_reclamation_planning_boundary("recovery_snapshot_journal", &[]);
+                            engram_root_reclamation_planning_boundary(
+                                "recovery_snapshot_journal",
+                                &[],
+                            );
                         })
                         .filter(|journal| {
                             &journal.store == store
@@ -1275,7 +1329,11 @@ impl AppState {
                     "retained named-root run needs an authorized reader in its original store",
                 )),
                 Some(target) => self
-                    .read_engram_authority_fact_classified_until(target, &binding, deadline - reserve)
+                    .read_engram_authority_fact_classified_until(
+                        target,
+                        &binding,
+                        deadline - reserve,
+                    )
                     .map_err(|failure| match failure {
                         EngramAuthorityReadFailure::Refused(refused, error) => {
                             refusal = Some(refused);
@@ -1326,12 +1384,12 @@ impl AppState {
                 .collect::<Vec<_>>();
             let reader_current = target.as_ref().is_some_and(|target| {
                 Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
-                .ok()
-                .flatten()
-                .is_some_and(|current| {
-                    current.connection == target.connection
-                        && current.settings.authority_store_key.as_ref() == Some(store)
-                })
+                    .ok()
+                    .flatten()
+                    .is_some_and(|current| {
+                        current.connection == target.connection
+                            && current.settings.authority_store_key.as_ref() == Some(store)
+                    })
             });
             let route_current = reclamation.is_none_or(|(root, route)| {
                 engram_root_reclamation_route_current(&inner, root, route)
@@ -1363,8 +1421,15 @@ impl AppState {
                 Err(error) if journals_settle => {
                     let refused = refusal.expect("checked refusal");
                     current.retire_recovery_run(&binding, refused, store, &error.message);
-                    let observer = target.as_ref().expect("a current reader").connection.session_id.clone();
-                    engram_settle_refused_run_journals_locked(&mut inner, store, &binding, refused, &observer);
+                    let observer = target
+                        .as_ref()
+                        .expect("a current reader")
+                        .connection
+                        .session_id
+                        .clone();
+                    engram_settle_refused_run_journals_locked(
+                        &mut inner, store, &binding, refused, &observer,
+                    );
                     if refused == EngramNamedRootReadRefusal::OtherProject {
                         console.lines.push(format!(
                             "engram> host-binding bug: Engram places retained run {} / claim {} \
@@ -1392,8 +1457,11 @@ impl AppState {
                         console.lines.push(format!(
                             "engram> {ENGRAM_STORE_INTEGRITY_ALARM}: retained run {} / claim {} of \
                              work {} in store {}: {}",
-                            binding.run_id, binding.claim_id, binding.work_id,
-                            store.database_path.display(), error.message
+                            binding.run_id,
+                            binding.claim_id,
+                            binding.work_id,
+                            store.database_path.display(),
+                            error.message
                         ));
                     }
                     if new && refusal == Some(EngramNamedRootReadRefusal::OtherProject) {
@@ -1435,7 +1503,8 @@ impl AppState {
                         // failure; a superseded owner or a missing association
                         // as a conflict.
                         let damaged = error.status == StatusCode::BAD_GATEWAY;
-                        if history.note_unresolved_run(&binding, &error.message, damaged) && damaged {
+                        if history.note_unresolved_run(&binding, &error.message, damaged) && damaged
+                        {
                             console.lines.push(format!(
                                 "engram> {ENGRAM_STORE_INTEGRITY_ALARM}: retained run {} / claim {} \
                                  of work {} in store {}: {}",
@@ -1463,7 +1532,10 @@ impl AppState {
                         .iter_mut()
                         .inspect(|_| {
                             #[cfg(test)]
-                            engram_root_reclamation_planning_boundary("recovery_settle_journal", &[]);
+                            engram_root_reclamation_planning_boundary(
+                                "recovery_settle_journal",
+                                &[],
+                            );
                         })
                         .filter(|journal| {
                             &journal.store == store
@@ -1529,7 +1601,7 @@ impl AppState {
     /// the repair line (`ENGRAM_RETAINED_HISTORY_REPAIR_LINE_PREFIX`), which an
     /// acknowledged forward name of that work retires
     /// (`retire_engram_retained_history_repair_lines_locked`).
-    fn recover_engram_authority_runs(&self, session_id: &str, budget: Duration) {
+    pub(crate) fn recover_engram_authority_runs(&self, session_id: &str, budget: Duration) {
         self.recover_engram_authority_runs_preferring(session_id, None, budget);
     }
 
@@ -1547,7 +1619,7 @@ impl AppState {
     /// A startup sweep supplies its remaining work so a bounded pass cannot
     /// repeatedly spend its budget on an already-attempted failure. Return
     /// only work actually reached before the deadline, not just selected work.
-    fn recover_engram_authority_work_batch(
+    pub(crate) fn recover_engram_authority_work_batch(
         &self,
         session_id: &str,
         preferred: Option<&str>,
@@ -1560,11 +1632,10 @@ impl AppState {
         let deadline = clock.now() + budget.min(Duration::from_secs(2));
         let (store, runs, root_runs) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(store) =
-                Self::engram_source_root_target_locked(&inner, session_id)
-                    .ok()
-                    .flatten()
-                    .and_then(|target| target.settings.authority_store_key)
+            let Some(store) = Self::engram_source_root_target_locked(&inner, session_id)
+                .ok()
+                .flatten()
+                .and_then(|target| target.settings.authority_store_key)
             else {
                 return BTreeSet::new();
             };
@@ -1712,7 +1783,11 @@ impl AppState {
             // would retain the run again, so a read left unanswered would
             // re-withhold a work that had only to publish.
             if self
-                .recover_engram_authority_candidate_until(&store, &binding.work_id, operation_deadline)
+                .recover_engram_authority_candidate_until(
+                    &store,
+                    &binding.work_id,
+                    operation_deadline,
+                )
                 .is_err()
             {
                 continue;
@@ -1732,22 +1807,34 @@ impl AppState {
             if settled {
                 let read_deadline = operation_deadline;
                 if retired
-                    || !root_runs.iter().any(|root| engram_same_recovery_run(root, &binding))
+                    || !root_runs
+                        .iter()
+                        .any(|root| engram_same_recovery_run(root, &binding))
                     || self.engram_settled_root_read_learns_nothing(
-                        session_id, &store, &binding, read_deadline,
+                        session_id,
+                        &store,
+                        &binding,
+                        read_deadline,
                     )
                 {
                     continue;
                 }
             }
-            if let Ok(owner) = self.prepare_engram_authority_until(&store, &binding, operation_deadline) {
-                let _ =
-                    self.recover_engram_authority_batch_admitting_until(
-                        &store, &owner, operation_deadline, Some(deadline), true, None,
-                    );
+            if let Ok(owner) =
+                self.prepare_engram_authority_until(&store, &binding, operation_deadline)
+            {
+                let _ = self.recover_engram_authority_batch_admitting_until(
+                    &store,
+                    &owner,
+                    operation_deadline,
+                    Some(deadline),
+                    true,
+                    None,
+                );
                 // Publish what this bounded pass actually read. The general
                 // publication helper would start another recovery batch.
-                let _ = self.publish_engram_authority_image_until(&store, &owner, operation_deadline);
+                let _ =
+                    self.publish_engram_authority_image_until(&store, &owner, operation_deadline);
             }
         }
         attempted
@@ -1772,10 +1859,16 @@ impl AppState {
         let (target, root) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             (
-                Self::engram_source_root_target_locked(&inner, session_id).ok().flatten(),
+                Self::engram_source_root_target_locked(&inner, session_id)
+                    .ok()
+                    .flatten(),
                 engram_work_source_root_for_claim(
-                    &inner.engram_work_source_roots, store, &binding.work_id, &binding.claim_id,
-                ).cloned(),
+                    &inner.engram_work_source_roots,
+                    store,
+                    &binding.work_id,
+                    &binding.claim_id,
+                )
+                .cloned(),
             )
         };
         let (Some(target), Some(root)) = (target, root) else {
@@ -1786,7 +1879,7 @@ impl AppState {
     }
 
     /// What a read of `root`'s run shows: whether anything is left to settle.
-    fn engram_root_read_learns_nothing(
+    pub(crate) fn engram_root_read_learns_nothing(
         &self,
         root: &EngramWorkSourceRoot,
         binding: &EngramControlWorkBinding,
@@ -1800,18 +1893,28 @@ impl AppState {
                             && u64::try_from(*generation).ok() == Some(root.generation)
                             && engram_named_at_matches(named_at, &root.named_at));
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                let history_agrees = inner.engram_work_naming_history.iter()
-                    .find(|history| history.store == root.store && history.work_id == binding.work_id)
+                let history_agrees = inner
+                    .engram_work_naming_history
+                    .iter()
+                    .find(|history| {
+                        history.store == root.store && history.work_id == binding.work_id
+                    })
                     .is_some_and(|history| {
-                        history.proofs.iter().any(|proof| engram_same_recovery_run(&proof.binding, binding))
-                            && engram_proof_keeps_acknowledged_history(history, binding, read).is_ok()
+                        history
+                            .proofs
+                            .iter()
+                            .any(|proof| engram_same_recovery_run(&proof.binding, binding))
+                            && engram_proof_keeps_acknowledged_history(history, binding, read)
+                                .is_ok()
                             && engram_learn_canonical_history(&mut history.clone(), read).is_ok()
                     });
                 still_bound
                     && history_agrees
                     && !matches!(read.run.state.as_str(), "completed" | "cancelled")
-                    && read.latest_event.as_ref().is_none_or(|event|
-                        event.kind != EngramNamedRootKind::Ended)
+                    && read
+                        .latest_event
+                        .as_ref()
+                        .is_none_or(|event| event.kind != EngramNamedRootKind::Ended)
                     && engram_root_retirement_reason(root, read).is_none()
                     && engram_root_claim_retirement_reason(
                         root,
@@ -1819,11 +1922,15 @@ impl AppState {
                         chrono::Utc::now(),
                         engram_named_root_session_present(&inner, &root.named_by_session),
                         engram_named_root_claim_holder(&inner, root).is_some()
-                            || inner.quarantined_persisted_session_ids.contains(&root.named_by_session),
+                            || inner
+                                .quarantined_persisted_session_ids
+                                .contains(&root.named_by_session),
                     )
                     .is_none()
             }
-            Err(EngramAuthorityReadFailure::Refused(..) | EngramAuthorityReadFailure::Damaged(_)) => false,
+            Err(
+                EngramAuthorityReadFailure::Refused(..) | EngramAuthorityReadFailure::Damaged(_),
+            ) => false,
             Err(EngramAuthorityReadFailure::Source(error)) => {
                 !engram_named_root_read_refusal_closes_claim(&error.message)
             }
@@ -1833,7 +1940,7 @@ impl AppState {
 
     /// Authority callers must never use the generic synchronous persistence
     /// fallback under StateInner. The enclosing owner supplies durability.
-    fn commit_engram_root_locked(&self, inner: &mut StateInner) -> anyhow::Result<u64> {
+    pub(crate) fn commit_engram_root_locked(&self, inner: &mut StateInner) -> anyhow::Result<u64> {
         inner.revision = inner
             .revision
             .checked_add(1)
@@ -1843,7 +1950,7 @@ impl AppState {
         Ok(inner.revision)
     }
 
-    fn read_engram_authority_fact(
+    pub(crate) fn read_engram_authority_fact(
         &self,
         target: &EngramBindingTarget,
         binding: &EngramControlWorkBinding,
@@ -1853,7 +1960,7 @@ impl AppState {
         self.read_engram_authority_fact_until(target, binding, clock.now() + budget)
     }
 
-    fn read_engram_authority_fact_until(
+    pub(crate) fn read_engram_authority_fact_until(
         &self,
         target: &EngramBindingTarget,
         binding: &EngramControlWorkBinding,
@@ -1863,7 +1970,7 @@ impl AppState {
             .map_err(EngramAuthorityReadFailure::into_api)
     }
 
-    fn read_engram_authority_fact_classified_until(
+    pub(crate) fn read_engram_authority_fact_classified_until(
         &self,
         target: &EngramBindingTarget,
         binding: &EngramControlWorkBinding,
@@ -1953,9 +2060,9 @@ impl AppState {
     ) -> Result<(), ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let current = Self::engram_source_root_target_locked(&inner, &target.connection.session_id)
-        .ok()
-        .flatten()
-        .ok_or_else(|| ApiError::conflict("named-root reader authority disappeared"))?;
+            .ok()
+            .flatten()
+            .ok_or_else(|| ApiError::conflict("named-root reader authority disappeared"))?;
         if current.connection != target.connection
             || current.settings.authority_store_key.as_ref() != Some(store)
         {
@@ -1969,7 +2076,7 @@ impl AppState {
     /// Install the withholding obligation before authority-changing I/O.
     /// Persistence uncertainty retains it; it never revives the old image.
     #[cfg(test)]
-    fn prepare_engram_authority(
+    pub(crate) fn prepare_engram_authority(
         &self,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
@@ -1979,7 +2086,7 @@ impl AppState {
         self.prepare_engram_authority_until(store, binding, clock.now() + budget)
     }
 
-    fn prepare_engram_authority_until(
+    pub(crate) fn prepare_engram_authority_until(
         &self,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
@@ -2004,7 +2111,7 @@ impl AppState {
     /// refused with what the caller can do: once `unchanged` fails, retrying
     /// the same request cannot help; once the retries or the budget are spent
     /// with the binding unchanged, the identical request can be retried.
-    fn prepare_engram_authority_retrying_supersession_until(
+    pub(crate) fn prepare_engram_authority_retrying_supersession_until(
         &self,
         store: &EngramAuthorityStoreKey,
         binding: &EngramControlWorkBinding,
@@ -2012,7 +2119,9 @@ impl AppState {
         unchanged: impl Fn(&StateInner) -> bool,
     ) -> Result<EngramAuthorityTransition, ApiError> {
         self.retry_engram_naming_supersession_until(
-            deadline, unchanged, "nothing was named",
+            deadline,
+            unchanged,
+            "nothing was named",
             || self.prepare_engram_authority_until(store, binding, deadline),
         )
     }
@@ -2032,8 +2141,11 @@ impl AppState {
                 Err(error) => error,
             };
             if error.status != StatusCode::CONFLICT
-                || !matches!(error.message.as_str(),
-                    ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR | ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR)
+                || !matches!(
+                    error.message.as_str(),
+                    ENGRAM_AUTHORITY_IMAGE_SUPERSEDED_ERROR
+                        | ENGRAM_AUTHORITY_RESPONSE_SUPERSEDED_ERROR
+                )
             {
                 return Err(error);
             }
@@ -2065,7 +2177,7 @@ impl AppState {
     /// canonical fact under a newly acknowledged owner, and keep the lock on
     /// success so selection installation cannot race another owner again.
     /// No producer transition is sent by this recovery.
-    fn learn_engram_naming_authority_until<'a>(
+    pub(crate) fn learn_engram_naming_authority_until<'a>(
         &'a self,
         target: &EngramBindingTarget,
         reader: &EngramBindingTarget,
@@ -2074,11 +2186,23 @@ impl AppState {
         proof: &EngramNamedRootReadResponse,
         captured: Option<EngramNamingReadContext>,
         deadline: std::time::Instant,
-    ) -> Result<(StateMutexGuard<'a, StateInner>, EngramAuthorityTransition, EngramNamedRootReadResponse), ApiError> {
-        let store = target.settings.authority_store_key.as_ref()
+    ) -> Result<
+        (
+            StateMutexGuard<'a, StateInner>,
+            EngramAuthorityTransition,
+            EngramNamedRootReadResponse,
+        ),
+        ApiError,
+    > {
+        let store = target
+            .settings
+            .authority_store_key
+            .as_ref()
             .ok_or_else(|| ApiError::conflict("naming authority store disappeared"))?;
         if reader.settings.authority_store_key.as_ref() != Some(store) {
-            return Err(ApiError::conflict("naming canonical reader belongs to another authority store"));
+            return Err(ApiError::conflict(
+                "naming canonical reader belongs to another authority store",
+            ));
         }
         let binding = &owner.binding;
         if !engram_same_recovery_run(binding, naming_binding) {
@@ -2086,10 +2210,9 @@ impl AppState {
                 "naming recovery requires its requested association to name the original run",
             ));
         }
-        let live_binding = target.work_binding.as_ref()
-            .ok_or_else(|| ApiError::conflict(
-                "naming recovery requires its captured live association",
-            ))?;
+        let live_binding = target.work_binding.as_ref().ok_or_else(|| {
+            ApiError::conflict("naming recovery requires its captured live association")
+        })?;
         let EngramNamingReadContext { selection, journal } = captured.unwrap_or_else(|| {
             let inner = self.inner.lock().expect("state mutex poisoned");
             EngramNamingReadContext::capture(&inner, store, binding)
@@ -2148,7 +2271,7 @@ impl AppState {
         )
     }
 
-    fn recover_engram_authority_candidate_until(
+    pub(crate) fn recover_engram_authority_candidate_until(
         &self,
         store: &EngramAuthorityStoreKey,
         work_id: &str,
@@ -2199,7 +2322,7 @@ impl AppState {
         Ok(false)
     }
 
-    fn prepare_engram_authority_image_locked(
+    pub(crate) fn prepare_engram_authority_image_locked(
         &self,
         inner: &mut StateInner,
         store: &EngramAuthorityStoreKey,
@@ -2277,7 +2400,7 @@ impl AppState {
         EngramAuthorityImage::capture(inner, store, &binding.work_id)
     }
 
-    fn confirm_engram_authority_image_until(
+    pub(crate) fn confirm_engram_authority_image_until(
         &self,
         image: &EngramAuthorityImage,
         deadline: std::time::Instant,
@@ -2344,7 +2467,9 @@ impl AppState {
                 let target = PersistFenceTarget::EngramWorkAuthority(Box::new(image.clone()));
                 let committed = self
                     .engram_authority_manual_write(|connection| {
-                        target.is_already_durable(connection).context("authority read-back failed")
+                        target
+                            .is_already_durable(connection)
+                            .context("authority read-back failed")
                     })
                     .map_err(|error| {
                         ApiError::internal(format!(
@@ -2377,7 +2502,7 @@ impl AppState {
     /// on disk may redundantly survive the acknowledgement; restoration must
     /// recover that candidate rather than treating it as published.
     #[cfg(test)]
-    fn publish_engram_authority(
+    pub(crate) fn publish_engram_authority(
         &self,
         store: &EngramAuthorityStoreKey,
         owner: &EngramAuthorityTransition,
@@ -2387,7 +2512,7 @@ impl AppState {
         self.publish_engram_authority_until(store, owner, clock.now() + budget)
     }
 
-    fn publish_engram_authority_until(
+    pub(crate) fn publish_engram_authority_until(
         &self,
         store: &EngramAuthorityStoreKey,
         owner: &EngramAuthorityTransition,
@@ -2399,7 +2524,7 @@ impl AppState {
 
     /// Publish the already-read complete image without spending another read
     /// from a bounded maintenance pass. Unresolved facts remain guarded.
-    fn publish_engram_authority_image_until(
+    pub(crate) fn publish_engram_authority_image_until(
         &self,
         store: &EngramAuthorityStoreKey,
         owner: &EngramAuthorityTransition,
@@ -2410,7 +2535,7 @@ impl AppState {
 
     /// Capture the publication's resulting state under its final ownership
     /// lock, rather than adopting a possibly newer image after returning.
-    fn publish_engram_authority_image_with_result_until<T>(
+    pub(crate) fn publish_engram_authority_image_with_result_until<T>(
         &self,
         store: &EngramAuthorityStoreKey,
         owner: &EngramAuthorityTransition,

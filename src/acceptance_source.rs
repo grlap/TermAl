@@ -1,16 +1,19 @@
 // Private evaluation source admission and immutable subprocess handoff.
 // Identity remains the existing owner object; paths and summaries are not identities.
 
+use super::*;
+
 include!("engram_evaluation_checkpoint.rs");
 
-const ACCEPTANCE_SOURCE_ID_MAX_BYTES: usize = 1_048_576;
-const ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES: usize = 2_113_536;
-const ACCEPTANCE_PRIVATE_RESPONSE_MAX_BYTES: usize = ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES + 26;
-const ACCEPTANCE_VERIFICATION_FRAME_MAX_BYTES: usize = 2_162_688;
+pub(crate) const ACCEPTANCE_SOURCE_ID_MAX_BYTES: usize = 1_048_576;
+pub(crate) const ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES: usize = 2_113_536;
+pub(crate) const ACCEPTANCE_PRIVATE_RESPONSE_MAX_BYTES: usize =
+    ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES + 26;
+pub(crate) const ACCEPTANCE_VERIFICATION_FRAME_MAX_BYTES: usize = 2_162_688;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(untagged)]
-enum AcceptanceSourceBasis {
+pub(crate) enum AcceptanceSourceBasis {
     Legacy(AcceptanceLegacySourceBasis),
     Shared(AcceptanceSharedSourceBasis),
 }
@@ -19,12 +22,12 @@ enum AcceptanceSourceBasis {
 // and root metadata remain separate from identity equality, as in Engram.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "AcceptanceVerificationSourceWire")]
-struct AcceptanceVerificationSourceBasis {
-    workspace_id: String,
-    identity: AcceptanceSourceBasis,
-    git_tree: Option<String>,
-    source_root_generation: Option<i64>,
-    source_root_state: Option<EngramSourceRootState>,
+pub(crate) struct AcceptanceVerificationSourceBasis {
+    pub(crate) workspace_id: String,
+    pub(crate) identity: AcceptanceSourceBasis,
+    pub(crate) git_tree: Option<String>,
+    pub(crate) source_root_generation: Option<i64>,
+    pub(crate) source_root_state: Option<EngramSourceRootState>,
 }
 
 #[derive(Deserialize)]
@@ -101,12 +104,15 @@ fn acceptance_verification_tree_id(tree: &str) -> bool {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceVerificationApplicability {
-    kind: String,
-    tree: String,
+pub(crate) struct AcceptanceVerificationApplicability {
+    pub(crate) kind: String,
+    pub(crate) tree: String,
 }
 
-fn deserialize_acceptance_verification_applicability<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_acceptance_verification_applicability<
+    'de,
+    D: serde::Deserializer<'de>,
+>(
     decoder: D,
 ) -> std::result::Result<Option<AcceptanceVerificationApplicability>, D::Error> {
     let value = AcceptanceVerificationApplicability::deserialize(decoder)
@@ -119,7 +125,7 @@ fn deserialize_acceptance_verification_applicability<'de, D: serde::Deserializer
     Ok(Some(value))
 }
 
-fn acceptance_verification_basis_agrees(
+pub(crate) fn acceptance_verification_basis_agrees(
     original: &AcceptanceVerificationSourceBasis,
     verification: &AcceptanceVerificationSourceBasis,
 ) -> bool {
@@ -135,27 +141,27 @@ fn acceptance_verification_basis_agrees(
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceLegacySourceBasis {
+pub(crate) struct AcceptanceLegacySourceBasis {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_acceptance_source_workspace"
     )]
-    workspace_id: Option<String>,
-    fingerprint: String,
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) fingerprint: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceSharedSourceBasis {
+pub(crate) struct AcceptanceSharedSourceBasis {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_acceptance_source_workspace"
     )]
-    workspace_id: Option<String>,
+    pub(crate) workspace_id: Option<String>,
     #[serde(deserialize_with = "deserialize_acceptance_source_id")]
-    source_id: EngramSourceId,
+    pub(crate) source_id: EngramSourceId,
 }
 
 fn deserialize_acceptance_source_id<'de, D: serde::Deserializer<'de>>(
@@ -177,14 +183,16 @@ fn deserialize_acceptance_source_workspace<'de, D: serde::Deserializer<'de>>(
         .ok_or_else(|| serde::de::Error::custom("invalid evaluation source workspace"))
 }
 
-fn deserialize_acceptance_optional_source_id<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_acceptance_optional_source_id<'de, D: serde::Deserializer<'de>>(
     decoder: D,
 ) -> std::result::Result<Option<EngramSourceId>, D::Error> {
     // `default` covers absence. A present null is not an undeclared identity.
     deserialize_acceptance_source_id(decoder).map(Some)
 }
 
-fn acceptance_source_bytes(source: &EngramSourceId) -> std::result::Result<Vec<u8>, &'static str> {
+pub(crate) fn acceptance_source_bytes(
+    source: &EngramSourceId,
+) -> std::result::Result<Vec<u8>, &'static str> {
     source
         .validate(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET)
         .map_err(|_| "invalid evaluation source_id")?;
@@ -195,22 +203,29 @@ fn acceptance_source_bytes(source: &EngramSourceId) -> std::result::Result<Vec<u
     Ok(bytes)
 }
 
-fn acceptance_attempt_source_label(
+pub(crate) fn acceptance_attempt_source_label(
     source_id: Option<&EngramSourceId>,
     legacy: Option<&str>,
 ) -> String {
     if let Some(source) = source_id {
-        let changes = source.git_delta_description().unwrap_or_else(|| format!(
-            "{} changes, {} submodules", source.changes.len(), source.submodules.len(),
-        ));
-        format!("source-id:{} ({changes})", source.commit.get(..12).unwrap_or("unavailable"))
+        let changes = source.git_delta_description().unwrap_or_else(|| {
+            format!(
+                "{} changes, {} submodules",
+                source.changes.len(),
+                source.submodules.len(),
+            )
+        });
+        format!(
+            "source-id:{} ({changes})",
+            source.commit.get(..12).unwrap_or("unavailable")
+        )
     } else {
         acceptance_brief_text(legacy.unwrap_or("unmeasured"), 160)
     }
 }
 
 impl AcceptanceSourceBasis {
-    fn same_source(&self, other: &Self) -> bool {
+    pub(crate) fn same_source(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Legacy(a), Self::Legacy(b)) => a.fingerprint == b.fingerprint,
             (Self::Shared(a), Self::Shared(b)) => a.source_id == b.source_id,
@@ -224,21 +239,21 @@ impl AcceptanceSourceBasis {
 // it never republishes the object. The payload digest excludes the pathname.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct AcceptanceSourcePayload {
+pub(crate) struct AcceptanceSourcePayload {
     #[serde(deserialize_with = "deserialize_acceptance_source_id")]
-    source_id: EngramSourceId,
+    pub(crate) source_id: EngramSourceId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_file: Option<PathBuf>,
+    pub(crate) source_file: Option<PathBuf>,
 }
 
-struct AcceptanceSourceFile {
-    lease: Arc<AcceptanceSourceFileLease>,
+pub(crate) struct AcceptanceSourceFile {
+    pub(crate) lease: Arc<AcceptanceSourceFileLease>,
 }
 
-struct AcceptanceSourceFileLease {
-    path: PathBuf,
-    file: Mutex<Option<fs::File>>,
-    terminal: AtomicBool,
+pub(crate) struct AcceptanceSourceFileLease {
+    pub(crate) path: PathBuf,
+    pub(crate) file: Mutex<Option<fs::File>>,
+    pub(crate) terminal: AtomicBool,
 }
 
 // Every consumer in this host shares the same lease, including retries that
@@ -249,7 +264,7 @@ static ACCEPTANCE_SOURCE_FILE_LEASES: LazyLock<
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl AcceptanceSourcePayload {
-    fn reopen(
+    pub(crate) fn reopen(
         &self,
         private_directory: &FsPath,
     ) -> std::result::Result<AcceptanceSourceFile, ApiError> {
@@ -302,7 +317,7 @@ impl AcceptanceSourcePayload {
         Ok(guard)
     }
 
-    fn publish(
+    pub(crate) fn publish(
         &self,
         private_directory: &FsPath,
     ) -> std::result::Result<AcceptanceSourceFile, ApiError> {
@@ -412,7 +427,7 @@ impl AcceptanceSourceFile {
         Ok(())
     }
 
-    fn verify(&self, expected: &[u8]) -> std::result::Result<(), ApiError> {
+    pub(crate) fn verify(&self, expected: &[u8]) -> std::result::Result<(), ApiError> {
         use std::io::{Read, Seek, SeekFrom};
         let mut handle = self
             .lease
@@ -451,12 +466,12 @@ impl AcceptanceSourceFile {
         Ok(())
     }
 
-    fn path(&self) -> &FsPath {
+    pub(crate) fn path(&self) -> &FsPath {
         &self.lease.path
     }
 
     #[cfg(test)]
-    fn consumer(&self) -> Self {
+    pub(crate) fn consumer(&self) -> Self {
         Self {
             lease: Arc::clone(&self.lease),
         }
@@ -464,11 +479,11 @@ impl AcceptanceSourceFile {
 
     // This only authorizes removal; each in-flight consumer still owns the
     // handle. Unknown outcomes do not call it and retain their saved locator.
-    fn terminal(&self) {
+    pub(crate) fn terminal(&self) {
         self.lease.terminal.store(true, Ordering::Release);
     }
 
-    fn retain(&self) {
+    pub(crate) fn retain(&self) {
         self.lease.terminal.store(false, Ordering::Release);
     }
 }
@@ -490,7 +505,7 @@ impl Drop for AcceptanceSourceFileLease {
 }
 
 impl AcceptanceEvaluationOpenWrite {
-    fn digest(&self) -> std::result::Result<String, ApiError> {
+    pub(crate) fn digest(&self) -> std::result::Result<String, ApiError> {
         let Some(payload) = &self.source_payload else {
             // Preserve historical open-write hashes byte for byte.
             if self.args.iter().any(|arg| arg == "--source-id-file") {
@@ -531,7 +546,7 @@ impl AcceptanceEvaluationOpenWrite {
         Ok(format!("{:x}", digest.finalize()))
     }
 
-    fn source_file_args(
+    pub(crate) fn source_file_args(
         &self,
         file: &AcceptanceSourceFile,
     ) -> std::result::Result<Vec<String>, ApiError> {
@@ -555,7 +570,7 @@ impl AcceptanceEvaluationOpenWrite {
     }
 }
 
-fn acceptance_source_candidate(
+pub(crate) fn acceptance_source_candidate(
     declared: &DelegationAcceptanceEvaluation,
     is_new: bool,
     private_directory: &FsPath,
@@ -590,7 +605,7 @@ fn acceptance_source_candidate(
     Ok((payload, file))
 }
 
-fn acceptance_source_replay_file(
+pub(crate) fn acceptance_source_replay_file(
     original: &AcceptanceEvaluationOpenWrite,
     digest: &str,
     mut file: Option<AcceptanceSourceFile>,
@@ -622,7 +637,7 @@ fn acceptance_source_replay_file(
     Ok(file)
 }
 
-fn run_acceptance_source_payload(
+pub(crate) fn run_acceptance_source_payload(
     connection: &EngramConnectionConfig,
     original: &AcceptanceEvaluationOpenWrite,
     file: Option<&AcceptanceSourceFile>,
@@ -656,7 +671,7 @@ fn run_acceptance_source_payload(
 }
 
 impl AppState {
-    fn acceptance_owner_judged_source(
+    pub(crate) fn acceptance_owner_judged_source(
         &self,
         owner: &str,
         place: &EngramBasisPlace,
@@ -681,7 +696,8 @@ impl AppState {
             }
             return Ok((None, None, None));
         };
-        if admission.and_then(|admission| admission.recorded_source.as_ref())
+        if admission
+            .and_then(|admission| admission.recorded_source.as_ref())
             .is_some_and(|expected| !expected.same_format(&source_id))
         {
             return Err(ApiError::conflict(
@@ -717,7 +733,7 @@ impl AppState {
         ))
     }
 
-    fn acceptance_shared_source_capture(
+    pub(crate) fn acceptance_shared_source_capture(
         &self,
         owner: &str,
         place: &EngramBasisPlace,
@@ -767,7 +783,7 @@ impl AppState {
 }
 
 impl DelegationAcceptanceEvaluation {
-    fn private_source_basis(&self) -> Option<AcceptanceSourceBasis> {
+    pub(crate) fn private_source_basis(&self) -> Option<AcceptanceSourceBasis> {
         match (&self.source_id, &self.source_fingerprint) {
             (Some(source_id), None) => {
                 Some(AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
@@ -794,7 +810,7 @@ fn acceptance_private_control_read(request: &EngramControlRequest) -> bool {
     )
 }
 
-fn engram_control_request_frame_limit(request: &EngramControlRequest) -> usize {
+pub(crate) fn engram_control_request_frame_limit(request: &EngramControlRequest) -> usize {
     match request {
         EngramControlRequest::ExecutionObserve { .. } => ENGRAM_OBSERVATION_MAX_REQUEST_BYTES,
         EngramControlRequest::VerificationRecord { .. } => ACCEPTANCE_VERIFICATION_FRAME_MAX_BYTES,
@@ -802,7 +818,7 @@ fn engram_control_request_frame_limit(request: &EngramControlRequest) -> usize {
     }
 }
 
-fn encode_engram_control_request(
+pub(crate) fn encode_engram_control_request(
     request: &EngramControlRequest,
 ) -> std::result::Result<Vec<u8>, EngramTransportError> {
     let encoded = serde_json::to_vec(request).map_err(|_| {
@@ -823,7 +839,7 @@ fn encode_engram_control_request(
     Ok(encoded)
 }
 
-fn engram_control_response_frame_limit(request: &EngramControlRequest) -> usize {
+pub(crate) fn engram_control_response_frame_limit(request: &EngramControlRequest) -> usize {
     if acceptance_private_control_read(request) {
         ACCEPTANCE_PRIVATE_RESPONSE_MAX_BYTES
     } else {

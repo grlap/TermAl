@@ -1,7 +1,9 @@
 // Explicit central activation. An existing verified report is consumed as
 // evidence, while Greg's authorization remains the recorded process rule.
 
-async fn activate_federation_satellite_route(
+use super::*;
+
+pub(crate) async fn activate_federation_satellite_route(
     AxumPath(id): AxumPath<String>,
     State(app): State<AppState>,
 ) -> Result<Json<FederationPeerSnapshot>, ApiError> {

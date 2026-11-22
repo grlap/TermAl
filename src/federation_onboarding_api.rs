@@ -2,16 +2,18 @@
 // Does not expose control actions through L1 or activate satellites implicitly.
 // New O1 handlers composed into main.rs's existing local API router.
 
+use super::*;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationEnrollmentRequest {
-    record: FederationPeerRecord,
+pub(crate) struct FederationEnrollmentRequest {
+    pub(crate) record: FederationPeerRecord,
     #[serde(default)]
-    engram_enabled: bool,
-    engram_command: Option<FederationEngramProbeCommand>,
+    pub(crate) engram_enabled: bool,
+    pub(crate) engram_command: Option<FederationEngramProbeCommand>,
 }
 
-async fn enroll_federation_satellite(
+pub(crate) async fn enroll_federation_satellite(
     State(app): State<AppState>,
     AxumPath(id): AxumPath<String>,
     Json(request): Json<FederationEnrollmentRequest>,
@@ -49,7 +51,7 @@ async fn enroll_federation_satellite(
     .map_err(|_| federation_transport_unavailable())?
 }
 
-async fn verify_federation_satellite_route(
+pub(crate) async fn verify_federation_satellite_route(
     State(app): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<FederationOnboardingReport>, ApiError> {
@@ -61,7 +63,7 @@ async fn verify_federation_satellite_route(
         .map(Json)
 }
 
-async fn get_federation_onboarding_report(
+pub(crate) async fn get_federation_onboarding_report(
     State(app): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Result<Json<FederationOnboardingReport>, ApiError> {

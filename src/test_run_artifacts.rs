@@ -5,13 +5,15 @@
 // guess by PID/time/command similarity, scan processes, mint verification or
 // final host proof, or manufacture a launcher registration ACK.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
-    static TEST_TEST_RUN_TERMINAL_RETENTION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static TEST_TEST_RUN_TERMINAL_RETENTION_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_TERMINAL_RETENTION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_TERMINAL_RETENTION_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
+pub(crate) fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
     row.summary.state = TestRunState::Unknown;
     row.summary.unknown_reason = Some(TestRunUnknownReason::ResultsUnreadable);
     row.summary.error = Some("Launcher result describes only the launch; the test run's terminal outcome is not confirmed.".to_owned());
@@ -28,7 +30,7 @@ fn test_run_artifact_observation_matches_snapshot(
 }
 
 impl AppState {
-    fn retain_test_command_artifact_refusal(
+    pub(crate) fn retain_test_command_artifact_refusal(
         &self,
         expected: &TestRunCommandObservation,
         code: TestRunNativeCompletionRefusalCode,
@@ -68,7 +70,7 @@ impl AppState {
     // Retain factual terminal results before artifacts can disappear. Use the
     // same positive association as API/SSE alias suppression, with no I/O or
     // evidence settlement here. A native terminal proof is never rewritten.
-    fn retain_test_command_artifact_terminals_locked(&self, inner: &mut StateInner) {
+    pub(crate) fn retain_test_command_artifact_terminals_locked(&self, inner: &mut StateInner) {
         // Reuse the fresh per-cut projection's candidate index and BTreeMap
         // row order. Its linear preparation still sees completed history,
         // but only unfinished same-run candidates reach exact matching.
@@ -221,7 +223,7 @@ impl AppState {
         }
     }
 
-    fn observe_test_command_artifact(
+    pub(crate) fn observe_test_command_artifact(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,

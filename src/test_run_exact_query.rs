@@ -1,25 +1,30 @@
 // Owns exact GET selection against a captured registration content fence.
 // Does not publish the index, scan history, or decide persistence durability.
 // Split from test_runs_api.rs so native filesystem checks stay off the state lock.
-struct TestRunExactQuery {
-    run: TestRunSummary,
-    directory: Option<PathBuf>,
-    request_identity: Option<String>,
+
+use super::*;
+pub(crate) struct TestRunExactQuery {
+    pub(crate) run: TestRunSummary,
+    pub(crate) directory: Option<PathBuf>,
+    pub(crate) request_identity: Option<String>,
     /// Whether the durable registration this answer was served from bound
     /// the run to work: read inside the same fence as the answer, so a
     /// registration still being published binds nothing yet.
-    registration_bound: bool,
+    pub(crate) registration_bound: bool,
 }
 
 #[cfg(test)]
 thread_local! {
     // Controlled supersession while the native identity check is off-lock.
-    static TEST_TEST_RUN_QUERY_CANONICALIZED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_TEST_RUN_QUERY_CANONICALIZED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 // Called on the blocking pool. Display keys are unsuitable here: Unix names
 // can contain literal backslashes and distinct bytes with the same lossy text.
-fn test_run_registered_disk_matches(row: &TestRunRegistration, disk: &TestRunDisk) -> bool {
+pub(crate) fn test_run_registered_disk_matches(
+    row: &TestRunRegistration,
+    disk: &TestRunDisk,
+) -> bool {
     row.run_id == disk.run_id
         && disk.request_identity.as_ref() == Some(&row.request_identity)
         && disk.owner.as_deref() == Some(row.initiating_session_id.as_str())
@@ -31,7 +36,7 @@ fn test_run_registered_disk_matches(row: &TestRunRegistration, disk: &TestRunDis
             .is_some_and(|(registered, indexed)| registered == indexed)
 }
 
-fn test_run_exact_query(
+pub(crate) fn test_run_exact_query(
     state: &AppState,
     run_id: &str,
     diagnostics: &mut TestRunRegistrationDiagnostics,
@@ -55,15 +60,18 @@ fn test_run_exact_query(
         changed();
     }
     let inner = diagnostics.lock(&state.inner);
-    let same_registration = match (inner.test_run_registrations.get(run_id), registration.as_ref()) {
+    let same_registration = match (
+        inner.test_run_registrations.get(run_id),
+        registration.as_ref(),
+    ) {
         (Some(actual), Some(expected)) => actual.matches_registration_snapshot(expected),
         (None, None) => true,
         _ => false,
     };
-    if !same_registration
-        || inner.test_runs.registered.contains(run_id) != durable
-    {
-        return Err(ApiError::conflict("test run registration changed during query; retry"));
+    if !same_registration || inner.test_runs.registered.contains(run_id) != durable {
+        return Err(ApiError::conflict(
+            "test run registration changed during query; retry",
+        ));
     }
     let registration_bound = durable
         && registration
@@ -100,7 +108,9 @@ fn test_run_exact_query(
         }));
     }
     if !same_index {
-        return Err(ApiError::conflict("test run index changed during query; retry"));
+        return Err(ApiError::conflict(
+            "test run index changed during query; retry",
+        ));
     }
     Ok(None)
 }

@@ -1,20 +1,22 @@
 // Owns the current worker's redacted progress in the existing attestation map.
 // Does not schedule retries, clear quarantine, persist state or grant authority.
-struct FederationWorkerObservation {
-    worker_id: String,
-    server_instance_id: String,
-    attempt: u64,
-    enrollment: u64,
-    transport: u64,
-    started_at: String,
-    updated_at: String,
-    stage: &'static str,
+
+use super::*;
+pub(crate) struct FederationWorkerObservation {
+    pub(crate) worker_id: String,
+    pub(crate) server_instance_id: String,
+    pub(crate) attempt: u64,
+    pub(crate) enrollment: u64,
+    pub(crate) transport: u64,
+    pub(crate) started_at: String,
+    pub(crate) updated_at: String,
+    pub(crate) stage: &'static str,
     retry_after_ms: Option<u64>,
-    ssh: Option<FederationSshDiagnostics>,
+    pub(crate) ssh: Option<FederationSshDiagnostics>,
 }
 
 impl FederationWorkerObservation {
-    fn project(&self, peer: &FederationPeerRecord) -> Value {
+    pub(crate) fn project(&self, peer: &FederationPeerRecord) -> Value {
         json!({"workerId":self.worker_id, "attempt":self.attempt,
             "serverInstanceId":self.server_instance_id, "hostId":peer.identity.host_id,
             "enrollmentGeneration":self.enrollment, "transportGeneration":self.transport,
@@ -32,15 +34,15 @@ impl FederationWorkerObservation {
     }
 }
 
-struct FederationWorkerReporter {
-    app: AppState,
-    basis: Arc<FederationTransportBasis>,
-    worker_id: String,
-    attempt: u64,
+pub(crate) struct FederationWorkerReporter {
+    pub(crate) app: AppState,
+    pub(crate) basis: Arc<FederationTransportBasis>,
+    pub(crate) worker_id: String,
+    pub(crate) attempt: u64,
 }
 
 impl FederationWorkerReporter {
-    fn new(app: AppState, basis: Arc<FederationTransportBasis>) -> Self {
+    pub(crate) fn new(app: AppState, basis: Arc<FederationTransportBasis>) -> Self {
         Self {
             app,
             basis,
@@ -49,30 +51,30 @@ impl FederationWorkerReporter {
         }
     }
 
-    fn begin(&mut self) {
+    pub(crate) fn begin(&mut self) {
         self.attempt = self.attempt.saturating_add(1);
         self.update(true, |_, _| {});
     }
 
-    fn stage(&self, stage: &'static str) {
+    pub(crate) fn stage(&self, stage: &'static str) {
         self.update(false, |worker, _| {
             worker.stage = stage;
             worker.retry_after_ms = None;
         });
     }
 
-    fn retry(&self, delay: Duration) {
+    pub(crate) fn retry(&self, delay: Duration) {
         self.update(false, |worker, _| {
             worker.stage = "retryBackoff";
             worker.retry_after_ms = Some(delay.as_millis().min(u64::MAX as u128) as u64);
         });
     }
 
-    fn ssh(&self, ssh: Option<FederationSshDiagnostics>) {
+    pub(crate) fn ssh(&self, ssh: Option<FederationSshDiagnostics>) {
         self.update(false, |worker, _| worker.ssh = ssh);
     }
 
-    fn update(
+    pub(crate) fn update(
         &self,
         begin: bool,
         update: impl FnOnce(&mut FederationWorkerObservation, &FederationPeerSnapshot),
@@ -139,7 +141,14 @@ impl Drop for FederationWorkerReporter {
             return;
         }
         self.update(false, |worker, _| {
-            if !matches!(worker.stage, "runtimeQuarantine" | "materialChanged" | "sshStartSettlement" | "sshCleanupPending" | "sshCleanupRetry") {
+            if !matches!(
+                worker.stage,
+                "runtimeQuarantine"
+                    | "materialChanged"
+                    | "sshStartSettlement"
+                    | "sshCleanupPending"
+                    | "sshCleanupRetry"
+            ) {
                 worker.stage = "stopped";
                 worker.retry_after_ms = None;
             }

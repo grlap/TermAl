@@ -2,6 +2,8 @@
 // test counts and carried full gates stay in their existing modules. Artifact
 // reads happen off the state lock and never substitute for source/grant fences.
 
+use super::*;
+
 /// Only Cargo's build subcommand, with at most one plain toolchain selector.
 /// Help, version, planning and dry-run requests do not execute a build.
 fn engram_cargo_build_args(args: &[String]) -> bool {
@@ -31,7 +33,7 @@ fn engram_cargo_build_args(args: &[String]) -> bool {
 }
 
 /// The shared foreground wrapper; metadata cannot stand for a Build command.
-fn engram_focused_build_words(program: &str, args: &[String]) -> Option<Vec<String>> {
+pub(crate) fn engram_focused_build_words(program: &str, args: &[String]) -> Option<Vec<String>> {
     let [cargo, rest @ ..] = engram_focused_launcher_words(program, args)?.ok()? else {
         return None;
     };
@@ -42,7 +44,7 @@ fn engram_focused_build_words(program: &str, args: &[String]) -> Option<Vec<Stri
     })
 }
 
-fn engram_is_build_command(program: &str, args: &[String]) -> bool {
+pub(crate) fn engram_is_build_command(program: &str, args: &[String]) -> bool {
     (program == "cargo" && engram_cargo_build_args(args))
         || engram_focused_build_words(program, args).is_some()
 }
@@ -50,7 +52,7 @@ fn engram_is_build_command(program: &str, args: &[String]) -> bool {
 /// Capture the nested Cargo selector at command start, without probing a
 /// workspace-chosen path. The report still fingerprints the original wrapper.
 #[cfg(test)]
-fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckCommand {
+pub(crate) fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckCommand {
     let mut toolchain = check.clone();
     if check.kind == EngramVerificationKind::Build
         && check.program == "node"
@@ -71,7 +73,7 @@ fn engram_build_toolchain_command(check: &EngramCheckCommand) -> EngramCheckComm
 /// (`EngramBuildDiagnostic::rejected`). `Compound`, `Runner` and `Counts` are
 /// focused Node Test guards a Build never reaches.
 #[derive(Clone, Copy, Debug)]
-enum EngramBuildRejection {
+pub(crate) enum EngramBuildRejection {
     Owner,
     Root,
     Detached,
@@ -90,7 +92,7 @@ enum EngramBuildRejection {
 
 impl EngramBuildRejection {
     #[cfg(test)]
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Owner => "owner",
             Self::Root => "root",
@@ -112,7 +114,7 @@ impl EngramBuildRejection {
 
 /// A diagnostic distinction only; neither alternative supplies pipe proof
 /// or an eligible test exit. The prefix view never selects verification.
-fn engram_pipe_rejection(check: &EngramCheckCommand) -> EngramBuildRejection {
+pub(crate) fn engram_pipe_rejection(check: &EngramCheckCommand) -> EngramBuildRejection {
     if check.normalized.contains('|')
         && engram_first_command(&check.normalized).len() == check.normalized.len()
     {
@@ -126,15 +128,15 @@ fn engram_pipe_rejection(check: &EngramCheckCommand) -> EngramBuildRejection {
 /// stays separate from `EngramTurnCheckEnd.exit`, which controls credit/refs.
 /// A Build's, or a focused Node Test's whose launcher records were rejected.
 #[derive(Clone, Debug)]
-struct EngramBuildDiagnostic {
+pub(crate) struct EngramBuildDiagnostic {
     /// The check kind the summary names: `Build` or `Test`.
-    subject: &'static str,
+    pub(crate) subject: &'static str,
     observed_exit: Option<i64>,
-    rejection: EngramBuildRejection,
+    pub(crate) rejection: EngramBuildRejection,
 }
 
 impl EngramBuildDiagnostic {
-    fn rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
+    pub(crate) fn rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
         let rejection = match rejection {
             EngramBuildRejection::Detached | EngramBuildRejection::Cwd => {
                 EngramBuildRejection::Root
@@ -146,11 +148,11 @@ impl EngramBuildDiagnostic {
 
     /// A focused Node Test whose run reported a terminal but whose launcher
     /// records failed a guard: the guard is named as it is, `detached` too.
-    fn test_rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
+    pub(crate) fn test_rejected(exit: EngramCommandExit, rejection: EngramBuildRejection) -> Self {
         Self::observed("Test", exit, rejection)
     }
 
-    fn observed(
+    pub(crate) fn observed(
         subject: &'static str,
         exit: EngramCommandExit,
         rejection: EngramBuildRejection,
@@ -166,7 +168,7 @@ impl EngramBuildDiagnostic {
     }
 
     #[cfg(test)]
-    fn summary(&self, command: &EngramCheckCommand) -> String {
+    pub(crate) fn summary(&self, command: &EngramCheckCommand) -> String {
         let terminal = self.observed_exit.map_or_else(
             || "no native terminal exit observed".to_owned(),
             |code| format!("observed native exit {code}"),
@@ -194,7 +196,7 @@ impl EngramBuildDiagnostic {
 
 /// A plain Cargo exit belongs to Cargo. A launcher exit instead needs its
 /// invocation's native stage; absent or inconsistent artifacts yield Unknown.
-fn engram_build_completion(
+pub(crate) fn engram_build_completion(
     check: &EngramTurnCheck,
     session_id: &str,
     output: &str,
@@ -245,7 +247,7 @@ fn engram_build_completion(
 /// This is a local launcher evidence seam, not cryptographic attestation of
 /// arbitrary files. Existing overlap and source checks still apply afterward.
 #[cfg(test)]
-fn engram_focused_build_exit(
+pub(crate) fn engram_focused_build_exit(
     check: &EngramTurnCheck,
     session_id: &str,
     output: &str,
@@ -273,7 +275,7 @@ fn engram_validated_focused_stage(
 
 /// Same validity policy for both callers. Each retains the first rejected
 /// guard for truthful diagnostics; a Build reports `Detached` as `Root`.
-fn engram_validated_focused_stage_result(
+pub(crate) fn engram_validated_focused_stage_result(
     check: &EngramTurnCheck,
     session_id: &str,
     output: &str,

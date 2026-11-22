@@ -16,16 +16,18 @@ the HTTP route, or the upload itself; those live in `telegram_documents.rs` and
 Provenance: new module; nothing was moved here from another file.
 */
 
+use super::*;
+
 /// Upper bound for one Markdown document. Telegram bots may upload up to
 /// 50 MB; a Markdown note far above 1 MiB is almost certainly not a note.
-const TELEGRAM_DOCUMENT_MAX_BYTES: u64 = 1024 * 1024;
+pub(crate) const TELEGRAM_DOCUMENT_MAX_BYTES: u64 = 1024 * 1024;
 
 /// A Markdown file that passed every admission rule, read into memory once.
 #[derive(Debug)]
-struct AdmittedTelegramDocument {
-    file_name: String,
-    canonical_path: PathBuf,
-    bytes: Vec<u8>,
+pub(crate) struct AdmittedTelegramDocument {
+    pub(crate) file_name: String,
+    pub(crate) canonical_path: PathBuf,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// Resolves `requested` and admits it as a Markdown document.
@@ -34,7 +36,7 @@ struct AdmittedTelegramDocument {
 /// `allowed_roots` must be canonical and normalized with
 /// `normalize_user_facing_path`; the canonical file must equal or lie under
 /// one of them.
-fn admit_telegram_markdown_document(
+pub(crate) fn admit_telegram_markdown_document(
     requested: &str,
     base_dir: &FsPath,
     allowed_roots: &[PathBuf],
@@ -42,7 +44,7 @@ fn admit_telegram_markdown_document(
     admit_telegram_markdown_document_before_open(requested, base_dir, allowed_roots, || {})
 }
 
-fn admit_telegram_markdown_document_before_open(
+pub(crate) fn admit_telegram_markdown_document_before_open(
     requested: &str,
     base_dir: &FsPath,
     allowed_roots: &[PathBuf],
@@ -59,7 +61,7 @@ fn admit_telegram_markdown_document_before_open(
 
 // Per-call callbacks expose the two namespace race boundaries to tests. They
 // never replace the file handle, its kernel path observation, or the checks.
-fn admit_telegram_markdown_document_observed(
+pub(crate) fn admit_telegram_markdown_document_observed(
     requested: &str,
     base_dir: &FsPath,
     allowed_roots: &[PathBuf],

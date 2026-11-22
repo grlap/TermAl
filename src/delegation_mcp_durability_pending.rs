@@ -1,10 +1,12 @@
 // Bridge-only validation and propagation of the post-enqueue Deadline
 // contract. Owns no retry, persistence, operation admission or success path.
 
+use super::*;
+
 /// Distinct from both a proven no-write refusal and a transport-unknown reply.
 #[derive(Debug)]
-struct TermalDurabilityPendingError {
-    envelope: Value,
+pub(crate) struct TermalDurabilityPendingError {
+    pub(crate) envelope: Value,
 }
 
 impl std::fmt::Display for TermalDurabilityPendingError {
@@ -22,7 +24,7 @@ fn durability_pending_nonempty_string(value: &Value) -> bool {
 /// The original POST body is supplied by the single-attempt long-call path.
 /// Malformed or foreign envelopes remain ordinary non-success errors. Retain
 /// only the versioned fields, not arbitrary server extensions or instructions.
-fn durability_pending_for_request(
+pub(crate) fn durability_pending_for_request(
     status: StatusCode,
     method: &str,
     path: &str,
@@ -201,7 +203,7 @@ fn durability_pending_for_request(
     })
 }
 
-fn mcp_json_rpc_durability_pending_error(
+pub(crate) fn mcp_json_rpc_durability_pending_error(
     id: Value,
     pending: &TermalDurabilityPendingError,
 ) -> Value {

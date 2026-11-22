@@ -5,41 +5,46 @@
 // Git/artifact reads hold neither. S0 publishes only before prompt handoff,
 // R never moves, and END freezes artifact judgment before later tool events.
 
+use super::*;
+
 include!("declared_run_task_end.rs");
 
 // The owner may use 60 s to capture source. Opening also reserves the existing
 // margin for local declaration/preimage and publication stages;
 // registration durability has its own window. Expiry withholds credit,
 // not dispatch. Every source stage derives its cap from the same budget.
-const NATIVE_S0_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_METADATA_BUDGET;
-const NATIVE_S0_AUTHORITY_MARGIN: Duration = TEST_RUN_REGISTRATION_DURABILITY_BUDGET;
+pub(crate) const NATIVE_S0_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_METADATA_BUDGET;
+pub(crate) const NATIVE_S0_AUTHORITY_MARGIN: Duration = TEST_RUN_REGISTRATION_DURABILITY_BUDGET;
 
 // Host-private provenance, persisted with the original execution before its
 // registration. A request file cannot supply or change this reservation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct DeclaredRunReservation {
-    host_instance: String,
-    execution_id: String,
-    session_id: String,
-    run_id: String,
-    run_directory: String,
-    common_dir: String,
-    request_identity: String,
-    registered_at: String,
-    source: DeclaredRunSource,
-    declaration: EngramDeclaredBinding,
-    store: EngramAuthorityStoreKey,
-    binding: EngramControlWorkBinding,
-    named: TestRunNamedRoot,
+pub(crate) struct DeclaredRunReservation {
+    pub(crate) host_instance: String,
+    pub(crate) execution_id: String,
+    pub(crate) session_id: String,
+    pub(crate) run_id: String,
+    pub(crate) run_directory: String,
+    pub(crate) common_dir: String,
+    pub(crate) request_identity: String,
+    pub(crate) registered_at: String,
+    pub(crate) source: DeclaredRunSource,
+    pub(crate) declaration: EngramDeclaredBinding,
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) named: TestRunNamedRoot,
     // Provider time is attributed data, never the host reservation clock.
-    provider_time: BTreeMap<String, Value>,
+    pub(crate) provider_time: BTreeMap<String, Value>,
 }
 
 impl DeclaredRunReservation {
     // Naming proves the recovery run and root fence. The registration worker
     // may observe a newer work revision, just like a committed launcher run;
     // that separately retained binding becomes the exact closing baseline.
-    fn accepts_registration_binding(&self, binding: Option<&EngramControlWorkBinding>) -> bool {
+    pub(crate) fn accepts_registration_binding(
+        &self,
+        binding: Option<&EngramControlWorkBinding>,
+    ) -> bool {
         binding.is_some_and(|binding| {
             engram_same_recovery_run(&self.binding, binding)
                 && binding.claim_fence == self.binding.claim_fence
@@ -49,29 +54,29 @@ impl DeclaredRunReservation {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct DeclaredRunTerminal {
-    results_digest: String,
-    source: Option<DeclaredRunSource>,
+pub(crate) struct DeclaredRunTerminal {
+    pub(crate) results_digest: String,
+    pub(crate) source: Option<DeclaredRunSource>,
     #[serde(default)]
-    source_refusal: Option<String>,
-    check: EngramVerificationRecordCheck,
+    pub(crate) source_refusal: Option<String>,
+    pub(crate) check: EngramVerificationRecordCheck,
     // Original provider endpoint, never inferred from mutable result JSON.
     #[serde(default)]
-    reported_success: bool,
+    pub(crate) reported_success: bool,
 }
 
 #[derive(Clone, Debug)]
-struct DeclaredRunObservedEnd {
-    ended_at: String,
-    exit: Option<i64>,
-    reported_success: bool,
-    interrupted: bool,
-    check: EngramVerificationRecordCheck,
+pub(crate) struct DeclaredRunObservedEnd {
+    pub(crate) ended_at: String,
+    pub(crate) exit: Option<i64>,
+    pub(crate) reported_success: bool,
+    pub(crate) interrupted: bool,
+    pub(crate) check: EngramVerificationRecordCheck,
 }
 
 // The artifact reader already combines the original process endpoint with its
 // result. Display that frozen verdict without inventing an OS exit number.
-fn declared_run_result_state(check: &EngramVerificationRecordCheck) -> &'static str {
+pub(crate) fn declared_run_result_state(check: &EngramVerificationRecordCheck) -> &'static str {
     match check.outcome {
         EngramVerificationRecordCheckOutcome::Passed => "passed",
         EngramVerificationRecordCheckOutcome::Failed => "failed",
@@ -80,28 +85,32 @@ fn declared_run_result_state(check: &EngramVerificationRecordCheck) -> &'static 
 }
 
 #[derive(Debug)]
-struct DeclaredRunExecution {
-    reservation: DeclaredRunReservation,
-    request: Value,
-    registered: bool,
-    worker_active: bool,
+pub(crate) struct DeclaredRunExecution {
+    pub(crate) reservation: DeclaredRunReservation,
+    pub(crate) request: Value,
+    pub(crate) registered: bool,
+    pub(crate) worker_active: bool,
     end_capture_started: bool,
-    end: Option<DeclaredRunObservedEnd>,
-    failure: Option<String>,
-    verification_refusal: Option<String>,
+    pub(crate) end: Option<DeclaredRunObservedEnd>,
+    pub(crate) failure: Option<String>,
+    pub(crate) verification_refusal: Option<String>,
 }
 
 struct DeclaredRunWorkerSlot(Arc<std::sync::atomic::AtomicUsize>);
 impl Drop for DeclaredRunWorkerSlot {
-    fn drop(&mut self) { self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
-fn declared_run_prepare_directory(start: &DeclaredRunReservation) -> Result<PathBuf> {
+pub(crate) fn declared_run_prepare_directory(start: &DeclaredRunReservation) -> Result<PathBuf> {
     let directory = PathBuf::from(&start.run_directory);
     let parent = directory.parent().context("native run parent absent")?;
     let git_dir = fs::canonicalize(parent.parent().context("native Git directory absent")?)?;
-    let common = fs::canonicalize(test_runs_git_common_dir(&start.source.root)
-        .context("native Git common directory absent")?)?;
+    let common = fs::canonicalize(
+        test_runs_git_common_dir(&start.source.root)
+            .context("native Git common directory absent")?,
+    )?;
     if engram_exact_path_key(&common) != start.common_dir
         || test_run_registration_relative_parent(&common, &git_dir.join("review-runs")).is_none()
         || parent.file_name() != Some(std::ffi::OsStr::new("review-runs"))
@@ -112,8 +121,8 @@ fn declared_run_prepare_directory(start: &DeclaredRunReservation) -> Result<Path
     // Create only the one known metadata directory. An existing redirect is
     // resolved and refused before creating any run or writing either file.
     match fs::create_dir(parent) {
-        Ok(()) => {},
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {},
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
     if fs::canonicalize(parent)? != git_dir.join("review-runs")
@@ -125,16 +134,28 @@ fn declared_run_prepare_directory(start: &DeclaredRunReservation) -> Result<Path
     Ok(directory)
 }
 
-fn declared_run_frame_match(turn: &DeclaredRunTurn, frame: &Value, workdir: &str)
-    -> Option<(EngramCheckCommand, EngramDeclaredBinding)> {
+fn declared_run_frame_match(
+    turn: &DeclaredRunTurn,
+    frame: &Value,
+    workdir: &str,
+) -> Option<(EngramCheckCommand, EngramDeclaredBinding)> {
     let snapshot = turn.snapshot.as_ref()?;
     let (ran, cwd) = match &turn.runtime {
-        RuntimeToken::Codex(_) => (frame.get("command")?.as_str()?, FsPath::new(frame.get("cwd")?.as_str()?)),
+        RuntimeToken::Codex(_) => (
+            frame.get("command")?.as_str()?,
+            FsPath::new(frame.get("cwd")?.as_str()?),
+        ),
         RuntimeToken::Claude(_) => {
             let input = frame.get("input")?;
             let ran = input.get("command")?.as_str()?;
-            if engram_declared_candidate(ran)?.0.directory.as_deref()
-                .is_none_or(|path| !FsPath::new(path).is_absolute()) { return None; }
+            if engram_declared_candidate(ran)?
+                .0
+                .directory
+                .as_deref()
+                .is_none_or(|path| !FsPath::new(path).is_absolute())
+            {
+                return None;
+            }
             (ran, FsPath::new(workdir))
         }
         _ => return None,
@@ -143,28 +164,28 @@ fn declared_run_frame_match(turn: &DeclaredRunTurn, frame: &Value, workdir: &str
 }
 
 #[derive(Clone, Debug)]
-struct DeclaredRunTurn {
-    runtime: RuntimeToken,
-    generation: u64,
-    keys: TestRunWorktreeKeys,
-    store: EngramAuthorityStoreKey,
-    binding: EngramControlWorkBinding,
-    named: TestRunNamedRoot,
+pub(crate) struct DeclaredRunTurn {
+    pub(crate) runtime: RuntimeToken,
+    pub(crate) generation: u64,
+    pub(crate) keys: TestRunWorktreeKeys,
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) named: TestRunNamedRoot,
     // Freeze the locally acknowledged name and claim fence with S0.
     // Registration retains its current revision separately; neither a newer
     // claim nor a later source capture may replace this opening reservation.
-    root_claim_fence: i64,
-    snapshot: Option<DeclaredRunSnapshot>,
-    opening_refusal: Option<String>,
-    opening_refusal_code: Option<&'static str>,
-    first_tool: DeclaredRunFirstTool,
-    timings: Arc<SourceReadTimings>,
-    native_start_attempted: bool,
-    execution: Option<Arc<Mutex<DeclaredRunExecution>>>,
+    pub(crate) root_claim_fence: i64,
+    pub(crate) snapshot: Option<DeclaredRunSnapshot>,
+    pub(crate) opening_refusal: Option<String>,
+    pub(crate) opening_refusal_code: Option<&'static str>,
+    pub(crate) first_tool: DeclaredRunFirstTool,
+    pub(crate) timings: Arc<SourceReadTimings>,
+    pub(crate) native_start_attempted: bool,
+    pub(crate) execution: Option<Arc<Mutex<DeclaredRunExecution>>>,
 }
 
 impl DeclaredRunTurn {
-    fn is_current(&self, record: &SessionRecord) -> bool {
+    pub(crate) fn is_current(&self, record: &SessionRecord) -> bool {
         record.active_turn_generation == self.generation
             && record.runtime.matches_runtime_token(&self.runtime)
             && record.session.status == SessionStatus::Active
@@ -172,11 +193,20 @@ impl DeclaredRunTurn {
     }
 }
 
-fn declared_run_opening_notice(record: &SessionRecord) -> Option<String> {
-    let turn = record.engram.declared_run_turn.as_ref().filter(|turn| turn.is_current(record))?;
-    if turn.snapshot.is_some() { return None; }
+pub(crate) fn declared_run_opening_notice(record: &SessionRecord) -> Option<String> {
+    let turn = record
+        .engram
+        .declared_run_turn
+        .as_ref()
+        .filter(|turn| turn.is_current(record))?;
+    if turn.snapshot.is_some() {
+        return None;
+    }
     let code = turn.opening_refusal_code.unwrap_or("opening_invalid");
-    Some(format!("[TermAl] Native declared-command credit is unavailable for this turn ({code}). S0 stages: {}. The prompt proceeds. To seek credit, run the declared command as the first tool activity of a later turn after the source and named-root authority are valid.", turn.timings.summary()))
+    Some(format!(
+        "[TermAl] Native declared-command credit is unavailable for this turn ({code}). S0 stages: {}. The prompt proceeds. To seek credit, run the declared command as the first tool activity of a later turn after the source and named-root authority are valid.",
+        turn.timings.summary()
+    ))
 }
 
 // A recovered name can retain an older proof's recovery association. Naming
@@ -244,16 +274,27 @@ fn declared_run_opening_named_binding(
 }
 
 fn declared_run_opening_authority_locked(
-    inner: &StateInner, session_id: &str, pending: &DeclaredRunTurn,
+    inner: &StateInner,
+    session_id: &str,
+    pending: &DeclaredRunTurn,
 ) -> Result<EngramSourceOwnerAuthority> {
-    let index = inner.find_session_index(session_id).context("native opening session unavailable")?;
+    let index = inner
+        .find_session_index(session_id)
+        .context("native opening session unavailable")?;
     let record = &inner.sessions[index];
-    let current = record.engram.declared_run_turn.as_ref()
+    let current = record
+        .engram
+        .declared_run_turn
+        .as_ref()
         .context("native opening reservation unavailable")?;
-    if !pending.is_current(record) || current.runtime != pending.runtime
-        || current.generation != pending.generation || current.keys != pending.keys
-        || current.store != pending.store || current.binding != pending.binding
-        || current.named != pending.named || current.root_claim_fence != pending.root_claim_fence
+    if !pending.is_current(record)
+        || current.runtime != pending.runtime
+        || current.generation != pending.generation
+        || current.keys != pending.keys
+        || current.store != pending.store
+        || current.binding != pending.binding
+        || current.named != pending.named
+        || current.root_claim_fence != pending.root_claim_fence
         || current.snapshot.is_some()
         || current.first_tool != DeclaredRunFirstTool::Waiting
     {
@@ -261,11 +302,12 @@ fn declared_run_opening_authority_locked(
     }
     let authority = engram_source_owner_authority_locked(inner, session_id)
         .map_err(|error| anyhow!(error.message))?;
-    let (binding, named) = declared_run_opening_named_binding(
-        inner, session_id, &pending.store, &pending.keys)
-        .map_err(|error| anyhow!(error.message))?;
+    let (binding, named) =
+        declared_run_opening_named_binding(inner, session_id, &pending.store, &pending.keys)
+            .map_err(|error| anyhow!(error.message))?;
     if authority.settings.authority_store_key.as_ref() != Some(&pending.store)
-        || binding.as_ref() != Some(&pending.binding) || named.as_ref() != Some(&pending.named)
+        || binding.as_ref() != Some(&pending.binding)
+        || named.as_ref() != Some(&pending.named)
         || test_run_named_root_fence(inner, session_id, Some(&pending.store), named.as_ref())
             != Some(pending.root_claim_fence)
     {
@@ -277,38 +319,68 @@ fn declared_run_opening_authority_locked(
 impl AppState {
     // One admitted observation supplies both schema/pin and this named root's
     // S0 identity. The public project-root metadata GET remains separate.
-    fn capture_declared_run_opening_with_owner(
-        &self, session_id: &str, pending: &DeclaredRunTurn, deadline: std::time::Instant,
+    pub(crate) fn capture_declared_run_opening_with_owner(
+        &self,
+        session_id: &str,
+        pending: &DeclaredRunTurn,
+        deadline: std::time::Instant,
         source_plan: EngramSourcePhasePlan,
-        mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
-            -> Result<std::process::Output>,
+        mut run: impl FnMut(
+            &FsPath,
+            &FsPath,
+            &[String],
+            std::time::Instant,
+            usize,
+        ) -> Result<std::process::Output>,
     ) -> Result<(DeclaredRunSnapshot, EngramSourceOwnerAuthority)> {
         let authority = declared_run_opening_authority_locked(
-            &self.inner.lock().expect("state mutex poisoned"), session_id, pending)?;
-        let configured = authority.settings.binary_path.as_deref().filter(|value| !value.is_empty())
+            &self.inner.lock().expect("state mutex poisoned"),
+            session_id,
+            pending,
+        )?;
+        let configured = authority
+            .settings
+            .binary_path
+            .as_deref()
+            .filter(|value| !value.is_empty())
             .context("Engram source owner binaryPath is not configured for this project")?;
         let root = FsPath::new(&pending.named.workspace_id);
         let cwd = engram_host_workdir(self.persistence_path.as_ref())?;
         // Bare-name trust remains scoped to the configured project, even when
         // the measured named worktree differs. No worktree-owned PATH search.
-        let binary = resolve_engram_source_program(FsPath::new(configured),
-            FsPath::new(&authority.project_root), deadline)?;
+        let binary = resolve_engram_source_program(
+            FsPath::new(configured),
+            FsPath::new(&authority.project_root),
+            deadline,
+        )?;
         let measurement = pending.timings.begin("source_owner_observation");
         // The outer window also funds declaration and publication. Source
         // receives its own operation window, leaving that authority reserve.
-        let (pin, observation) = engram_source_owner_observe_with(&binary, root, &cwd, source_plan, &mut run)?;
+        let (pin, observation) =
+            engram_source_owner_observe_with(&binary, root, &cwd, source_plan, &mut run)?;
         let observed_at = test_run_timestamp();
         drop(measurement);
-        let mut snapshot = declared_run_snapshot_with_owner(root, &pin, deadline,
-            Some(pending.timings.clone()), |_, _, until| observation.into_source_id(until))?;
+        let mut snapshot = declared_run_snapshot_with_owner(
+            root,
+            &pin,
+            deadline,
+            Some(pending.timings.clone()),
+            |_, _, until| observation.into_source_id(until),
+        )?;
         snapshot.source.measured_at = observed_at;
-        if resolve_engram_source_program(FsPath::new(configured),
-            FsPath::new(&authority.project_root), deadline)? != binary
+        if resolve_engram_source_program(
+            FsPath::new(configured),
+            FsPath::new(&authority.project_root),
+            deadline,
+        )? != binary
         {
             anyhow::bail!("native opening source owner changed during capture");
         }
         let current = declared_run_opening_authority_locked(
-            &self.inner.lock().expect("state mutex poisoned"), session_id, pending)?;
+            &self.inner.lock().expect("state mutex poisoned"),
+            session_id,
+            pending,
+        )?;
         if current != authority {
             anyhow::bail!("native opening source owner configuration changed during capture");
         }
@@ -317,31 +389,57 @@ impl AppState {
     }
 
     fn native_declared_scope_current(&self, start: &DeclaredRunReservation) -> bool {
-        let Some(keys) = test_run_worktree_keys(&start.source.root) else { return false; };
+        let Some(keys) = test_run_worktree_keys(&start.source.root) else {
+            return false;
+        };
         let inner = self.inner.lock().expect("state mutex poisoned");
-        if inner.find_session_index(&start.session_id).is_none() { return false; }
+        if inner.find_session_index(&start.session_id).is_none() {
+            return false;
+        }
         if let Some(execution) = inner.test_runs.declared_executions.get(&start.run_id) {
             let job = execution.lock().expect("native execution mutex poisoned");
-            if job.reservation == *start && (job.failure.is_some() || job.verification_refusal.is_some()) { return false; }
+            if job.reservation == *start
+                && (job.failure.is_some() || job.verification_refusal.is_some())
+            {
+                return false;
+            }
         }
         let (named_binding, named) = match test_run_registration_named_binding(
-            &inner, &start.session_id, Some(&start.store), Some(&keys)) {
+            &inner,
+            &start.session_id,
+            Some(&start.store),
+            Some(&keys),
+        ) {
             Ok(binding) => binding,
             Err(error) => {
                 eprintln!("[termal] native named-root scope refused: {error:?}");
                 return false;
             }
         };
-        keys.common_dir == start.common_dir && named.as_ref() == Some(&start.named)
-            && named_binding.as_ref().is_some_and(|named| engram_same_recovery_run(named, &start.binding))
-            && test_run_named_root_fence(&inner, &start.session_id, Some(&start.store), Some(&start.named))
-                == Some(start.binding.claim_fence)
-            && inner.test_run_observations.get(&start.execution_id)
+        keys.common_dir == start.common_dir
+            && named.as_ref() == Some(&start.named)
+            && named_binding
+                .as_ref()
+                .is_some_and(|named| engram_same_recovery_run(named, &start.binding))
+            && test_run_named_root_fence(
+                &inner,
+                &start.session_id,
+                Some(&start.store),
+                Some(&start.named),
+            ) == Some(start.binding.claim_fence)
+            && inner
+                .test_run_observations
+                .get(&start.execution_id)
                 .is_some_and(|row| row.declared_native.as_ref() == Some(start))
     }
 
-    fn finish_native_declared_run(&self, start: &DeclaredRunReservation, request: &Value,
-        end: &DeclaredRunObservedEnd, execution: &Arc<Mutex<DeclaredRunExecution>>) -> Result<()> {
+    fn finish_native_declared_run(
+        &self,
+        start: &DeclaredRunReservation,
+        request: &Value,
+        end: &DeclaredRunObservedEnd,
+        execution: &Arc<Mutex<DeclaredRunExecution>>,
+    ) -> Result<()> {
         let state = declared_run_result_state(&end.check);
         let stage = json!({"name":"focused", "state":state, "code":end.exit,
             "reportedSuccess":end.reported_success,
@@ -349,9 +447,15 @@ impl AppState {
         // END already froze this judgment before returning to provider-event
         // processing. Registration waits cannot substitute a later artifact.
         let check = end.check.clone();
-        let deadline = EngramSourcePhasePlan::from(std::time::Instant::now()
-            + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET));
-        let live = self.inner.lock().expect("state mutex poisoned").engram_turn_basis_captures_live.clone();
+        let deadline = EngramSourcePhasePlan::from(
+            std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET),
+        );
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_turn_basis_captures_live
+            .clone();
         let declaration = start.declaration.clone();
         let source_owner = start.source.source_owner.clone();
         #[cfg(test)]
@@ -361,42 +465,56 @@ impl AppState {
             .expect("state mutex poisoned")
             .test_declared_run_source
             .clone();
-        let after =
-            bounded_source_capture(
-                &live,
-                &self.capture_lifetime,
-                ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
-                deadline.remaining(),
-                move || {
-                    let capture = || {
-                        #[cfg(test)]
-                        if let Some(capture) = source_capture {
-                            return capture(&declaration, &source_owner, deadline.completion_deadline);
-                        }
-                        declared_run_source(&declaration, &source_owner, deadline)
-                    };
-                    Some(capture().map_err(|error| {
+        let after = bounded_source_capture(
+            &live,
+            &self.capture_lifetime,
+            ENGRAM_TURN_BASIS_CAPTURE_LIMIT,
+            deadline.remaining(),
+            move || {
+                let capture = || {
+                    #[cfg(test)]
+                    if let Some(capture) = source_capture {
+                        return capture(&declaration, &source_owner, deadline.completion_deadline);
+                    }
+                    declared_run_source(&declaration, &source_owner, deadline)
+                };
+                Some(
+                    capture().map_err(|error| {
                         format!("{error:#}").chars().take(2048).collect::<String>()
-                    }))
-                },
-            );
+                    }),
+                )
+            },
+        );
         let (after, source_refusal) = match after {
             Some(Ok(source)) => (Some(source), None),
             Some(Err(reason)) => (None, Some(reason)),
-            None => (None, Some("native after-run source capture unavailable: deadline/capacity/cleanup".to_owned())),
+            None => (
+                None,
+                Some(
+                    "native after-run source capture unavailable: deadline/capacity/cleanup"
+                        .to_owned(),
+                ),
+            ),
         };
-        let same_scope_after = after.as_ref().filter(|after|
-            after.root == start.source.root && after.source_owner == start.source.source_owner);
-        let source_comparison = same_scope_after
-            .and_then(|after| start.source.source_id.compare(&after.source_id));
+        let same_scope_after = after.as_ref().filter(|after| {
+            after.root == start.source.root && after.source_owner == start.source.source_owner
+        });
+        let source_comparison =
+            same_scope_after.and_then(|after| start.source.source_id.compare(&after.source_id));
         let source_refusal = source_refusal.or_else(|| {
             (same_scope_after.is_some() && source_comparison.is_none())
                 .then(|| "native source_id formats are incomparable".to_owned())
         });
-        let source_change = same_scope_after.filter(|_| source_comparison == Some(false))
-            .map(|after| engram_source_id_change_detail(&engram_source_id_differences(
-                &start.source.source_id, &after.source_id)));
-        let mut eligible = source_comparison == Some(true) && self.native_declared_scope_current(start);
+        let source_change = same_scope_after
+            .filter(|_| source_comparison == Some(false))
+            .map(|after| {
+                engram_source_id_change_detail(&engram_source_id_differences(
+                    &start.source.source_id,
+                    &after.source_id,
+                ))
+            });
+        let mut eligible =
+            source_comparison == Some(true) && self.native_declared_scope_current(start);
         if eligible {
             let clock = self.engram_budget_clock();
             let deadline = test_run_registration_deadline(&clock, std::time::Instant::now());
@@ -405,22 +523,46 @@ impl AppState {
             // Keep the naming-proof reservation immutable. Registration froze
             // the first current binding off the send path; closing must match
             // that exact binding, so a later revision cannot inherit credit.
-            let registered_binding = self.inner.lock().expect("state mutex poisoned")
-                .test_run_registrations.get(&start.run_id)
+            let registered_binding = self
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .test_run_registrations
+                .get(&start.run_id)
                 .filter(|row| row.declared_native.as_ref() == Some(start))
                 .and_then(|row| row.work_binding.clone());
             eligible = start.accepts_registration_binding(registered_binding.as_ref());
             if eligible {
                 let probe = format!("native-closing-{}", Uuid::new_v4());
-                eligible = self.read_test_run_current_named_binding(&start.session_id, &probe,
-                    keys.as_ref(), &clock, deadline, &mut diagnostics).ok().is_some_and(|current| {
-                    let inner = self.inner.lock().expect("state mutex poisoned");
-                    current.resolve_locked(&inner, &start.session_id, Some(&start.store), keys.as_ref()).ok()
-                        == Some((registered_binding.clone(), Some(start.named.clone())))
-                        && inner.test_run_registrations.get(&start.run_id).is_some_and(|row|
-                            row.declared_native.as_ref() == Some(start)
-                                && row.work_binding == registered_binding)
-                });
+                eligible = self
+                    .read_test_run_current_named_binding(
+                        &start.session_id,
+                        &probe,
+                        keys.as_ref(),
+                        &clock,
+                        deadline,
+                        &mut diagnostics,
+                    )
+                    .ok()
+                    .is_some_and(|current| {
+                        let inner = self.inner.lock().expect("state mutex poisoned");
+                        current
+                            .resolve_locked(
+                                &inner,
+                                &start.session_id,
+                                Some(&start.store),
+                                keys.as_ref(),
+                            )
+                            .ok()
+                            == Some((registered_binding.clone(), Some(start.named.clone())))
+                            && inner
+                                .test_run_registrations
+                                .get(&start.run_id)
+                                .is_some_and(|row| {
+                                    row.declared_native.as_ref() == Some(start)
+                                        && row.work_binding == registered_binding
+                                })
+                    });
             }
         }
         eligible &= self.native_declared_scope_current(start);
@@ -438,91 +580,164 @@ impl AppState {
             "nativeEligible":eligible,
         });
         let bytes = serde_json::to_vec_pretty(&results)?;
-        let terminal = DeclaredRunTerminal { results_digest: file_content_hash(&bytes), source: after, source_refusal, check,
-            reported_success: end.reported_success };
+        let terminal = DeclaredRunTerminal {
+            results_digest: file_content_hash(&bytes),
+            source: after,
+            source_refusal,
+            check,
+            reported_success: end.reported_success,
+        };
         let expected = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let expected = inner.test_run_registrations.update(&start.run_id, |registration| {
-                if registration.declared_native.as_ref() != Some(start) || registration.declared_terminal.is_some() {
-                    return None;
-                }
-                registration.declared_terminal = Some(terminal.clone());
-                Some(registration.clone())
-            }).flatten().ok_or_else(|| anyhow!("native registration changed before its terminal"))?;
-            let row = inner.test_run_observations.update(&start.execution_id, |row| {
-                if row.declared_native.as_ref() == Some(start) {
-                    if let Some(artifact) = row.artifact.as_mut() {
-                        artifact.terminal_digest = Some(terminal.results_digest.clone());
+            let expected = inner
+                .test_run_registrations
+                .update(&start.run_id, |registration| {
+                    if registration.declared_native.as_ref() != Some(start)
+                        || registration.declared_terminal.is_some()
+                    {
+                        return None;
                     }
-                }
-                row.clone()
-            }).ok_or_else(|| anyhow!("native original execution disappeared"))?;
+                    registration.declared_terminal = Some(terminal.clone());
+                    Some(registration.clone())
+                })
+                .flatten()
+                .ok_or_else(|| anyhow!("native registration changed before its terminal"))?;
+            let row = inner
+                .test_run_observations
+                .update(&start.execution_id, |row| {
+                    if row.declared_native.as_ref() == Some(start) {
+                        if let Some(artifact) = row.artifact.as_mut() {
+                            artifact.terminal_digest = Some(terminal.results_digest.clone());
+                        }
+                    }
+                    row.clone()
+                })
+                .ok_or_else(|| anyhow!("native original execution disappeared"))?;
             self.persist_test_command_observation_locked(&mut inner, row);
             expected
         };
-        let durable = self.inner.lock().expect("state mutex poisoned")
-            .test_runs.observations_durable.contains(&start.execution_id);
+        let durable = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_runs
+            .observations_durable
+            .contains(&start.execution_id);
         if !durable {
-            let (fence, waiter) = PersistFence::new(PersistFenceTarget::TestRunRegistration(expected),
-                std::time::Instant::now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
-            self.persist_tx.send(PersistRequest::Fence(Box::new(fence)))
+            let (fence, waiter) = PersistFence::new(
+                PersistFenceTarget::TestRunRegistration(expected),
+                std::time::Instant::now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET,
+            );
+            self.persist_tx
+                .send(PersistRequest::Fence(Box::new(fence)))
                 .map_err(|_| anyhow!("native terminal persistence unavailable"))?;
-            waiter.wait().map_err(|error| anyhow!("native terminal was not durably confirmed: {error:?}"))?;
+            waiter
+                .wait()
+                .map_err(|error| anyhow!("native terminal was not durably confirmed: {error:?}"))?;
         }
-        engram_verification_record_write(&PathBuf::from(&start.run_directory).join("results.json"), &bytes)?;
+        engram_verification_record_write(
+            &PathBuf::from(&start.run_directory).join("results.json"),
+            &bytes,
+        )?;
         if let Some(detail) = source_change {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(&start.session_id) {
-                EngramHost::native_run_withheld(&mut inner.sessions[index],
-                    format!("{ENGRAM_CHECK_CREDIT_LINE_PREFIX} native run {} received no credit: {detail}.", start.run_id));
+                EngramHost::native_run_withheld(
+                    &mut inner.sessions[index],
+                    format!(
+                        "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} native run {} received no credit: {detail}.",
+                        start.run_id
+                    ),
+                );
             }
         }
         Ok(())
     }
 
-    fn start_native_declared_run(&self, session_id: &str, provenance: &EngramObservationProvenance,
-        key: Option<&str>, is_command: bool, frame: &Value) {
+    pub(crate) fn start_native_declared_run(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: Option<&str>,
+        is_command: bool,
+        frame: &Value,
+    ) {
         let registered_at = test_run_timestamp();
-        let Some(key) = key.filter(|key| !key.is_empty() && is_command) else { return; };
+        let Some(key) = key.filter(|key| !key.is_empty() && is_command) else {
+            return;
+        };
         let (turn, mut origin, workdir) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             let record = &inner.sessions[index];
-            let Some(turn) = record.engram.declared_run_turn.as_ref().filter(|turn|
-                declared_run_original_turn(record, provenance) && turn.is_current(record)
+            let Some(turn) = record.engram.declared_run_turn.as_ref().filter(|turn| {
+                declared_run_original_turn(record, provenance)
+                    && turn.is_current(record)
                     && turn.first_tool.accepts(key)
-                    && (!turn.native_start_attempted || turn.execution.is_some())) else { return; };
-            let captured = (turn.clone(), TestRunCommandOrigin::capture(&inner, index, provenance, key),
-                record.session.workdir.clone());
+                    && (!turn.native_start_attempted || turn.execution.is_some())
+            }) else {
+                return;
+            };
+            let captured = (
+                turn.clone(),
+                TestRunCommandOrigin::capture(&inner, index, provenance, key),
+                record.session.workdir.clone(),
+            );
             // An incomplete first frame cannot move the original R to a
             // later description. Duplicates only replay an existing R.
-            inner.sessions[index].engram.declared_run_turn.as_mut().unwrap().native_start_attempted = true;
+            inner.sessions[index]
+                .engram
+                .declared_run_turn
+                .as_mut()
+                .unwrap()
+                .native_start_attempted = true;
             captured
         };
-        let Some(snapshot) = turn.snapshot.as_ref() else { return; };
+        let Some(snapshot) = turn.snapshot.as_ref() else {
+            return;
+        };
         let mut matched = declared_run_frame_match(&turn, frame, &workdir);
         if let Some(execution) = turn.execution.as_ref() {
             let mut job = execution.lock().expect("native execution mutex poisoned");
             if let Some((_, binding)) = &mut matched {
-                binding.environment_missing = job.reservation.declaration.environment_missing.clone();
+                binding.environment_missing =
+                    job.reservation.declaration.environment_missing.clone();
             }
-            if matched.as_ref().is_none_or(|(_, binding)| binding != &job.reservation.declaration) {
-                job.verification_refusal = Some("original native tool identity was reused with different command facts".to_owned());
+            if matched
+                .as_ref()
+                .is_none_or(|(_, binding)| binding != &job.reservation.declaration)
+            {
+                job.verification_refusal = Some(
+                    "original native tool identity was reused with different command facts"
+                        .to_owned(),
+                );
             }
             return;
         }
-        let Some((command, mut declaration)) = matched else { return; };
+        let Some((command, mut declaration)) = matched else {
+            return;
+        };
         // The provider setup may complete after S0 (shared Codex). Bind the
         // environment actually applied to that runtime at the original start.
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             let record = &inner.sessions[index];
-            if !turn.is_current(record) { return; }
+            if !turn.is_current(record) {
+                return;
+            }
             record.project_environment.bind(&mut declaration);
         }
-        let Ok(argv) = engram_declared_words(&declaration.entry.command) else { return; };
-        let Some(program) = argv.first() else { return; };
+        let Ok(argv) = engram_declared_words(&declaration.entry.command) else {
+            return;
+        };
+        let Some(program) = argv.first() else {
+            return;
+        };
         let run_id = format!("test-{}", Uuid::new_v4());
         let directory = snapshot.git_dir.join("review-runs").join(&run_id);
         let execution_id = origin.execution_id();
@@ -535,49 +750,106 @@ impl AppState {
             "nativeOpeningStages": turn.timings.summary(),
             "stages": [{"name":"focused", "command":program, "args":&argv[1..], "cwd":declaration.entry.cwd}],
         });
-        let Ok(request_identity) = test_run_registration_identity(&request) else { return; };
+        let Ok(request_identity) = test_run_registration_identity(&request) else {
+            return;
+        };
         let provider_time = ["timestamp", "startedAt", "startTime", "started_at"]
-            .into_iter().filter_map(|name| frame.get(name).filter(|value|
-                value.as_str().is_some_and(|value| value.len() <= 128) || value.is_number())
-                .map(|value| (name.to_owned(), value.clone()))).collect();
+            .into_iter()
+            .filter_map(|name| {
+                frame
+                    .get(name)
+                    .filter(|value| {
+                        value.as_str().is_some_and(|value| value.len() <= 128) || value.is_number()
+                    })
+                    .map(|value| (name.to_owned(), value.clone()))
+            })
+            .collect();
         let reservation = DeclaredRunReservation {
-            host_instance: self.server_instance_id.clone(), execution_id, session_id: session_id.to_owned(),
-            run_id, run_directory: test_run_display_path(&directory), request_identity, registered_at,
+            host_instance: self.server_instance_id.clone(),
+            execution_id,
+            session_id: session_id.to_owned(),
+            run_id,
+            run_directory: test_run_display_path(&directory),
+            request_identity,
+            registered_at,
             common_dir: turn.keys.common_dir.clone(),
-            source: snapshot.source.clone(), declaration: declaration.clone(), store: turn.store.clone(),
-            binding: turn.binding.clone(), named: turn.named.clone(), provider_time,
+            source: snapshot.source.clone(),
+            declaration: declaration.clone(),
+            store: turn.store.clone(),
+            binding: turn.binding.clone(),
+            named: turn.named.clone(),
+            provider_time,
         };
         let execution = Arc::new(Mutex::new(DeclaredRunExecution {
-            reservation: reservation.clone(), request, registered: false, worker_active: true,
-            end: None, end_capture_started: false, failure: None, verification_refusal: None,
+            reservation: reservation.clone(),
+            request,
+            registered: false,
+            worker_active: true,
+            end: None,
+            end_capture_started: false,
+            failure: None,
+            verification_refusal: None,
         }));
         {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             let record = &mut inner.sessions[index];
-            if !turn.is_current(record) { return; }
-            let Some(current) = record.engram.declared_run_turn.as_mut().filter(|current|
-                current.execution.is_none()
-                    && current.first_tool.accepts(key)) else { return; };
+            if !turn.is_current(record) {
+                return;
+            }
+            let Some(current) =
+                record.engram.declared_run_turn.as_mut().filter(|current| {
+                    current.execution.is_none() && current.first_tool.accepts(key)
+                })
+            else {
+                return;
+            };
             current.execution = Some(execution.clone());
             origin.work_binding = Some(turn.binding.clone());
-            origin.source_root = inner.engram_work_source_roots.iter().find(|root|
-                root.store == turn.store && root.root == turn.named.workspace_id
-                    && root.generation == turn.named.generation).cloned();
+            origin.source_root = inner
+                .engram_work_source_roots
+                .iter()
+                .find(|root| {
+                    root.store == turn.store
+                        && root.root == turn.named.workspace_id
+                        && root.generation == turn.named.generation
+                })
+                .cloned();
             origin.validated_unbound = false;
         }
-        self.observe_test_command_start_with_native(origin, &command, &reservation.named.workspace_id,
-            &reservation.registered_at, Some(&declaration), Some(reservation.clone()));
-        self.inner.lock().expect("state mutex poisoned").test_runs.declared_executions
+        self.observe_test_command_start_with_native(
+            origin,
+            &command,
+            &reservation.named.workspace_id,
+            &reservation.registered_at,
+            Some(&declaration),
+            Some(reservation.clone()),
+        );
+        self.inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_runs
+            .declared_executions
             .insert(reservation.run_id.clone(), execution.clone());
         self.spawn_native_declared_worker(execution);
     }
 
     fn spawn_native_declared_worker(&self, execution: Arc<Mutex<DeclaredRunExecution>>) {
-        let live = self.inner.lock().expect("state mutex poisoned").engram_turn_basis_captures_live.clone();
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_turn_basis_captures_live
+            .clone();
         use std::sync::atomic::Ordering;
-        if live.try_update(Ordering::SeqCst, Ordering::SeqCst,
-            |count| (count < ENGRAM_TURN_BASIS_CAPTURE_LIMIT).then_some(count + 1)).is_err() {
+        if live
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                (count < ENGRAM_TURN_BASIS_CAPTURE_LIMIT).then_some(count + 1)
+            })
+            .is_err()
+        {
             let mut job = execution.lock().expect("native execution mutex poisoned");
             job.failure = Some("native registration capacity unavailable".to_owned());
             job.worker_active = false;
@@ -588,30 +860,43 @@ impl AppState {
         let failed = execution.clone();
         // Durability, registration source, and END capture have separate
         // windows; worker age must not shorten a later stage's operation.
-        if let Err(error) = self.capture_lifetime.spawn_observer("native-declared-run", move || {
-            let _slot = slot;
-            if let Err(error) = state.drive_native_declared_run(&execution) {
-                let session_id = {
-                    let mut job = execution.lock().expect("native execution mutex poisoned");
-                    job.failure = Some(format!("{error:#}"));
-                    job.worker_active = false;
-                    eprintln!("[termal] native declared verification withheld for {}: {error:#}", job.reservation.run_id);
-                    job.reservation.session_id.clone()
-                };
-                state.start_runtime_observation_worker(&session_id);
-            }
-        }) {
+        if let Err(error) = self
+            .capture_lifetime
+            .spawn_observer("native-declared-run", move || {
+                let _slot = slot;
+                if let Err(error) = state.drive_native_declared_run(&execution) {
+                    let session_id = {
+                        let mut job = execution.lock().expect("native execution mutex poisoned");
+                        job.failure = Some(format!("{error:#}"));
+                        job.worker_active = false;
+                        eprintln!(
+                            "[termal] native declared verification withheld for {}: {error:#}",
+                            job.reservation.run_id
+                        );
+                        job.reservation.session_id.clone()
+                    };
+                    state.start_runtime_observation_worker(&session_id);
+                }
+            })
+        {
             let mut job = failed.lock().expect("native execution mutex poisoned");
             job.failure = Some(error.to_string());
             job.worker_active = false;
         }
     }
 
-    fn drive_native_declared_run(&self, execution: &Arc<Mutex<DeclaredRunExecution>>) -> Result<()> {
+    fn drive_native_declared_run(
+        &self,
+        execution: &Arc<Mutex<DeclaredRunExecution>>,
+    ) -> Result<()> {
         let (start, request, registered) = {
             let job = execution.lock().expect("native execution mutex poisoned");
             if job.failure.is_some() || job.verification_refusal.is_some() {
-                anyhow::bail!("original native execution was refused: {:?} {:?}", job.failure, job.verification_refusal);
+                anyhow::bail!(
+                    "original native execution was refused: {:?} {:?}",
+                    job.failure,
+                    job.verification_refusal
+                );
             }
             (job.reservation.clone(), job.request.clone(), job.registered)
         };
@@ -622,91 +907,178 @@ impl AppState {
             }
             // Confirm the immutable start even if the provider has already
             // appended an end to its observation. No clock is rewritten.
-            let durable = self.inner.lock().expect("state mutex poisoned")
-                .test_runs.observations_durable.contains(&start.execution_id);
+            let durable = self
+                .inner
+                .lock()
+                .expect("state mutex poisoned")
+                .test_runs
+                .observations_durable
+                .contains(&start.execution_id);
             if !durable {
                 let (fence, waiter) = PersistFence::new(
                     PersistFenceTarget::DeclaredRunReservation(Box::new(start.clone())),
-                    std::time::Instant::now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
-                self.persist_tx.send(PersistRequest::Fence(Box::new(fence)))
+                    std::time::Instant::now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET,
+                );
+                self.persist_tx
+                    .send(PersistRequest::Fence(Box::new(fence)))
                     .map_err(|_| anyhow!("native reservation persistence unavailable"))?;
-                waiter.wait().map_err(|error| anyhow!("native reservation was not durable: {error:?}"))?;
+                waiter
+                    .wait()
+                    .map_err(|error| anyhow!("native reservation was not durable: {error:?}"))?;
             }
             // Admission precedes every write; registration repeats containment.
             declared_run_prepare_directory(&start)?;
-            engram_verification_record_write(&directory.join("request.json"), &serde_json::to_vec_pretty(&request)?)?;
+            engram_verification_record_write(
+                &directory.join("request.json"),
+                &serde_json::to_vec_pretty(&request)?,
+            )?;
             let running = json!({"runId":start.run_id,"state":"running", "started":start.registered_at,
                 "stages":[{"name":"focused","state":"running","started":start.registered_at,
                     "command":request["observedCommand"]}]});
-            engram_verification_record_write(&directory.join("results.json"), &serde_json::to_vec_pretty(&running)?)?;
-            self.register_test_run_reserved(&start.session_id, RegisterTestRunRequest {
-                run_id: start.run_id.clone(), run_directory: start.run_directory.clone(),
-            }, TestRunRegistrationDiagnostics::new(&self.server_instance_id), Some(&start))
-                .map_err(|error| anyhow!("native registration refused: {error:?}"))?;
-            execution.lock().expect("native execution mutex poisoned").registered = true;
+            engram_verification_record_write(
+                &directory.join("results.json"),
+                &serde_json::to_vec_pretty(&running)?,
+            )?;
+            self.register_test_run_reserved(
+                &start.session_id,
+                RegisterTestRunRequest {
+                    run_id: start.run_id.clone(),
+                    run_directory: start.run_directory.clone(),
+                },
+                TestRunRegistrationDiagnostics::new(&self.server_instance_id),
+                Some(&start),
+            )
+            .map_err(|error| anyhow!("native registration refused: {error:?}"))?;
+            execution
+                .lock()
+                .expect("native execution mutex poisoned")
+                .registered = true;
         }
         let end = {
             let mut job = execution.lock().expect("native execution mutex poisoned");
-            let Some(end) = job.end.clone() else { job.worker_active = false; return Ok(()); };
+            let Some(end) = job.end.clone() else {
+                job.worker_active = false;
+                return Ok(());
+            };
             end
         };
         self.finish_native_declared_run(&start, &request, &end, execution)?;
-        execution.lock().expect("native execution mutex poisoned").worker_active = false;
-        self.inner.lock().expect("state mutex poisoned").test_runs.declared_executions.remove(&start.run_id);
+        execution
+            .lock()
+            .expect("native execution mutex poisoned")
+            .worker_active = false;
+        self.inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_runs
+            .declared_executions
+            .remove(&start.run_id);
         Ok(())
     }
 
-    fn end_native_declared_run(&self, session_id: &str, provenance: &EngramObservationProvenance,
-        key: &str, exit: Option<EngramCommandExit>, interrupted: bool) {
+    pub(crate) fn end_native_declared_run(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        exit: Option<EngramCommandExit>,
+        interrupted: bool,
+    ) {
         let execution = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             let record = &inner.sessions[index];
-            let Some(turn) = record.engram.declared_run_turn.as_ref().filter(|turn|
+            let Some(turn) = record.engram.declared_run_turn.as_ref().filter(|turn| {
                 turn.generation == record.active_turn_generation
                     && record.runtime.matches_runtime_token(&turn.runtime)
-                    && declared_run_original_turn(record, provenance)) else { return; };
-            let Some(execution) = turn.execution.clone() else { return; };
-            let expected = TestRunCommandOrigin::capture(&inner, index, provenance, key).execution_id();
-            if execution.lock().expect("native execution mutex poisoned").reservation.execution_id != expected { return; }
+                    && declared_run_original_turn(record, provenance)
+            }) else {
+                return;
+            };
+            let Some(execution) = turn.execution.clone() else {
+                return;
+            };
+            let expected =
+                TestRunCommandOrigin::capture(&inner, index, provenance, key).execution_id();
+            if execution
+                .lock()
+                .expect("native execution mutex poisoned")
+                .reservation
+                .execution_id
+                != expected
+            {
+                return;
+            }
             execution
         };
         self.freeze_native_declared_end(session_id, provenance, key, execution, exit, interrupted);
     }
 
-    fn freeze_native_declared_end(&self, session_id: &str, provenance: &EngramObservationProvenance,
-        key: &str, execution: Arc<Mutex<DeclaredRunExecution>>, exit: Option<EngramCommandExit>, interrupted: bool) {
+    fn freeze_native_declared_end(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        execution: Arc<Mutex<DeclaredRunExecution>>,
+        exit: Option<EngramCommandExit>,
+        interrupted: bool,
+    ) {
         // An acknowledgement of an ongoing command is never END, even if
         // its result artifact is already complete. The original task's END
         // freezes the artifact and only then permits the after-run capture.
-        if !interrupted && exit == Some(EngramCommandExit::NotFinished) { return; }
+        if !interrupted && exit == Some(EngramCommandExit::NotFinished) {
+            return;
+        }
         let ended_at = test_run_timestamp();
         let (start, request) = {
             let mut job = execution.lock().expect("native execution mutex poisoned");
-            if job.end_capture_started || job.end.is_some() { return; }
+            if job.end_capture_started || job.end.is_some() {
+                return;
+            }
             job.end_capture_started = true;
             (job.reservation.clone(), job.request.clone())
         };
-        let code = match exit { Some(EngramCommandExit::Code(code)) => Some(code), _ => None };
+        let code = match exit {
+            Some(EngramCommandExit::Code(code)) => Some(code),
+            _ => None,
+        };
         // Claude reports successful completion without an OS exit number.
         // Preserve that distinction; the frozen artifact remains the oracle.
         let reported_success = exit == Some(EngramCommandExit::ReportedSuccess);
-        let state = match code { Some(0) => "passed", Some(_) => "failed",
-            None if reported_success => "passed", None => "unknown" };
+        let state = match code {
+            Some(0) => "passed",
+            Some(_) => "failed",
+            None if reported_success => "passed",
+            None => "unknown",
+        };
         let stage = json!({"name":"focused", "state":state, "code":code,
             "started":start.registered_at,"ended":ended_at,"command":request["observedCommand"]});
         // Bounded artifact inspection occurs off both state/execution locks,
         // synchronously at the original END boundary, before another tool can
         // replace the artifact while registration is waiting on durability.
-        let mut check = engram_verification_record_declared_check(&stage,
-            &engram_verification_record_planned_argv(&request), &start.declaration,
-            exit.unwrap_or(EngramCommandExit::Unknown));
+        let mut check = engram_verification_record_declared_check(
+            &stage,
+            &engram_verification_record_planned_argv(&request),
+            &start.declaration,
+            exit.unwrap_or(EngramCommandExit::Unknown),
+        );
         if interrupted && let Ok(check) = &mut check {
             check.outcome = EngramVerificationRecordCheckOutcome::Indeterminate;
-            check.summary = Some("The process was interrupted before its artifact END was frozen.".to_owned());
+            check.summary =
+                Some("The process was interrupted before its artifact END was frozen.".to_owned());
         }
-        let ended_test_runs = self.observe_test_command_end_awaiting_declared_verdict(session_id, provenance, key,
-            if exit == Some(EngramCommandExit::NotFinished) { None } else { exit });
+        let ended_test_runs = self.observe_test_command_end_awaiting_declared_verdict(
+            session_id,
+            provenance,
+            key,
+            if exit == Some(EngramCommandExit::NotFinished) {
+                None
+            } else {
+                exit
+            },
+        );
         let outcome = check.as_ref().ok().map(|check| match check.outcome {
             EngramVerificationRecordCheckOutcome::Passed => EngramExecutionOutcome::Succeeded,
             EngramVerificationRecordCheckOutcome::Failed => EngramExecutionOutcome::Failed,
@@ -719,38 +1091,82 @@ impl AppState {
         self.apply_declared_verdict_to_test_run(&ended_test_runs, outcome);
         let spawn = {
             let mut job = execution.lock().expect("native execution mutex poisoned");
-            if job.failure.is_some() || job.verification_refusal.is_some() { return; }
+            if job.failure.is_some() || job.verification_refusal.is_some() {
+                return;
+            }
             let check = match check {
                 Ok(check) => check,
-                Err(error) => { job.failure = Some(format!("native END artifact refused: {error}")); return; }
+                Err(error) => {
+                    job.failure = Some(format!("native END artifact refused: {error}"));
+                    return;
+                }
             };
-            job.end = Some(DeclaredRunObservedEnd { ended_at, exit: code, reported_success,
-                interrupted, check });
-            if job.worker_active { false } else { job.worker_active = true; true }
+            job.end = Some(DeclaredRunObservedEnd {
+                ended_at,
+                exit: code,
+                reported_success,
+                interrupted,
+                check,
+            });
+            if job.worker_active {
+                false
+            } else {
+                job.worker_active = true;
+                true
+            }
         };
-        if spawn { self.spawn_native_declared_worker(execution); }
+        if spawn {
+            self.spawn_native_declared_worker(execution);
+        }
     }
 
-    fn end_native_declared_task(&self, session_id: &str, token: &RuntimeToken, key: &str, interrupted: bool) {
+    pub(crate) fn end_native_declared_task(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+        key: &str,
+        interrupted: bool,
+    ) {
         let provenance = EngramObservationProvenance::Claude(ClaudeObservationProvenance {
-            token: token.clone(), origin: ClaudeWorkOrigin::Unattributed,
+            token: token.clone(),
+            origin: ClaudeWorkOrigin::Unattributed,
         });
         let execution = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             let record = &inner.sessions[index];
-            if !record.runtime.matches_runtime_token(token) { return; }
+            if !record.runtime.matches_runtime_token(token) {
+                return;
+            }
             let runtime = test_run_runtime_identity(record, &provenance);
             let tool = sha256_hex(key.as_bytes());
-            let mut matching = inner.test_run_observations.values().filter(|row|
+            let mut matching = inner.test_run_observations.values().filter(|row| {
                 row.summary.owner_session_id.as_deref() == Some(session_id)
-                    && row.runtime_identity == runtime && row.tool_identity == tool
-                    && row.summary.ended_at.is_none() && row.declared_native.is_some());
-            let (Some(row), None) = (matching.next(), matching.next()) else { return; };
+                    && row.runtime_identity == runtime
+                    && row.tool_identity == tool
+                    && row.summary.ended_at.is_none()
+                    && row.declared_native.is_some()
+            });
+            let (Some(row), None) = (matching.next(), matching.next()) else {
+                return;
+            };
             let start = row.declared_native.as_ref().unwrap();
-            let Some(execution) = inner.test_runs.declared_executions.get(&start.run_id)
-                .filter(|job| job.lock().expect("native execution mutex poisoned").reservation == *start)
-                .cloned() else { return; };
+            let Some(execution) = inner
+                .test_runs
+                .declared_executions
+                .get(&start.run_id)
+                .filter(|job| {
+                    job.lock()
+                        .expect("native execution mutex poisoned")
+                        .reservation
+                        == *start
+                })
+                .cloned()
+            else {
+                return;
+            };
             execution
         };
         self.freeze_native_declared_end(session_id, &provenance, key, execution, None, interrupted);
@@ -758,56 +1174,98 @@ impl AppState {
 
     // Off-lock and before either provider receives this prompt. Failure only
     // withholds native credit; it never prevents the ordinary prompt.
-    fn prepare_declared_run_before_handoff(&self, session_id: &str, runtime: &RuntimeToken, generation: u64) {
+    pub(crate) fn prepare_declared_run_before_handoff(
+        &self,
+        session_id: &str,
+        runtime: &RuntimeToken,
+        generation: u64,
+    ) {
         #[cfg(test)]
-        let now: Arc<dyn Fn() -> std::time::Instant + Send + Sync> = self.inner.lock().expect("state mutex poisoned")
-            .test_declared_run_clock.clone().unwrap_or_else(|| Arc::new(std::time::Instant::now));
+        let now: Arc<dyn Fn() -> std::time::Instant + Send + Sync> = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .test_declared_run_clock
+            .clone()
+            .unwrap_or_else(|| Arc::new(std::time::Instant::now));
         #[cfg(not(test))]
         let now = std::time::Instant::now;
         let pending = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
             inner.sessions[index].engram.declared_run_turn = None;
             let record = &inner.sessions[index];
             if !matches!(runtime, RuntimeToken::Codex(_) | RuntimeToken::Claude(_))
                 || !record.runtime.matches_runtime_token(runtime)
                 || record.active_turn_generation != generation
                 || record.runtime_stop_in_progress
-            { return; }
-            let Some(store) = record.session.project_id.as_deref()
+            {
+                return;
+            }
+            let Some(store) = record
+                .session
+                .project_id
+                .as_deref()
                 .and_then(|id| inner.projects.iter().find(|project| project.id == id))
                 .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
                 .and_then(|project| project.engram.as_ref())
-                .and_then(|settings| settings.authority_store_key.clone()) else { return; };
+                .and_then(|settings| settings.authority_store_key.clone())
+            else {
+                return;
+            };
             // Naming and its held-claim read own authority, including when
             // ordinary turn attribution is absent (control OFF/human prompt).
             let selected = match engram_turn_root_capture_locked(&inner, session_id) {
-                EngramRootCapture::Recorded { workspace_id, generation, .. } => Some((workspace_id, generation)),
+                EngramRootCapture::Recorded {
+                    workspace_id,
+                    generation,
+                    ..
+                } => Some((workspace_id, generation)),
                 _ => None,
             };
-            let mut entries = inner.engram_work_source_roots.iter().filter(|entry|
-                entry.store == store && entry.named_by_session == session_id
-                    && selected.as_ref().is_none_or(|(root, generation)|
-                        entry.root == *root && entry.generation as i64 == *generation));
-            let (Some(entry), None) = (entries.next(), entries.next()) else { return; };
+            let mut entries = inner.engram_work_source_roots.iter().filter(|entry| {
+                entry.store == store
+                    && entry.named_by_session == session_id
+                    && selected.as_ref().is_none_or(|(root, generation)| {
+                        entry.root == *root && entry.generation as i64 == *generation
+                    })
+            });
+            let (Some(entry), None) = (entries.next(), entries.next()) else {
+                return;
+            };
             let keys = TestRunWorktreeKeys {
                 root: engram_exact_path_key(FsPath::new(&entry.root)),
                 common_dir: entry.common_dir_key.clone(),
             };
-            let named = match declared_run_opening_named_binding(
-                &inner, session_id, &store, &keys) {
+            let named = match declared_run_opening_named_binding(&inner, session_id, &store, &keys)
+            {
                 Ok(binding) => binding,
                 Err(error) => {
                     eprintln!("[termal] native opening named root refused: {error:?}");
                     return;
                 }
             };
-            let (Some(binding), Some(named)) = named else { return; };
-            let Some(root_claim_fence) = test_run_named_root_fence(
-                &inner, session_id, Some(&store), Some(&named)) else { return; };
+            let (Some(binding), Some(named)) = named else {
+                return;
+            };
+            let Some(root_claim_fence) =
+                test_run_named_root_fence(&inner, session_id, Some(&store), Some(&named))
+            else {
+                return;
+            };
             let pending = DeclaredRunTurn {
-                runtime: runtime.clone(), generation, keys, store, binding, named, root_claim_fence,
-                snapshot: None, opening_refusal: None, opening_refusal_code: None,
+                runtime: runtime.clone(),
+                generation,
+                keys,
+                store,
+                binding,
+                named,
+                root_claim_fence,
+                snapshot: None,
+                opening_refusal: None,
+                opening_refusal_code: None,
                 first_tool: DeclaredRunFirstTool::default(),
                 timings: Arc::default(),
                 native_start_attempted: false,
@@ -820,20 +1278,33 @@ impl AppState {
         // Cheap applicability only. A present declaration's committed membership
         // is still proved inside the same capture, never by an extra source read.
         if matches!(fs::symlink_metadata(root.join(ENGRAM_DECLARATION_FILE)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound)
+        {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(index) = inner.find_session_index(session_id) {
-                if inner.sessions[index].engram.declared_run_turn.as_ref()
-                    .is_some_and(|turn| turn.runtime == pending.runtime && turn.generation == pending.generation) {
+                if inner.sessions[index]
+                    .engram
+                    .declared_run_turn
+                    .as_ref()
+                    .is_some_and(|turn| {
+                        turn.runtime == pending.runtime && turn.generation == pending.generation
+                    })
+                {
                     inner.sessions[index].engram.declared_run_turn = None;
                 }
             }
             return;
         }
         let admitted_at = now();
-        let source_plan = EngramSourcePhasePlan::at(admitted_at + ENGRAM_SOURCE_COMMAND_BUDGET, admitted_at);
+        let source_plan =
+            EngramSourcePhasePlan::at(admitted_at + ENGRAM_SOURCE_COMMAND_BUDGET, admitted_at);
         let deadline = admitted_at + NATIVE_S0_CAPTURE_BUDGET + NATIVE_S0_AUTHORITY_MARGIN;
-        let live = self.inner.lock().expect("state mutex poisoned").engram_turn_basis_captures_live.clone();
+        let live = self
+            .inner
+            .lock()
+            .expect("state mutex poisoned")
+            .engram_turn_basis_captures_live
+            .clone();
         let expected_keys = pending.keys.clone();
         let capture_state = self.clone();
         let capture_session = session_id.to_owned();
@@ -853,56 +1324,107 @@ impl AppState {
             move || {
                 let owner_capture = || {
                     capture_state.capture_declared_run_opening_with_owner(
-                        &capture_session, &capture_pending, deadline, source_plan, engram_source_owner_run)
+                        &capture_session,
+                        &capture_pending,
+                        deadline,
+                        source_plan,
+                        engram_source_owner_run,
+                    )
                 };
                 #[cfg(test)]
                 let captured = match snapshot_capture {
                     Some(capture) => {
                         let authority = declared_run_opening_authority_locked(
                             &capture_state.inner.lock().expect("state mutex poisoned"),
-                            &capture_session, &capture_pending);
-                        authority.and_then(|authority| capture(&root, deadline).map(|snapshot| (snapshot, authority)))
-                    },
+                            &capture_session,
+                            &capture_pending,
+                        );
+                        authority.and_then(|authority| {
+                            capture(&root, deadline).map(|snapshot| (snapshot, authority))
+                        })
+                    }
                     None => owner_capture(),
                 };
                 #[cfg(not(test))]
                 let captured = owner_capture();
-                Some(captured.and_then(|(snapshot, authority)| {
-                    if test_run_worktree_keys(&root).as_ref() != Some(&expected_keys) {
-                        anyhow::bail!("native opening root/common directory changed");
-                    }
-                    Ok((snapshot, authority))
-                }).map_err(|error| {
-                    let reason: String = format!("{error:#}").chars().take(2048).collect();
-                    // The caller can exhaust its wait before this worker
-                    // reports the existing Git operation/timing error.
-                    eprintln!("[termal] native opening capture failed: {reason}");
-                    reason
-                }))
-            });
+                Some(
+                    captured
+                        .and_then(|(snapshot, authority)| {
+                            if test_run_worktree_keys(&root).as_ref() != Some(&expected_keys) {
+                                anyhow::bail!("native opening root/common directory changed");
+                            }
+                            Ok((snapshot, authority))
+                        })
+                        .map_err(|error| {
+                            let reason: String = format!("{error:#}").chars().take(2048).collect();
+                            // The caller can exhaust its wait before this worker
+                            // reports the existing Git operation/timing error.
+                            eprintln!("[termal] native opening capture failed: {reason}");
+                            reason
+                        }),
+                )
+            },
+        );
         let (snapshot, source_owner_authority) = match snapshot {
             Some(Ok(snapshot)) => snapshot,
-            Some(Err(error)) => { self.declared_run_opening_refused(session_id, &pending, &error); return; },
-            None => { self.declared_run_opening_refused(session_id, &pending, "opening capture unavailable: deadline/capacity/cleanup"); return; },
+            Some(Err(error)) => {
+                self.declared_run_opening_refused(session_id, &pending, &error);
+                return;
+            }
+            None => {
+                self.declared_run_opening_refused(
+                    session_id,
+                    &pending,
+                    "opening capture unavailable: deadline/capacity/cleanup",
+                );
+                return;
+            }
         };
         if now() >= deadline {
-            self.declared_run_opening_refused(session_id, &pending, "opening capture deadline elapsed");
+            self.declared_run_opening_refused(
+                session_id,
+                &pending,
+                "opening capture deadline elapsed",
+            );
             return;
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if declared_run_opening_authority_locked(&inner, session_id, &pending)
-            .ok().as_ref() != Some(&source_owner_authority) { return; }
-        let Some(index) = inner.find_session_index(session_id) else { return; };
-        if !pending.is_current(&inner.sessions[index]) { return; }
-        let Some(turn) = inner.sessions[index].engram.declared_run_turn.as_mut().filter(|turn|
-            turn.runtime == pending.runtime && turn.generation == pending.generation
-                && turn.keys == pending.keys
-                && turn.first_tool == DeclaredRunFirstTool::Waiting) else { return; };
+            .ok()
+            .as_ref()
+            != Some(&source_owner_authority)
+        {
+            return;
+        }
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        if !pending.is_current(&inner.sessions[index]) {
+            return;
+        }
+        let Some(turn) = inner.sessions[index]
+            .engram
+            .declared_run_turn
+            .as_mut()
+            .filter(|turn| {
+                turn.runtime == pending.runtime
+                    && turn.generation == pending.generation
+                    && turn.keys == pending.keys
+                    && turn.first_tool == DeclaredRunFirstTool::Waiting
+            })
+        else {
+            return;
+        };
         if now() >= deadline {
-            turn.opening_refusal = Some(format!("opening capture deadline elapsed before publication; s0_stages={}",
-                turn.timings.summary()));
+            turn.opening_refusal = Some(format!(
+                "opening capture deadline elapsed before publication; s0_stages={}",
+                turn.timings.summary()
+            ));
             turn.opening_refusal_code = Some("opening_deadline");
-            eprintln!("[termal] native opening unavailable: {}", turn.opening_refusal.as_deref().unwrap());
+            eprintln!(
+                "[termal] native opening unavailable: {}",
+                turn.opening_refusal.as_deref().unwrap()
+            );
             return;
         }
         // S0 precedes model edits, but authority availability never delays the
@@ -911,46 +1433,97 @@ impl AppState {
         turn.snapshot = Some(snapshot);
     }
 
-    fn declared_run_opening_refused(&self, session_id: &str, expected: &DeclaredRunTurn, reason: &str) {
+    pub(crate) fn declared_run_opening_refused(
+        &self,
+        session_id: &str,
+        expected: &DeclaredRunTurn,
+        reason: &str,
+    ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else { return; };
-        let Some(turn) = inner.sessions[index].engram.declared_run_turn.as_mut().filter(|turn|
-            turn.runtime == expected.runtime && turn.generation == expected.generation && turn.snapshot.is_none()) else { return; };
-        turn.opening_refusal = Some(format!("{}; s0_stages={}", reason.chars().take(2048).collect::<String>(),
-            turn.timings.summary()));
-        turn.opening_refusal_code = Some(if reason.contains("deadline") || reason.contains("TimedOut") {
-            "opening_deadline"
-        } else if reason.contains("declaration_not_committed") {
-            "declaration_not_committed"
-        } else { "opening_unavailable" });
-        eprintln!("[termal] native opening unavailable: {}", turn.opening_refusal.as_deref().unwrap());
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
+        let Some(turn) = inner.sessions[index]
+            .engram
+            .declared_run_turn
+            .as_mut()
+            .filter(|turn| {
+                turn.runtime == expected.runtime
+                    && turn.generation == expected.generation
+                    && turn.snapshot.is_none()
+            })
+        else {
+            return;
+        };
+        turn.opening_refusal = Some(format!(
+            "{}; s0_stages={}",
+            reason.chars().take(2048).collect::<String>(),
+            turn.timings.summary()
+        ));
+        turn.opening_refusal_code = Some(
+            if reason.contains("deadline") || reason.contains("TimedOut") {
+                "opening_deadline"
+            } else if reason.contains("declaration_not_committed") {
+                "declaration_not_committed"
+            } else {
+                "opening_unavailable"
+            },
+        );
+        eprintln!(
+            "[termal] native opening unavailable: {}",
+            turn.opening_refusal.as_deref().unwrap()
+        );
     }
 
-    fn observe_declared_tool_activity(&self, session_id: &str, provenance: &EngramObservationProvenance,
-        key: Option<&str>, is_command: bool) {
+    pub(crate) fn observe_declared_tool_activity(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: Option<&str>,
+        is_command: bool,
+    ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else { return; };
+        let Some(index) = inner.find_session_index(session_id) else {
+            return;
+        };
         let record = &inner.sessions[index];
         let current = declared_run_original_turn(record, provenance);
-        let valid = current && record.engram.declared_run_turn.as_ref().is_some_and(|turn| turn.is_current(record));
+        let valid = current
+            && record
+                .engram
+                .declared_run_turn
+                .as_ref()
+                .is_some_and(|turn| turn.is_current(record));
         if let Some(turn) = inner.sessions[index].engram.declared_run_turn.as_mut() {
-            if valid { turn.first_tool.observe(key, is_command); }
-            else { turn.first_tool = DeclaredRunFirstTool::Ineligible; }
+            if valid {
+                turn.first_tool.observe(key, is_command);
+            } else {
+                turn.first_tool = DeclaredRunFirstTool::Ineligible;
+            }
         }
     }
 }
 
-fn declared_run_original_turn(record: &SessionRecord, provenance: &EngramObservationProvenance) -> bool {
+fn declared_run_original_turn(
+    record: &SessionRecord,
+    provenance: &EngramObservationProvenance,
+) -> bool {
     // A human-originated prompt is legitimate. The separate ordinary-turn
     // attribution policy does not grant or remove registered-run authority.
     match provenance {
-        EngramObservationProvenance::Runtime { token, turn_generation } =>
-            record.runtime.matches_runtime_token(token) && *turn_generation == record.active_turn_generation,
-        EngramObservationProvenance::Claude(origin) =>
+        EngramObservationProvenance::Runtime {
+            token,
+            turn_generation,
+        } => {
+            record.runtime.matches_runtime_token(token)
+                && *turn_generation == record.active_turn_generation
+        }
+        EngramObservationProvenance::Claude(origin) => {
             record.runtime.matches_runtime_token(&origin.token)
                 && matches!(origin.origin, ClaudeWorkOrigin::Attempt { turn_generation }
                     if turn_generation == record.active_turn_generation)
-                && !unmediated_claude_turn_hides_observations(record),
+                && !unmediated_claude_turn_hides_observations(record)
+        }
         EngramObservationProvenance::Ambient => false,
     }
 }

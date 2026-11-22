@@ -2,8 +2,10 @@
 // Naming, native verification and observations use the same claim identity;
 // this read changes no focus and authorizes no model turn.
 
+use super::*;
+
 /// Names the caller in every failure message of a one-shot Engram CLI call.
-const ENGRAM_WORK_BINDING_READER_LABEL: &str = "work-binding reader";
+pub(crate) const ENGRAM_WORK_BINDING_READER_LABEL: &str = "work-binding reader";
 
 /// What an Engram build without `work core held` prints on stderr when asked
 /// for it (its argument parser's refusal).
@@ -13,45 +15,45 @@ const ENGRAM_WORK_CORE_HELD_MISSING_DIAGNOSTIC: &str = "unrecognized subcommand 
 /// session holds a live claim on, newest claim first. Fields TermAl does not
 /// read are ignored.
 #[derive(Clone, Debug, Deserialize)]
-struct EngramHeldClaims {
-    items: Vec<EngramHeldClaim>,
+pub(crate) struct EngramHeldClaims {
+    pub(crate) items: Vec<EngramHeldClaim>,
     /// Held claims left out of `items` by Engram's row limit (the oldest).
     #[serde(default)]
-    omitted: u64,
+    pub(crate) omitted: u64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct EngramHeldClaim {
+pub(crate) struct EngramHeldClaim {
     #[serde(default)]
-    work_id: String,
+    pub(crate) work_id: String,
     /// The item's short reference, which agents name it by.
     #[serde(default)]
-    short_ref: String,
+    pub(crate) short_ref: String,
     /// The claim itself, read from the row: `control_binding` is null while a
     /// handoff offer is pending, yet the row is still the live claim. Empty
     /// from an Engram build that does not list it.
     #[serde(default)]
-    claim_id: String,
+    pub(crate) claim_id: String,
     #[serde(default)]
-    claim_fence: i64,
+    pub(crate) claim_fence: i64,
     #[serde(default)]
-    focused: bool,
+    pub(crate) focused: bool,
     /// The current canonical work association, or null for an unavailable
     /// association (a pending handoff offer or a run no longer claimed or
     /// active). A revision by the holder re-accepts the claim, so it shows
     /// a fresh binding at the new revision rather than null. Absent reads as
     /// null.
     #[serde(default)]
-    control_binding: Option<EngramControlWorkBinding>,
+    pub(crate) control_binding: Option<EngramControlWorkBinding>,
 }
 
 /// What a work-binding read prefers and what it leaves out
 /// (`select_engram_held_binding`).
 #[derive(Clone, Copy, Debug, Default)]
-struct EngramBindingPreference<'a> {
+pub(crate) struct EngramBindingPreference<'a> {
     /// The binding the session is bound with now, which the selection keeps
     /// while that claim is still bindable.
-    current: Option<&'a EngramControlWorkBinding>,
+    pub(crate) current: Option<&'a EngramControlWorkBinding>,
 }
 
 /// Reads the work binding a session should be bound with, under the agent's
@@ -62,14 +64,13 @@ struct EngramBindingPreference<'a> {
 /// another item moves focus, and a note on another item must not unbind the
 /// session. `preference` names its current claim association
 /// (`select_engram_held_binding`).
-fn read_engram_work_binding_from_cli(
+pub(crate) fn read_engram_work_binding_from_cli(
     connection: &EngramConnectionConfig,
     preference: EngramBindingPreference<'_>,
     timeout: Duration,
     host_workdir: &FsPath,
 ) -> std::result::Result<Option<EngramControlWorkBinding>, EngramTransportError> {
-    let held =
-        read_engram_held_claims_from_cli(connection, timeout, host_workdir)?;
+    let held = read_engram_held_claims_from_cli(connection, timeout, host_workdir)?;
     Ok(select_engram_held_binding(
         held.items,
         held.omitted,
@@ -83,7 +84,7 @@ fn read_engram_work_binding_from_cli(
 /// no delivery and appends nothing. The work-binding read selects one binding
 /// from it; a work's source root (`engram_source_roots.rs`) reads the claims
 /// themselves.
-fn read_engram_held_claims_from_cli(
+pub(crate) fn read_engram_held_claims_from_cli(
     connection: &EngramConnectionConfig,
     timeout: Duration,
     host_workdir: &FsPath,
@@ -136,7 +137,7 @@ fn read_engram_held_claims_from_cli(
 /// kept for the caller's exact canonical revalidation rather than switched.
 /// Without a candidate there is no work association. Each captured report carries its own
 /// original claim and run.
-fn select_engram_held_binding(
+pub(crate) fn select_engram_held_binding(
     held: Vec<EngramHeldClaim>,
     omitted: u64,
     preference: EngramBindingPreference<'_>,

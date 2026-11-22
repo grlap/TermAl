@@ -8,13 +8,15 @@
 // split out of src/engram_carried_checks.rs so that file does not grow
 // further.
 
+use super::*;
+
 /// The process-local order of watcher notifications and command starts. It
 /// never runs backward, unlike the wall clock, so it alone decides whether a
 /// notification reached the host before a check's launch.
 static ENGRAM_WATCHER_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// The next point of `ENGRAM_WATCHER_ORDER`.
-fn engram_watcher_order_tick() -> u64 {
+pub(crate) fn engram_watcher_order_tick() -> u64 {
     ENGRAM_WATCHER_ORDER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }
 
@@ -35,7 +37,7 @@ static ENGRAM_RUN_REGISTRATION_ORDERS: std::sync::Mutex<std::collections::VecDeq
 /// in `run_directory`, already canonical, now in the watcher order. A run
 /// already recorded keeps its first point, the earliest and so the strictest.
 /// Reads no file, so it may run under the state lock.
-fn engram_note_run_registered(run_directory: &FsPath) {
+pub(crate) fn engram_note_run_registered(run_directory: &FsPath) {
     let key = engram_path_key(run_directory);
     let mut orders = ENGRAM_RUN_REGISTRATION_ORDERS
         .lock()
@@ -53,7 +55,7 @@ fn engram_note_run_registered(run_directory: &FsPath) {
 /// of the launcher run in `run_directory`, if it did and still remembers it.
 /// Resolves the directory first, so call it off the state lock.
 #[cfg(test)]
-fn engram_run_registration_order(run_directory: &FsPath) -> Option<u64> {
+pub(crate) fn engram_run_registration_order(run_directory: &FsPath) -> Option<u64> {
     let key = engram_path_key(&fs::canonicalize(run_directory).ok()?);
     ENGRAM_RUN_REGISTRATION_ORDERS
         .lock()
@@ -67,7 +69,7 @@ fn engram_run_registration_order(run_directory: &FsPath) -> Option<u64> {
 /// gate because its notification arrived at `arrival`, before the gate's
 /// launch: the first cause is kept, and the latest such arrival, which the
 /// run's registration must follow for the exemption to hold.
-fn engram_note_watcher_exemption(
+pub(crate) fn engram_note_watcher_exemption(
     exempted: &mut Option<(String, u64)>,
     cause: &str,
     arrival: Option<EngramWatcherArrival>,
@@ -85,14 +87,14 @@ fn engram_note_watcher_exemption(
 /// When a watcher notification reached the host: its place in the watcher
 /// order, which decides, and its wall-clock time, which is only shown.
 #[derive(Clone, Copy, Debug)]
-struct EngramWatcherArrival {
-    order: u64,
-    at: std::time::SystemTime,
+pub(crate) struct EngramWatcherArrival {
+    pub(crate) order: u64,
+    pub(crate) at: std::time::SystemTime,
 }
 
 /// The arrival of a notification reaching the host now. The watcher's notify
 /// callback takes it before the event waits behind earlier events.
-fn engram_watcher_arrival_now() -> EngramWatcherArrival {
+pub(crate) fn engram_watcher_arrival_now() -> EngramWatcherArrival {
     EngramWatcherArrival {
         order: engram_watcher_order_tick(),
         at: std::time::SystemTime::now(),
@@ -111,7 +113,7 @@ fn engram_watcher_arrival_now() -> EngramWatcherArrival {
 ///
 /// Residual, accepted: a notification the operating system itself delivers
 /// late, after the launch, for a write before it, still fences the check.
-fn engram_watcher_change_may_follow_launch(
+pub(crate) fn engram_watcher_change_may_follow_launch(
     arrival: Option<EngramWatcherArrival>,
     started_order: Option<u64>,
 ) -> bool {
@@ -124,7 +126,7 @@ fn engram_watcher_change_may_follow_launch(
 /// Whether a change modified at `candidate` should be the one a worktree's
 /// watcher cause names over one modified at `current`: a change without a
 /// modification time names the least known, so it wins; otherwise the later.
-fn engram_watcher_change_is_later(candidate: Option<u64>, current: Option<u64>) -> bool {
+pub(crate) fn engram_watcher_change_is_later(candidate: Option<u64>, current: Option<u64>) -> bool {
     match (candidate, current) {
         (_, None) => false,
         (None, Some(_)) => true,
@@ -134,7 +136,9 @@ fn engram_watcher_change_is_later(candidate: Option<u64>, current: Option<u64>) 
 
 /// The modification time a batch of watcher changes too widespread to place
 /// is named by: none when any change has none, else the latest.
-fn engram_watcher_changes_latest_mtime(changes: &[WorkspaceFileChangeEvent]) -> Option<u64> {
+pub(crate) fn engram_watcher_changes_latest_mtime(
+    changes: &[WorkspaceFileChangeEvent],
+) -> Option<u64> {
     changes
         .iter()
         .map(|change| change.mtime_ms)
@@ -145,7 +149,7 @@ fn engram_watcher_changes_latest_mtime(changes: &[WorkspaceFileChangeEvent]) -> 
 /// change's modification time and, when known, when its notification reached
 /// the host, so the holder can tell a late report of an earlier change from
 /// a write while the check ran.
-fn engram_watcher_change_cause(
+pub(crate) fn engram_watcher_change_cause(
     shown: &str,
     mtime_ms: Option<u64>,
     arrival: Option<EngramWatcherArrival>,

@@ -2,15 +2,17 @@
 // receipt nonces and real runtime/reset/Stop ownership qualify a delivery.
 // Historical control records never authorize or delay an independent turn.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
-    static TEST_HUMAN_PROMOTION_CAPTURE_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    static TEST_HUMAN_BEFORE_RUNTIME_RESET: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_HUMAN_BEFORE_PROMOTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_HUMAN_PROMOTION_CAPTURE_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static TEST_HUMAN_BEFORE_RUNTIME_RESET: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_HUMAN_BEFORE_PROMOTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Debug)]
-struct HumanPromptOwnerChanged;
+pub(crate) struct HumanPromptOwnerChanged;
 impl std::fmt::Display for HumanPromptOwnerChanged {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("the human runtime-reset owner changed or is fenced")
@@ -19,14 +21,14 @@ impl std::fmt::Display for HumanPromptOwnerChanged {
 impl std::error::Error for HumanPromptOwnerChanged {}
 
 #[cfg(test)]
-type TestHumanDrainHook = Box<dyn FnOnce() -> std::sync::mpsc::Sender<()> + Send>;
+pub(crate) type TestHumanDrainHook = Box<dyn FnOnce() -> std::sync::mpsc::Sender<()> + Send>;
 #[cfg(test)]
 static TEST_HUMAN_DRAIN_CAPTURE_HOOKS: std::sync::LazyLock<
     std::sync::Mutex<HashMap<(usize, String), TestHumanDrainHook>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 #[cfg(test)]
-struct TestHumanDrainHookOwner((usize, String));
+pub(crate) struct TestHumanDrainHookOwner(pub(crate) (usize, String));
 #[cfg(test)]
 impl Drop for TestHumanDrainHookOwner {
     fn drop(&mut self) {
@@ -37,7 +39,7 @@ impl Drop for TestHumanDrainHookOwner {
     }
 }
 #[cfg(test)]
-struct TestHumanDrainCompletion(std::sync::mpsc::Sender<()>);
+pub(crate) struct TestHumanDrainCompletion(pub(crate) std::sync::mpsc::Sender<()>);
 #[cfg(test)]
 impl Drop for TestHumanDrainCompletion {
     fn drop(&mut self) {
@@ -45,7 +47,7 @@ impl Drop for TestHumanDrainCompletion {
     }
 }
 #[cfg(test)]
-fn install_test_human_drain_capture_hook(
+pub(crate) fn install_test_human_drain_capture_hook(
     state: &AppState,
     session_id: &str,
     hook: TestHumanDrainHook,
@@ -61,7 +63,7 @@ fn install_test_human_drain_capture_hook(
     TestHumanDrainHookOwner(key)
 }
 #[cfg(test)]
-fn run_test_human_drain_capture_hook(
+pub(crate) fn run_test_human_drain_capture_hook(
     state: &AppState,
     session_id: &str,
 ) -> Option<TestHumanDrainCompletion> {
@@ -71,23 +73,23 @@ fn run_test_human_drain_capture_hook(
 }
 
 #[derive(Clone, Debug)]
-struct HumanPromptTurn {
-    prompt_id: String,
-    generation: u64,
+pub(crate) struct HumanPromptTurn {
+    pub(crate) prompt_id: String,
+    pub(crate) generation: u64,
 }
 
-fn explicit_human_request(request: &SendMessageRequest) -> bool {
+pub(crate) fn explicit_human_request(request: &SendMessageRequest) -> bool {
     request.source_session_id.is_none() && request.source_mailbox.is_none()
 }
 
-fn human_prompt_turn_is_current(record: &SessionRecord) -> bool {
+pub(crate) fn human_prompt_turn_is_current(record: &SessionRecord) -> bool {
     record
         .human_prompt_turn
         .as_ref()
         .is_some_and(|owner| owner.generation == record.active_turn_generation)
 }
 
-fn human_prompt_handoff_allowed(record: &SessionRecord, generation: u64) -> bool {
+pub(crate) fn human_prompt_handoff_allowed(record: &SessionRecord, generation: u64) -> bool {
     record.human_prompt_turn.as_ref().is_some_and(|owner| {
         owner.generation == generation
             && generation == record.active_turn_generation
@@ -101,7 +103,7 @@ fn human_prompt_handoff_allowed(record: &SessionRecord, generation: u64) -> bool
     })
 }
 
-enum HumanPromptDrain {
+pub(crate) enum HumanPromptDrain {
     Absent,
     Held,
     Started(StartedQueuedTurn),
@@ -135,7 +137,7 @@ fn human_queue_entry_is_eligible(
         && ordinary_queue_entry_is_runnable(record, queued)
 }
 
-fn require_human_runtime_reset_owner(
+pub(crate) fn require_human_runtime_reset_owner(
     inner: &StateInner,
     session_id: &str,
     prompt_id: &str,
@@ -168,12 +170,15 @@ fn require_human_runtime_reset_owner(
 }
 
 #[derive(Clone)]
-struct HumanResetResume {
-    prompt_id: String,
-    resume: PromptDeliveryResume,
+pub(crate) struct HumanResetResume {
+    pub(crate) prompt_id: String,
+    pub(crate) resume: PromptDeliveryResume,
 }
 
-fn capture_human_reset_resume(record: &SessionRecord, prompt_id: &str) -> Option<HumanResetResume> {
+pub(crate) fn capture_human_reset_resume(
+    record: &SessionRecord,
+    prompt_id: &str,
+) -> Option<HumanResetResume> {
     Some(HumanResetResume {
         prompt_id: prompt_id.to_owned(),
         resume: record
@@ -185,7 +190,7 @@ fn capture_human_reset_resume(record: &SessionRecord, prompt_id: &str) -> Option
     })
 }
 
-fn transfer_human_reset_resume(
+pub(crate) fn transfer_human_reset_resume(
     record: &mut SessionRecord,
     saved: &HumanResetResume,
     generation: u64,
@@ -223,13 +228,25 @@ fn transfer_human_reset_resume(
     true
 }
 
-fn human_position_may_start(_inner: &StateInner, record: &SessionRecord, position: usize, explicit: bool) -> bool {
-    !record.queued_prompts.iter().take(position)
+fn human_position_may_start(
+    _inner: &StateInner,
+    record: &SessionRecord,
+    position: usize,
+    explicit: bool,
+) -> bool {
+    !record
+        .queued_prompts
+        .iter()
+        .take(position)
         .any(|queued| queued_prompt_held_for_durability(record, queued))
         && record.queued_prompts.iter().take(position).all(|queued| {
             !ordinary_queue_entry_is_runnable(record, queued)
-                || (explicit && record.orchestrator_auto_dispatch_blocked
-                    && matches!(queued.source, QueuedPromptSource::Mailbox | QueuedPromptSource::Orchestrator))
+                || (explicit
+                    && record.orchestrator_auto_dispatch_blocked
+                    && matches!(
+                        queued.source,
+                        QueuedPromptSource::Mailbox | QueuedPromptSource::Orchestrator
+                    ))
         })
 }
 
@@ -270,7 +287,7 @@ impl AppState {
     // Test convenience entry point. User-facing handlers use the acceptance-
     // tracking variant below; automated sends continue through dispatch_turn.
     #[cfg(test)]
-    fn dispatch_human_turn(
+    pub(crate) fn dispatch_human_turn(
         &self,
         session_id: &str,
         request: SendMessageRequest,
@@ -278,7 +295,7 @@ impl AppState {
         self.dispatch_human_turn_with_acceptance(session_id, request, &mut None)
     }
 
-    fn dispatch_human_turn_with_acceptance(
+    pub(crate) fn dispatch_human_turn_with_acceptance(
         &self,
         session_id: &str,
         request: SendMessageRequest,
@@ -288,7 +305,7 @@ impl AppState {
         self.dispatch_human_turn_with_followup(session_id, request, None, accepted_prompt_id)
     }
 
-    fn dispatch_human_turn_with_followup(
+    pub(crate) fn dispatch_human_turn_with_followup(
         &self,
         session_id: &str,
         request: SendMessageRequest,
@@ -427,9 +444,10 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|owner| owner.matches(record))
                 && !queued_head_held_for_durability(record)
-                && record.queued_prompts.front().is_some_and(|head| {
-                    ordinary_queue_entry_is_runnable(record, head)
-                })
+                && record
+                    .queued_prompts
+                    .front()
+                    .is_some_and(|head| ordinary_queue_entry_is_runnable(record, head))
             {
                 prioritize_user_queued_prompts(record);
             }
@@ -543,7 +561,7 @@ impl AppState {
     // unsent would make the UI restore a draft that can be submitted twice.
     // Keep its original id/content and surface a retryable session failure;
     // never disturb a concurrent runtime/Stop owner or old control evidence.
-    fn retain_accepted_human_start_failure(
+    pub(crate) fn retain_accepted_human_start_failure(
         &self,
         session_id: &str,
         prompt_id: &str,
@@ -565,9 +583,9 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_visible_session_index(session_id) {
             let record = &mut inner.sessions[index];
-            if deadline_generations.is_some_and(|generations| {
-                generations != HumanIntakeGenerations::capture(record)
-            }) {
+            if deadline_generations
+                .is_some_and(|generations| generations != HumanIntakeGenerations::capture(record))
+            {
                 return DispatchTurnResult::Queued;
             }
             if record.queued_prompts.iter().any(|queued| {
@@ -584,9 +602,7 @@ impl AppState {
                     .queued_prompts
                     .iter()
                     .find(|queued| queued.pending_prompt.id == prompt_id)
-                    .is_some_and(|queued| {
-                        ordinary_queue_entry_is_runnable(record, queued)
-                    });
+                    .is_some_and(|queued| ordinary_queue_entry_is_runnable(record, queued));
                 let recovery = if unsent {
                     "Resume retries the retained prompt."
                 } else {
@@ -609,7 +625,7 @@ impl AppState {
         DispatchTurnResult::Queued
     }
 
-    fn start_human_queued_turn(
+    pub(crate) fn start_human_queued_turn(
         &self,
         session_id: &str,
         explicit_resume: bool,
@@ -617,7 +633,7 @@ impl AppState {
         self.start_human_queued_turn_with_selection(session_id, explicit_resume, None)
     }
 
-    fn start_human_queued_turn_with_selection(
+    pub(crate) fn start_human_queued_turn_with_selection(
         &self,
         session_id: &str,
         explicit_resume: bool,
@@ -876,9 +892,9 @@ impl AppState {
     }
 }
 
-struct HumanPromptPersistenceImage {
-    session_id: String,
-    minimum: PersistSessionWriteStamp,
+pub(crate) struct HumanPromptPersistenceImage {
+    pub(crate) session_id: String,
+    pub(crate) minimum: PersistSessionWriteStamp,
 }
 
 enum HumanPromptPersistenceFailure {
@@ -897,16 +913,18 @@ impl HumanPromptPersistenceFailure {
     }
 }
 
-fn human_prompt_persistence_fence(
+pub(crate) fn human_prompt_persistence_fence(
     inner: &StateInner,
     session_id: &str,
 ) -> Result<Option<HumanPromptPersistenceImage>, ApiError> {
     if engram_project_for_session_locked(inner, session_id)
-        .filter(|project| project.engram.is_some()).is_none()
+        .filter(|project| project.engram.is_some())
+        .is_none()
     {
         return Ok(None);
     }
-    let record = inner.find_session_index(session_id)
+    let record = inner
+        .find_session_index(session_id)
         .map(|index| &inner.sessions[index])
         .ok_or_else(|| ApiError::not_found("session not found"))?;
     Ok(Some(HumanPromptPersistenceImage {
@@ -915,7 +933,7 @@ fn human_prompt_persistence_fence(
     }))
 }
 impl AppState {
-    fn confirm_human_prompt_persistence(
+    pub(crate) fn confirm_human_prompt_persistence(
         &self,
         image: Option<HumanPromptPersistenceImage>,
     ) -> Result<(), ApiError> {
@@ -939,7 +957,11 @@ impl AppState {
             clock.now() + std::time::Duration::from_secs(20),
             clock,
         );
-        if self.persist_tx.send(PersistRequest::Fence(Box::new(fence))).is_err() {
+        if self
+            .persist_tx
+            .send(PersistRequest::Fence(Box::new(fence)))
+            .is_err()
+        {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let record = inner
                 .find_session_index(&image.session_id)
@@ -962,6 +984,8 @@ impl AppState {
                 })?;
             return Ok(());
         }
-        waiter.wait().map_err(HumanPromptPersistenceFailure::Acknowledgement)
+        waiter
+            .wait()
+            .map_err(HumanPromptPersistenceFailure::Acknowledgement)
     }
 }

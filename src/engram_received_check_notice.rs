@@ -3,32 +3,32 @@
 // EngramOtherRootNoticeRead moved here from engram_turn_checks.rs, extended
 // with receipt presentation; its existing owned-observer lifecycle is reused.
 // Presentation confirms receipt of the registered run's historical record.
-const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
+pub(crate) const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ReceivedNoticeSourceUnavailable {
+pub(crate) enum ReceivedNoticeSourceUnavailable {
     Deadline,
     Read,
 }
 
-fn received_notice_step_timeout(deadline: std::time::Instant, maximum: Duration) -> Duration {
+pub(crate) fn received_notice_step_timeout(deadline: std::time::Instant, maximum: Duration) -> Duration {
     maximum.min(deadline.saturating_duration_since(std::time::Instant::now()))
 }
 
 #[cfg(test)]
-static TEST_RECEIVED_NOTICE_SOURCE_READ: std::sync::LazyLock<std::sync::Mutex<
+pub(crate) static TEST_RECEIVED_NOTICE_SOURCE_READ: std::sync::LazyLock<std::sync::Mutex<
     HashMap<String, Box<dyn FnOnce(std::time::Instant) + Send>>,
 >> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 #[derive(Clone)]
-struct ReceivedCheckNotice {
-    registration: TestRunRegistration,
-    receipt: EngramVerificationRecordReceipt,
-    deadline: std::time::Instant,
+pub(crate) struct ReceivedCheckNotice {
+    pub(crate) registration: TestRunRegistration,
+    pub(crate) receipt: EngramVerificationRecordReceipt,
+    pub(crate) deadline: std::time::Instant,
 }
 
 impl ReceivedCheckNotice {
-    fn read(registration: &TestRunRegistration, deadline: std::time::Instant) -> Option<Self> {
+    pub(crate) fn read(registration: &TestRunRegistration, deadline: std::time::Instant) -> Option<Self> {
         let ack = registration.verification_record.as_ref()?;
         let (receipt, digest) = match ack {
             TestRunVerificationAck::Settled { receipt, body_digest } => (receipt, body_digest),
@@ -69,12 +69,12 @@ impl ReceivedCheckNotice {
                 named.workspace_id == root.root && named.generation == root.generation)
     }
 
-    fn is_current(&self, inner: &StateInner) -> bool {
+    pub(crate) fn is_current(&self, inner: &StateInner) -> bool {
         inner.test_run_registrations.get(&self.registration.run_id)
             .is_some_and(|actual| actual.matches_registration_snapshot(&self.registration))
     }
 
-    fn line(&self) -> String {
+    pub(crate) fn line(&self) -> String {
         let outcome = match self.receipt.run_outcome {
             EngramVerificationRecordRunOutcome::Passed => "passed",
             EngramVerificationRecordRunOutcome::Failed => "failed",
@@ -108,7 +108,7 @@ fn registered_launcher_notice(run: &TestRunRegistration, state: &TestRunState) -
 }
 
 impl AppState {
-    fn schedule_received_launcher_notice(&self, registration: &TestRunRegistration, deadline: std::time::Instant) {
+    pub(crate) fn schedule_received_launcher_notice(&self, registration: &TestRunRegistration, deadline: std::time::Instant) {
         let Some(current) = self.pending_received_launcher_registration(registration) else { return; };
         let owner = self.clone();
         if let Err(error) = self.capture_lifetime.spawn_observer("termal-received-launcher-notice", move || {
@@ -212,21 +212,21 @@ impl AppState {
 // Other claims are read only to explain command placement. This snapshot
 // owns no turn admission or evidence. Its read runs in an owned observer,
 // never on the runtime frame path.
-struct EngramOtherRootNoticeRead {
-    session_id: String,
-    target: EngramBindingTarget,
-    roots: Vec<EngramWorkSourceRoot>,
-    host_turn_ref: String,
-    turn_generation: u64,
-    runtime: Option<RuntimeToken>,
-    workdir: String,
-    source_root: Option<EngramTurnSourceRoot>,
+pub(crate) struct EngramOtherRootNoticeRead {
+    pub(crate) session_id: String,
+    pub(crate) target: EngramBindingTarget,
+    pub(crate) roots: Vec<EngramWorkSourceRoot>,
+    pub(crate) host_turn_ref: String,
+    pub(crate) turn_generation: u64,
+    pub(crate) runtime: Option<RuntimeToken>,
+    pub(crate) workdir: String,
+    pub(crate) source_root: Option<EngramTurnSourceRoot>,
     bound_root: Option<EngramWorkSourceRoot>,
     received_candidates: Vec<TestRunRegistration>,
 }
 
 impl EngramOtherRootNoticeRead {
-    fn capture(inner: &StateInner, index: usize) -> Option<Self> {
+    pub(crate) fn capture(inner: &StateInner, index: usize) -> Option<Self> {
         let record = &inner.sessions[index];
         let session_id = &record.session.id;
         if AppState::engram_session_has_child_binding_shape_locked(inner, session_id) {
@@ -267,7 +267,7 @@ impl EngramOtherRootNoticeRead {
             source_root: record.engram.observed_source_root().cloned(), bound_root, received_candidates })
     }
 
-    fn read(&self, deadline: std::time::Instant, shared: bool) -> Result<
+    pub(crate) fn read(&self, deadline: std::time::Instant, shared: bool) -> Result<
         (Vec<EngramWorkSourceRoot>, Vec<(EngramWorkSourceRoot, ReceivedCheckNotice)>),
         ReceivedNoticeSourceUnavailable,
     > {
@@ -301,7 +301,7 @@ impl EngramOtherRootNoticeRead {
         Ok((roots, received))
     }
 
-    fn is_current(&self, inner: &StateInner, index: usize) -> bool {
+    pub(crate) fn is_current(&self, inner: &StateInner, index: usize) -> bool {
         let record = &inner.sessions[index];
         record.active_turn_generation == self.turn_generation
             && record.runtime.runtime_token() == self.runtime
@@ -317,7 +317,7 @@ impl EngramOtherRootNoticeRead {
                 })
     }
 
-    fn schedule(self, state: &AppState, bound: String, shared: bool, feedback_revision: u64) {
+    pub(crate) fn schedule(self, state: &AppState, bound: String, shared: bool, feedback_revision: u64) {
         if self.roots.is_empty() { return; }
         let owner = state.clone();
         if let Err(error) = state.capture_lifetime.spawn_observer("termal-other-root-notice", move || {

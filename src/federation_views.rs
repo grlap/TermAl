@@ -1,9 +1,11 @@
 // Owns redacted registry and capacity projection. Does not own credentials, transport or runtime execution.
 // Split from federation_registry.rs while implementing the new domain foundation.
 
+use super::*;
+
 #[cfg_attr(not(test), allow(dead_code))]
 impl AppState {
-    fn federation_registry_view(&self) -> Result<Value, ApiError> {
+    pub(crate) fn federation_registry_view(&self) -> Result<Value, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let peers: Vec<Value> = inner.federation.peers.values().map(|peer| {
             let allocated: Vec<_> = inner.federation.placements.values().filter(|placement|

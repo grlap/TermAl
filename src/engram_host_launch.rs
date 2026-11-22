@@ -1,7 +1,9 @@
 // Host-owned Engram processes have no reason to retain a project's worktree.
 // This launch policy is runtime-private; durable intents keep their original
 // project/store/session authority and acquire the policy at the adapter boundary.
-fn engram_host_workdir(persistence_path: &FsPath) -> std::io::Result<PathBuf> {
+
+use super::*;
+pub(crate) fn engram_host_workdir(persistence_path: &FsPath) -> std::io::Result<PathBuf> {
     let absolute = if persistence_path.is_absolute() {
         persistence_path.to_path_buf()
     } else {
@@ -18,44 +20,73 @@ fn engram_host_workdir(persistence_path: &FsPath) -> std::io::Result<PathBuf> {
 // directories, not cwd, a relative PATH entry, a batch shim, or the project.
 // Unlike ordinary command search, multiple distinct programs refuse rather
 // than silently selecting whichever happens to come first.
-fn resolve_engram_source_program(
-    configured: &FsPath, project_root: &FsPath, deadline: std::time::Instant,
+pub(crate) fn resolve_engram_source_program(
+    configured: &FsPath,
+    project_root: &FsPath,
+    deadline: std::time::Instant,
 ) -> Result<PathBuf> {
     let directories = std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>()).unwrap_or_default();
+        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
     resolve_engram_source_program_in(configured, project_root, &directories, deadline)
 }
 
-fn resolve_engram_source_program_in(
-    configured: &FsPath, project_root: &FsPath, directories: &[PathBuf], deadline: std::time::Instant,
+pub(crate) fn resolve_engram_source_program_in(
+    configured: &FsPath,
+    project_root: &FsPath,
+    directories: &[PathBuf],
+    deadline: std::time::Instant,
 ) -> Result<PathBuf> {
     engram_source_before_deadline(deadline)?;
-    if configured.is_absolute() { return engram_source_binary(configured, deadline); }
-    let name = configured.to_str().context("Engram source owner command is not UTF-8")?;
-    if name.is_empty() || configured.components().count() != 1
-        || name.contains(['/', '\\', ':']) || name.chars().any(char::is_control)
+    if configured.is_absolute() {
+        return engram_source_binary(configured, deadline);
+    }
+    let name = configured
+        .to_str()
+        .context("Engram source owner command is not UTF-8")?;
+    if name.is_empty()
+        || configured.components().count() != 1
+        || name.contains(['/', '\\', ':'])
+        || name.chars().any(char::is_control)
         || matches!(name, "." | "..")
     {
         bail!("Engram source owner command must be a native name or an absolute executable path");
     }
-    let project = fs::canonicalize(project_root).context("Engram source owner project root is unavailable")?;
+    let project = fs::canonicalize(project_root)
+        .context("Engram source owner project root is unavailable")?;
     let mut found = BTreeMap::new();
-    for directory in directories.iter().filter(|directory| directory.is_absolute()) {
+    for directory in directories
+        .iter()
+        .filter(|directory| directory.is_absolute())
+    {
         engram_source_before_deadline(deadline)?;
         let candidate = directory.join(configured);
         #[cfg(windows)]
-        let candidate = if configured.extension().is_none() { candidate.with_extension("exe") } else { candidate };
-        if !candidate.is_file() { continue; }
+        let candidate = if configured.extension().is_none() {
+            candidate.with_extension("exe")
+        } else {
+            candidate
+        };
+        if !candidate.is_file() {
+            continue;
+        }
         let binary = engram_source_binary(&candidate, deadline)?;
         if binary.starts_with(&project) {
-            bail!("Engram source owner command resolved inside the project; configure an explicit trusted executable");
+            bail!(
+                "Engram source owner command resolved inside the project; configure an explicit trusted executable"
+            );
         }
         found.insert(engram_exact_path_key(&binary), binary);
     }
     match found.len() {
-        1 => Ok(found.into_values().next().context("Engram source owner executable is unavailable")?),
+        1 => Ok(found
+            .into_values()
+            .next()
+            .context("Engram source owner executable is unavailable")?),
         0 => bail!("Engram source owner command was not found in absolute host PATH directories"),
-        _ => bail!("Engram source owner command is ambiguous; configure its absolute executable path"),
+        _ => bail!(
+            "Engram source owner command is ambiguous; configure its absolute executable path"
+        ),
     }
 }
 
@@ -70,14 +101,20 @@ enum EngramHostProgramKind {
 #[cfg(windows)]
 fn engram_host_program_kind(binary: &FsPath) -> EngramHostProgramKind {
     match binary.extension().and_then(|extension| extension.to_str()) {
-        Some(extension) if extension.eq_ignore_ascii_case("ps1") => EngramHostProgramKind::PowerShell,
-        Some(extension) if extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat") => EngramHostProgramKind::Batch,
+        Some(extension) if extension.eq_ignore_ascii_case("ps1") => {
+            EngramHostProgramKind::PowerShell
+        }
+        Some(extension)
+            if extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat") =>
+        {
+            EngramHostProgramKind::Batch
+        }
         _ => EngramHostProgramKind::Native,
     }
 }
 
 #[cfg(windows)]
-fn resolve_engram_host_program(
+pub(crate) fn resolve_engram_host_program(
     binary: &FsPath,
     project_root: &FsPath,
 ) -> Result<PathBuf, EngramTransportError> {
@@ -102,21 +139,29 @@ fn resolve_engram_host_program(
             local
         } else {
             std::env::var_os("PATH")
-                .and_then(|value| std::env::split_paths(&value)
-                    .map(|directory| directory.join(binary))
-                    .find(|candidate| candidate.is_file()))
-                .ok_or_else(|| EngramTransportError::spawn_failed(format!(
-                    "Engram script not found: {}", binary.display()
-                )))?
+                .and_then(|value| {
+                    std::env::split_paths(&value)
+                        .map(|directory| directory.join(binary))
+                        .find(|candidate| candidate.is_file())
+                })
+                .ok_or_else(|| {
+                    EngramTransportError::spawn_failed(format!(
+                        "Engram script not found: {}",
+                        binary.display()
+                    ))
+                })?
         }
     } else {
         // Share the native Windows search used by finite reads, modeled on
         // std::process::Command: application/system directories then PATH,
         // with .exe for an extensionless name. A PATH batch shim cannot win.
         let wide = windows_launch::resolve_program_path(&windows_launch::LaunchSpec::new(binary))
-            .map_err(|error| EngramTransportError::spawn_failed(format!(
-                "failed resolving Engram program {}: {error}", binary.display()
-            )))?;
+            .map_err(|error| {
+            EngramTransportError::spawn_failed(format!(
+                "failed resolving Engram program {}: {error}",
+                binary.display()
+            ))
+        })?;
         PathBuf::from(std::ffi::OsString::from_wide(&wide[..wide.len() - 1]))
     };
     // Resolve before selecting the child cwd, including relative PATH entries.
@@ -130,7 +175,8 @@ fn resolve_engram_host_program(
     if configured_kind != resolved_kind {
         return Err(EngramTransportError::spawn_failed(format!(
             "Engram launch kind changed from {configured_kind:?} at {} to {resolved_kind:?} at {}; no process was started",
-            binary.display(), canonical.display()
+            binary.display(),
+            canonical.display()
         )));
     }
     // PowerShell interprets a verbatim local script path as a remote path for
@@ -145,7 +191,7 @@ fn resolve_engram_host_program(
 }
 
 #[cfg(windows)]
-fn validate_engram_host_launch_paths(
+pub(crate) fn validate_engram_host_launch_paths(
     project_file: &FsPath,
     home: &FsPath,
     host_workdir: &FsPath,
@@ -163,7 +209,7 @@ fn validate_engram_host_launch_paths(
     Ok(())
 }
 
-fn engram_host_command(
+pub(crate) fn engram_host_command(
     binary: &FsPath,
     project_root: &FsPath,
     project_file: &FsPath,
@@ -186,7 +232,7 @@ fn engram_host_command(
 }
 
 #[cfg(windows)]
-fn engram_host_command_for_program(
+pub(crate) fn engram_host_command_for_program(
     binary: &FsPath,
     project_root: &FsPath,
     host_workdir: &FsPath,
@@ -219,7 +265,7 @@ fn engram_host_command_for_program(
 }
 
 impl AppState {
-    fn engram_host_launch_workdir(&self) -> PathBuf {
+    pub(crate) fn engram_host_launch_workdir(&self) -> PathBuf {
         self.inner
             .lock()
             .expect("state mutex poisoned")

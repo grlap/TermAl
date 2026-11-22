@@ -5,44 +5,44 @@
 const GIT_SUBMODULE_FILE_LIMIT: usize = 100;
 
 #[derive(Default)]
-struct ParsedGitBranchStatus {
-    ahead: usize,
-    behind: usize,
-    branch: Option<String>,
-    upstream: Option<String>,
-    initial: bool,
+pub(crate) struct ParsedGitBranchStatus {
+    pub(crate) ahead: usize,
+    pub(crate) behind: usize,
+    pub(crate) branch: Option<String>,
+    pub(crate) upstream: Option<String>,
+    pub(crate) initial: bool,
 }
 
-struct ParsedGitStatusEntry {
-    file: GitStatusFile,
-    gitlink: Option<GitlinkChange>,
+pub(crate) struct ParsedGitStatusEntry {
+    pub(crate) file: GitStatusFile,
+    pub(crate) gitlink: Option<GitlinkChange>,
     path_is_utf8: bool,
 }
 
 #[derive(Default)]
-struct GitlinkChange {
-    head: Option<String>,
-    index: Option<String>,
-    staged: bool,
-    unstaged: bool,
+pub(crate) struct GitlinkChange {
+    pub(crate) head: Option<String>,
+    pub(crate) index: Option<String>,
+    pub(crate) staged: bool,
+    pub(crate) unstaged: bool,
     staged_pointer: bool,
     worktree_pointer: bool,
-    dirt: GitlinkDirt,
+    pub(crate) dirt: GitlinkDirt,
 }
 
 #[derive(Clone, Copy, Default)]
-struct GitlinkDirt {
-    modified: bool,
-    untracked: bool,
+pub(crate) struct GitlinkDirt {
+    pub(crate) modified: bool,
+    pub(crate) untracked: bool,
 }
 
 impl GitlinkDirt {
-    fn any(self) -> bool {
+    pub(crate) fn any(self) -> bool {
         self.modified || self.untracked
     }
 }
 
-fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError> {
+pub(crate) fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError> {
     let workdir = normalize_git_workdir_path(path)?;
     let repo_root = resolve_git_repo_root(&workdir)?;
     let mut branch = ParsedGitBranchStatus::default();
@@ -105,7 +105,7 @@ fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusResponse, ApiError
     })
 }
 
-fn parse_git_status(output: &[u8]) -> (ParsedGitBranchStatus, Vec<ParsedGitStatusEntry>) {
+pub(crate) fn parse_git_status(output: &[u8]) -> (ParsedGitBranchStatus, Vec<ParsedGitStatusEntry>) {
     let mut branch = ParsedGitBranchStatus::default();
     let mut entries = Vec::new();
     let mut records = output.split(|byte| *byte == 0);
@@ -454,7 +454,7 @@ fn resolve_git_submodule_checkout(
     Ok(child)
 }
 
-fn git_submodule_read_command(child: &FsPath) -> Command {
+pub(crate) fn git_submodule_read_command(child: &FsPath) -> Command {
     let mut command = git_command();
     command
         .env("GIT_NO_LAZY_FETCH", "1")
@@ -463,7 +463,7 @@ fn git_submodule_read_command(child: &FsPath) -> Command {
     command
 }
 
-fn git_submodule_checkout_head(child: &FsPath) -> Option<String> {
+pub(crate) fn git_submodule_checkout_head(child: &FsPath) -> Option<String> {
     let output = git_submodule_read_command(child)
         .args(["rev-parse", "--verify", "HEAD"])
         .output()
@@ -475,7 +475,7 @@ fn git_submodule_checkout_head(child: &FsPath) -> Option<String> {
     .then(|| oid.to_owned())
 }
 
-fn read_git_submodule_commit_files(
+pub(crate) fn read_git_submodule_commit_files(
     child: &FsPath,
     old: Option<&str>,
     new: Option<&str>,

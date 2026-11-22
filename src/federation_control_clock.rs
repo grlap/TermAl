@@ -1,13 +1,15 @@
 // Owns monotonic control deadlines and an explicit fixture clock.
 // Does not change persistence, RPC limits or global Tokio time. New federation timing boundary.
 
+use super::*;
+
 #[derive(Clone)]
-struct FederationControlClock {
-    clock: EngramBudgetClock,
+pub(crate) struct FederationControlClock {
+    pub(crate) clock: EngramBudgetClock,
     #[cfg(test)]
-    changed: Arc<tokio::sync::watch::Sender<u64>>,
+    pub(crate) changed: Arc<tokio::sync::watch::Sender<u64>>,
     #[cfg(test)]
-    io_deadlines: bool,
+    pub(crate) io_deadlines: bool,
 }
 
 impl Default for FederationControlClock {
@@ -25,7 +27,7 @@ impl Default for FederationControlClock {
 impl FederationControlClock {
     // Production keeps Tokio's original deadlines. Only an explicitly opted-in
     // fixture drives protocol deadlines with the existing per-channel clock.
-    async fn timeout<F: std::future::Future>(
+    pub(crate) async fn timeout<F: std::future::Future>(
         &self,
         duration: Duration,
         future: F,
@@ -37,7 +39,7 @@ impl FederationControlClock {
         tokio::time::timeout(duration, future).await.map_err(|_| ())
     }
 
-    async fn timeout_at<F: std::future::Future>(
+    pub(crate) async fn timeout_at<F: std::future::Future>(
         &self,
         until: tokio::time::Instant,
         future: F,
@@ -62,11 +64,11 @@ impl FederationControlClock {
         }
     }
 
-    fn now(&self) -> std::time::Instant {
+    pub(crate) fn now(&self) -> std::time::Instant {
         self.clock.now()
     }
 
-    async fn deadline(&self, until: std::time::Instant) {
+    pub(crate) async fn deadline(&self, until: std::time::Instant) {
         #[cfg(test)]
         if matches!(self.clock, EngramBudgetClock::Scripted(_)) {
             let mut changed = self.changed.subscribe();
@@ -83,7 +85,7 @@ impl FederationControlClock {
     }
 
     #[cfg(test)]
-    fn scripted() -> Self {
+    pub(crate) fn scripted() -> Self {
         Self {
             clock: EngramBudgetClock::scripted(),
             changed: Arc::new(tokio::sync::watch::channel(0).0),
@@ -92,12 +94,15 @@ impl FederationControlClock {
     }
 
     #[cfg(test)]
-    fn scripted_io() -> Self {
-        Self { io_deadlines: true, ..Self::scripted() }
+    pub(crate) fn scripted_io() -> Self {
+        Self {
+            io_deadlines: true,
+            ..Self::scripted()
+        }
     }
 
     #[cfg(test)]
-    fn advance(&self, duration: Duration) {
+    pub(crate) fn advance(&self, duration: Duration) {
         self.clock.advance(duration);
         self.changed.send_modify(|revision| *revision += 1);
     }

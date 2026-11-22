@@ -2,22 +2,24 @@
 // Does not wait for storage admission or perform transport. New adapter between
 // mailboxes.rs transaction boundaries and M1/L1's exact authority witnesses.
 
-struct FederationMailboxAuthority {
-    app: AppState,
-    actor: FederationMailboxBinding,
-    lease: Option<FederationLinkLease>,
-    target: Option<FederationMailboxParticipant>,
+use super::*;
+
+pub(crate) struct FederationMailboxAuthority {
+    pub(crate) app: AppState,
+    pub(crate) actor: FederationMailboxBinding,
+    pub(crate) lease: Option<FederationLinkLease>,
+    pub(crate) target: Option<FederationMailboxParticipant>,
 }
 
-struct FederationMailboxAdmission<'a> {
-    _inner: StateMutexGuard<'a, StateInner>,
-    _link: Option<std::sync::MutexGuard<'a, FederationLinkState>>,
+pub(crate) struct FederationMailboxAdmission<'a> {
+    pub(crate) _inner: StateMutexGuard<'a, StateInner>,
+    pub(crate) _link: Option<std::sync::MutexGuard<'a, FederationLinkState>>,
 }
 
 impl FederationMailboxAuthority {
     /// Called ONLY after acquiring the SQLite connection/transaction. Neither
     /// the storage admission wait nor any network I/O occurs under these locks.
-    fn lock(&self) -> Result<FederationMailboxAdmission<'_>> {
+    pub(crate) fn lock(&self) -> Result<FederationMailboxAdmission<'_>> {
         let link = self
             .lease
             .as_ref()

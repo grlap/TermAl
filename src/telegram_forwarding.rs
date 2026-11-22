@@ -5,9 +5,11 @@ Tracks assistant text cursors, chunk retry state, footer delivery, and selected
 session baselines for Telegram-originated prompts.
 */
 
-const TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT: usize = 3;
+use super::*;
 
-fn telegram_assistant_chunk_skipped_notice(
+pub(crate) const TELEGRAM_ASSISTANT_CHUNK_SEND_FAILURE_LIMIT: usize = 3;
+
+pub(crate) fn telegram_assistant_chunk_skipped_notice(
     chunk_index: usize,
     chunk_count: usize,
     failed_attempts: usize,
@@ -21,7 +23,7 @@ fn telegram_assistant_chunk_skipped_notice(
 }
 
 /// Syncs Telegram digest.
-fn sync_telegram_digest(
+pub(crate) fn sync_telegram_digest(
     telegram: &impl TelegramDigestMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -92,7 +94,7 @@ fn sync_telegram_digest(
 /// Polls only the targeted/armed sessions needed for optional assistant reply
 /// forwarding. Unlike the retired digest loop, this never builds a project
 /// projection or acquires the global state lock through `/api/projects/...`.
-fn sync_telegram_assistant_replies(
+pub(crate) fn sync_telegram_assistant_replies(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
@@ -117,7 +119,7 @@ fn sync_telegram_assistant_replies(
 /// session remains, an optional caller-provided fallback is used when promptable;
 /// otherwise the latest promptable project-root session is selected. The
 /// production relay passes no digest fallback.
-fn resolve_telegram_project_prompt_session(
+pub(crate) fn resolve_telegram_project_prompt_session(
     termal: &impl TelegramPromptClient,
     project_id: &str,
     state: &mut TelegramBotState,
@@ -154,7 +156,7 @@ fn resolve_telegram_project_prompt_session(
     Ok((fallback_session_id, dirty))
 }
 
-fn ensure_selected_session_forwarding_baseline(
+pub(crate) fn ensure_selected_session_forwarding_baseline(
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
     session_id: &str,
@@ -168,7 +170,7 @@ fn ensure_selected_session_forwarding_baseline(
     Ok(apply_assistant_forwarding_plan(state, plan))
 }
 
-fn forward_relevant_assistant_messages(
+pub(crate) fn forward_relevant_assistant_messages(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
@@ -212,7 +214,7 @@ fn forward_relevant_assistant_messages(
     dirty
 }
 
-fn merge_assistant_forward_result(dirty: &mut bool, result: Result<bool>) {
+pub(crate) fn merge_assistant_forward_result(dirty: &mut bool, result: Result<bool>) {
     match result {
         Ok(changed) => *dirty |= changed,
         Err(err) => {
@@ -236,13 +238,13 @@ fn latest_assistant_text_cursor(
     })
 }
 
-fn telegram_assistant_text_hash(text: &str) -> String {
+pub(crate) fn telegram_assistant_text_hash(text: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
     format!("{:x}", hasher.finalize())
 }
 
-fn resolve_assistant_forwarding_cursor(
+pub(crate) fn resolve_assistant_forwarding_cursor(
     state: &TelegramBotState,
     session_id: &str,
 ) -> TelegramAssistantForwardingCursor {
@@ -253,7 +255,7 @@ fn resolve_assistant_forwarding_cursor(
         .unwrap_or_default()
 }
 
-fn forward_next_assistant_message_session_ids(state: &TelegramBotState) -> Vec<String> {
+pub(crate) fn forward_next_assistant_message_session_ids(state: &TelegramBotState) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut session_ids = Vec::new();
     for session_id in &state.forward_next_assistant_message_session_ids {
@@ -303,7 +305,7 @@ fn remember_assistant_forwarding_cursor(
     changed
 }
 
-fn remember_assistant_forwarding_footer_pending(
+pub(crate) fn remember_assistant_forwarding_footer_pending(
     state: &mut TelegramBotState,
     session_id: &str,
     pending: bool,
@@ -320,7 +322,7 @@ fn remember_assistant_forwarding_footer_pending(
     remember_assistant_forwarding_cursor(state, session_id, cursor)
 }
 
-fn clear_forward_next_assistant_message_session_id(
+pub(crate) fn clear_forward_next_assistant_message_session_id(
     state: &mut TelegramBotState,
     session_id: &str,
 ) -> bool {
@@ -334,7 +336,7 @@ fn clear_forward_next_assistant_message_session_id(
     changed
 }
 
-fn arm_forward_next_assistant_message_session_id(
+pub(crate) fn arm_forward_next_assistant_message_session_id(
     state: &mut TelegramBotState,
     session_id: &str,
 ) -> bool {
@@ -353,15 +355,15 @@ fn arm_forward_next_assistant_message_session_id(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct TelegramAssistantForwardingPlan {
-    session_id: String,
-    cursor: TelegramAssistantForwardingCursor,
+pub(crate) struct TelegramAssistantForwardingPlan {
+    pub(crate) session_id: String,
+    pub(crate) cursor: TelegramAssistantForwardingCursor,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct TelegramAssistantForwardingOutcome {
-    dirty: bool,
-    sent_visible_content: bool,
+pub(crate) struct TelegramAssistantForwardingOutcome {
+    pub(crate) dirty: bool,
+    pub(crate) sent_visible_content: bool,
     delivery_failed: bool,
 }
 
@@ -401,7 +403,7 @@ enum TelegramAssistantForwardingMessagePlan {
     },
 }
 
-fn prepare_assistant_forwarding_for_telegram_prompt(
+pub(crate) fn prepare_assistant_forwarding_for_telegram_prompt(
     termal: &impl TelegramSessionReader,
     session_id: &str,
 ) -> Result<TelegramAssistantForwardingPlan> {
@@ -422,7 +424,7 @@ fn prepare_assistant_forwarding_for_telegram_prompt(
     })
 }
 
-fn apply_assistant_forwarding_plan(
+pub(crate) fn apply_assistant_forwarding_plan(
     state: &mut TelegramBotState,
     plan: TelegramAssistantForwardingPlan,
 ) -> bool {
@@ -442,7 +444,7 @@ fn apply_assistant_forwarding_baseline(
 }
 
 #[cfg(test)]
-fn arm_assistant_forwarding_for_telegram_prompt(
+pub(crate) fn arm_assistant_forwarding_for_telegram_prompt(
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
     session_id: &str,
@@ -729,7 +731,7 @@ fn complete_assistant_forwarding_cursor(
 /// Thin dirty-state wrapper for callers that only need persistence progress.
 /// Use `forward_new_assistant_message_outcome` when visible-content forwarding
 /// affects control flow, such as digest-primary suppression.
-fn forward_new_assistant_message_if_any(
+pub(crate) fn forward_new_assistant_message_if_any(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
@@ -742,7 +744,7 @@ fn forward_new_assistant_message_if_any(
     Ok(outcome.dirty)
 }
 
-fn forward_new_assistant_message_outcome(
+pub(crate) fn forward_new_assistant_message_outcome(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramSessionReader,
     state: &mut TelegramBotState,
@@ -755,7 +757,10 @@ fn forward_new_assistant_message_outcome(
             // All three references can independently schedule another poll.
             // Remove only this missing session; operational failures still retry.
             let mut dirty = clear_forward_next_assistant_message_session_id(state, session_id);
-            dirty |= state.assistant_forwarding_cursors.remove(session_id).is_some();
+            dirty |= state
+                .assistant_forwarding_cursors
+                .remove(session_id)
+                .is_some();
             if state.selected_session_id.as_deref() == Some(session_id) {
                 state.selected_session_id = None;
                 dirty = true;
@@ -1051,7 +1056,7 @@ fn forward_new_assistant_message_outcome(
 /// gates on known settled statuses before invoking this function, so these
 /// arms should be unreachable in practice; we map them to the same fallback
 /// footer for safety.
-fn telegram_turn_settled_footer(status: &TelegramSessionStatus) -> &'static str {
+pub(crate) fn telegram_turn_settled_footer(status: &TelegramSessionStatus) -> &'static str {
     match status {
         TelegramSessionStatus::Approval => "─────────── ⏸ approval needed ───────────",
         TelegramSessionStatus::Error => "─────────── ⚠ stopped on error ───────────",

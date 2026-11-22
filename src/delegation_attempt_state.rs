@@ -2,6 +2,8 @@
 // Runtime, pause, durability and delivery receipts determine whether an attempt
 // is waiting; stored control history supplies no admission or retry authority.
 
+use super::*;
+
 /// What a held child's queue head says about the delegation's attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DelegationChildHold {
@@ -22,8 +24,12 @@ struct DelegationChildHold {
 /// its queue is paused and a prompt remains queued. Reads the
 /// child only.
 fn delegation_child_hold(child: &SessionRecord) -> Option<DelegationChildHold> {
-    if matches!(child.session.status, SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping)
-        || !child.orchestrator_auto_dispatch_blocked || delegation_child_admitting(child) {
+    if matches!(
+        child.session.status,
+        SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+    ) || !child.orchestrator_auto_dispatch_blocked
+        || delegation_child_admitting(child)
+    {
         return None;
     }
     let head = ordinary_queue_position(child)
@@ -32,13 +38,20 @@ fn delegation_child_hold(child: &SessionRecord) -> Option<DelegationChildHold> {
     let runnable = ordinary_queue_entry_is_runnable(child, head);
     let durable = !queued_prompt_held_for_durability(child, head);
     Some(DelegationChildHold {
-        reason: if !durable { DelegationHoldReason::PersistenceUnknown }
-            else if !runnable { DelegationHoldReason::DeliveryUnknown }
-            else { DelegationHoldReason::Stopped },
+        reason: if !durable {
+            DelegationHoldReason::PersistenceUnknown
+        } else if !runnable {
+            DelegationHoldReason::DeliveryUnknown
+        } else {
+            DelegationHoldReason::Stopped
+        },
         retry_eligible: runnable && durable,
         next_retry_at: None,
-        actions: if runnable && durable { vec![DelegationHoldAction::Resume, DelegationHoldAction::Cancel] }
-            else { vec![DelegationHoldAction::Cancel] },
+        actions: if runnable && durable {
+            vec![DelegationHoldAction::Resume, DelegationHoldAction::Cancel]
+        } else {
+            vec![DelegationHoldAction::Cancel]
+        },
         detail: child.session.preview.clone(),
         prompt_id: head.pending_prompt.id.clone(),
         attempts: 0,
@@ -56,7 +69,7 @@ fn delegation_child_admitting(child: &SessionRecord) -> bool {
 
 /// The hold a record carries while its stored status is `running`; none once
 /// it is terminal.
-fn delegation_current_hold(record: &DelegationRecord) -> Option<&DelegationHold> {
+pub(crate) fn delegation_current_hold(record: &DelegationRecord) -> Option<&DelegationHold> {
     (record.status == DelegationStatus::Running)
         .then_some(record.attempt.hold.as_ref())
         .flatten()
@@ -67,7 +80,7 @@ fn delegation_current_hold(record: &DelegationRecord) -> Option<&DelegationHold>
 /// the stored hold alone: an admission that took the prompt over (a resume, an
 /// automatic retry), or a transition that has not refreshed the record yet,
 /// leaves a stored hold the child no longer has.
-fn delegation_hold_is_live(inner: &StateInner, record: &DelegationRecord) -> bool {
+pub(crate) fn delegation_hold_is_live(inner: &StateInner, record: &DelegationRecord) -> bool {
     let Some(hold) = delegation_current_hold(record) else {
         return false;
     };
@@ -79,13 +92,13 @@ fn delegation_hold_is_live(inner: &StateInner, record: &DelegationRecord) -> boo
 
 /// Clears what a terminal record no longer has: a hold and a pending start.
 /// The hold generation stays, so a later attempt never reuses one.
-fn clear_delegation_attempt_presentation(record: &mut DelegationRecord) {
+pub(crate) fn clear_delegation_attempt_presentation(record: &mut DelegationRecord) {
     record.attempt.hold = None;
     record.attempt.pending_start = false;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DelegationAttemptChange {
+pub(crate) enum DelegationAttemptChange {
     Unchanged,
     /// Only the guidance text changed; saved with the next commit, announced
     /// with nothing.
@@ -97,7 +110,7 @@ enum DelegationAttemptChange {
 /// Brings the attempt state of `delegation_index` up to date with its child.
 /// `followup_awaits_first_turn` is the caller's reading of
 /// `delegation_followup_awaits_first_turn` for the same record.
-fn sync_delegation_attempt_state_locked(
+pub(crate) fn sync_delegation_attempt_state_locked(
     inner: &mut StateInner,
     delegation_index: usize,
     followup_awaits_first_turn: bool,
@@ -164,7 +177,8 @@ fn sync_delegation_attempt_state_locked(
     };
     let detail_changed = !hold_changed && previous_hold != next_hold;
     let record = &mut inner.delegations[delegation_index];
-    let unchanged = !hold_changed && !detail_changed && record.attempt.pending_start == pending_start;
+    let unchanged =
+        !hold_changed && !detail_changed && record.attempt.pending_start == pending_start;
     if unchanged {
         return DelegationAttemptChange::Unchanged;
     }
@@ -190,7 +204,7 @@ fn delegation_hold_card_detail(hold: &DelegationHold) -> String {
     )
 }
 
-fn delegation_hold_reason_label(reason: DelegationHoldReason) -> &'static str {
+pub(crate) fn delegation_hold_reason_label(reason: DelegationHoldReason) -> &'static str {
     match reason {
         DelegationHoldReason::AdmissionDeferred => "admissionDeferred",
         DelegationHoldReason::PersistenceUnknown => "persistenceUnknown",
@@ -200,7 +214,7 @@ fn delegation_hold_reason_label(reason: DelegationHoldReason) -> &'static str {
     }
 }
 
-fn delegation_hold_actions_label(actions: &[DelegationHoldAction]) -> String {
+pub(crate) fn delegation_hold_actions_label(actions: &[DelegationHoldAction]) -> String {
     if actions.is_empty() {
         return "none".to_owned();
     }
@@ -216,7 +230,7 @@ fn delegation_hold_actions_label(actions: &[DelegationHoldAction]) -> String {
 
 /// The lifecycle delta for an attempt change of a running record: its public
 /// status, and the parent card moved to the matching detail.
-fn delegation_attempt_delta_locked(
+pub(crate) fn delegation_attempt_delta_locked(
     inner: &mut StateInner,
     delegation_index: usize,
 ) -> Option<DelegationLifecycleDelta> {
@@ -251,7 +265,10 @@ fn delegation_attempt_delta_locked(
 
 /// The section a held child contributes to a wait's fan-in. It says what the
 /// child needs, never that it completed.
-fn delegation_wait_hold_section(delegation: &DelegationRecord, hold: &DelegationHold) -> String {
+pub(crate) fn delegation_wait_hold_section(
+    delegation: &DelegationRecord,
+    hold: &DelegationHold,
+) -> String {
     let next_retry = hold
         .next_retry_at
         .as_deref()
@@ -306,7 +323,7 @@ fn delegation_turn_delivery(
 impl AppState {
     /// The response of a create that started a delegation's first turn: the
     /// delegation as it stands now, with how that turn was left.
-    fn delegation_response_after_turn(
+    pub(crate) fn delegation_response_after_turn(
         &self,
         delegation_id: &str,
         delivery: TurnDispatchDeliveryOutcome,
@@ -330,7 +347,7 @@ impl AppState {
     /// The response of a follow-up: the delegation as it stands after its
     /// turn's delivery (never the admission's earlier snapshot), with how that
     /// turn was left and the hold its child reports.
-    fn delegation_status_after_followup_turn(
+    pub(crate) fn delegation_status_after_followup_turn(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -362,7 +379,7 @@ impl AppState {
     /// delivery, a stop, an unconfirmed settlement) and for a delegation that
     /// is not held. Afterwards the delegation reports `queued` while it
     /// admits, `running` once its provider runs, or `held` again.
-    fn resume_delegation(
+    pub(crate) fn resume_delegation(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -421,7 +438,9 @@ impl AppState {
             // owner holds it now.
             Ok(None) => TurnDispatchDeliveryOutcome::Superseded,
             // The resumed admission held the prompt again: report that hold.
-            Err(error) if hold.is_some() => TurnDispatchDeliveryOutcome::Held { error: Some(error) },
+            Err(error) if hold.is_some() => {
+                TurnDispatchDeliveryOutcome::Held { error: Some(error) }
+            }
             Err(error) => return Err(error),
         };
         let turn = delegation_turn_delivery(delivery, hold)?;
@@ -439,7 +458,7 @@ impl AppState {
     /// can hold or release a child's retained prompt: a dispatch, a Stop, a
     /// queued-prompt cancellation, and the abort-retry tick. Never terminalizes
     /// a delegation; the ordinary refresh owns that.
-    fn sync_delegation_attempt_for_child_session(&self, child_session_id: &str) {
+    pub(crate) fn sync_delegation_attempt_for_child_session(&self, child_session_id: &str) {
         let (revision, wait_refresh) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(delegation_id) = inner

@@ -10,6 +10,8 @@
 // admits, which the tracker alone decides.
 // A new module beside acceptance_evaluation_refusal.rs, included from main.rs.
 
+use super::*;
+
 /// The refusal code Engram gives a citation it does not admit for a bound
 /// criterion, among other admission refusals; only on this code are
 /// alternatives read.
@@ -24,9 +26,9 @@ const MAX_ACCEPTANCE_CITABLE_ALTERNATIVES_PER_CRITERION: usize = 8;
 /// `citable_records.records`, newest first; absent when none is citable).
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceCitableAlternatives {
-    criterion: usize,
-    records: Vec<String>,
+pub(crate) struct AcceptanceCitableAlternatives {
+    pub(crate) criterion: usize,
+    pub(crate) records: Vec<String>,
 }
 
 /// A refusal that allowed one re-submission, kept on the attempt: while it is
@@ -34,10 +36,10 @@ struct AcceptanceCitableAlternatives {
 /// only the records named for it; a further refusal is definitive.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceEvaluationCitationRetry {
-    code: String,
-    message: String,
-    alternatives: Vec<AcceptanceCitableAlternatives>,
+pub(crate) struct AcceptanceEvaluationCitationRetry {
+    pub(crate) code: String,
+    pub(crate) message: String,
+    pub(crate) alternatives: Vec<AcceptanceCitableAlternatives>,
 }
 
 /// The citable alternatives in Engram's refusal envelope: for the one
@@ -45,7 +47,9 @@ struct AcceptanceEvaluationCitationRetry {
 /// each once. Anything of another shape gives none, so a malformed cause
 /// allows no re-submission. A list, so that a cause naming several criteria
 /// could be carried without a change of the retry it keys.
-fn acceptance_citable_alternatives(envelope: &Value) -> Vec<AcceptanceCitableAlternatives> {
+pub(crate) fn acceptance_citable_alternatives(
+    envelope: &Value,
+) -> Vec<AcceptanceCitableAlternatives> {
     let Some(cause) = envelope.pointer("/error/details/cause") else {
         return Vec::new();
     };
@@ -80,7 +84,7 @@ fn acceptance_citable_alternatives(envelope: &Value) -> Vec<AcceptanceCitableAlt
 
 /// Whether this refusal allows the attempt's one re-submission: an admission
 /// refusal naming alternatives, on an attempt that has not used it.
-fn acceptance_citation_retry_allowed(
+pub(crate) fn acceptance_citation_retry_allowed(
     history: &AcceptanceEvaluationAttemptHistory,
     code: Option<&str>,
     alternatives: &[AcceptanceCitableAlternatives],
@@ -94,13 +98,22 @@ fn acceptance_citation_retry_allowed(
 fn acceptance_citable_alternatives_text(alternatives: &[AcceptanceCitableAlternatives]) -> String {
     alternatives
         .iter()
-        .map(|entry| format!("criterion {}: {}", entry.criterion, entry.records.join(", ")))
+        .map(|entry| {
+            format!(
+                "criterion {}: {}",
+                entry.criterion,
+                entry.records.join(", ")
+            )
+        })
         .collect::<Vec<_>>()
         .join("; ")
 }
 
 /// The evaluator's answer when the refusal allowed a re-submission.
-fn acceptance_citation_retry_offer(words: &str, alternatives: &[AcceptanceCitableAlternatives]) -> String {
+pub(crate) fn acceptance_citation_retry_offer(
+    words: &str,
+    alternatives: &[AcceptanceCitableAlternatives],
+) -> String {
     format!(
         "Engram refused the evaluation; nothing was recorded: {words}. It names records it admits instead ({}). You may submit once more under the same attemptKey: for each criterion named here cite only the records named for it, after checking them against the criterion. Any further refusal is final: finish and report it",
         acceptance_citable_alternatives_text(alternatives)
@@ -110,7 +123,7 @@ fn acceptance_citation_retry_offer(words: &str, alternatives: &[AcceptanceCitabl
 impl SubmitAcceptanceEvaluationRequest {
     /// The re-submission a refusal allowed cites, for each criterion it named,
     /// only the records it named for that criterion.
-    fn validate_citation_retry(
+    pub(crate) fn validate_citation_retry(
         &self,
         retry: &AcceptanceEvaluationCitationRetry,
     ) -> std::result::Result<(), String> {

@@ -2,15 +2,17 @@
 // Does not enroll peers, mint secrets, or change global keyring configuration.
 // New federation support; OS backend choice matches telegram_settings.rs.
 
-struct FederationTransportCredentials {
-    capability: FederationPairCapability,
-    known_hosts: Option<PathBuf>,
-    material_fingerprint: [u8; 32],
+use super::*;
+
+pub(crate) struct FederationTransportCredentials {
+    pub(crate) capability: FederationPairCapability,
+    pub(crate) known_hosts: Option<PathBuf>,
+    pub(crate) material_fingerprint: [u8; 32],
 }
 
 const FEDERATION_KEYRING_SERVICE: &str = "TermAl.Federation";
 
-fn resolve_federation_credentials(
+pub(crate) fn resolve_federation_credentials(
     snapshot: &FederationPeerSnapshot,
 ) -> Result<FederationTransportCredentials, ApiError> {
     let store = federation_credential_store().map_err(|_| federation_credential_error())?;
@@ -27,7 +29,7 @@ fn resolve_federation_credentials(
     resolve_federation_credentials_with(snapshot, read)
 }
 
-fn resolve_federation_credentials_with(
+pub(crate) fn resolve_federation_credentials_with(
     snapshot: &FederationPeerSnapshot,
     read: impl Fn(&str, &str) -> Result<String, ApiError>,
 ) -> Result<FederationTransportCredentials, ApiError> {
@@ -69,7 +71,7 @@ fn resolve_federation_credentials_with(
     })
 }
 
-fn federation_credential_error() -> ApiError {
+pub(crate) fn federation_credential_error() -> ApiError {
     ApiError::from_status(
         StatusCode::SERVICE_UNAVAILABLE,
         "federation enrollment credential unavailable",

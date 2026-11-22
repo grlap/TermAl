@@ -5,9 +5,11 @@
 // readback, never a turn's critical path.
 // New fragment beside engram_unadmitted_capture.rs.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-enum EngramRuntimeObservationDelivery {
+pub(crate) enum EngramRuntimeObservationDelivery {
     Pending {
         last_error: Option<String>,
     },
@@ -27,31 +29,31 @@ enum EngramRuntimeObservationDelivery {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-struct EngramRuntimeObservationEnvelope {
-    request: Value,
-    delivery: EngramRuntimeObservationDelivery,
+pub(crate) struct EngramRuntimeObservationEnvelope {
+    pub(crate) request: Value,
+    pub(crate) delivery: EngramRuntimeObservationDelivery,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-struct EngramRuntimeObservationReport {
-    host_turn_ref: String,
-    adopted_at: String,
-    notice_message_id: String,
-    generation: u64,
-    version: u64,
-    observing_session: String,
-    connection: EngramConnectionConfig,
-    store: EngramAuthorityStoreKey,
-    call_timeout_ms: u64,
-    attempts: u32,
-    retry_at: String,
+pub(crate) struct EngramRuntimeObservationReport {
+    pub(crate) host_turn_ref: String,
+    pub(crate) adopted_at: String,
+    pub(crate) notice_message_id: String,
+    pub(crate) generation: u64,
+    pub(crate) version: u64,
+    pub(crate) observing_session: String,
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) store: EngramAuthorityStoreKey,
+    pub(crate) call_timeout_ms: u64,
+    pub(crate) attempts: u32,
+    pub(crate) retry_at: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    store_wait_notice_posted: bool,
-    envelopes: Vec<EngramRuntimeObservationEnvelope>,
+    pub(crate) store_wait_notice_posted: bool,
+    pub(crate) envelopes: Vec<EngramRuntimeObservationEnvelope>,
 }
 
 impl EngramRuntimeObservationReport {
-    fn prepare(
+    pub(crate) fn prepare(
         trace: &EngramRuntimeObservedTurn,
         capture: EngramRuntimeClosingCapture,
         connection: EngramConnectionConfig,
@@ -64,14 +66,13 @@ impl EngramRuntimeObservationReport {
                 "runtime observation has no producer session identity",
             ));
         }
-        let envelopes =
-            prepare_runtime_observations(trace, capture, chrono::Utc::now())?
-                .into_iter()
-                .map(|request| EngramRuntimeObservationEnvelope {
-                    request,
-                    delivery: EngramRuntimeObservationDelivery::Pending { last_error: None },
-                })
-                .collect();
+        let envelopes = prepare_runtime_observations(trace, capture, chrono::Utc::now())?
+            .into_iter()
+            .map(|request| EngramRuntimeObservationEnvelope {
+                request,
+                delivery: EngramRuntimeObservationDelivery::Pending { last_error: None },
+            })
+            .collect();
         Ok(Self {
             host_turn_ref: trace.host_turn_ref.clone(),
             adopted_at: trace.adopted_at.clone(),
@@ -89,7 +90,7 @@ impl EngramRuntimeObservationReport {
         })
     }
 
-    fn pending(&self) -> Option<usize> {
+    pub(crate) fn pending(&self) -> Option<usize> {
         self.envelopes.iter().position(|envelope| {
             matches!(
                 envelope.delivery,
@@ -98,20 +99,24 @@ impl EngramRuntimeObservationReport {
         })
     }
 
-    fn is_settled(&self) -> bool {
+    pub(crate) fn is_settled(&self) -> bool {
         self.pending().is_none()
     }
 
     /// Engram answered every envelope definitively, so nothing about this
     /// report is still owed. A local failure is settled but not discharged: its
     /// outcome stays unresolved and it keeps its session from being removed.
-    fn is_discharged(&self) -> bool {
-        self.envelopes.iter().all(|envelope| matches!(envelope.delivery,
-            EngramRuntimeObservationDelivery::Recorded { .. }
-                | EngramRuntimeObservationDelivery::Refused { .. }))
+    pub(crate) fn is_discharged(&self) -> bool {
+        self.envelopes.iter().all(|envelope| {
+            matches!(
+                envelope.delivery,
+                EngramRuntimeObservationDelivery::Recorded { .. }
+                    | EngramRuntimeObservationDelivery::Refused { .. }
+            )
+        })
     }
 
-    fn next_version(&self) -> Self {
+    pub(crate) fn next_version(&self) -> Self {
         let mut next = self.clone();
         next.version = next.version.saturating_add(1);
         next
@@ -121,7 +126,7 @@ impl EngramRuntimeObservationReport {
 // The report has to be in the SESSION row, not only in an in-memory queue or
 // a metadata snapshot that could be overwritten independently of the lane.
 // This is a read, never a writer-side repair or an authority transition.
-fn runtime_observation_report_is_durable(
+pub(crate) fn runtime_observation_report_is_durable(
     path: &FsPath,
     session_id: &str,
     expected: &EngramRuntimeObservationReport,
@@ -137,24 +142,33 @@ fn runtime_observation_report_is_durable(
     )
 }
 
-fn runtime_observation_session_entry_is_durable(
+pub(crate) fn runtime_observation_session_entry_is_durable(
     path: &FsPath,
     session_id: &str,
     field: &str,
     expected: &Value,
 ) -> Result<bool, EngramTransportError> {
     let row = runtime_observation_session_row(path, session_id)?;
-    Ok(runtime_observation_row_contains(row.as_ref(), field, expected))
+    Ok(runtime_observation_row_contains(
+        row.as_ref(),
+        field,
+        expected,
+    ))
 }
 
-fn runtime_observation_row_contains(row: Option<&Value>, field: &str, expected: &Value) -> bool {
-    row.and_then(|row| row.get(field)).and_then(Value::as_array)
+pub(crate) fn runtime_observation_row_contains(
+    row: Option<&Value>,
+    field: &str,
+    expected: &Value,
+) -> bool {
+    row.and_then(|row| row.get(field))
+        .and_then(Value::as_array)
         .is_some_and(|entries| entries.contains(expected))
 }
 
 // Read one session image so every member of a naming cut is checked against
 // the same SQLite row, using the observation outbox's exact-content rule.
-fn runtime_observation_session_row(
+pub(crate) fn runtime_observation_session_row(
     path: &FsPath,
     session_id: &str,
 ) -> Result<Option<Value>, EngramTransportError> {
@@ -196,7 +210,7 @@ const ENGRAM_EXECUTION_OBSERVE_PRE_WRITE_REFUSALS: &[&str] = &[
 /// envelope's idempotency key. Engram compares the stored intent before any
 /// write, so it rejected this report unapplied: a terminal identity
 /// collision, settled as `Refused` with this code and its key named.
-const ENGRAM_IDEMPOTENCY_CONFLICT_CODE: &str = "control_operation_idempotency_conflict";
+pub(crate) const ENGRAM_IDEMPOTENCY_CONFLICT_CODE: &str = "control_operation_idempotency_conflict";
 
 /// How a failed send of one retained envelope, keyed `key`, settles. Only a
 /// refusal Engram documents as recording nothing is final (`Refused`), and
@@ -204,7 +218,7 @@ const ENGRAM_IDEMPOTENCY_CONFLICT_CODE: &str = "control_operation_idempotency_co
 /// again under this key or a new one. Other failures leave the identical
 /// request pending. The delivery scheduler preserves the retry budget for
 /// typed temporary store refusals and bounds retries for unresolved outcomes.
-fn engram_runtime_observation_failure_delivery(
+pub(crate) fn engram_runtime_observation_failure_delivery(
     error: EngramTransportError,
     key: &str,
 ) -> EngramRuntimeObservationDelivery {
@@ -239,21 +253,31 @@ fn runtime_observation_has_legacy_source(occurrence: &EngramInterTurnOccurrence)
         legacy(&basis.source_revision, basis.source_id.as_ref())
     };
     let change = |change: &EngramObservedSourceChange| match change {
-        EngramObservedSourceChange::ContentComparison { baseline, sighting, .. } =>
+        EngramObservedSourceChange::ContentComparison {
+            baseline, sighting, ..
+        } => {
             legacy(&baseline.source_revision, baseline.source_id.as_ref())
-                || source_basis(&sighting.source_basis),
-        EngramObservedSourceChange::AssumedMissingBaseline { sighting, .. } =>
-            source_basis(&sighting.source_basis),
+                || source_basis(&sighting.source_basis)
+        }
+        EngramObservedSourceChange::AssumedMissingBaseline { sighting, .. } => {
+            source_basis(&sighting.source_basis)
+        }
     };
-    let check = |check: &EngramObservedCheck| {
-        check.source_basis.as_ref().is_some_and(source_basis)
-    };
+    let check = |check: &EngramObservedCheck| check.source_basis.as_ref().is_some_and(source_basis);
     match occurrence {
-        EngramInterTurnOccurrence::SourceSighting { source_basis: basis, .. } => source_basis(basis),
+        EngramInterTurnOccurrence::SourceSighting {
+            source_basis: basis,
+            ..
+        } => source_basis(basis),
         EngramInterTurnOccurrence::InterTurnChange { source_change } => change(source_change),
-        EngramInterTurnOccurrence::UnadmittedTurn { source_change, observed_checks, .. } =>
-            source_change.as_ref().is_some_and(change) || observed_checks.iter().any(check),
-        EngramInterTurnOccurrence::ObservedCheck { check: observed, .. } => check(observed),
+        EngramInterTurnOccurrence::UnadmittedTurn {
+            source_change,
+            observed_checks,
+            ..
+        } => source_change.as_ref().is_some_and(change) || observed_checks.iter().any(check),
+        EngramInterTurnOccurrence::ObservedCheck {
+            check: observed, ..
+        } => check(observed),
     }
 }
 
@@ -262,7 +286,7 @@ fn runtime_observation_has_legacy_source(occurrence: &EngramInterTurnOccurrence)
 // that envelope with its code; it never pauses a queue or retries as if
 // permission existed.
 #[cfg(test)]
-fn deliver_runtime_observation_envelope(
+pub(crate) fn deliver_runtime_observation_envelope(
     adapter: &EngramHostAdapter,
     report: &EngramRuntimeObservationReport,
     index: usize,
@@ -273,7 +297,7 @@ fn deliver_runtime_observation_envelope(
 
 // The retry classification belongs to this attempt, not to remote message
 // text or a new persisted request. The worker installs the unchanged wire.
-fn deliver_runtime_observation_attempt(
+pub(crate) fn deliver_runtime_observation_attempt(
     adapter: &EngramHostAdapter,
     report: &EngramRuntimeObservationReport,
     index: usize,
@@ -290,10 +314,8 @@ fn deliver_runtime_observation_attempt(
     ) {
         return Ok((report.clone(), false));
     }
-    let request: EngramControlRequest =
-        serde_json::from_value(envelope.request.clone()).map_err(|_| {
-            EngramTransportError::protocol("invalid retained observation shape")
-        })?;
+    let request: EngramControlRequest = serde_json::from_value(envelope.request.clone())
+        .map_err(|_| EngramTransportError::protocol("invalid retained observation shape"))?;
     if serde_json::to_value(&request).ok().as_ref() != Some(&envelope.request) {
         return Err(EngramTransportError::protocol(
             "retained observation contains unsupported fields; its original bytes remain retained",
@@ -307,13 +329,16 @@ fn deliver_runtime_observation_attempt(
     if runtime_observation_has_legacy_source(&observation.occurrence) {
         let mut next = report.next_version();
         let earlier_error = match &envelope.delivery {
-            EngramRuntimeObservationDelivery::Pending { last_error: Some(error) } =>
-                format!("; earlier delivery diagnostic: {error}"),
+            EngramRuntimeObservationDelivery::Pending {
+                last_error: Some(error),
+            } => format!("; earlier delivery diagnostic: {error}"),
             _ => String::new(),
         };
         next.envelopes[index].delivery = EngramRuntimeObservationDelivery::LocalFailure {
             code: "legacy_source_input_retired".to_owned(),
-            message: format!("retained revision-only source input is retired locally and not sent; any earlier producer outcome is unchanged{earlier_error}"),
+            message: format!(
+                "retained revision-only source input is retired locally and not sent; any earlier producer outcome is unchanged{earlier_error}"
+            ),
         };
         return Ok((next, false));
     }
@@ -339,10 +364,12 @@ fn deliver_runtime_observation_attempt(
                 code: "store_open_refused".to_owned(),
                 message: error.message,
             }
-        } else if !store_unavailable && matches!(
-            error.kind,
-            EngramTransportErrorKind::Protocol | EngramTransportErrorKind::LocalState
-        ) {
+        } else if !store_unavailable
+            && matches!(
+                error.kind,
+                EngramTransportErrorKind::Protocol | EngramTransportErrorKind::LocalState
+            )
+        {
             EngramRuntimeObservationDelivery::LocalFailure {
                 code: "runtime_observation_policy_unavailable".to_owned(),
                 message: format!(
@@ -359,10 +386,21 @@ fn deliver_runtime_observation_attempt(
     }
     let mut store_unavailable = false;
     next.envelopes[index].delivery = match adapter.request(&report.connection, &request, timeout) {
-        Ok(value) => match if matches!(&observation.occurrence, EngramInterTurnOccurrence::SourceSighting { .. }) {
-            EngramSourceObservationReceipt::from_recorded_result(value.clone(), observation, &report.observing_session)
+        Ok(value) => match if matches!(
+            &observation.occurrence,
+            EngramInterTurnOccurrence::SourceSighting { .. }
+        ) {
+            EngramSourceObservationReceipt::from_recorded_result(
+                value.clone(),
+                observation,
+                &report.observing_session,
+            )
         } else {
-            EngramSourceObservationReceipt::from_unadmitted_result(value.clone(), observation, &report.observing_session)
+            EngramSourceObservationReceipt::from_unadmitted_result(
+                value.clone(),
+                observation,
+                &report.observing_session,
+            )
         } {
             Ok(_) => EngramRuntimeObservationDelivery::Recorded { receipt: value },
             // Invalid receipt bytes cannot prove acceptance or refusal. Keep
@@ -374,7 +412,7 @@ fn deliver_runtime_observation_attempt(
         Err(error) => {
             store_unavailable = engram_store_transient(&error);
             engram_runtime_observation_failure_delivery(error, &observation.idempotency_key)
-        },
+        }
     };
     Ok((next, store_unavailable))
 }

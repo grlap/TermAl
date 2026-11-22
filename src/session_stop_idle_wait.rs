@@ -15,11 +15,13 @@
 //
 // New fragment; not split from an existing file.
 
+use super::*;
+
 impl AppState {
     /// Stops an Idle session that waits for delegations or test runs.
     /// Returns `Ok(None)` when the session is not Idle or holds no pending
     /// wait, so the caller keeps its ordinary Stop path.
-    fn stop_idle_waiting_session(
+    pub(crate) fn stop_idle_waiting_session(
         &self,
         session_id: &str,
     ) -> std::result::Result<Option<StateResponse>, ApiError> {
@@ -123,8 +125,7 @@ impl AppState {
 /// and possible provider deliveries. Stop is not evidence they were unsent.
 fn drop_queued_workflow_continuations_keeping_held_head(record: &mut SessionRecord) {
     let keep = |_index: usize, queued: &QueuedPromptRecord| {
-        queued.source != QueuedPromptSource::Orchestrator
-            || queued.has_stored_history()
+        queued.source != QueuedPromptSource::Orchestrator || queued.has_stored_history()
     };
     let original_len = record.queued_prompts.len();
     let mut index = 0usize;

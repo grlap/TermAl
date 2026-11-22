@@ -1,7 +1,9 @@
 // Central-only explicit placement establishment and recovery. A retained key
 // recovers its immutable install intent before considering a new PREPARE.
 
-async fn reserve_federation_mailbox_placement_route(
+use super::*;
+
+pub(crate) async fn reserve_federation_mailbox_placement_route(
     AxumPath(id): AxumPath<String>,
     State(app): State<AppState>,
     Json(request): Json<FederationPlacementRequest>,
@@ -49,17 +51,31 @@ async fn reserve_federation_mailbox_placement_route(
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
                 intent.ensure_authority(&inner.federation, current, placement)?;
             }
-            let automatic = inner.federation.placements.values().find(|placement|
-                placement.mailbox_only && placement.identity.host_id == id
-                    && placement.identity.session_id == request.native_session_id
-                    && placement.state != FederationPlacementState::Completed
-                    && federation_mailbox_placement_authority(&inner.federation, &inner.preferences.federation, placement)
-            ).map(|placement| {
-                let intent = inner.federation.binding_install_intents.get(&placement.admission_key)
-                    .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
-                intent.ensure_authority(&inner.federation, current, placement)?;
-                Ok::<_, ApiError>(intent.clone())
-            }).transpose()?;
+            let automatic = inner
+                .federation
+                .placements
+                .values()
+                .find(|placement| {
+                    placement.mailbox_only
+                        && placement.identity.host_id == id
+                        && placement.identity.session_id == request.native_session_id
+                        && placement.state != FederationPlacementState::Completed
+                        && federation_mailbox_placement_authority(
+                            &inner.federation,
+                            &inner.preferences.federation,
+                            placement,
+                        )
+                })
+                .map(|placement| {
+                    let intent = inner
+                        .federation
+                        .binding_install_intents
+                        .get(&placement.admission_key)
+                        .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?;
+                    intent.ensure_authority(&inner.federation, current, placement)?;
+                    Ok::<_, ApiError>(intent.clone())
+                })
+                .transpose()?;
             Ok((current.clone(), prior, automatic))
         })
         .map_err(|error| {

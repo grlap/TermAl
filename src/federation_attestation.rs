@@ -1,6 +1,8 @@
 // Owns peer proof transcripts and mutual key confirmation on owned streams.
 // Does not authenticate HTTP or run SSH. New A1 handshake leaf.
 
+use super::*;
+
 fn federation_transcript(
     channel: &FederationChannel,
     satellite_boot: &[u8],
@@ -23,7 +25,7 @@ fn federation_transcript(
 }
 
 #[cfg(test)]
-async fn federation_attest_central(
+pub(crate) async fn federation_attest_central(
     channel: &FederationChannel,
     io: &mut FederationControlIo,
 ) -> Result<(Arc<FederationSecurityContext>, FederationControlGuard), ApiError> {
@@ -35,7 +37,7 @@ async fn federation_attest_central(
     federation_attest_central_started(channel, io, started).await
 }
 
-async fn federation_prove_central(
+pub(crate) async fn federation_prove_central(
     channel: &FederationChannel,
     io: &mut FederationControlIo,
     owner: u64,
@@ -81,7 +83,7 @@ async fn federation_prove_central(
     Ok(context)
 }
 
-async fn federation_attest_satellite(
+pub(crate) async fn federation_attest_satellite(
     channel: &FederationChannel,
     io: &mut FederationControlIo,
 ) -> Result<(Arc<FederationSecurityContext>, FederationControlGuard), ApiError> {
@@ -95,11 +97,14 @@ async fn federation_attest_satellite(
             false,
         )
     })?;
-    let (context, tag) = match channel.control.clock.timeout(
-        channel.control.attest_timeout,
-        federation_prove_satellite(channel, io, owner),
-    )
-    .await
+    let (context, tag) = match channel
+        .control
+        .clock
+        .timeout(
+            channel.control.attest_timeout,
+            federation_prove_satellite(channel, io, owner),
+        )
+        .await
     {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -143,31 +148,34 @@ async fn federation_attest_satellite(
                 false,
             )
         })?;
-    channel.control.clock.timeout(
-        channel.control.attest_timeout,
-        federation_write_frame(io, &federation_encode(b"termal-hello-proof-v1", &[&tag])),
-    )
-    .await
-    .map_err(|_| {
-        federation_attestation_error(
-            channel,
-            Some(owner),
-            "attest",
-            "tagWriteExpired",
-            federation_transport_unavailable(),
-            false,
+    channel
+        .control
+        .clock
+        .timeout(
+            channel.control.attest_timeout,
+            federation_write_frame(io, &federation_encode(b"termal-hello-proof-v1", &[&tag])),
         )
-    })?
-    .map_err(|error| {
-        federation_attestation_error(
-            channel,
-            Some(owner),
-            "attest",
-            "linkDownBeforeTag",
-            error,
-            false,
-        )
-    })?;
+        .await
+        .map_err(|_| {
+            federation_attestation_error(
+                channel,
+                Some(owner),
+                "attest",
+                "tagWriteExpired",
+                federation_transport_unavailable(),
+                false,
+            )
+        })?
+        .map_err(|error| {
+            federation_attestation_error(
+                channel,
+                Some(owner),
+                "attest",
+                "linkDownBeforeTag",
+                error,
+                false,
+            )
+        })?;
     Ok((context, guard))
 }
 

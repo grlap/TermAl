@@ -70,15 +70,17 @@
 // and prose therefore never trigger automatic session/new or a capability
 // downgrade. See docs/features/current-agent-contracts.md for the evidence.
 
-const ACP_CANCEL_GRACE: Duration = Duration::from_secs(2);
-const MAX_ACP_OPTION_LABEL_CHARS: usize = 200;
-const MAX_ACP_OPTION_DESCRIPTION_CHARS: usize = 1_000;
-const ACP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
-const ACP_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
-const ACP_SESSION_SETUP_TIMEOUT: Duration = Duration::from_secs(30);
+use super::*;
+
+pub(crate) const ACP_CANCEL_GRACE: Duration = Duration::from_secs(2);
+pub(crate) const MAX_ACP_OPTION_LABEL_CHARS: usize = 200;
+pub(crate) const MAX_ACP_OPTION_DESCRIPTION_CHARS: usize = 1_000;
+pub(crate) const ACP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const ACP_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const ACP_SESSION_SETUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Spawns ACP runtime.
-fn spawn_acp_runtime_with_environment(
+pub(crate) fn spawn_acp_runtime_with_environment(
     state: AppState,
     session_id: String,
     cwd: String,
@@ -91,8 +93,9 @@ fn spawn_acp_runtime_with_environment(
     // Consumed before any early return, so a failed spawn cannot leave the
     // one-shot test seam armed for a later runtime on the same thread.
     #[cfg(all(test, windows))]
-    let initialize_timeout = (!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED.with(|untimed| untimed.replace(false)))
-        .then_some(ACP_INITIALIZE_TIMEOUT);
+    let initialize_timeout = (!TEST_DEDICATED_ACP_INITIALIZE_UNTIMED
+        .with(|untimed| untimed.replace(false)))
+    .then_some(ACP_INITIALIZE_TIMEOUT);
     #[cfg(not(all(test, windows)))]
     let initialize_timeout = Some(ACP_INITIALIZE_TIMEOUT);
     if !state.agent_runtime_spawning_enabled {
@@ -100,9 +103,11 @@ fn spawn_acp_runtime_with_environment(
     }
     let runtime_id = Uuid::new_v4().to_string();
     let cwd = normalize_local_user_facing_path(&cwd);
-    let mut command = dedicated_provider_command(|| agent.command(AcpLaunchOptions {
-        gemini_approval_mode,
-    }))?;
+    let mut command = dedicated_provider_command(|| {
+        agent.command(AcpLaunchOptions {
+            gemini_approval_mode,
+        })
+    })?;
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
     apply_agent_process_env(&mut command, Some(&termal_env), engram_mcp)?;
     project_environment.apply(&mut command);
@@ -396,7 +401,10 @@ fn spawn_acp_runtime_with_environment(
                 let detail = format!("{} process tree cleanup failed: {error:#}", agent.label());
                 fail_pending_acp_requests(&wait_pending_requests, &detail);
                 let _ = wait_state.handle_runtime_root_exit_if_matches(
-                    &wait_session_id, &wait_runtime_token, root_exit_provider_error(&wait_result, agent.label()).as_deref());
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    root_exit_provider_error(&wait_result, agent.label()).as_deref(),
+                );
                 return;
             }
             match wait_result {
@@ -450,7 +458,7 @@ fn spawn_acp_runtime_with_environment(
 }
 
 /// Handles maybe authenticate ACP runtime.
-fn maybe_authenticate_acp_runtime(
+pub(crate) fn maybe_authenticate_acp_runtime(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     initialize_result: &Value,
@@ -482,7 +490,7 @@ fn maybe_authenticate_acp_runtime(
 ///
 /// Only the ACP v1 `agentCapabilities` envelope is authoritative. Omitted
 /// capabilities are unsupported; requests never probe an older protocol.
-fn update_acp_runtime_capabilities(
+pub(crate) fn update_acp_runtime_capabilities(
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     initialize_result: &Value,
 ) {
@@ -499,7 +507,7 @@ fn update_acp_runtime_capabilities(
 }
 
 /// Returns whether ACP initialize reported session/load support.
-fn acp_supports_session_load(initialize_result: &Value) -> Option<bool> {
+pub(crate) fn acp_supports_session_load(initialize_result: &Value) -> Option<bool> {
     initialize_result
         .pointer("/agentCapabilities/loadSession")
         .and_then(Value::as_bool)
@@ -509,14 +517,14 @@ fn acp_supports_session_load(initialize_result: &Value) -> Option<bool> {
 ///
 /// ACP v1 represents this capability as an object (`"resume": {}`). Other
 /// shapes do not advertise support.
-fn acp_supports_session_resume(initialize_result: &Value) -> Option<bool> {
+pub(crate) fn acp_supports_session_resume(initialize_result: &Value) -> Option<bool> {
     initialize_result
         .pointer("/agentCapabilities/sessionCapabilities/resume")
         .map(Value::is_object)
 }
 
 /// Handles select ACP auth method.
-fn select_acp_auth_method(
+pub(crate) fn select_acp_auth_method(
     initialize_result: &Value,
     agent: AcpAgent,
     _workdir: &str,
@@ -546,7 +554,7 @@ fn select_acp_auth_method(
 }
 
 /// Handles ACP prompt command.
-enum AcpEngramMcpSource<'a> {
+pub(crate) enum AcpEngramMcpSource<'a> {
     Runtime {
         token: &'a RuntimeToken,
         engram: Option<&'a TermalDelegationMcpStdioConfig>,
@@ -556,12 +564,12 @@ enum AcpEngramMcpSource<'a> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum AcpSessionPurpose {
+pub(crate) enum AcpSessionPurpose {
     Prompt,
     ConfigRefresh,
 }
 
-fn handle_acp_prompt_command(
+pub(crate) fn handle_acp_prompt_command(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -668,7 +676,9 @@ fn handle_acp_prompt_command(
                 .then_some(record.active_turn_generation)
         })
     };
-    runtime_state.lock().expect("ACP runtime state mutex poisoned")
+    runtime_state
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
         .observation_turn_generation = observation_turn_generation;
     prompt_blocks.push(json!({"type": "text", "text": command.prompt}));
     if let Some(notice) = state.project_environment_notice(session_id) {
@@ -775,7 +785,7 @@ fn handle_acp_prompt_command(
 /// Sends the ACP `session/cancel` notification for the active external session.
 /// The protocol does not acknowledge this notification; TermAl proves a clean
 /// stop by observing the in-flight prompt settle before the grace deadline.
-fn handle_acp_cancel_command(
+pub(crate) fn handle_acp_cancel_command(
     writer: &mut impl Write,
     runtime_state: &Arc<Mutex<AcpRuntimeState>>,
     agent: AcpAgent,
@@ -804,7 +814,7 @@ fn handle_acp_cancel_command(
 }
 
 /// Publishes the in-flight prompt state used by graceful cancellation.
-fn set_acp_turn_active(turn_lifecycle: &AcpTurnLifecycle, active: bool) {
+pub(crate) fn set_acp_turn_active(turn_lifecycle: &AcpTurnLifecycle, active: bool) {
     let (active_lock, condvar) = &**turn_lifecycle;
     *active_lock
         .lock()
@@ -813,7 +823,10 @@ fn set_acp_turn_active(turn_lifecycle: &AcpTurnLifecycle, active: bool) {
 }
 
 /// Waits for the current ACP prompt response to settle within a bounded grace.
-fn wait_for_acp_turn_settle(turn_lifecycle: &AcpTurnLifecycle, timeout: Duration) -> bool {
+pub(crate) fn wait_for_acp_turn_settle(
+    turn_lifecycle: &AcpTurnLifecycle,
+    timeout: Duration,
+) -> bool {
     let (active_lock, condvar) = &**turn_lifecycle;
     let active = active_lock
         .lock()
@@ -855,7 +868,7 @@ fn handle_acp_session_config_refresh_for_runtime(
 }
 
 #[cfg(test)]
-fn handle_acp_session_config_refresh(
+pub(crate) fn handle_acp_session_config_refresh(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -876,7 +889,7 @@ fn handle_acp_session_config_refresh(
     )
 }
 
-fn handle_acp_session_config_refresh_inner(
+pub(crate) fn handle_acp_session_config_refresh_inner(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -946,7 +959,7 @@ fn ensure_acp_session_ready_for_runtime(
 }
 
 #[cfg(test)]
-fn ensure_acp_session_ready(
+pub(crate) fn ensure_acp_session_ready(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -968,7 +981,7 @@ fn ensure_acp_session_ready(
     )
 }
 
-fn ensure_acp_session_ready_inner(
+pub(crate) fn ensure_acp_session_ready_inner(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -1245,7 +1258,7 @@ fn start_acp_session(
 /// Configures ACP settings and returns the acknowledged model. The session
 /// bootstrap snapshot predates these setters and must not overwrite their
 /// result, including a config notification delivered before the setter ACK.
-fn configure_acp_session(
+pub(crate) fn configure_acp_session(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     agent: AcpAgent,
@@ -1323,7 +1336,7 @@ fn configure_acp_session(
 }
 
 /// Handles ACP message.
-fn handle_acp_message(
+pub(crate) fn handle_acp_message(
     message: &Value,
     state: &AppState,
     session_id: &str,
@@ -1516,7 +1529,7 @@ fn handle_acp_message(
 
 // Direct-handler tests do not have a running reader to perform admission.
 #[cfg(test)]
-fn handle_acp_request(
+pub(crate) fn handle_acp_request(
     message: &Value,
     state: &AppState,
     session_id: &str,
@@ -1568,7 +1581,9 @@ fn handle_admitted_acp_request(
                                 json!({ "outcome": { "outcome": "cancelled" } }),
                             ),
                         ))
-                        .map_err(|err| anyhow!("failed to dismiss malformed Kimi question: {err}"))?;
+                        .map_err(|err| {
+                            anyhow!("failed to dismiss malformed Kimi question: {err}")
+                        })?;
                     return Ok(());
                 };
                 let approval = AcpPendingApproval {
@@ -1661,7 +1676,7 @@ fn cursor_permission_response_option_id(
 }
 
 #[cfg(test)]
-fn acp_permission_response_option_id(
+pub(crate) fn acp_permission_response_option_id(
     agent: AcpAgent,
     state: &AppState,
     session_id: &str,
@@ -1749,7 +1764,7 @@ fn opencode_auto_approval_allowed_locked(inner: &StateInner, session_id: &str) -
 }
 
 /// Handles ACP notification.
-fn handle_acp_notification(
+pub(crate) fn handle_acp_notification(
     method: &str,
     message: &Value,
     state: &AppState,
@@ -1763,11 +1778,14 @@ fn handle_acp_notification(
 ) -> Result<()> {
     match method {
         "session/update" => {
-            let generation = runtime_state.lock()
-                .expect("ACP runtime state mutex poisoned").observation_turn_generation;
+            let generation = runtime_state
+                .lock()
+                .expect("ACP runtime state mutex poisoned")
+                .observation_turn_generation;
             recorder.set_observation_provenance(match generation {
                 Some(turn_generation) => EngramObservationProvenance::Runtime {
-                    token: runtime_token.clone(), turn_generation,
+                    token: runtime_token.clone(),
+                    turn_generation,
                 },
                 None => EngramObservationProvenance::Ambient,
             });
@@ -1874,13 +1892,13 @@ fn handle_acp_notification(
 /// must use this predicate so a newly supported protocol spelling cannot wake
 /// only one half of the model-dependent config flow.
 /// Kimi's singular spelling is scoped to Kimi, not added to other adapters.
-fn is_acp_config_update_kind(kind: &str, agent: AcpAgent) -> bool {
+pub(crate) fn is_acp_config_update_kind(kind: &str, agent: AcpAgent) -> bool {
     matches!(kind, "config_options_update" | "config_update")
         || (agent == AcpAgent::Kimi && kind == "config_option_update")
 }
 
 /// Handles ACP session update.
-fn handle_acp_session_update(
+pub(crate) fn handle_acp_session_update(
     update: &Value,
     state: &AppState,
     session_id: &str,
@@ -2080,7 +2098,7 @@ fn acp_tool_cwd(update: &Value) -> Option<&str> {
 /// `rawOutput` as the command's combined output in a bare string — with no
 /// stdout, stderr or exitCode fields — and the same text again as the update's
 /// first text content block; other ACP agents carry a `rawOutput` object.
-fn acp_kimi_tool_output_text(update: &Value) -> Option<String> {
+pub(crate) fn acp_kimi_tool_output_text(update: &Value) -> Option<String> {
     if let Some(text) = update.get("rawOutput").and_then(Value::as_str) {
         return Some(text.to_owned());
     }
@@ -2093,7 +2111,7 @@ fn acp_kimi_tool_output_text(update: &Value) -> Option<String> {
 }
 
 /// Summarizes ACP tool output.
-fn summarize_acp_tool_output(update: &Value, agent: AcpAgent) -> String {
+pub(crate) fn summarize_acp_tool_output(update: &Value, agent: AcpAgent) -> String {
     if agent == AcpAgent::Kimi {
         if let Some(text) = acp_kimi_tool_output_text(update) {
             return text;
@@ -2125,7 +2143,7 @@ fn summarize_acp_tool_output(update: &Value, agent: AcpAgent) -> String {
 }
 
 /// Handles ACP tool status.
-fn acp_tool_status(update: &Value) -> CommandStatus {
+pub(crate) fn acp_tool_status(update: &Value) -> CommandStatus {
     match update.get("status").and_then(Value::as_str) {
         Some("completed") => {
             // ACP completion is successful even for tools with no shell exit
@@ -2177,7 +2195,7 @@ fn acp_cursor_mode(update: &Value) -> Option<CursorMode> {
 /// The one option a request offers whose kind is exactly `allow_once`. Zero
 /// or two or more mean the request is a choice (a question's answers) or
 /// unknown, and it stays manual. `allow_always` is never selected.
-fn acp_single_allow_once_option(options: &[Value]) -> Option<String> {
+pub(crate) fn acp_single_allow_once_option(options: &[Value]) -> Option<String> {
     let mut allow_once = options
         .iter()
         .filter(|option| option.get("kind").and_then(Value::as_str) == Some("allow_once"));
@@ -2194,7 +2212,7 @@ fn acp_single_allow_once_option(options: &[Value]) -> Option<String> {
 
 /// Selects an exact ACP v1 kind and returns its opaque optionId unchanged.
 /// Neither display text nor identifier spelling grants permission authority.
-fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<String> {
+pub(crate) fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<String> {
     kinds.iter().find_map(|kind| {
         options.iter().find_map(|option| {
             if option.get("kind").and_then(Value::as_str) != Some(*kind) {
@@ -2210,7 +2228,7 @@ fn find_acp_permission_option(options: &[Value], kinds: &[&str]) -> Option<Strin
 }
 
 /// Handles send ACP JSON RPC request.
-fn send_acp_json_rpc_request(
+pub(crate) fn send_acp_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     method: &str,
@@ -2230,7 +2248,7 @@ fn send_acp_json_rpc_request(
 
 /// Handles send ACP JSON RPC request without timeout.
 #[cfg(test)]
-fn send_acp_json_rpc_request_without_timeout(
+pub(crate) fn send_acp_json_rpc_request_without_timeout(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     method: &str,
@@ -2241,7 +2259,7 @@ fn send_acp_json_rpc_request_without_timeout(
 }
 
 /// Starts ACP JSON RPC request.
-fn start_acp_json_rpc_request(
+pub(crate) fn start_acp_json_rpc_request(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     method: &str,
@@ -2288,7 +2306,7 @@ fn send_acp_json_rpc_request_inner(
 }
 
 /// Returns a typed ACP JSON-RPC rejection from an error chain.
-fn acp_json_rpc_response_error(err: &anyhow::Error) -> Option<&AcpJsonRpcError> {
+pub(crate) fn acp_json_rpc_response_error(err: &anyhow::Error) -> Option<&AcpJsonRpcError> {
     err.chain().find_map(|source| {
         source
             .downcast_ref::<AcpResponseError>()
@@ -2298,7 +2316,7 @@ fn acp_json_rpc_response_error(err: &anyhow::Error) -> Option<&AcpJsonRpcError> 
 
 /// Returns whether an ACP request failed at the transport boundary rather than
 /// receiving a protocol-level JSON-RPC rejection.
-fn acp_error_is_transport_failure(err: &anyhow::Error) -> bool {
+pub(crate) fn acp_error_is_transport_failure(err: &anyhow::Error) -> bool {
     err.chain().any(|source| {
         matches!(
             source.downcast_ref::<AcpResponseError>(),
@@ -2308,7 +2326,7 @@ fn acp_error_is_transport_failure(err: &anyhow::Error) -> bool {
 }
 
 /// Handles wait for ACP JSON RPC response.
-fn wait_for_acp_json_rpc_response(
+pub(crate) fn wait_for_acp_json_rpc_response(
     pending_requests: &AcpPendingRequestMap,
     pending_request: PendingAcpJsonRpcRequest,
     method: &str,
@@ -2355,7 +2373,7 @@ fn wait_for_acp_json_rpc_response(
 }
 
 /// Marks pending ACP requests as failed.
-fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &str) {
+pub(crate) fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &str) {
     let senders = pending_requests
         .lock()
         .expect("ACP pending requests mutex poisoned")
@@ -2369,7 +2387,7 @@ fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap, detail: &s
 }
 
 /// Writes ACP JSON RPC message.
-fn write_acp_json_rpc_message(
+pub(crate) fn write_acp_json_rpc_message(
     writer: &mut impl Write,
     message: &Value,
     agent: AcpAgent,
@@ -2392,7 +2410,7 @@ fn acp_request_id_key(id: &Value) -> String {
 }
 
 /// Parses an ACP JSON RPC error.
-fn parse_acp_json_rpc_error(error: &Value) -> AcpJsonRpcError {
+pub(crate) fn parse_acp_json_rpc_error(error: &Value) -> AcpJsonRpcError {
     AcpJsonRpcError {
         code: error.get("code").and_then(Value::as_i64),
         message: error

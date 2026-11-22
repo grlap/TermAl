@@ -1,6 +1,8 @@
 // Pinned plumbing and recursive repository enumeration for raw identities.
 // Does not invoke diff/status/submodule porcelain, filters or transports.
-fn identity_git_path(path: &FsPath) -> Result<String> {
+
+use super::*;
+pub(crate) fn identity_git_path(path: &FsPath) -> Result<String> {
     let value = identity_utf8_path(path)?;
     #[cfg(windows)]
     {
@@ -65,7 +67,7 @@ fn identity_git_path(path: &FsPath) -> Result<String> {
 #[cfg(not(test))]
 fn identity_metadata_walk_point(_: &FsPath) {}
 #[cfg(test)]
-thread_local! { static IDENTITY_METADATA_WALK_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(&FsPath)>>> = const { std::cell::RefCell::new(None) }; }
+thread_local! { pub(crate) static IDENTITY_METADATA_WALK_HOOK: std::cell::RefCell<Option<Box<dyn FnMut(&FsPath)>>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
 fn identity_metadata_walk_point(path: &FsPath) {
     IDENTITY_METADATA_WALK_HOOK.with(|hook| {
@@ -75,31 +77,34 @@ fn identity_metadata_walk_point(path: &FsPath) {
     });
 }
 
-struct ReviewIdentityGit {
-    root: PathBuf,
-    gitdir: PathBuf,
-    common: PathBuf,
-    object_format: String,
-    runner: ReviewFreezeGit,
+pub(crate) struct ReviewIdentityGit {
+    pub(crate) root: PathBuf,
+    pub(crate) gitdir: PathBuf,
+    pub(crate) common: PathBuf,
+    pub(crate) object_format: String,
+    pub(crate) runner: ReviewFreezeGit,
 }
 impl ReviewIdentityGit {
     #[cfg(test)]
-    fn new(root: &FsPath) -> Result<Self> {
+    pub(crate) fn new(root: &FsPath) -> Result<Self> {
         Self::new_until(root, std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT)
     }
-    fn new_until(root: &FsPath, deadline: std::time::Instant) -> Result<Self> {
+    pub(crate) fn new_until(root: &FsPath, deadline: std::time::Instant) -> Result<Self> {
         // A review root that cannot be resolved (a workdir not created yet)
         // names itself before the shared Git runner resolves it again. An IO
         // failure inside that runner's own setup names the review root.
         identity_canonical(root)?;
-        let runner = identity_at(root, ReviewFreezeGit::new_with_deadline(root, Some(deadline)))
-            .map_err(|error| {
-                if format!("{error:#}").contains("configured Git filters") {
-                    identity_refusal("configured_filter_unsupported")
-                } else {
-                    error
-                }
-            })?;
+        let runner = identity_at(
+            root,
+            ReviewFreezeGit::new_with_deadline(root, Some(deadline)),
+        )
+        .map_err(|error| {
+            if format!("{error:#}").contains("configured Git filters") {
+                identity_refusal("configured_filter_unsupported")
+            } else {
+                error
+            }
+        })?;
         let gitdir = runner.run(&["rev-parse", "--absolute-git-dir"], false)?;
         let gitdir = identity_canonical(FsPath::new(std::str::from_utf8(&gitdir)?.trim()))?;
         let common = runner.run(
@@ -119,7 +124,7 @@ impl ReviewIdentityGit {
         result.admit()?;
         Ok(result)
     }
-    fn child(&self, root: PathBuf) -> Result<Self> {
+    pub(crate) fn child(&self, root: PathBuf) -> Result<Self> {
         let dotgit = root.join(".git");
         let meta = identity_metadata(&dotgit)?;
         identity_plain_metadata(&meta)?;
@@ -173,13 +178,13 @@ impl ReviewIdentityGit {
         child.admit()?;
         Ok(child)
     }
-    fn check_deadline(&self) -> Result<()> {
+    pub(crate) fn check_deadline(&self) -> Result<()> {
         if std::time::Instant::now() >= self.runner.deadline {
             return Err(identity_refusal("deadline_exceeded"));
         }
         Ok(())
     }
-    fn admit(&self) -> Result<()> {
+    pub(crate) fn admit(&self) -> Result<()> {
         self.check_deadline()?;
         identity_no_links(&self.gitdir)?;
         identity_no_links(&self.common)?;
@@ -309,7 +314,7 @@ impl ReviewIdentityGit {
         }
         Ok(())
     }
-    fn validate_location(&self) -> Result<()> {
+    pub(crate) fn validate_location(&self) -> Result<()> {
         if identity_object_format(&self.run(
             &["rev-parse", "--show-object-format"],
             false,
@@ -347,7 +352,12 @@ impl ReviewIdentityGit {
         }
         self.admit()
     }
-    fn run(&self, args: &[&str], absent: bool, input: Option<Vec<u8>>) -> Result<Vec<u8>> {
+    pub(crate) fn run(
+        &self,
+        args: &[&str],
+        absent: bool,
+        input: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>> {
         self.check_deadline()?;
         let mut command = self.runner.command(&[]);
         command
@@ -385,7 +395,7 @@ impl ReviewIdentityGit {
         }
         Ok(output.stdout)
     }
-    fn blobs(&self, oids: &BTreeSet<String>) -> Result<HashMap<String, u64>> {
+    pub(crate) fn blobs(&self, oids: &BTreeSet<String>) -> Result<HashMap<String, u64>> {
         if oids.is_empty() {
             return Ok(HashMap::new());
         }

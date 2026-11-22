@@ -29,12 +29,14 @@
 // anchor the visible assistant message for the turn so the UI can
 // scroll to it when it first appears.
 
+use super::*;
+
 /// Queues a subagent result for later flushing. Subagent results must
 /// appear *before* the final assistant reply, but arrive mid-turn
 /// before TermAl knows which reply will be the final one; buffering
 /// here lets `flush_pending_codex_subagent_results` drain them in order
 /// at the right moment.
-fn buffer_codex_subagent_result(
+pub(crate) fn buffer_codex_subagent_result(
     turn_state: &mut CodexTurnState,
     title: &str,
     summary: &str,
@@ -60,7 +62,7 @@ fn buffer_codex_subagent_result(
 /// insertion order. Called both from `begin_codex_assistant_output`
 /// (just before the first visible assistant text) and on `turn/completed`
 /// so unflushed results from silent turns still reach the session.
-fn flush_pending_codex_subagent_results(
+pub(crate) fn flush_pending_codex_subagent_results(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
@@ -80,7 +82,7 @@ fn flush_pending_codex_subagent_results(
 /// buffered subagent results first so they land above the assistant's
 /// first visible message. Idempotent: subsequent calls within the same
 /// turn are no-ops.
-fn begin_codex_assistant_output(
+pub(crate) fn begin_codex_assistant_output(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
@@ -95,7 +97,7 @@ fn begin_codex_assistant_output(
 /// Captures the id of the first visible assistant message of the turn
 /// so subsequent notices (model rerouted, thread compacted, subagent
 /// results) can be inserted *before* it rather than appended after.
-fn remember_codex_first_assistant_message_id(
+pub(crate) fn remember_codex_first_assistant_message_id(
     state: &AppState,
     session_id: &str,
     turn_state: &mut CodexTurnState,
@@ -108,7 +110,7 @@ fn remember_codex_first_assistant_message_id(
 
 /// Appends one typed v2 agent-message delta verbatim. Finalizes any
 /// prior streaming text when the `item_id` changes.
-fn record_codex_agent_message_delta(
+pub(crate) fn record_codex_agent_message_delta(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
     state: &AppState,
@@ -137,7 +139,7 @@ fn record_codex_agent_message_delta(
 }
 
 /// Defines the completed text update variants.
-enum CompletedTextUpdate {
+pub(crate) enum CompletedTextUpdate {
     NoChange,
     Append(String),
     Replace(String),
@@ -148,7 +150,10 @@ enum CompletedTextUpdate {
 /// text is already exactly seen, `Append` when the incoming value only
 /// adds a suffix, and `Replace` when the text diverged and must be
 /// rewritten in full.
-fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> CompletedTextUpdate {
+pub(crate) fn next_completed_codex_text_update(
+    existing: &mut String,
+    incoming: &str,
+) -> CompletedTextUpdate {
     if incoming.is_empty() {
         return CompletedTextUpdate::NoChange;
     }
@@ -183,7 +188,7 @@ fn next_completed_codex_text_update(existing: &mut String, incoming: &str) -> Co
 /// Appends one typed `item/agentMessage/delta` exactly as delivered.
 /// The v2 protocol defines these as ordered incremental chunks, so
 /// repeated text is content, not evidence of retransmission.
-fn append_codex_agent_message_delta(existing: &mut String, delta: &str) -> bool {
+pub(crate) fn append_codex_agent_message_delta(existing: &mut String, delta: &str) -> bool {
     if delta.is_empty() {
         return false;
     }

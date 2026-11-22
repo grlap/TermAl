@@ -51,22 +51,24 @@
 // src/remote_terminal.rs (terminal stream forwarding); src/tests/remote.rs
 // (pin tests).
 
+use super::*;
+
 #[derive(Clone, Copy)]
-struct RemoteDeltaHydrationExpectation {
-    message_count: u32,
-    session_mutation_stamp: Option<u64>,
+pub(crate) struct RemoteDeltaHydrationExpectation {
+    pub(crate) message_count: u32,
+    pub(crate) session_mutation_stamp: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RemoteDeltaHydrationOutcome {
+pub(crate) enum RemoteDeltaHydrationOutcome {
     Continue,
     SkipApplied,
     SkipInFlight,
 }
 
-struct RemoteDeltaHydrationInFlightGuard {
-    in_flight: Arc<Mutex<HashSet<RemoteDeltaHydrationKey>>>,
-    key: RemoteDeltaHydrationKey,
+pub(crate) struct RemoteDeltaHydrationInFlightGuard {
+    pub(crate) in_flight: Arc<Mutex<HashSet<RemoteDeltaHydrationKey>>>,
+    pub(crate) key: RemoteDeltaHydrationKey,
 }
 
 impl Drop for RemoteDeltaHydrationInFlightGuard {
@@ -85,7 +87,7 @@ impl AppState {
     /// proxy session. Called once at boot after the persisted state is
     /// loaded so inbound SSE deltas keep flowing without waiting for a
     /// first outbound request to touch each remote.
-    fn restore_remote_event_bridges(&self) {
+    pub(crate) fn restore_remote_event_bridges(&self) {
         let mut remote_ids = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -113,7 +115,7 @@ impl AppState {
     /// Remote operations can retain a config snapshot while network I/O is in
     /// flight. Resolving by id here prevents bridge startup from reintroducing
     /// a stale endpoint after a concurrent settings update.
-    fn start_remote_event_bridge_by_id(&self, remote_id: &str) {
+    pub(crate) fn start_remote_event_bridge_by_id(&self, remote_id: &str) {
         self.remote_registry
             .start_event_bridge_by_id(self.clone(), remote_id);
     }
@@ -121,7 +123,7 @@ impl AppState {
     /// Starts a bridge only if the decoded response's exact connection still
     /// owns routing authority. Create flows use this instead of resolving by
     /// id so a response from endpoint A cannot accidentally claim endpoint B.
-    fn start_remote_event_bridge_for_lease(
+    pub(crate) fn start_remote_event_bridge_for_lease(
         &self,
         lease: &RemoteRequestLease,
     ) -> Result<(), ApiError> {
@@ -140,7 +142,7 @@ impl AppState {
     /// `None` if the session has no `remote_id`/`remote_session_id` and
     /// therefore lives locally. Errors only if the local session or the
     /// remote config itself is missing.
-    fn remote_session_target(
+    pub(crate) fn remote_session_target(
         &self,
         session_id: &str,
     ) -> Result<Option<RemoteSessionTarget>, ApiError> {
@@ -167,7 +169,7 @@ impl AppState {
     }
 
     /// Mirror of `remote_session_target` for orchestrator instances.
-    fn remote_orchestrator_target(
+    pub(crate) fn remote_orchestrator_target(
         &self,
         instance_id: &str,
     ) -> Result<Option<RemoteOrchestratorTarget>, ApiError> {
@@ -201,7 +203,7 @@ impl AppState {
     /// otherwise trigger `ensure_remote_project_binding`'s unbounded
     /// `POST /api/projects` call outside the 429 rate limit on a burst of
     /// first-time remote terminal requests.
-    fn terminal_request_is_remote(
+    pub(crate) fn terminal_request_is_remote(
         &self,
         session_id: Option<&str>,
         project_id: Option<&str>,
@@ -237,7 +239,7 @@ impl AppState {
     /// `POST /api/projects` if this is the first time the project is being
     /// bound on this remote — callers on a hot path should gate that with
     /// `terminal_request_is_remote` first.
-    fn remote_scope_for_request(
+    pub(crate) fn remote_scope_for_request(
         &self,
         session_id: Option<&str>,
         project_id: Option<&str>,
@@ -273,7 +275,7 @@ impl AppState {
     // `_response_without_timeout` returns the raw response so long-running
     // bodies (streams, events) can be read incrementally.
 
-    fn remote_get_json<T: DeserializeOwned>(
+    pub(crate) fn remote_get_json<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
         path: &str,
@@ -284,7 +286,7 @@ impl AppState {
             .request_json(&scope.remote, Method::GET, path, &query, None)
     }
 
-    fn remote_post_json<T: DeserializeOwned>(
+    pub(crate) fn remote_post_json<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
         path: &str,
@@ -299,7 +301,7 @@ impl AppState {
         )
     }
 
-    fn remote_post_json_with_timeout<T: DeserializeOwned>(
+    pub(crate) fn remote_post_json_with_timeout<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
         path: &str,
@@ -316,7 +318,7 @@ impl AppState {
         )
     }
 
-    fn remote_post_response_without_timeout(
+    pub(crate) fn remote_post_response_without_timeout(
         &self,
         scope: &RemoteScope,
         path: &str,
@@ -331,7 +333,7 @@ impl AppState {
         )
     }
 
-    fn remote_put_json<T: DeserializeOwned>(
+    pub(crate) fn remote_put_json<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
         path: &str,
@@ -346,7 +348,7 @@ impl AppState {
         )
     }
 
-    fn remote_put_json_with_query_scope<T: DeserializeOwned>(
+    pub(crate) fn remote_put_json_with_query_scope<T: DeserializeOwned>(
         &self,
         scope: &RemoteScope,
         path: &str,
@@ -363,7 +365,7 @@ impl AppState {
     // paired remote project (when a local project first needs a remote
     // counterpart) so subsequent proxy calls can use `remote_project_id`.
 
-    fn lookup_remote_config(&self, remote_id: &str) -> Result<RemoteConfig, ApiError> {
+    pub(crate) fn lookup_remote_config(&self, remote_id: &str) -> Result<RemoteConfig, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
             .find_remote(remote_id)
@@ -376,7 +378,7 @@ impl AppState {
     /// `remote_project_id` on the local record if one does not yet exist.
     /// Returns `None` for local-only projects (those with
     /// `remote_id == LOCAL_REMOTE_ID`).
-    fn ensure_remote_project_binding(
+    pub(crate) fn ensure_remote_project_binding(
         &self,
         project_id: &str,
     ) -> Result<Option<RemoteProjectBinding>, ApiError> {
@@ -386,7 +388,7 @@ impl AppState {
         )
     }
 
-    fn ensure_remote_project_binding_with_missing_status(
+    pub(crate) fn ensure_remote_project_binding_with_missing_status(
         &self,
         project_id: &str,
         missing_project_status: RemoteCreateMissingProjectStatus,
@@ -530,7 +532,7 @@ impl AppState {
     /// state only if its revision is newer, persists the change, and
     /// records the applied remote revision. Used by most session proxies
     /// after they forward the call.
-    fn sync_remote_state_for_target(
+    pub(crate) fn sync_remote_state_for_target(
         &self,
         target: &RemoteSessionTarget,
         remote_state: StateResponse,
@@ -579,7 +581,7 @@ impl AppState {
         }
     }
 
-    fn remote_delta_payload_fingerprint<T: Serialize>(payload: &T) -> Option<String> {
+    pub(crate) fn remote_delta_payload_fingerprint<T: Serialize>(payload: &T) -> Option<String> {
         match serde_json::to_vec(payload) {
             Ok(encoded) => Some(format!("{:x}", Sha256::digest(encoded))),
             Err(err) => {
@@ -609,7 +611,7 @@ impl AppState {
     /// Returns `None` when any payload field cannot be JSON-serialized. The
     /// monotonic `remote_applied_revisions` watermark remains the authoritative
     /// ordering defense, so the replay cache is safe to skip per delta.
-    fn remote_delta_replay_key_for_generation(
+    pub(crate) fn remote_delta_replay_key_for_generation(
         remote_id: &str,
         authority_generation: u64,
         event: &DeltaEvent,
@@ -876,7 +878,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn remote_delta_replay_key(
+    pub(crate) fn remote_delta_replay_key(
         remote_id: &str,
         event: &DeltaEvent,
     ) -> Option<RemoteDeltaReplayKey> {
@@ -885,7 +887,10 @@ impl AppState {
 
     /// Explicit no-op for `None` keys so callers can plumb optional replay
     /// keys without branching.
-    fn should_skip_remote_applied_delta_replay(&self, key: &Option<RemoteDeltaReplayKey>) -> bool {
+    pub(crate) fn should_skip_remote_applied_delta_replay(
+        &self,
+        key: &Option<RemoteDeltaReplayKey>,
+    ) -> bool {
         key.as_ref().is_some_and(|key| {
             self.remote_delta_replay_cache
                 .lock()
@@ -896,7 +901,7 @@ impl AppState {
 
     /// Explicit no-op for `None` keys; an unserializable delta still advances
     /// through the monotonic revision watermark after it applies.
-    fn note_remote_applied_delta_replay(&self, key: &Option<RemoteDeltaReplayKey>) {
+    pub(crate) fn note_remote_applied_delta_replay(&self, key: &Option<RemoteDeltaReplayKey>) {
         if let Some(key) = key {
             self.remote_delta_replay_cache
                 .lock()
@@ -905,7 +910,7 @@ impl AppState {
         }
     }
 
-    fn fetch_remote_session_tail_target(
+    pub(crate) fn fetch_remote_session_tail_target(
         &self,
         target: &RemoteSessionTarget,
         message_limit: usize,
@@ -1119,7 +1124,7 @@ impl AppState {
         })
     }
 
-    fn fetch_remote_session_history_target(
+    pub(crate) fn fetch_remote_session_history_target(
         &self,
         target: &RemoteSessionTarget,
         before: Option<&str>,
@@ -1221,9 +1226,7 @@ impl AppState {
             record.session.session_mutation_stamp.is_none()
                 && remote_page.message_count == record.session.message_count
                 && remote_page.revision >= latest_remote_revision;
-        if !metadata_matches_current_session
-            && !compatible_without_remote_mutation_stamp
-        {
+        if !metadata_matches_current_session && !compatible_without_remote_mutation_stamp {
             return Err(ApiError::conflict(
                 "remote session history changed while the page was loading; retry the request",
             ));
@@ -1244,7 +1247,7 @@ impl AppState {
         })
     }
 
-    fn repair_remote_session_tail_after_delta_error(
+    pub(crate) fn repair_remote_session_tail_after_delta_error(
         &self,
         remote_id: &str,
         event: &DeltaEvent,
@@ -1254,7 +1257,7 @@ impl AppState {
         )
     }
 
-    fn repair_remote_session_tail_after_delta_error_for_bridge(
+    pub(crate) fn repair_remote_session_tail_after_delta_error_for_bridge(
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
@@ -1328,7 +1331,7 @@ impl AppState {
 
     /// Ensures an unloaded remote proxy has one bounded tail before applying a
     /// narrow delta. It never asks either backend for an unbounded transcript.
-    fn try_begin_remote_delta_hydration(
+    pub(crate) fn try_begin_remote_delta_hydration(
         &self,
         key: RemoteDeltaHydrationKey,
     ) -> Option<RemoteDeltaHydrationInFlightGuard> {
@@ -1345,7 +1348,7 @@ impl AppState {
         })
     }
 
-    fn hydrate_unloaded_remote_session_for_delta(
+    pub(crate) fn hydrate_unloaded_remote_session_for_delta(
         &self,
         remote_id: &str,
         remote_session_id: &str,
@@ -1449,7 +1452,7 @@ impl AppState {
         Ok(RemoteDeltaHydrationOutcome::SkipApplied)
     }
 
-    fn should_skip_delta_after_remote_hydration(
+    pub(crate) fn should_skip_delta_after_remote_hydration(
         &self,
         outcome: RemoteDeltaHydrationOutcome,
         remote_delta_replay_key: &Option<RemoteDeltaReplayKey>,
@@ -1469,21 +1472,21 @@ impl AppState {
     // which factors out the common 'forward POST, fold new state if newer,
     // persist' plumbing.
 
-    fn proxy_remote_pause_orchestrator_instance(
+    pub(crate) fn proxy_remote_pause_orchestrator_instance(
         &self,
         target: RemoteOrchestratorTarget,
     ) -> Result<StateResponse, ApiError> {
         self.proxy_remote_orchestrator_state_action(target, "pause")
     }
 
-    fn proxy_remote_resume_orchestrator_instance(
+    pub(crate) fn proxy_remote_resume_orchestrator_instance(
         &self,
         target: RemoteOrchestratorTarget,
     ) -> Result<StateResponse, ApiError> {
         self.proxy_remote_orchestrator_state_action(target, "resume")
     }
 
-    fn proxy_remote_stop_orchestrator_instance(
+    pub(crate) fn proxy_remote_stop_orchestrator_instance(
         &self,
         target: RemoteOrchestratorTarget,
     ) -> Result<StateResponse, ApiError> {
@@ -1494,7 +1497,7 @@ impl AppState {
     /// routes: POSTs to `/api/orchestrators/<remote_id>/<action>`, folds
     /// the returned `StateResponse` in if newer, persists, and returns a
     /// fresh local snapshot.
-    fn proxy_remote_orchestrator_state_action(
+    pub(crate) fn proxy_remote_orchestrator_state_action(
         &self,
         target: RemoteOrchestratorTarget,
         action: &str,
@@ -1552,7 +1555,7 @@ impl AppState {
     /// if its revision is newer than what we have applied from that
     /// remote; no-op otherwise. Used both by routes that return a fresh
     /// snapshot and by the `state` event handler in `process_remote_event_stream`.
-    fn apply_remote_state_snapshot(
+    pub(crate) fn apply_remote_state_snapshot(
         &self,
         remote_id: &str,
         remote_state: StateResponse,
@@ -1564,7 +1567,7 @@ impl AppState {
         )
     }
 
-    fn apply_remote_lagged_recovery_state_snapshot(
+    pub(crate) fn apply_remote_lagged_recovery_state_snapshot(
         &self,
         remote_id: &str,
         remote_state: StateResponse,
@@ -1592,7 +1595,7 @@ impl AppState {
         )
     }
 
-    fn apply_remote_state_snapshot_for_bridge(
+    pub(crate) fn apply_remote_state_snapshot_for_bridge(
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
@@ -1609,7 +1612,7 @@ impl AppState {
         )
     }
 
-    fn apply_remote_state_snapshot_for_request(
+    pub(crate) fn apply_remote_state_snapshot_for_request(
         &self,
         lease: &RemoteRequestLease,
         remote_state: StateResponse,
@@ -1648,15 +1651,31 @@ impl AppState {
             connection.ensure_state_continuity_generation(generation)?;
         }
         if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, mode) {
-            if expected_connection.is_some_and(|connection|
-                connection.event_stream_status.compare_exchange(REMOTE_STREAM_PENDING, REMOTE_STREAM_LIVE, Ordering::SeqCst, Ordering::SeqCst).is_ok()) {
+            if expected_connection.is_some_and(|connection| {
+                connection
+                    .event_stream_status
+                    .compare_exchange(
+                        REMOTE_STREAM_PENDING,
+                        REMOTE_STREAM_LIVE,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    )
+                    .is_ok()
+            }) {
                 // A valid authoritative full state can confirm the connection
                 // even when its mirror already holds the same revision.
                 if let Err(err) = self.commit_remote_localization_locked(&mut inner) {
                     if let Some(connection) = expected_connection {
-                        let _ = connection.event_stream_status.compare_exchange(REMOTE_STREAM_LIVE, REMOTE_STREAM_PENDING, Ordering::SeqCst, Ordering::SeqCst);
+                        let _ = connection.event_stream_status.compare_exchange(
+                            REMOTE_STREAM_LIVE,
+                            REMOTE_STREAM_PENDING,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        );
                     }
-                    return Err(ApiError::internal(format!("failed to persist remote state: {err:#}")));
+                    return Err(ApiError::internal(format!(
+                        "failed to persist remote state: {err:#}"
+                    )));
                 }
             }
             self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
@@ -1668,11 +1687,25 @@ impl AppState {
             return Ok(());
         }
         note_remote_applied_state_snapshot_revision(&mut inner, remote_id, &remote_state);
-        let marked_live = expected_connection.is_some_and(|connection|
-            connection.event_stream_status.compare_exchange(REMOTE_STREAM_PENDING, REMOTE_STREAM_LIVE, Ordering::SeqCst, Ordering::SeqCst).is_ok());
+        let marked_live = expected_connection.is_some_and(|connection| {
+            connection
+                .event_stream_status
+                .compare_exchange(
+                    REMOTE_STREAM_PENDING,
+                    REMOTE_STREAM_LIVE,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+        });
         if let Err(err) = self.commit_remote_localization_locked(&mut inner) {
             if marked_live && let Some(connection) = expected_connection {
-                let _ = connection.event_stream_status.compare_exchange(REMOTE_STREAM_LIVE, REMOTE_STREAM_PENDING, Ordering::SeqCst, Ordering::SeqCst);
+                let _ = connection.event_stream_status.compare_exchange(
+                    REMOTE_STREAM_LIVE,
+                    REMOTE_STREAM_PENDING,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
             }
             return Err(ApiError::internal(format!(
                 "failed to persist remote state: {err:#}"

@@ -3,7 +3,12 @@
 // A checked pathname is never reopened for reading: path and regular-file
 // admission are checked on the handle that supplies every uploaded byte.
 
-fn telegram_document_file_error(path: &FsPath, error: io::Error) -> TelegramDocumentError {
+use super::*;
+
+pub(crate) fn telegram_document_file_error(
+    path: &FsPath,
+    error: io::Error,
+) -> TelegramDocumentError {
     let detail = format!("cannot read {}: {error}", path.display());
     #[cfg(unix)]
     if error.raw_os_error() == Some(libc::ELOOP) {
@@ -22,7 +27,9 @@ fn telegram_document_file_error(path: &FsPath, error: io::Error) -> TelegramDocu
     }
 }
 
-fn refuse_telegram_document_namespace(path: &FsPath) -> Result<(), TelegramDocumentError> {
+pub(crate) fn refuse_telegram_document_namespace(
+    path: &FsPath,
+) -> Result<(), TelegramDocumentError> {
     #[cfg(windows)]
     {
         use std::path::{Component, Prefix};
@@ -45,7 +52,7 @@ fn refuse_telegram_document_namespace(path: &FsPath) -> Result<(), TelegramDocum
     Ok(())
 }
 
-fn open_telegram_document(path: &FsPath) -> io::Result<fs::File> {
+pub(crate) fn open_telegram_document(path: &FsPath) -> io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -64,7 +71,7 @@ fn open_telegram_document(path: &FsPath) -> io::Result<fs::File> {
     options.open(path)
 }
 
-fn telegram_document_is_reparse(metadata: &fs::Metadata) -> bool {
+pub(crate) fn telegram_document_is_reparse(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -76,7 +83,7 @@ fn telegram_document_is_reparse(metadata: &fs::Metadata) -> bool {
     }
 }
 
-fn validate_telegram_document_handle(
+pub(crate) fn validate_telegram_document_handle(
     file: &fs::File,
     expected: &FsPath,
     roots: &[PathBuf],

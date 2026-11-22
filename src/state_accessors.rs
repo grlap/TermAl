@@ -31,24 +31,26 @@
 // already received a resync so the fallback loop doesn't re-push
 // identical snapshots back to clients.
 
+use super::*;
+
 #[cfg(test)]
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_millis(100);
 #[cfg(not(test))]
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5);
-const SESSION_TAIL_DEFAULT_MESSAGES: usize = 20;
-const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 64;
-const SESSION_HISTORY_PAGE_MAX_MESSAGES: usize = 64;
+pub(crate) const SESSION_TAIL_DEFAULT_MESSAGES: usize = 20;
+pub(crate) const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 64;
+pub(crate) const SESSION_HISTORY_PAGE_MAX_MESSAGES: usize = 64;
 const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_BEFORE_QUEUE_PROJECTION_HASH: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_BEFORE_SESSION_SUMMARY_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_BEFORE_STATE_SNAPSHOT_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_BEFORE_QUEUE_PROJECTION_HASH: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_BEFORE_SESSION_SUMMARY_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_BEFORE_STATE_SNAPSHOT_PROJECT: std::cell::RefCell<Option<Box<dyn FnMut()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-fn observe_state_snapshot_projection_for_test() {
+pub(crate) fn observe_state_snapshot_projection_for_test() {
     TEST_BEFORE_STATE_SNAPSHOT_PROJECT.with(|hook| {
         if let Some(hook) = hook.borrow_mut().as_mut() {
             hook();
@@ -69,7 +71,7 @@ fn bounded_live_activity_summary_text(value: &str) -> String {
     bounded
 }
 
-fn bounded_live_activity_summary(
+pub(crate) fn bounded_live_activity_summary(
     activity: &Option<SessionLiveActivity>,
 ) -> Option<SessionLiveActivity> {
     activity.as_ref().map(|activity| SessionLiveActivity {
@@ -84,7 +86,7 @@ fn bounded_live_activity_summary(
 
 /// A remote tail repair may fall back to applying the narrow SSE delta when
 /// transport or freshness prevents the bounded fetch itself.
-fn is_recoverable_remote_tail_miss(err: &ApiError) -> bool {
+pub(crate) fn is_recoverable_remote_tail_miss(err: &ApiError) -> bool {
     matches!(err.kind, Some(ApiErrorKind::RemoteConnectionUnavailable))
 }
 
@@ -543,7 +545,7 @@ mod visible_session_hydration_error_tests {
 }
 
 impl AppState {
-    fn queue_projection_hash(record: &SessionRecord) -> String {
+    pub(crate) fn queue_projection_hash(record: &SessionRecord) -> String {
         #[cfg(test)]
         TEST_BEFORE_QUEUE_PROJECTION_HASH.with(|hook| {
             if let Some(hook) = hook.borrow_mut().as_mut() {
@@ -560,7 +562,10 @@ impl AppState {
         sha256_hex(&serialized)
     }
 
-    fn wire_session_from_record(local_instance_id: &str, record: &SessionRecord) -> Session {
+    pub(crate) fn wire_session_from_record(
+        local_instance_id: &str,
+        record: &SessionRecord,
+    ) -> Session {
         let mut session = record.session.clone();
         if record.is_local_session() {
             session.provider_handoffs = record
@@ -620,7 +625,7 @@ impl AppState {
             .saturating_sub(retained_message_count)
     }
 
-    fn wire_session_tail_from_record(
+    pub(crate) fn wire_session_tail_from_record(
         local_instance_id: &str,
         record: &SessionRecord,
         message_limit: usize,
@@ -646,7 +651,7 @@ impl AppState {
     /// domain. Every field is also checked by the borrowed hit validator;
     /// new projection inputs must update it. Writers still use stamping
     /// accessors so persistence observes their changes.
-    fn wire_session_summary_from_record(
+    pub(crate) fn wire_session_summary_from_record(
         local_instance_id: &str,
         record: &SessionRecord,
     ) -> StateSessionSummary {
@@ -821,11 +826,11 @@ impl AppState {
     /// the same path used by `commit_locked` / `publish_state_locked`.  This
     /// ensures that a `snapshot()` call at revision N uses the same cached
     /// readiness value that was published in the SSE event for revision N.
-    fn snapshot(&self) -> StateResponse {
+    pub(crate) fn snapshot(&self) -> StateResponse {
         self.summary_snapshot()
     }
 
-    fn summary_snapshot(&self) -> StateResponse {
+    pub(crate) fn summary_snapshot(&self) -> StateResponse {
         let _ = self.agent_readiness_snapshot();
         let snapshot = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -840,13 +845,13 @@ impl AppState {
     /// metadata-first. Tests that inspect retained session windows use this
     /// helper so `snapshot()` keeps the same shape in test and production.
     #[cfg(test)]
-    fn full_snapshot(&self) -> FullStateSnapshot {
+    pub(crate) fn full_snapshot(&self) -> FullStateSnapshot {
         let _ = self.agent_readiness_snapshot();
         let inner = self.inner.lock().expect("state mutex poisoned");
         self.full_snapshot_from_inner(&inner)
     }
 
-    fn agent_readiness_snapshot(&self) -> Vec<AgentReadiness> {
+    pub(crate) fn agent_readiness_snapshot(&self) -> Vec<AgentReadiness> {
         #[cfg(test)]
         let _readiness = self.test_api_phase_timer("readiness_total", None);
         if let Some(snapshot) = self.cached_agent_readiness_if_fresh() {
@@ -881,7 +886,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn test_api_phase_timer(
+    pub(crate) fn test_api_phase_timer(
         &self,
         phase: &'static str,
         session_id: Option<&str>,
@@ -914,7 +919,7 @@ impl AppState {
         (!cache.needs_refresh(now)).then(|| cache.snapshot.clone())
     }
 
-    fn cached_agent_readiness(&self) -> Vec<AgentReadiness> {
+    pub(crate) fn cached_agent_readiness(&self) -> Vec<AgentReadiness> {
         self.agent_readiness_cache
             .read()
             .expect("agent readiness cache poisoned")
@@ -924,12 +929,12 @@ impl AppState {
 
     /// Test helper for the same bounded default tail exposed by the route.
     #[cfg(test)]
-    fn get_session(&self, session_id: &str) -> Result<SessionResponse, ApiError> {
+    pub(crate) fn get_session(&self, session_id: &str) -> Result<SessionResponse, ApiError> {
         self.get_session_tail(session_id, SESSION_TAIL_DEFAULT_MESSAGES)
     }
 
     /// Returns a visible session suffix without marking the transcript fully loaded.
-    fn get_session_tail(
+    pub(crate) fn get_session_tail(
         &self,
         session_id: &str,
         message_limit: usize,
@@ -983,7 +988,7 @@ impl AppState {
     ///
     /// Remote proxies forward the same bounded cursor query to the upstream
     /// backend; they never materialize an unbounded transcript locally.
-    fn get_session_history(
+    pub(crate) fn get_session_history(
         &self,
         session_id: &str,
         before: Option<&str>,
@@ -1019,7 +1024,7 @@ impl AppState {
             .page(session_id, selector, self.server_instance_id.clone())
     }
 
-    fn invalidate_agent_readiness_cache(&self) {
+    pub(crate) fn invalidate_agent_readiness_cache(&self) {
         let _refresh_lock = self
             .agent_readiness_refresh_lock
             .lock()
@@ -1033,7 +1038,7 @@ impl AppState {
     /// Returns whether a remote fallback-driven /api/state resync can be
     /// skipped because the same or a newer fallback revision was already
     /// recovered for that remote within the current event-stream lifetime.
-    fn should_skip_remote_sse_fallback_resync(
+    pub(crate) fn should_skip_remote_sse_fallback_resync(
         &self,
         remote_id: &str,
         fallback_revision: u64,
@@ -1045,7 +1050,7 @@ impl AppState {
             .is_some_and(|last_revision| *last_revision >= fallback_revision)
     }
 
-    fn should_skip_remote_sse_fallback_resync_for_bridge(
+    pub(crate) fn should_skip_remote_sse_fallback_resync_for_bridge(
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
@@ -1058,7 +1063,7 @@ impl AppState {
 
     /// Records that a remote fallback-driven /api/state resync recovered the
     /// given fallback revision.
-    fn note_remote_sse_fallback_resync(&self, remote_id: &str, fallback_revision: u64) {
+    pub(crate) fn note_remote_sse_fallback_resync(&self, remote_id: &str, fallback_revision: u64) {
         self.remote_sse_fallback_resynced_revision
             .lock()
             .expect("remote fallback resync mutex poisoned")
@@ -1069,7 +1074,7 @@ impl AppState {
             .or_insert(fallback_revision);
     }
 
-    fn note_remote_sse_fallback_resync_for_bridge(
+    pub(crate) fn note_remote_sse_fallback_resync_for_bridge(
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
@@ -1084,14 +1089,14 @@ impl AppState {
     /// Clears the latest applied remote revision when event-stream continuity
     /// is lost, such as after a disconnect or restart.
     #[cfg(test)]
-    fn clear_remote_applied_revision(&self, remote_id: &str) {
+    pub(crate) fn clear_remote_applied_revision(&self, remote_id: &str) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let _ = self.clear_remote_applied_revision_locked(&mut inner, remote_id);
     }
 
     /// Locked counterpart used when settings publication must clear continuity
     /// state before releasing the same state guard.
-    fn clear_remote_applied_revision_locked(
+    pub(crate) fn clear_remote_applied_revision_locked(
         &self,
         inner: &mut StateInner,
         remote_id: &str,
@@ -1119,7 +1124,7 @@ impl AppState {
 
     /// Clears remote fallback resync tracking when event-stream continuity is
     /// lost, such as after a disconnect or restart.
-    fn clear_remote_sse_fallback_resync(&self, remote_id: &str) -> bool {
+    pub(crate) fn clear_remote_sse_fallback_resync(&self, remote_id: &str) -> bool {
         self.remote_sse_fallback_resynced_revision
             .lock()
             .expect("remote fallback resync mutex poisoned")
@@ -1131,7 +1136,7 @@ impl AppState {
     /// still own the remote id. The application-state guard linearizes this
     /// cleanup against settings publication, preventing a retiring worker from
     /// erasing watermarks established by its replacement.
-    fn clear_remote_bridge_continuity_if_current(
+    pub(crate) fn clear_remote_bridge_continuity_if_current(
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
@@ -1152,7 +1157,7 @@ impl AppState {
     }
 
     #[cfg(not(test))]
-    fn spawn_workspace_file_watcher(&self) {
+    pub(crate) fn spawn_workspace_file_watcher(&self) {
         let state = self.clone();
         std::thread::Builder::new()
             .name("termal-file-watch".to_owned())
@@ -1178,11 +1183,11 @@ impl AppState {
     /// following mutation carries the fresh value.  Paths where freshness matters
     /// (`create_session`, `update_app_settings`) pre-refresh the cache before
     /// entering the critical section.
-    fn snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
+    pub(crate) fn snapshot_from_inner(&self, inner: &StateInner) -> StateResponse {
         self.snapshot_from_inner_with_agent_readiness(inner, self.cached_agent_readiness())
     }
 
-    fn pending_engram_mcp_revocation_session_ids(inner: &StateInner) -> Vec<String> {
+    pub(crate) fn pending_engram_mcp_revocation_session_ids(inner: &StateInner) -> Vec<String> {
         let mut session_ids = inner
             .sessions
             .iter()
@@ -1221,7 +1226,7 @@ impl AppState {
         self.snapshot_header_from_inner(inner, agent_readiness, sessions)
     }
 
-    fn snapshot_header_from_inner(
+    pub(crate) fn snapshot_header_from_inner(
         &self,
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
@@ -1297,7 +1302,7 @@ impl AppState {
     /// the effective approval mode and whether the session is a delegation
     /// child — read under a single state lock so the attendedness policy
     /// (`claude_question_is_unattended`) never sees a torn pair.
-    fn claude_control_request_context(
+    pub(crate) fn claude_control_request_context(
         &self,
         session_id: &str,
     ) -> Result<(ClaudeApprovalMode, bool)> {
@@ -1316,7 +1321,7 @@ impl AppState {
 
     /// Reads the effective Cursor mode for tests without reader admission.
     #[cfg(test)]
-    fn cursor_mode(&self, session_id: &str) -> Result<CursorMode> {
+    pub(crate) fn cursor_mode(&self, session_id: &str) -> Result<CursorMode> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -1332,7 +1337,11 @@ impl AppState {
     /// guard wrappers in `turn_lifecycle.rs` to drop stray events
     /// from torn-down runtimes (see `session_runtime.rs` for the
     /// token lifecycle).
-    fn session_matches_runtime_token(&self, session_id: &str, token: &RuntimeToken) -> bool {
+    pub(crate) fn session_matches_runtime_token(
+        &self,
+        session_id: &str,
+        token: &RuntimeToken,
+    ) -> bool {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
             .find_session_index(session_id)

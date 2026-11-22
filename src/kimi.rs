@@ -4,12 +4,14 @@
 // Does not own credentials or the shared ACP lifecycle (acp.rs).
 // Added for Kimi Code 2.0.2's `kimi acp` interface; never invoke a shell shim.
 
-const MAX_KIMI_THINKING_CHARS: usize = 128;
-const KIMI_MODEL_SET_TIMEOUT: Duration = Duration::from_secs(15);
+use super::*;
+
+pub(crate) const MAX_KIMI_THINKING_CHARS: usize = 128;
+pub(crate) const KIMI_MODEL_SET_TIMEOUT: Duration = Duration::from_secs(15);
 const KIMI_THINKING_SET_TIMEOUT: Duration = Duration::from_secs(15);
 // A fresh worker initializes and authenticates before handling refresh. Allow
 // every bounded setup phase, model-dependent discovery, and response delivery.
-const KIMI_MODEL_REFRESH_TIMEOUT: Duration = Duration::from_secs(
+pub(crate) const KIMI_MODEL_REFRESH_TIMEOUT: Duration = Duration::from_secs(
     ACP_INITIALIZE_TIMEOUT.as_secs()
         + ACP_AUTH_TIMEOUT.as_secs()
         + ACP_SESSION_SETUP_TIMEOUT.as_secs()
@@ -17,7 +19,7 @@ const KIMI_MODEL_REFRESH_TIMEOUT: Duration = Duration::from_secs(
         + 5,
 );
 
-fn kimi_thinking_options(config: &Value) -> Vec<SessionModelOption> {
+pub(crate) fn kimi_thinking_options(config: &Value) -> Vec<SessionModelOption> {
     acp_session_config_options(config, "thinking", Some(MAX_KIMI_THINKING_CHARS))
         .into_iter()
         // Reserved host clear sentinel, never an explicit provider selection.
@@ -27,7 +29,7 @@ fn kimi_thinking_options(config: &Value) -> Vec<SessionModelOption> {
 
 /// Discover the thinking catalog for a valid requested model. Invalid saved
 /// models still get model discovery, but must not borrow another model's efforts.
-fn discover_kimi_thinking_config(
+pub(crate) fn discover_kimi_thinking_config(
     writer: &mut impl Write,
     pending: &AcpPendingRequestMap,
     external_id: &str,
@@ -57,11 +59,11 @@ fn discover_kimi_thinking_config(
     Ok(Some(result))
 }
 
-fn resolve_kimi_executable() -> Option<PathBuf> {
+pub(crate) fn resolve_kimi_executable() -> Option<PathBuf> {
     resolve_kimi_executable_with(std::env::var_os("PATH").as_deref(), home_dir().as_deref())
 }
 
-fn resolve_kimi_executable_with(
+pub(crate) fn resolve_kimi_executable_with(
     path: Option<&std::ffi::OsStr>,
     home: Option<&FsPath>,
 ) -> Option<PathBuf> {
@@ -91,7 +93,7 @@ fn resolve_kimi_executable_with(
     })
 }
 
-fn kimi_acp_command(executable: Option<PathBuf>) -> Result<Command> {
+pub(crate) fn kimi_acp_command(executable: Option<PathBuf>) -> Result<Command> {
     let executable = executable.context(
         "Kimi Code CLI was not found on PATH or in ~/.kimi-code/bin; install Kimi Code CLI and run `kimi login`",
     )?;
@@ -100,7 +102,9 @@ fn kimi_acp_command(executable: Option<PathBuf>) -> Result<Command> {
     Ok(command)
 }
 
-fn kimi_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> AgentReadiness {
+pub(crate) fn kimi_agent_readiness_with(
+    resolve: impl FnOnce() -> Option<PathBuf>,
+) -> AgentReadiness {
     let path = resolve().map(|path| display_path_for_user(&normalize_user_facing_path(&path)));
     AgentReadiness {
         agent: Agent::Kimi,
@@ -133,7 +137,7 @@ fn kimi_agent_readiness_with(resolve: impl FnOnce() -> Option<PathBuf>) -> Agent
 /// otherwise (`AppState::kimi_effective_mode`). A missing or contradictory
 /// ACK refuses the turn, so Kimi never runs a prompt in a mode TermAl did not
 /// choose; a mode Kimi kept from an earlier session is never inherited.
-fn configure_kimi_mode(
+pub(crate) fn configure_kimi_mode(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     session_id: &str,
@@ -206,13 +210,13 @@ impl AppState {
     /// Provider observations update only the effective value/catalog, never
     /// requested intent: a delayed refresh cannot undo a newer settings PATCH.
     #[cfg(test)]
-    fn sync_kimi_thinking(&self, session_id: &str, config: &Value) -> Result<()> {
+    pub(crate) fn sync_kimi_thinking(&self, session_id: &str, config: &Value) -> Result<()> {
         self.sync_kimi_config_observation(session_id, config, None, None, false)
     }
 
     // Runtime identity and requested-model fences are checked under the same
     // lock as publication. A combined notification produces one revision.
-    fn sync_kimi_config_observation(
+    pub(crate) fn sync_kimi_config_observation(
         &self,
         session_id: &str,
         config: &Value,
@@ -296,7 +300,7 @@ impl AppState {
     /// The mode Kimi must run a prompt in: `default` for a read-only
     /// delegation child whatever its session says (the host gate needs Kimi to
     /// ask), and the session's `kimiMode` otherwise, `default` when unset.
-    fn kimi_effective_mode(&self, session_id: &str) -> Result<KimiMode> {
+    pub(crate) fn kimi_effective_mode(&self, session_id: &str) -> Result<KimiMode> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_session_index(session_id)
@@ -307,7 +311,7 @@ impl AppState {
         Ok(inner.sessions[index].session.kimi_mode.unwrap_or_default())
     }
 
-    fn admit_kimi_thinking(
+    pub(crate) fn admit_kimi_thinking(
         &self,
         writer: &mut impl Write,
         pending: &AcpPendingRequestMap,

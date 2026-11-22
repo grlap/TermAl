@@ -10,6 +10,8 @@
 // no wake, retry or delivery, and never asks for a resend or a poll.
 // New module beside src/mailboxes.rs, not split out of it.
 
+use super::*;
+
 /// The optional next action every receipt line names, with the message's
 /// own returned id: a local id or a relay locator, never a rebuilt one.
 fn mailbox_current_status_action(message_id: &str) -> String {
@@ -20,7 +22,7 @@ fn mailbox_current_status_action(message_id: &str) -> String {
 
 /// One sentence for a wake state. It says nothing about acknowledgement, and
 /// the states are not a ladder: no wording claims a wake never happened.
-fn mailbox_wake_state_sentence(notification_state: &str) -> String {
+pub(crate) fn mailbox_wake_state_sentence(notification_state: &str) -> String {
     match notification_state {
         "deliveredToIdleSession" => "Notification delivered to the recipient's session.".to_owned(),
         "queuedBehindActiveTurn" => {
@@ -46,7 +48,11 @@ fn mailbox_wake_state_sentence(notification_state: &str) -> String {
 
 /// The send receipt's line. Its disposition is the wake status AT SEND TIME
 /// and never changes; it is not current status.
-fn mailbox_send_receipt_note(notification_disposition: &str, message_id: &str, duplicate: bool) -> String {
+pub(crate) fn mailbox_send_receipt_note(
+    notification_disposition: &str,
+    message_id: &str,
+    duplicate: bool,
+) -> String {
     let lead = if duplicate {
         "Duplicate send: the original message was saved earlier."
     } else {
@@ -71,7 +77,7 @@ fn mailbox_send_receipt_note(notification_disposition: &str, message_id: &str, d
 /// recipient's acknowledgement on its own. An acknowledgement is the
 /// recipient's protocol acknowledgement, not proof the content was acted on,
 /// and a message can be acknowledged without any wake.
-fn mailbox_current_status_summary(
+pub(crate) fn mailbox_current_status_summary(
     observed_at: &str,
     notification_state: &str,
     recipient_acknowledged: bool,
@@ -84,7 +90,7 @@ fn mailbox_current_status_summary(
 }
 
 /// The caller already owns this wake observation; ACK remains independent.
-fn mailbox_current_status_summary_with_cause(
+pub(crate) fn mailbox_current_status_summary_with_cause(
     observed_at: &str,
     wake_summary: &str,
     recipient_acknowledged: bool,
@@ -99,7 +105,7 @@ fn mailbox_current_status_summary_with_cause(
 
 /// Relay admission and target handoff are independent observations. The home
 /// disposition remains conservative, so it cannot describe the combined read.
-fn mailbox_relay_current_status_summary(
+pub(crate) fn mailbox_relay_current_status_summary(
     observed_at: &str,
     progress: &MailboxRelayProgress,
     recipient_acknowledged: bool,
@@ -111,16 +117,25 @@ fn mailbox_relay_current_status_summary(
     };
     let target = match &progress.target {
         MailboxRelayTargetProgress::Observed {
-            observed_at, provider_handoff_recorded, currently_queued, ..
+            observed_at,
+            provider_handoff_recorded,
+            currently_queued,
+            ..
         } => {
             let handoff = match provider_handoff_recorded {
                 Some(true) => "provider handoff recorded",
                 Some(false) => "no provider handoff recorded",
                 None => "provider handoff observation unavailable",
             };
-            format!("Target observed at {observed_at}: currently queued = {currently_queued}; {handoff}.")
+            format!(
+                "Target observed at {observed_at}: currently queued = {currently_queued}; {handoff}."
+            )
         }
-        MailboxRelayTargetProgress::Unavailable { observed_at, reason, .. } => {
+        MailboxRelayTargetProgress::Unavailable {
+            observed_at,
+            reason,
+            ..
+        } => {
             format!("Target progress unavailable at {observed_at}: {reason}.")
         }
     };
@@ -129,13 +144,15 @@ fn mailbox_relay_current_status_summary(
     } else {
         "Not yet acknowledged by the recipient."
     };
-    format!("As of {observed_at}: {home} {target} {acknowledgement} Queue admission is not provider delivery; handoff and acknowledgement are not completed work.")
+    format!(
+        "As of {observed_at}: {home} {target} {acknowledgement} Queue admission is not provider delivery; handoff and acknowledgement are not completed work."
+    )
 }
 
 /// An exact read whose remote mailbox home could not be reached or gave no
 /// usable answer. Only the cause's first clause is kept: guidance written for
 /// another operation, such as retrying an original send, does not apply here.
-fn mailbox_current_status_unavailable_text(cause: &str) -> String {
+pub(crate) fn mailbox_current_status_unavailable_text(cause: &str) -> String {
     let cause = cause.split(';').next().unwrap_or(cause).trim();
     format!(
         "current status unavailable: the message's mailbox home could not be reached or gave no usable answer, which says nothing about delivery; try the read again later ({cause})"

@@ -1,6 +1,8 @@
 // Durable scheduling metadata on the original send rows. Custody, authenticated
 // completion and final receipts remain with their existing owners.
-const CAUSAL_PENDING_DIAGNOSTICS: usize = 64;
+
+use super::*;
+pub(crate) const CAUSAL_PENDING_DIAGNOSTICS: usize = 64;
 const CAUSAL_PENDING_METADATA_REASON: &str = "pending_metadata_decode";
 
 fn causal_pending_now() -> String {
@@ -9,7 +11,7 @@ fn causal_pending_now() -> String {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
-enum CausalPendingReason {
+pub(crate) enum CausalPendingReason {
     AwaitingReceipt,
     AwaitingCompletion,
     TestRequestDecode,
@@ -39,7 +41,7 @@ enum CausalPendingReason {
 }
 
 impl CausalPendingReason {
-    fn custody_failure(self) -> bool {
+    pub(crate) fn custody_failure(self) -> bool {
         matches!(
             self,
             Self::TestRequestDecode
@@ -55,19 +57,19 @@ impl CausalPendingReason {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CausalPendingState {
-    schema_version: u8,
-    reason: CausalPendingReason,
-    attempts: u64,
+pub(crate) struct CausalPendingState {
+    pub(crate) schema_version: u8,
+    pub(crate) reason: CausalPendingReason,
+    pub(crate) attempts: u64,
     first_pending_at: String,
-    last_attempt_at: Option<String>,
-    migrated: bool,
+    pub(crate) last_attempt_at: Option<String>,
+    pub(crate) migrated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    legacy_custody_digest: Option<String>,
+    pub(crate) legacy_custody_digest: Option<String>,
 }
 
 impl CausalPendingState {
-    fn new(reason: CausalPendingReason, migrated: bool) -> Self {
+    pub(crate) fn new(reason: CausalPendingReason, migrated: bool) -> Self {
         Self {
             schema_version: 1,
             reason,
@@ -79,7 +81,7 @@ impl CausalPendingState {
         }
     }
 
-    fn decode(encoded: &str) -> Result<Self> {
+    pub(crate) fn decode(encoded: &str) -> Result<Self> {
         if encoded.len() > 1024 {
             bail!("causal pending metadata exceeds its bound");
         }
@@ -103,7 +105,7 @@ impl CausalPendingState {
         Ok(state)
     }
 
-    fn diagnostic(&self) -> Value {
+    pub(crate) fn diagnostic(&self) -> Value {
         // Private quarantine fingerprints never enter the public diagnostic.
         json!({"schemaVersion":self.schema_version,"reason":self.reason,
             "attempts":self.attempts,"firstPendingAt":self.first_pending_at,
@@ -111,14 +113,14 @@ impl CausalPendingState {
     }
 }
 
-enum CausalPendingMetadata {
+pub(crate) enum CausalPendingMetadata {
     Retired,
     Readable(CausalPendingState),
     Malformed,
 }
 
 impl CausalPendingMetadata {
-    fn from_column(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<Self> {
+    pub(crate) fn from_column(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<Self> {
         // Field contents may be damaged while a store is open. Query/column
         // shape errors still propagate; only this field's bytes are isolated.
         Ok(match row.get_ref(column)? {
@@ -132,7 +134,7 @@ impl CausalPendingMetadata {
         })
     }
 
-    fn diagnostic(self) -> Option<Value> {
+    pub(crate) fn diagnostic(self) -> Option<Value> {
         match self {
             Self::Retired => None,
             Self::Readable(state) => Some(state.diagnostic()),
@@ -144,7 +146,10 @@ impl CausalPendingMetadata {
     }
 }
 
-fn causal_pending_order(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<Option<i64>> {
+pub(crate) fn causal_pending_order(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<i64>> {
     Ok(match row.get_ref(column)? {
         rusqlite::types::ValueRef::Integer(order) if order > 0 => Some(order),
         _ => None,
@@ -152,13 +157,13 @@ fn causal_pending_order(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Res
 }
 
 #[derive(Clone, Copy)]
-struct CausalPendingRow {
-    intents: bool,
-    row_id: i64,
+pub(crate) struct CausalPendingRow {
+    pub(crate) intents: bool,
+    pub(crate) row_id: i64,
 }
 
 impl CausalPendingRow {
-    fn table(self) -> &'static str {
+    pub(crate) fn table(self) -> &'static str {
         if self.intents {
             "mailbox_relay_intents"
         } else {
@@ -170,7 +175,7 @@ impl CausalPendingRow {
 // The partial indexes cover ONLY explicit pending membership. MAX never walks
 // ordinary mail. The caller holds the same IMMEDIATE transaction as its send,
 // retry or settlement, so retry order cannot race another writer.
-fn next_causal_pending_order(connection: &rusqlite::Connection) -> Result<i64> {
+pub(crate) fn next_causal_pending_order(connection: &rusqlite::Connection) -> Result<i64> {
     let last = connection.query_row(
         "SELECT MAX(n) FROM (
          SELECT MAX(test_request_pending_order) AS n FROM mailbox_messages
@@ -191,7 +196,10 @@ fn next_causal_pending_order(connection: &rusqlite::Connection) -> Result<i64> {
         .ok_or_else(|| anyhow!("causal pending retry order exhausted"))
 }
 
-fn rotate_causal_pending(connection: &rusqlite::Connection, row: CausalPendingRow) -> Result<()> {
+pub(crate) fn rotate_causal_pending(
+    connection: &rusqlite::Connection,
+    row: CausalPendingRow,
+) -> Result<()> {
     let order = next_causal_pending_order(connection)?;
     connection.execute(&format!(
         "UPDATE {} SET test_request_pending_order=?1 WHERE rowid=?2 AND test_request_pending_json IS NOT NULL",
@@ -199,7 +207,7 @@ fn rotate_causal_pending(connection: &rusqlite::Connection, row: CausalPendingRo
     Ok(())
 }
 
-fn create_causal_pending(
+pub(crate) fn create_causal_pending(
     connection: &rusqlite::Connection,
     intents: bool,
     owner: &str,
@@ -234,7 +242,7 @@ fn create_causal_pending(
     Ok(())
 }
 
-fn note_causal_pending(
+pub(crate) fn note_causal_pending(
     connection: &rusqlite::Connection,
     row: CausalPendingRow,
     reason: CausalPendingReason,
@@ -272,7 +280,7 @@ fn note_causal_pending(
 }
 
 impl MailboxStore {
-    fn note_causal_pending_for_selector(
+    pub(crate) fn note_causal_pending_for_selector(
         &self,
         selector: &CausalTestCompletionSelector,
         intents: bool,
@@ -306,7 +314,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn causal_pending_diagnostics(&self) -> Result<Value> {
+    pub(crate) fn causal_pending_diagnostics(&self) -> Result<Value> {
         let connection = self.connection()?;
         let transaction = connection.unchecked_transaction()?;
         let mut records = Vec::new();

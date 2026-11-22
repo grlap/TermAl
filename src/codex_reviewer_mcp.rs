@@ -1,11 +1,13 @@
 // Owns exact reviewer/evaluator scopes, typed observations and status parsing.
 // Readiness is thread-scoped; neither a profile catalog nor another
 // thread's startup notification is evidence for this delegation.
-const CODEX_REVIEWER_MCP_BUDGET: Duration = Duration::from_secs(60);
+
+use super::*;
+pub(crate) const CODEX_REVIEWER_MCP_BUDGET: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum CodexReviewerMcpOutcome {
+pub(crate) enum CodexReviewerMcpOutcome {
     Ready,
     Failed,
     MissingServer,
@@ -17,33 +19,33 @@ enum CodexReviewerMcpOutcome {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CodexReviewerMcpObservation {
-    phase: String,
-    outcome: CodexReviewerMcpOutcome,
-    elapsed_ms: u64,
-    budget_ms: u64,
-    measurement: String,
-    reason: String,
+pub(crate) struct CodexReviewerMcpObservation {
+    pub(crate) phase: String,
+    pub(crate) outcome: CodexReviewerMcpOutcome,
+    pub(crate) elapsed_ms: u64,
+    pub(crate) budget_ms: u64,
+    pub(crate) measurement: String,
+    pub(crate) reason: String,
 }
 
 #[derive(Clone)]
-struct CodexReviewerMcpScope {
-    session_id: String,
-    thread_id: String,
-    runtime_id: String,
-    delegation_id: String,
-    attempt: u32,
+pub(crate) struct CodexReviewerMcpScope {
+    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) runtime_id: String,
+    pub(crate) delegation_id: String,
+    pub(crate) attempt: u32,
     evaluation_attempt: Option<String>,
-    generation: u64,
-    stop_generation: u64,
+    pub(crate) generation: u64,
+    pub(crate) stop_generation: u64,
     allow_reset: bool,
-    gate: String,
-    query_started: std::time::Instant,
-    input_tx: Sender<CodexRuntimeCommand>,
+    pub(crate) gate: String,
+    pub(crate) query_started: std::time::Instant,
+    pub(crate) input_tx: Sender<CodexRuntimeCommand>,
 }
 
 impl CodexReviewerMcpScope {
-    fn required_tool(&self) -> &'static str {
+    pub(crate) fn required_tool(&self) -> &'static str {
         if self.evaluation_attempt.is_some() {
             TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
         } else {
@@ -51,7 +53,7 @@ impl CodexReviewerMcpScope {
         }
     }
 
-    fn label(&self) -> &'static str {
+    pub(crate) fn label(&self) -> &'static str {
         if self.evaluation_attempt.is_some() {
             "Evaluator MCP"
         } else {
@@ -60,7 +62,7 @@ impl CodexReviewerMcpScope {
     }
 }
 
-fn codex_reviewer_mcp_scope(
+pub(crate) fn codex_reviewer_mcp_scope(
     state: &AppState,
     session: &str,
     thread: &str,
@@ -69,7 +71,7 @@ fn codex_reviewer_mcp_scope(
     codex_reviewer_mcp_scope_with_stop(state, session, thread, runtime, false, false)
 }
 
-fn codex_reviewer_mcp_scope_with_stop(
+pub(crate) fn codex_reviewer_mcp_scope_with_stop(
     state: &AppState,
     session: &str,
     thread: &str,
@@ -130,7 +132,10 @@ fn codex_reviewer_mcp_scope_with_stop(
     })
 }
 
-fn codex_reviewer_mcp_identity(inner: &StateInner, scope: &CodexReviewerMcpScope) -> bool {
+pub(crate) fn codex_reviewer_mcp_identity(
+    inner: &StateInner,
+    scope: &CodexReviewerMcpScope,
+) -> bool {
     let Some(i) = inner.find_session_index(&scope.session_id) else {
         return false;
     };
@@ -158,16 +163,27 @@ fn codex_reviewer_mcp_identity(inner: &StateInner, scope: &CodexReviewerMcpScope
         })
 }
 
-fn codex_reviewer_mcp_current(inner: &StateInner, scope: &CodexReviewerMcpScope) -> bool {
-    codex_reviewer_mcp_identity(inner, scope) && inner.sessions.iter().any(|r| {
-        r.session.id == scope.session_id && r.runtime_stop_generation == scope.stop_generation
-            && !r.runtime_stop_in_progress
-            && (scope.allow_reset || !r.runtime_reset_required)
-            && matches!(r.session.status, SessionStatus::Active | SessionStatus::Approval)
-    })
+pub(crate) fn codex_reviewer_mcp_current(
+    inner: &StateInner,
+    scope: &CodexReviewerMcpScope,
+) -> bool {
+    codex_reviewer_mcp_identity(inner, scope)
+        && inner.sessions.iter().any(|r| {
+            r.session.id == scope.session_id
+                && r.runtime_stop_generation == scope.stop_generation
+                && !r.runtime_stop_in_progress
+                && (scope.allow_reset || !r.runtime_reset_required)
+                && matches!(
+                    r.session.status,
+                    SessionStatus::Active | SessionStatus::Approval
+                )
+        })
 }
 
-fn codex_reviewer_mcp_params(scope: &CodexReviewerMcpScope, cursor: Option<&str>) -> Value {
+pub(crate) fn codex_reviewer_mcp_params(
+    scope: &CodexReviewerMcpScope,
+    cursor: Option<&str>,
+) -> Value {
     let mut params = json!({"threadId": scope.thread_id, "serverName": TERMAL_DELEGATION_MCP_SERVER_NAME,
         "detail": "toolsAndAuthOnly", "limit": 100});
     if let Some(cursor) = cursor {
@@ -176,17 +192,22 @@ fn codex_reviewer_mcp_params(scope: &CodexReviewerMcpScope, cursor: Option<&str>
     params
 }
 
-fn codex_reviewer_mcp_has_environment_secret(
+pub(crate) fn codex_reviewer_mcp_has_environment_secret(
     raw: &str,
     values: impl Iterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> bool {
-    values.filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-        .any(|(k, v)| v.len() >= 4 && raw.contains(&v)
-            && ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL"].iter()
-                .any(|s| k.to_uppercase().contains(s)))
+    values
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .any(|(k, v)| {
+            v.len() >= 4
+                && raw.contains(&v)
+                && ["TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL"]
+                    .iter()
+                    .any(|s| k.to_uppercase().contains(s))
+        })
 }
 
-fn codex_reviewer_mcp_reason(raw: Option<&str>) -> String {
+pub(crate) fn codex_reviewer_mcp_reason(raw: Option<&str>) -> String {
     let Some(raw) = raw else {
         return "No startup reason supplied.".to_owned();
     };
@@ -224,7 +245,7 @@ fn codex_reviewer_mcp_reason(raw: Option<&str>) -> String {
 
 // None means genuinely starting, not missing/failed. Pagination is bounded and
 // exact-server filtering still validates the response, rather than trusting it.
-fn codex_reviewer_mcp_page(
+pub(crate) fn codex_reviewer_mcp_page(
     value: &Value,
     required_tool: &str,
 ) -> Result<(
@@ -281,7 +302,7 @@ fn codex_reviewer_mcp_page(
     Ok((outcome, reason, cursor))
 }
 
-fn record_codex_reviewer_mcp_observation(
+pub(crate) fn record_codex_reviewer_mcp_observation(
     state: &AppState,
     scope: &CodexReviewerMcpScope,
     mut observation: CodexReviewerMcpObservation,

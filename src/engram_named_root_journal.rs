@@ -2,8 +2,10 @@
 // Does not own naming authority, lifecycle reads, publication or retry custody.
 // Retention was split out of engram_named_root_binding.rs.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum EngramRootJournalRetention {
+pub(crate) enum EngramRootJournalRetention {
     UnpublishedRetirement,
     PendingIntent,
     UnsettledReconciliation,
@@ -22,7 +24,7 @@ enum EngramRootJournalRetention {
 }
 
 impl EngramRootJournalRetention {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::UnpublishedRetirement => "unpublishedRetirement",
             Self::PendingIntent => "pendingIntent",
@@ -53,19 +55,19 @@ impl Serialize for EngramRootJournalRetention {
 /// No claim, work, session, path, command or source payload is exposed.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramRootJournalCensus {
-    limit: usize,
-    entries: usize,
-    selected_roots: usize,
-    retained: usize,
-    reclaimable: usize,
-    retryable_closing_jobs: usize,
-    terminal_closing_jobs: usize,
-    primary_reasons: BTreeMap<EngramRootJournalRetention, usize>,
+pub(crate) struct EngramRootJournalCensus {
+    pub(crate) limit: usize,
+    pub(crate) entries: usize,
+    pub(crate) selected_roots: usize,
+    pub(crate) retained: usize,
+    pub(crate) reclaimable: usize,
+    pub(crate) retryable_closing_jobs: usize,
+    pub(crate) terminal_closing_jobs: usize,
+    pub(crate) primary_reasons: BTreeMap<EngramRootJournalRetention, usize>,
 }
 
 impl EngramRootJournalCensus {
-    fn capacity_message(&self) -> String {
+    pub(crate) fn capacity_message(&self) -> String {
         let reasons = self
             .primary_reasons
             .iter()
@@ -87,13 +89,13 @@ impl EngramRootJournalCensus {
 
 /// One inventory image for a pass. Entries keep their existing first-protection
 /// order in `engram_root_journal_retention`; the index supplies membership only.
-struct EngramJournalCustodyIndex<'a> {
-    unpublished: HashSet<(EngramAuthorityStoreKey, String)>,
-    evaluators: HashSet<(EngramAuthorityStoreKey, String)>,
+pub(crate) struct EngramJournalCustodyIndex<'a> {
+    pub(crate) unpublished: HashSet<(EngramAuthorityStoreKey, String)>,
+    pub(crate) evaluators: HashSet<(EngramAuthorityStoreKey, String)>,
     evaluator_work_after: HashMap<(EngramAuthorityStoreKey, String), u64>,
-    selected: HashSet<(EngramAuthorityStoreKey, String)>,
-    runtime: HashMap<String, EngramRootJournalRetention>,
-    captures: Vec<&'a EngramBasisCapture>,
+    pub(crate) selected: HashSet<(EngramAuthorityStoreKey, String)>,
+    pub(crate) runtime: HashMap<String, EngramRootJournalRetention>,
+    pub(crate) captures: Vec<&'a EngramBasisCapture>,
     capture_image: std::cell::OnceCell<EngramJournalCaptureImage>,
     retryable_jobs: usize,
     terminal_jobs: usize,
@@ -107,7 +109,7 @@ struct EngramJournalCaptureImage {
 }
 
 impl<'a> EngramJournalCustodyIndex<'a> {
-    fn new(inner: &'a StateInner) -> Self {
+    pub(crate) fn new(inner: &'a StateInner) -> Self {
         use EngramRootJournalRetention as Keep;
         let mut index = Self {
             unpublished: HashSet::new(),
@@ -214,7 +216,7 @@ impl<'a> EngramJournalCustodyIndex<'a> {
         index
     }
 
-    fn keep(&mut self, claim: &str, reason: EngramRootJournalRetention) {
+    pub(crate) fn keep(&mut self, claim: &str, reason: EngramRootJournalRetention) {
         // Runtime classes have the same priority as their enum order. A later
         // session must not override higher-priority custody found elsewhere.
         self.runtime
@@ -267,7 +269,7 @@ impl<'a> EngramJournalCustodyIndex<'a> {
 }
 
 /// Single production classification predicate for compaction and diagnostics.
-fn engram_root_journal_retention(
+pub(crate) fn engram_root_journal_retention(
     index: &EngramJournalCustodyIndex<'_>,
     journal: &EngramNamedRootJournal,
 ) -> Option<EngramRootJournalRetention> {
@@ -336,7 +338,7 @@ fn engram_root_journal_empty_census(
     census
 }
 
-fn engram_root_journal_census(inner: &StateInner) -> EngramRootJournalCensus {
+pub(crate) fn engram_root_journal_census(inner: &StateInner) -> EngramRootJournalCensus {
     let index = EngramJournalCustodyIndex::new(inner);
     let mut census = engram_root_journal_empty_census(inner, &index);
     for journal in inner.engram_named_root_journal.iter() {
@@ -354,13 +356,15 @@ fn engram_root_journal_census(inner: &StateInner) -> EngramRootJournalCensus {
 /// Only settled, unused history is disposable. In particular a capture
 /// worker still resolving its basis conservatively protects history until
 /// that basis can be inspected without waiting under the state lock.
-fn engram_compact_root_journal(inner: &mut StateInner) {
+pub(crate) fn engram_compact_root_journal(inner: &mut StateInner) {
     let _ = engram_compact_root_journal_with_census(inner);
 }
 
 /// Admission uses this same pass's count image if it still has no room. In
 /// particular it need not rebuild every inventory for a refusal's census.
-fn engram_compact_root_journal_with_census(inner: &mut StateInner) -> Option<EngramRootJournalCensus> {
+pub(crate) fn engram_compact_root_journal_with_census(
+    inner: &mut StateInner,
+) -> Option<EngramRootJournalCensus> {
     // An empty journal cannot refuse admission. Avoid walking or allocating
     // custody inventories on this common publication and unbind path.
     if inner.engram_named_root_journal.is_empty() {
@@ -385,13 +389,13 @@ fn engram_compact_root_journal_with_census(inner: &mut StateInner) -> Option<Eng
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramRootJournalDiagnostics {
-    server_instance_id: String,
-    revision: u64,
-    journal: EngramRootJournalCensus,
+pub(crate) struct EngramRootJournalDiagnostics {
+    pub(crate) server_instance_id: String,
+    pub(crate) revision: u64,
+    pub(crate) journal: EngramRootJournalCensus,
 }
 
-async fn get_engram_root_journal_diagnostics(
+pub(crate) async fn get_engram_root_journal_diagnostics(
     State(state): State<AppState>,
 ) -> Result<Json<EngramRootJournalDiagnostics>, ApiError> {
     run_blocking_api(move || {
@@ -407,8 +411,8 @@ async fn get_engram_root_journal_diagnostics(
 
 #[cfg(test)]
 thread_local! {
-    static ENGRAM_JOURNAL_SESSION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static ENGRAM_JOURNAL_CAPTURE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static ENGRAM_JOURNAL_SESSION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static ENGRAM_JOURNAL_CAPTURE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 // reader. Owns no verification reservation, source capture or tracker credit.
 
 impl AppState {
-    fn end_observed_declared_task(
+    pub(crate) fn end_observed_declared_task(
         &self,
         session_id: &str,
         token: &RuntimeToken,

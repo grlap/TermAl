@@ -1,27 +1,29 @@
 // Host-owned raw review identity protocol. Owns strict request admission,
 // canonical framing, bounded double capture and inventory paging. Git/FS
 // readers are separate fragments; no project helper or policy code is loaded.
-const REVIEW_IDENTITY_ALGORITHM: &str = "termal-review-identity-v1";
-const REVIEW_IDENTITY_RECORD_LIMIT: usize = 200_000;
-const REVIEW_IDENTITY_INVENTORY_LIMIT: usize = 8 * 1024 * 1024;
-const REVIEW_IDENTITY_PAYLOAD_LIMIT: usize = 128 * 1024 * 1024;
-const REVIEW_IDENTITY_AGGREGATE_LIMIT: usize = 2 * 1024 * 1024 * 1024;
+
+use super::*;
+pub(crate) const REVIEW_IDENTITY_ALGORITHM: &str = "termal-review-identity-v1";
+pub(crate) const REVIEW_IDENTITY_RECORD_LIMIT: usize = 200_000;
+pub(crate) const REVIEW_IDENTITY_INVENTORY_LIMIT: usize = 8 * 1024 * 1024;
+pub(crate) const REVIEW_IDENTITY_PAYLOAD_LIMIT: usize = 128 * 1024 * 1024;
+pub(crate) const REVIEW_IDENTITY_AGGREGATE_LIMIT: usize = 2 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewIdentityRequest {
-    operation: String,
-    schema_version: u32,
+pub(crate) struct ReviewIdentityRequest {
+    pub(crate) operation: String,
+    pub(crate) schema_version: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    root: Option<String>,
+    pub(crate) root: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    expected_fingerprint: Option<String>,
+    pub(crate) expected_fingerprint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     platform_profile: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    page_limit: Option<usize>,
+    pub(crate) page_limit: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    cursor: Option<String>,
+    pub(crate) cursor: Option<String>,
 }
 
 #[derive(Debug)]
@@ -32,7 +34,7 @@ impl std::fmt::Display for ReviewIdentityRefusal {
     }
 }
 impl std::error::Error for ReviewIdentityRefusal {}
-fn identity_refusal(code: &'static str) -> anyhow::Error {
+pub(crate) fn identity_refusal(code: &'static str) -> anyhow::Error {
     anyhow!(ReviewIdentityRefusal(code))
 }
 /// An IO failure of the review-identity observer, naming the path it could
@@ -53,7 +55,7 @@ impl std::error::Error for ReviewIdentityIoFailure {
         Some(&self.source)
     }
 }
-fn identity_io_failure(path: &FsPath, source: io::Error) -> anyhow::Error {
+pub(crate) fn identity_io_failure(path: &FsPath, source: io::Error) -> anyhow::Error {
     anyhow::Error::new(ReviewIdentityIoFailure {
         path: path.display().to_string(),
         source,
@@ -61,10 +63,12 @@ fn identity_io_failure(path: &FsPath, source: io::Error) -> anyhow::Error {
 }
 /// `result` with a bare IO failure in it naming `path`. Refusals, and
 /// failures that already name their path, are kept as they are.
-fn identity_at<T>(path: &FsPath, result: Result<T>) -> Result<T> {
+pub(crate) fn identity_at<T>(path: &FsPath, result: Result<T>) -> Result<T> {
     result.map_err(|error| {
         if error.downcast_ref::<ReviewIdentityRefusal>().is_some()
-            || error.chain().any(|cause| cause.is::<ReviewIdentityIoFailure>())
+            || error
+                .chain()
+                .any(|cause| cause.is::<ReviewIdentityIoFailure>())
         {
             return error;
         }
@@ -75,33 +79,33 @@ fn identity_at<T>(path: &FsPath, result: Result<T>) -> Result<T> {
     })
 }
 /// `fs::canonicalize`, naming the path when it cannot be resolved.
-fn identity_canonical(path: &FsPath) -> Result<PathBuf> {
+pub(crate) fn identity_canonical(path: &FsPath) -> Result<PathBuf> {
     fs::canonicalize(path).map_err(|error| identity_io_failure(path, error))
 }
 /// `fs::symlink_metadata`, naming the path when it cannot be read.
-fn identity_metadata(path: &FsPath) -> Result<fs::Metadata> {
+pub(crate) fn identity_metadata(path: &FsPath) -> Result<fs::Metadata> {
     fs::symlink_metadata(path).map_err(|error| identity_io_failure(path, error))
 }
 /// `fs::read_dir`, naming the directory when it cannot be listed.
-fn identity_read_dir(path: &FsPath) -> Result<fs::ReadDir> {
+pub(crate) fn identity_read_dir(path: &FsPath) -> Result<fs::ReadDir> {
     fs::read_dir(path).map_err(|error| identity_io_failure(path, error))
 }
 /// Whether an IO failure says the entry is gone: not found (Windows' file
 /// and path not found alike), or, on Windows, deleted while another handle
 /// still holds it open (delete pending).
-fn identity_gone(error: &io::Error) -> bool {
+pub(crate) fn identity_gone(error: &io::Error) -> bool {
     const ERROR_DELETE_PENDING: i32 = 303;
     error.kind() == io::ErrorKind::NotFound
         || (cfg!(windows) && error.raw_os_error() == Some(ERROR_DELETE_PENDING))
 }
 /// Whether `error` says a path it read no longer exists, as an entry a
 /// concurrent Git writer removed does (`identity_gone`).
-fn identity_vanished(error: &anyhow::Error) -> bool {
+pub(crate) fn identity_vanished(error: &anyhow::Error) -> bool {
     error
         .chain()
         .any(|cause| cause.downcast_ref::<io::Error>().is_some_and(identity_gone))
 }
-fn identity_error_code(error: &anyhow::Error) -> &'static str {
+pub(crate) fn identity_error_code(error: &anyhow::Error) -> &'static str {
     if let Some(reason) = error.downcast_ref::<ReviewIdentityRefusal>() {
         reason.0
     } else if error
@@ -120,15 +124,15 @@ fn identity_error_code(error: &anyhow::Error) -> &'static str {
         }
     }
 }
-fn identity_failure(code: &str) -> Value {
+pub(crate) fn identity_failure(code: &str) -> Value {
     json!({"schemaVersion":1,"algorithm":REVIEW_IDENTITY_ALGORITHM,
         "complete":false,"verified":false,"reason":{"code":code}})
 }
-fn identity_platform() -> &'static str {
+pub(crate) fn identity_platform() -> &'static str {
     if cfg!(windows) { "windows" } else { "unix" }
 }
 impl ReviewIdentityRequest {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.schema_version != 1 {
             return Err(identity_refusal("unsupported_schema"));
         }
@@ -171,31 +175,31 @@ impl ReviewIdentityRequest {
 
 #[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct ReviewIdentityEntry {
-    path: String,
-    layer: String,
-    kind: String,
+pub(crate) struct ReviewIdentityEntry {
+    pub(crate) path: String,
+    pub(crate) layer: String,
+    pub(crate) kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stage: Option<u8>,
+    pub(crate) stage: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    mode: Option<String>,
+    pub(crate) mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    oid: Option<String>,
+    pub(crate) oid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    flags: Option<String>,
+    pub(crate) flags: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    object_format: Option<String>,
+    pub(crate) object_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    size: Option<u64>,
+    pub(crate) size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content_sha256: Option<String>,
+    pub(crate) content_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    fs_mode: Option<Value>,
+    pub(crate) fs_mode: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<String>,
+    pub(crate) target: Option<String>,
 }
 impl ReviewIdentityEntry {
-    fn new(path: String, layer: &str, kind: &str) -> Self {
+    pub(crate) fn new(path: String, layer: &str, kind: &str) -> Self {
         Self {
             path,
             layer: layer.to_owned(),
@@ -203,7 +207,7 @@ impl ReviewIdentityEntry {
             ..Self::default()
         }
     }
-    fn digest(&self) -> String {
+    pub(crate) fn digest(&self) -> String {
         let mut hash = Sha256::new();
         for (tag, value) in [
             ("domain", "termal-review-entry-v1"),
@@ -248,16 +252,16 @@ impl ReviewIdentityEntry {
     }
 }
 
-struct ReviewIdentityCapture {
-    entries: Vec<ReviewIdentityEntry>,
-    repositories: usize,
-    bytes: usize,
-    encoded: usize,
-    visited_entries: usize,
-    seen_repositories: HashSet<String>,
+pub(crate) struct ReviewIdentityCapture {
+    pub(crate) entries: Vec<ReviewIdentityEntry>,
+    pub(crate) repositories: usize,
+    pub(crate) bytes: usize,
+    pub(crate) encoded: usize,
+    pub(crate) visited_entries: usize,
+    pub(crate) seen_repositories: HashSet<String>,
 }
 impl ReviewIdentityCapture {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             entries: Vec::new(),
             repositories: 0,
@@ -267,7 +271,7 @@ impl ReviewIdentityCapture {
             seen_repositories: HashSet::new(),
         }
     }
-    fn add(&mut self, entry: ReviewIdentityEntry) -> Result<()> {
+    pub(crate) fn add(&mut self, entry: ReviewIdentityEntry) -> Result<()> {
         self.encoded += serde_json::to_vec(&entry)?.len() + 1;
         if self.entries.len() >= REVIEW_IDENTITY_RECORD_LIMIT
             || self.encoded > REVIEW_IDENTITY_INVENTORY_LIMIT
@@ -277,7 +281,7 @@ impl ReviewIdentityCapture {
         self.entries.push(entry);
         Ok(())
     }
-    fn consume(&mut self, bytes: usize) -> Result<()> {
+    pub(crate) fn consume(&mut self, bytes: usize) -> Result<()> {
         self.bytes = self
             .bytes
             .checked_add(bytes)
@@ -287,14 +291,14 @@ impl ReviewIdentityCapture {
         }
         Ok(())
     }
-    fn visit(&mut self) -> Result<()> {
+    pub(crate) fn visit(&mut self) -> Result<()> {
         self.visited_entries += 1;
         if self.visited_entries > REVIEW_IDENTITY_RECORD_LIMIT {
             return Err(identity_refusal("input_limit_exceeded"));
         }
         Ok(())
     }
-    fn finish(&mut self) -> String {
+    pub(crate) fn finish(&mut self) -> String {
         self.entries
             .sort_by(|a, b| (&a.path, &a.layer, a.stage).cmp(&(&b.path, &b.layer, b.stage)));
         let mut hash = Sha256::new();
@@ -306,7 +310,7 @@ impl ReviewIdentityCapture {
     }
 }
 
-fn identity_composite(root: &str, content: &str, platform: &str) -> String {
+pub(crate) fn identity_composite(root: &str, content: &str, platform: &str) -> String {
     let mut hash = Sha256::new();
     for (tag, value) in [
         ("domain", REVIEW_IDENTITY_ALGORITHM),
@@ -329,7 +333,7 @@ struct ReviewIdentityCursor {
 }
 
 #[cfg(test)]
-fn identity_result(root: &FsPath, request: &ReviewIdentityRequest) -> Result<Value> {
+pub(crate) fn identity_result(root: &FsPath, request: &ReviewIdentityRequest) -> Result<Value> {
     identity_result_until(
         root,
         request,
@@ -431,7 +435,7 @@ fn identity_result_until(
 #[cfg(not(test))]
 fn identity_between_captures(_: &FsPath) {}
 #[cfg(test)]
-thread_local! { static IDENTITY_CAPTURE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce(&FsPath)>>> = const { std::cell::RefCell::new(None) }; }
+thread_local! { pub(crate) static IDENTITY_CAPTURE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce(&FsPath)>>> = const { std::cell::RefCell::new(None) }; }
 #[cfg(test)]
 fn identity_between_captures(root: &FsPath) {
     IDENTITY_CAPTURE_HOOK.with(|hook| {
@@ -441,7 +445,7 @@ fn identity_between_captures(root: &FsPath) {
     });
 }
 
-fn review_identity_mode(args: &[String]) -> Result<()> {
+pub(crate) fn review_identity_mode(args: &[String]) -> Result<()> {
     let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
     let result = (|| {
         if !matches!(args.len(), 3 | 4) || args[2].len() > 16 * 1024 {

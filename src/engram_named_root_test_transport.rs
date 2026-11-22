@@ -1,53 +1,55 @@
 // Opt-in ordinary work-service model for scripted host tests. It independently
 // checks named-root generation, immutable retries and observation receipts.
+
+use super::*;
 #[derive(Default)]
-struct TestEngramNamedRoots {
-    bindings: BTreeMap<String, String>,
-    runs: BTreeMap<String, String>,
-    read_bindings: BTreeMap<String, EngramControlWorkBinding>,
-    run_generations: BTreeMap<String, i64>,
-    run_cuts: BTreeMap<String, i64>,
-    project_id: Option<String>,
-    latest: BTreeMap<String, Value>,
-    released: BTreeMap<String, i64>,
-    seen: BTreeMap<(String, String), (Value, Value)>,
-    lose_next_reply: bool,
-    refuse_next: bool,
+pub(crate) struct TestEngramNamedRoots {
+    pub(crate) bindings: BTreeMap<String, String>,
+    pub(crate) runs: BTreeMap<String, String>,
+    pub(crate) read_bindings: BTreeMap<String, EngramControlWorkBinding>,
+    pub(crate) run_generations: BTreeMap<String, i64>,
+    pub(crate) run_cuts: BTreeMap<String, i64>,
+    pub(crate) project_id: Option<String>,
+    pub(crate) latest: BTreeMap<String, Value>,
+    pub(crate) released: BTreeMap<String, i64>,
+    pub(crate) seen: BTreeMap<(String, String), (Value, Value)>,
+    pub(crate) lose_next_reply: bool,
+    pub(crate) refuse_next: bool,
     // A claim's current fence, opt-in. As Engram does, a Bound under any other
     // fence is refused and a named-root read of the claim reports its fence.
-    claim_fences: BTreeMap<String, i64>,
+    pub(crate) claim_fences: BTreeMap<String, i64>,
     // The work's revision moved after the fence rose: Engram has no record of
     // that revision at the old fence, so it refuses with a mismatch instead.
-    revision_moved: bool,
+    pub(crate) revision_moved: bool,
     // A read of such a claim doesn't report its fence, as from an older Engram.
-    read_omits_claim: bool,
+    pub(crate) read_omits_claim: bool,
     // After the next stale refusal, reads of this claim go unanswered.
-    fail_reads_after_stale_refusal: Option<String>,
+    pub(crate) fail_reads_after_stale_refusal: Option<String>,
     // Ordinary children are independent of historical control-session phase.
     // Populated only by an explicit, identity-checked work-session reply.
-    work_sessions: BTreeSet<String>,
+    pub(crate) work_sessions: BTreeSet<String>,
     // Opt-in ordinary service response, independent of legacy RPC scripts.
-    work_session_read_reply: Option<Result<Value, EngramTransportError>>,
+    pub(crate) work_session_read_reply: Option<Result<Value, EngramTransportError>>,
     // Mutates the test host at an actual ordinary naming refusal boundary.
-    on_bind_refusal: Option<Box<dyn FnOnce() + Send>>,
-    root_reads: BTreeMap<String, Value>,
-    root_read_failures: BTreeSet<String>,
+    pub(crate) on_bind_refusal: Option<Box<dyn FnOnce() + Send>>,
+    pub(crate) root_reads: BTreeMap<String, Value>,
+    pub(crate) root_read_failures: BTreeSet<String>,
     // Engram's own error for a named-root read of a claim, as sent on the
     // wire (`code`, `message`, optional typed `reason`).
-    root_read_errors: BTreeMap<String, Value>,
+    pub(crate) root_read_errors: BTreeMap<String, Value>,
     // Runs once while such an error is being served, before it reaches the
     // host: the host changing under a refused read.
-    on_root_read_error: Option<Box<dyn FnOnce() + Send>>,
+    pub(crate) on_root_read_error: Option<Box<dyn FnOnce() + Send>>,
     // First producer recording of a request, including a lost reply. This
     // notice is not local durability acknowledgement or verification credit.
-    observation_notices: Option<mpsc::Sender<Value>>,
-    observations: BTreeMap<(String, String), (Value, Value)>,
-    lose_next_observation_reply: bool,
-    refuse_next_observation_policy: bool,
+    pub(crate) observation_notices: Option<mpsc::Sender<Value>>,
+    pub(crate) observations: BTreeMap<(String, String), (Value, Value)>,
+    pub(crate) lose_next_observation_reply: bool,
+    pub(crate) refuse_next_observation_policy: bool,
 }
 
 impl TestEngramNamedRoots {
-    fn register(&mut self, binding: &EngramControlWorkBinding) {
+    pub(crate) fn register(&mut self, binding: &EngramControlWorkBinding) {
         self.runs
             .insert(binding.claim_id.clone(), binding.run_id.clone());
         if !self.run_generations.contains_key(&binding.run_id) {
@@ -68,8 +70,12 @@ impl TestEngramNamedRoots {
         self.run_cuts.entry(binding.run_id.clone()).or_insert(1);
     }
 
-    fn state(&self, session: &str) -> Value {
-        if let Some(read) = self.bindings.get(session).and_then(|claim| self.root_reads.get(claim)) {
+    pub(crate) fn state(&self, session: &str) -> Value {
+        if let Some(read) = self
+            .bindings
+            .get(session)
+            .and_then(|claim| self.root_reads.get(claim))
+        {
             return read["named_root"].clone();
         }
         if let Some(generation) = self
@@ -97,17 +103,21 @@ impl TestEngramNamedRoots {
             })
     }
 
-    fn request(
+    pub(crate) fn request(
         &mut self,
         session: &str,
         request: &EngramControlRequest,
     ) -> Option<Result<Value, EngramTransportError>> {
         let mut wire = serde_json::to_value(request).unwrap();
-        assert!(wire.get("routing_token").is_none(),
-            "a current work-service request must not carry a removed credential");
+        assert!(
+            wire.get("routing_token").is_none(),
+            "a current work-service request must not carry a removed credential"
+        );
         if matches!(request, EngramControlRequest::WorkSessionRead { .. }) {
             if let Some(mut reply) = self.work_session_read_reply.clone() {
-                if let Ok(value) = &mut reply { self.annotate(session, request, value); }
+                if let Ok(value) = &mut reply {
+                    self.annotate(session, request, value);
+                }
                 return Some(reply);
             }
         }
@@ -121,55 +131,102 @@ impl TestEngramNamedRoots {
             let key = (session.to_owned(), observation.idempotency_key.clone());
             if let Some((original, receipt)) = self.observations.get(&key) {
                 if original != &wire {
-                    return Some(Err(EngramTransportError::protocol("observation retry changed its content")));
+                    return Some(Err(EngramTransportError::protocol(
+                        "observation retry changed its content",
+                    )));
                 }
                 // A committed idempotent reply can be lost on a retry too.
                 return Some(if std::mem::take(&mut self.lose_next_observation_reply) {
-                    Err(EngramTransportError::transport("fixture lost repeated observation reply"))
-                } else { Ok(receipt.clone()) });
+                    Err(EngramTransportError::transport(
+                        "fixture lost repeated observation reply",
+                    ))
+                } else {
+                    Ok(receipt.clone())
+                });
             }
             let claim = self.bindings.get(session);
             let binding = claim.and_then(|claim| self.read_bindings.get(claim));
-            let current: EngramNamedRootState = serde_json::from_value(self.state(session)).unwrap();
+            let current: EngramNamedRootState =
+                serde_json::from_value(self.state(session)).unwrap();
             let root_matches = match (&observation.root_basis.state, &current) {
                 (EngramObservationRootState::None {}, EngramNamedRootState::None) => true,
-                (EngramObservationRootState::Bound { workspace_id, generation, named_at },
-                    EngramNamedRootState::Bound { workspace_id: actual_workspace, generation: actual_generation, named_at: actual_time }) =>
-                    workspace_id == actual_workspace && generation == actual_generation && engram_named_at_matches(named_at, actual_time),
-                (EngramObservationRootState::UnboundByRelease { last_generation, released_at_position },
-                    EngramNamedRootState::UnboundByRelease { last_generation: actual_generation, released_at_position: actual_position }) =>
-                    last_generation == actual_generation && released_at_position == actual_position,
+                (
+                    EngramObservationRootState::Bound {
+                        workspace_id,
+                        generation,
+                        named_at,
+                    },
+                    EngramNamedRootState::Bound {
+                        workspace_id: actual_workspace,
+                        generation: actual_generation,
+                        named_at: actual_time,
+                    },
+                ) => {
+                    workspace_id == actual_workspace
+                        && generation == actual_generation
+                        && engram_named_at_matches(named_at, actual_time)
+                }
+                (
+                    EngramObservationRootState::UnboundByRelease {
+                        last_generation,
+                        released_at_position,
+                    },
+                    EngramNamedRootState::UnboundByRelease {
+                        last_generation: actual_generation,
+                        released_at_position: actual_position,
+                    },
+                ) => {
+                    last_generation == actual_generation && released_at_position == actual_position
+                }
                 _ => false,
             };
             // The real producer accepts historical unadmitted observations
             // without an open grant; accounting and settlement are independent.
             if binding != Some(&observation.binding) {
-                return Some(Err(EngramTransportError::protocol("observation has no matching historical fixture scope")));
+                return Some(Err(EngramTransportError::protocol(
+                    "observation has no matching historical fixture scope",
+                )));
             }
-            let latest_event = claim.and_then(|claim| self.root_reads.get(claim)
-                .and_then(|read| read["latest_event"]["event"].as_str().map(str::to_owned))
-                .or_else(|| self.latest.get(claim)
-                    .and_then(|event| event["event"].as_str().map(str::to_owned))));
+            let latest_event = claim.and_then(|claim| {
+                self.root_reads
+                    .get(claim)
+                    .and_then(|read| read["latest_event"]["event"].as_str().map(str::to_owned))
+                    .or_else(|| {
+                        self.latest
+                            .get(claim)
+                            .and_then(|event| event["event"].as_str().map(str::to_owned))
+                    })
+            });
             let root_moved = !root_matches || latest_event != observation.root_basis.latest_event;
-            let next = self.run_cuts.entry(observation.binding.run_id.clone()).or_insert(1);
+            let next = self
+                .run_cuts
+                .entry(observation.binding.run_id.clone())
+                .or_insert(1);
             *next += 1;
             let id = format!("{:032x}", 1000 + self.observations.len());
             let checks: Vec<&EngramObservedCheck> = match &observation.occurrence {
-                EngramInterTurnOccurrence::UnadmittedTurn { observed_checks, .. } =>
-                    observed_checks.iter().collect(),
+                EngramInterTurnOccurrence::UnadmittedTurn {
+                    observed_checks, ..
+                } => observed_checks.iter().collect(),
                 EngramInterTurnOccurrence::ObservedCheck { check, .. } => vec![check],
                 _ => Vec::new(),
             };
-            let observed_checks: Vec<_> = checks.into_iter().map(|check|
-                json!({"host_check_id":check.host_check_id, "credit":"uncredited"}))
+            let observed_checks: Vec<_> = checks
+                .into_iter()
+                .map(|check| json!({"host_check_id":check.host_check_id, "credit":"uncredited"}))
                 .collect();
             let accounting = if root_moved {
                 json!({"kind":"audit_only", "reason":"root_basis_moved"})
             } else {
                 match &observation.occurrence {
                     EngramInterTurnOccurrence::SourceSighting { .. } => json!({"kind":"sighting"}),
-                    EngramInterTurnOccurrence::UnadmittedTurn { source_change: None, .. }
-                    | EngramInterTurnOccurrence::ObservedCheck { .. } => json!({"kind":"no_source_change"}),
+                    EngramInterTurnOccurrence::UnadmittedTurn {
+                        source_change: None,
+                        ..
+                    }
+                    | EngramInterTurnOccurrence::ObservedCheck { .. } => {
+                        json!({"kind":"no_source_change"})
+                    }
                     _ => json!({"kind":"source_change", "source_change":id}),
                 }
             };
@@ -180,13 +237,18 @@ impl TestEngramNamedRoots {
                 "accounting": accounting,
                 "opened_obligations": [], "observed_checks": observed_checks,
                 "recorded_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true) });
-            self.observations.insert(key, (wire.clone(), receipt.clone()));
+            self.observations
+                .insert(key, (wire.clone(), receipt.clone()));
             if let Some(notices) = &self.observation_notices {
                 let _ = notices.send(wire);
             }
             return Some(if std::mem::take(&mut self.lose_next_observation_reply) {
-                Err(EngramTransportError::transport("fixture lost accounted observation reply"))
-            } else { Ok(receipt) });
+                Err(EngramTransportError::transport(
+                    "fixture lost accounted observation reply",
+                ))
+            } else {
+                Ok(receipt)
+            });
         }
         if wire["operation"] == "named_root_read" {
             if self
@@ -197,7 +259,10 @@ impl TestEngramNamedRoots {
                     "claim reader timed out",
                 )));
             }
-            if let Some(error) = self.root_read_errors.get(wire["claim_id"].as_str().unwrap()) {
+            if let Some(error) = self
+                .root_read_errors
+                .get(wire["claim_id"].as_str().unwrap())
+            {
                 let error: EngramControlErrorWire = serde_json::from_value(error.clone()).unwrap();
                 if let Some(meanwhile) = self.on_root_read_error.take() {
                     meanwhile();
@@ -236,17 +301,20 @@ impl TestEngramNamedRoots {
             } else {
                 position
             });
-            let fence = self.claim_fences.get(claim).filter(|_| !self.read_omits_claim);
+            let fence = self
+                .claim_fences
+                .get(claim)
+                .filter(|_| !self.read_omits_claim);
             let mut read = json!({"project_id":self.project_id.as_deref().unwrap_or("github.com/example/source-root"), "work_id":binding.work_id,
-                    "root_execution_id":binding.root_execution_id,"run_id":binding.run_id,"claim_id":binding.claim_id,
-                    "run":{"state":if self.released.contains_key(claim) { "open" } else { "claimed" },
-                        "generation":self.run_generations[&binding.run_id]},
-                    "named_root":root, "latest_event":latest.map(|event| json!({"event":event["event"],
-                        "position":event["position"],"kind":event["kind"],"generation":event["generation"],
-                        "workspace_id":event["workspace_id"],"named_at":event["named_at"]})),
-                    "read_cut":{"feed":{"kind":"run_execution", "id":binding.run_id},
-                        "position":*cut}
-                });
+                "root_execution_id":binding.root_execution_id,"run_id":binding.run_id,"claim_id":binding.claim_id,
+                "run":{"state":if self.released.contains_key(claim) { "open" } else { "claimed" },
+                    "generation":self.run_generations[&binding.run_id]},
+                "named_root":root, "latest_event":latest.map(|event| json!({"event":event["event"],
+                    "position":event["position"],"kind":event["kind"],"generation":event["generation"],
+                    "workspace_id":event["workspace_id"],"named_at":event["named_at"]})),
+                "read_cut":{"feed":{"kind":"run_execution", "id":binding.run_id},
+                    "position":*cut}
+            });
             if let Some(fence) = fence {
                 read["claim"] = json!({"state":"active", "fence":fence});
             }
@@ -278,7 +346,10 @@ impl TestEngramNamedRoots {
             })));
         };
         if wire["kind"] == "bound"
-            && self.claim_fences.get(&claim).is_some_and(|fence| wire["claim_fence"] != *fence)
+            && self
+                .claim_fences
+                .get(&claim)
+                .is_some_and(|fence| wire["claim_fence"] != *fence)
         {
             if let Some(unanswered) = self.fail_reads_after_stale_refusal.take() {
                 self.root_read_failures.insert(unanswered);
@@ -291,7 +362,8 @@ impl TestEngramNamedRoots {
             } else {
                 EngramControlErrorBody {
                     code: "named_root_binding_refused".to_owned(),
-                    message: "work binding is stale; reread the current claim association".to_owned(),
+                    message: "work binding is stale; reread the current claim association"
+                        .to_owned(),
                 }
             })));
         }
@@ -350,8 +422,11 @@ impl TestEngramNamedRoots {
         if matches!(request, EngramControlRequest::WorkSessionRead { .. })
             && reply["work_session"] == true
             && reply["session_id"] == session
-            && reply["project_id"] == self.project_id.as_deref()
-                .unwrap_or("github.com/example/source-root")
+            && reply["project_id"]
+                == self
+                    .project_id
+                    .as_deref()
+                    .unwrap_or("github.com/example/source-root")
             && engram_reply_supports_host_work(reply)
         {
             self.work_sessions.insert(session.to_owned());
@@ -360,7 +435,7 @@ impl TestEngramNamedRoots {
 }
 
 impl ScriptedEngramControlTransport {
-    fn register_named_root_run(&self, binding: &EngramControlWorkBinding) {
+    pub(crate) fn register_named_root_run(&self, binding: &EngramControlWorkBinding) {
         self.named_roots
             .lock()
             .unwrap()
@@ -368,7 +443,7 @@ impl ScriptedEngramControlTransport {
             .register(binding);
     }
 
-    fn enable_named_roots(&self, session: &str, binding: &EngramControlWorkBinding) {
+    pub(crate) fn enable_named_roots(&self, session: &str, binding: &EngramControlWorkBinding) {
         let mut roots = self.named_roots.lock().unwrap();
         let roots = roots.get_or_insert_with(TestEngramNamedRoots::default);
         roots

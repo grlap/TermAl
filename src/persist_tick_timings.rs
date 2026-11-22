@@ -9,26 +9,28 @@ quotes. Does not own the writer loop (app_boot.rs), the SQL (persist.rs) or
 fence resolution (persist_fence.rs). New file.
 */
 
+use super::*;
+
 /// A tick at least this slow writes one log line; faster ticks write none.
-const PERSIST_SLOW_TICK_LOG_THRESHOLD: Duration = Duration::from_secs(1);
+pub(crate) const PERSIST_SLOW_TICK_LOG_THRESHOLD: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct PersistTickTimings {
-    collect: Duration,
-    serialize: Duration,
+pub(crate) struct PersistTickTimings {
+    pub(crate) collect: Duration,
+    pub(crate) serialize: Duration,
     /// Opening the cached connection (a reopen after a failed tick reruns
     /// schema setup) and the pre-write redirection check.
-    open: Duration,
-    ticket_wait: Duration,
-    statements: Duration,
+    pub(crate) open: Duration,
+    pub(crate) ticket_wait: Duration,
+    pub(crate) statements: Duration,
     /// COMMIT, which includes a WAL checkpoint when SQLite runs one there.
-    commit: Duration,
-    post_commit: Duration,
-    acknowledge: Duration,
+    pub(crate) commit: Duration,
+    pub(crate) post_commit: Duration,
+    pub(crate) acknowledge: Duration,
 }
 
 impl PersistTickTimings {
-    fn total(&self) -> Duration {
+    pub(crate) fn total(&self) -> Duration {
         self.collect
             + self.serialize
             + self.open
@@ -39,7 +41,7 @@ impl PersistTickTimings {
             + self.acknowledge
     }
 
-    fn summary(&self) -> String {
+    pub(crate) fn summary(&self) -> String {
         format!(
             "collect {} ms, serialize {} ms, open {} ms, writer ticket {} ms, \
              statements {} ms, commit {} ms, post-commit {} ms, acknowledge {} ms",
@@ -54,7 +56,7 @@ impl PersistTickTimings {
         )
     }
 
-    fn log_if_slow(&self) {
+    pub(crate) fn log_if_slow(&self) {
         let total = self.total();
         if total >= PERSIST_SLOW_TICK_LOG_THRESHOLD {
             eprintln!(

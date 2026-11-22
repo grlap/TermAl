@@ -1,14 +1,14 @@
 // Callback-owned dirty paths. One component trie is shared by every scope;
 // overflow widens a notification instead of discarding it. No filesystem I/O
 // or session lookup runs while this structure is locked.
-const WORKSPACE_PENDING_NODES: usize = 4096;
-const WORKSPACE_PENDING_BYTES: usize = 256 * 1024;
+pub(crate) const WORKSPACE_PENDING_NODES: usize = 4096;
+pub(crate) const WORKSPACE_PENDING_BYTES: usize = 256 * 1024;
 const WORKSPACE_PENDING_CHILDREN: usize = 64;
 const WORKSPACE_PENDING_DEPTH: usize = 64;
 const WORKSPACE_PENDING_PATH_BYTES: usize = 16 * 1024;
 
 // Lexical overlap only; never resolves filesystem paths under StateInner.
-fn workspace_subtree_contains(path: &str, root: &FsPath) -> bool {
+pub(crate) fn workspace_subtree_contains(path: &str, root: &FsPath) -> bool {
     if path.is_empty() {
         return true;
     }
@@ -26,19 +26,19 @@ fn workspace_subtree_contains(path: &str, root: &FsPath) -> bool {
 }
 
 #[derive(Clone, Copy)]
-struct WorkspaceDirtyFact {
-    kind: WorkspaceFileChangeKind,
+pub(crate) struct WorkspaceDirtyFact {
+    pub(crate) kind: WorkspaceFileChangeKind,
     // Preserve coverage selected at ingress even if deletion or rename makes
     // the root impossible to canonicalize before this fact is drained.
-    covers_watched_root: bool,
-    first: EngramWatcherArrival,
-    last: EngramWatcherArrival,
-    raw_kind: Option<NotifyEventKind>,
-    observation: Option<WorkspaceWatchObservation>,
+    pub(crate) covers_watched_root: bool,
+    pub(crate) first: EngramWatcherArrival,
+    pub(crate) last: EngramWatcherArrival,
+    pub(crate) raw_kind: Option<NotifyEventKind>,
+    pub(crate) observation: Option<WorkspaceWatchObservation>,
 }
 
 impl WorkspaceDirtyFact {
-    fn merge(&mut self, other: Self) {
+    pub(crate) fn merge(&mut self, other: Self) {
         self.kind = merge_workspace_file_change_kind(self.kind, other.kind);
         self.covers_watched_root |= other.covers_watched_root;
         if self.raw_kind != other.raw_kind {
@@ -54,17 +54,17 @@ impl WorkspaceDirtyFact {
     }
 }
 
-struct WorkspaceDirtyNode {
-    children: BTreeMap<std::ffi::OsString, WorkspaceDirtyNode>,
+pub(crate) struct WorkspaceDirtyNode {
+    pub(crate) children: BTreeMap<std::ffi::OsString, WorkspaceDirtyNode>,
     // Summary includes descendants, even after they have been collapsed.
-    summary: Option<WorkspaceDirtyFact>,
+    pub(crate) summary: Option<WorkspaceDirtyFact>,
     // A path's own fact never includes its children's facts. Only an actual
     // collapse emits the aggregate, otherwise metadata filtering needs this.
-    terminal: Option<WorkspaceDirtyFact>,
-    subtree: bool,
-    nodes: usize,
-    bytes: usize,
-    delivery: usize,
+    pub(crate) terminal: Option<WorkspaceDirtyFact>,
+    pub(crate) subtree: bool,
+    pub(crate) nodes: usize,
+    pub(crate) bytes: usize,
+    pub(crate) delivery: usize,
 }
 
 impl Default for WorkspaceDirtyNode {
@@ -84,7 +84,7 @@ impl Default for WorkspaceDirtyNode {
 impl WorkspaceDirtyNode {
     // Child totals are cached: insertion only revisits the path and at most
     // CHILDREN siblings per level, never recursively scans the whole trie.
-    fn refresh(&mut self, prefix: usize) {
+    pub(crate) fn refresh(&mut self, prefix: usize) {
         self.nodes = 1;
         self.bytes = std::mem::size_of::<Self>();
         self.delivery = if self.terminal.is_some() {
@@ -99,7 +99,7 @@ impl WorkspaceDirtyNode {
         }
     }
 
-    fn collapse(&mut self, prefix: usize) {
+    pub(crate) fn collapse(&mut self, prefix: usize) {
         self.children.clear();
         self.subtree = true;
         if let Some(fact) = &mut self.summary {
@@ -109,7 +109,7 @@ impl WorkspaceDirtyNode {
         self.refresh(prefix);
     }
 
-    fn insert(&mut self, parts: &[std::ffi::OsString], fact: WorkspaceDirtyFact, prefix: usize) {
+    pub(crate) fn insert(&mut self, parts: &[std::ffi::OsString], fact: WorkspaceDirtyFact, prefix: usize) {
         match &mut self.summary {
             Some(summary) => summary.merge(fact),
             None => self.summary = Some(fact),
@@ -144,11 +144,11 @@ impl WorkspaceDirtyNode {
         self.refresh(prefix);
     }
 
-    fn usage(&self) -> (usize, usize) {
+    pub(crate) fn usage(&self) -> (usize, usize) {
         (self.nodes, self.bytes)
     }
 
-    fn delivery_bytes(&self, _prefix: usize) -> usize {
+    pub(crate) fn delivery_bytes(&self, _prefix: usize) -> usize {
         self.delivery
     }
 
@@ -194,7 +194,7 @@ impl WorkspaceDirtyNode {
         }
     }
 
-    fn drain(self, path: &mut PathBuf, out: &mut Vec<(PathBuf, WorkspaceDirtyFact)>) {
+    pub(crate) fn drain(self, path: &mut PathBuf, out: &mut Vec<(PathBuf, WorkspaceDirtyFact)>) {
         if let Some(fact) = self.terminal {
             out.push((path.clone(), fact));
         }
@@ -208,16 +208,16 @@ impl WorkspaceDirtyNode {
 }
 
 #[derive(Default)]
-struct WorkspacePendingChanges {
-    root: WorkspaceDirtyNode,
-    watch_roots: Vec<PathBuf>,
-    oldest: Option<std::time::Instant>,
-    newest: Option<std::time::Instant>,
+pub(crate) struct WorkspacePendingChanges {
+    pub(crate) root: WorkspaceDirtyNode,
+    pub(crate) watch_roots: Vec<PathBuf>,
+    pub(crate) oldest: Option<std::time::Instant>,
+    pub(crate) newest: Option<std::time::Instant>,
     last_error_log: Option<std::time::Instant>,
 }
 
 impl WorkspacePendingChanges {
-    fn ingest(
+    pub(crate) fn ingest(
         &mut self,
         result: notify::Result<NotifyEvent>,
         arrival: EngramWatcherArrival,
@@ -285,7 +285,7 @@ impl WorkspacePendingChanges {
         }
     }
 
-    fn insert(&mut self, path: &FsPath, fact: WorkspaceDirtyFact, now: std::time::Instant) {
+    pub(crate) fn insert(&mut self, path: &FsPath, fact: WorkspaceDirtyFact, now: std::time::Instant) {
         self.oldest.get_or_insert(now);
         self.newest = Some(now);
         // Only an unplaceable path or backend loss needs a global marker.
@@ -340,7 +340,7 @@ impl WorkspacePendingChanges {
         true
     }
 
-    fn due(&self, now: std::time::Instant) -> bool {
+    pub(crate) fn due(&self, now: std::time::Instant) -> bool {
         self.oldest
             .is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_secs(1))
             || self
@@ -348,7 +348,7 @@ impl WorkspacePendingChanges {
                 .is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_millis(250))
     }
 
-    fn take(&mut self) -> Vec<(PathBuf, WorkspaceDirtyFact)> {
+    pub(crate) fn take(&mut self) -> Vec<(PathBuf, WorkspaceDirtyFact)> {
         self.oldest = None;
         self.newest = None;
         let mut out = Vec::new();

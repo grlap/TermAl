@@ -2,17 +2,19 @@
 // and engram_host_adapter. Owns receipt admission and diagnostic routes, not
 // settings persistence, runtime revocation, or Engram store repair.
 
+use super::*;
+
 /// The readiness process budget (Verify, enable on Save), and the one
 /// wall-clock budget all absence probes of a Save share. A slow healthy
 /// process is diagnosed after ten seconds and retains its minute to finish.
-const ENGRAM_READINESS_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
-const ENGRAM_DIAGNOSTIC_DECLARATION_LIMIT: usize = 4096;
-const ENGRAM_DIAGNOSTIC_TEXT_LIMIT: usize = 4096;
-const ENGRAM_DIAGNOSTIC_REPORT_LIMIT: usize = 16 * 1024;
+pub(crate) const ENGRAM_READINESS_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+pub(crate) const ENGRAM_DIAGNOSTIC_DECLARATION_LIMIT: usize = 4096;
+pub(crate) const ENGRAM_DIAGNOSTIC_TEXT_LIMIT: usize = 4096;
+pub(crate) const ENGRAM_DIAGNOSTIC_REPORT_LIMIT: usize = 16 * 1024;
 
 // Transport capture has a larger budget. Only bounded text previews cross the
 // API boundary; these are not redacted, and omitted output is not logged.
-fn engram_diagnostic_preview(bytes: &[u8], limit: usize) -> (String, bool) {
+pub(crate) fn engram_diagnostic_preview(bytes: &[u8], limit: usize) -> (String, bool) {
     let mut end = bytes.len().min(limit);
     if let Err(error) = std::str::from_utf8(&bytes[..end])
         && error.error_len().is_none()
@@ -31,7 +33,7 @@ fn engram_diagnostic_preview(bytes: &[u8], limit: usize) -> (String, bool) {
     (text, truncated)
 }
 
-fn engram_diagnostic_excerpt(bytes: &[u8]) -> String {
+pub(crate) fn engram_diagnostic_excerpt(bytes: &[u8]) -> String {
     const SUFFIX: &str = "\n[truncated]";
     let (mut text, truncated) =
         engram_diagnostic_preview(bytes, ENGRAM_DIAGNOSTIC_TEXT_LIMIT - SUFFIX.len());
@@ -41,7 +43,7 @@ fn engram_diagnostic_excerpt(bytes: &[u8]) -> String {
     text
 }
 
-fn read_engram_diagnostic_declaration(marker: &FsPath) -> Result<String, ApiError> {
+pub(crate) fn read_engram_diagnostic_declaration(marker: &FsPath) -> Result<String, ApiError> {
     let read_error =
         |error| ApiError::bad_request(format!("Cannot read Engram declaration: {error}"));
     let validate_metadata = |metadata: fs::Metadata| {
@@ -62,7 +64,9 @@ fn read_engram_diagnostic_declaration(marker: &FsPath) -> Result<String, ApiErro
     read_engram_diagnostic_declaration_contents(file)
 }
 
-fn read_engram_diagnostic_declaration_contents(reader: impl io::Read) -> Result<String, ApiError> {
+pub(crate) fn read_engram_diagnostic_declaration_contents(
+    reader: impl io::Read,
+) -> Result<String, ApiError> {
     // Metadata is only a preflight: the file may grow before or during the read.
     // One extra byte distinguishes the maximum valid size from oversized input.
     let mut declaration = String::new();
@@ -80,39 +84,39 @@ fn read_engram_diagnostic_declaration_contents(reader: impl io::Read) -> Result<
 }
 
 #[derive(Deserialize)]
-struct EngramReadinessReceipt {
-    schema_version: u32,
-    scope: String,
-    ready: bool,
-    full_audit: String,
-    mutation_enabled: bool,
-    project_id: String,
-    database: PathBuf,
-    work_schema_version: u64,
-    host_path_policy: EngramReadinessPathPolicy,
+pub(crate) struct EngramReadinessReceipt {
+    pub(crate) schema_version: u32,
+    pub(crate) scope: String,
+    pub(crate) ready: bool,
+    pub(crate) full_audit: String,
+    pub(crate) mutation_enabled: bool,
+    pub(crate) project_id: String,
+    pub(crate) database: PathBuf,
+    pub(crate) work_schema_version: u64,
+    pub(crate) host_path_policy: EngramReadinessPathPolicy,
     #[serde(default, rename = "control")]
-    observation_policy: Option<EngramDoctorControl>,
+    pub(crate) observation_policy: Option<EngramDoctorControl>,
 }
 
 #[derive(Deserialize)]
-struct EngramReadinessPathPolicy {
-    stored: Option<String>,
-    resolved: Option<String>,
-    status: String,
+pub(crate) struct EngramReadinessPathPolicy {
+    pub(crate) stored: Option<String>,
+    pub(crate) resolved: Option<String>,
+    pub(crate) status: String,
 }
 
-struct EngramReadinessStoreRefusal {
-    code: &'static str,
-    refusal_kind: Option<&'static str>,
-    project_id: String,
-    database: Option<PathBuf>,
+pub(crate) struct EngramReadinessStoreRefusal {
+    pub(crate) code: &'static str,
+    pub(crate) refusal_kind: Option<&'static str>,
+    pub(crate) project_id: String,
+    pub(crate) database: Option<PathBuf>,
 }
 
 // Refusal identity is private to the readiness caller. The diagnostic HTTP
 // routes keep returning the same status and bounded diagnostic text.
-struct EngramReadinessFailure {
-    error: ApiError,
-    refusal: Option<EngramReadinessStoreRefusal>,
+pub(crate) struct EngramReadinessFailure {
+    pub(crate) error: ApiError,
+    pub(crate) refusal: Option<EngramReadinessStoreRefusal>,
 }
 
 impl From<ApiError> for EngramReadinessFailure {
@@ -124,7 +128,7 @@ impl From<ApiError> for EngramReadinessFailure {
     }
 }
 
-fn run_engram_readiness(
+pub(crate) fn run_engram_readiness(
     binary: &FsPath,
     marker: &FsPath,
     home: &FsPath,
@@ -142,7 +146,7 @@ fn run_engram_readiness(
     .map_err(|failure| failure.error)
 }
 
-fn run_engram_readiness_within(
+pub(crate) fn run_engram_readiness_within(
     binary: &FsPath,
     marker: &FsPath,
     home: &FsPath,
@@ -170,9 +174,10 @@ fn run_engram_readiness_within(
         )?,
     };
     if read_engram_diagnostic_declaration(marker).ok().as_ref() != Some(&declaration) {
-        return Err(
-            ApiError::conflict("Engram declaration changed during readiness; verify again").into(),
-        );
+        return Err(ApiError::conflict(
+            "Engram declaration changed during readiness; verify again",
+        )
+        .into());
     }
     if !output.status.success() {
         let error = ApiError::bad_request(format!(
@@ -204,13 +209,19 @@ fn run_engram_readiness_within(
 
 // Read refusal fields only from the bounded v1 envelope. Diagnostic prose,
 // malformed output and unrecognized phases cannot grant retries.
-fn engram_readiness_store_refusal(bytes: &[u8]) -> Option<EngramReadinessStoreRefusal> {
-    if bytes.len() > ENGRAM_DIAGNOSTIC_REPORT_LIMIT { return None; }
+pub(crate) fn engram_readiness_store_refusal(bytes: &[u8]) -> Option<EngramReadinessStoreRefusal> {
+    if bytes.len() > ENGRAM_DIAGNOSTIC_REPORT_LIMIT {
+        return None;
+    }
     let value: Value = serde_json::from_slice(bytes).ok()?;
-    if value["schema_version"] != 1 || value["scope"] != "readiness"
-        || value["ready"] != false || value["mutation_enabled"] != false
+    if value["schema_version"] != 1
+        || value["scope"] != "readiness"
+        || value["ready"] != false
+        || value["mutation_enabled"] != false
         || value["full_audit"] != "not_run"
-    { return None; }
+    {
+        return None;
+    }
     let phase = value["phase"].as_str();
     let (code, refusal_kind) = if value["code"] == "store_open_refused" {
         let kind = match (phase?, value["kind"].as_str()?) {
@@ -220,7 +231,9 @@ fn engram_readiness_store_refusal(bytes: &[u8]) -> Option<EngramReadinessStoreRe
         };
         ("store_open_refused", Some(kind))
     } else if phase == Some("open") {
-        let code = ENGRAM_STORE_TRANSIENT_CODES.iter().copied()
+        let code = ENGRAM_STORE_TRANSIENT_CODES
+            .iter()
+            .copied()
             .find(|code| Some(*code) == value["code"].as_str())?;
         (code, None)
     } else {
@@ -243,7 +256,7 @@ fn engram_readiness_store_refusal(bytes: &[u8]) -> Option<EngramReadinessStoreRe
 
 // Re-read routing after the process returns; the command's assertion alone is
 // not authority to bind a different project or a different selected store.
-fn validate_engram_diagnostic_identity(
+pub(crate) fn validate_engram_diagnostic_identity(
     project_id: &str,
     database: &FsPath,
     marker: &FsPath,
@@ -277,7 +290,7 @@ fn validate_engram_diagnostic_identity(
     })
 }
 
-fn validate_engram_readiness(
+pub(crate) fn validate_engram_readiness(
     receipt: &EngramReadinessReceipt,
     marker: &FsPath,
     home: &FsPath,
@@ -308,20 +321,20 @@ fn validate_engram_readiness(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramFullAuditResponse {
-    healthy: bool,
-    project_id: String,
-    database: String,
+pub(crate) struct EngramFullAuditResponse {
+    pub(crate) healthy: bool,
+    pub(crate) project_id: String,
+    pub(crate) database: String,
     checked_at: String,
-    elapsed_ms: u64,
-    warnings: String,
+    pub(crate) elapsed_ms: u64,
+    pub(crate) warnings: String,
     // A possibly incomplete JSON text preview, never an authoritative receipt.
-    report_preview: String,
-    report_truncated: bool,
+    pub(crate) report_preview: String,
+    pub(crate) report_truncated: bool,
 }
 
 impl AppState {
-    fn validate_engram_diagnostic_snapshot(
+    pub(crate) fn validate_engram_diagnostic_snapshot(
         &self,
         project: &Project,
         host: &EngramHostSettings,
@@ -343,7 +356,7 @@ impl AppState {
         Ok(())
     }
 
-    fn full_audit_project_engram(
+    pub(crate) fn full_audit_project_engram(
         &self,
         project_id: &str,
     ) -> Result<EngramFullAuditResponse, ApiError> {
@@ -444,12 +457,12 @@ impl AppState {
 
 // Long audits have their own nonwaiting slot, never consuming readiness slots.
 #[derive(Clone)]
-struct EngramAuditLimiter(Arc<tokio::sync::Semaphore>);
+pub(crate) struct EngramAuditLimiter(pub(crate) Arc<tokio::sync::Semaphore>);
 
 #[derive(Clone)]
-struct EngramReadinessLimiter(Arc<tokio::sync::Semaphore>);
+pub(crate) struct EngramReadinessLimiter(pub(crate) Arc<tokio::sync::Semaphore>);
 
-fn acquire_engram_readiness(
+pub(crate) fn acquire_engram_readiness(
     limiter: EngramReadinessLimiter,
 ) -> Result<tokio::sync::OwnedSemaphorePermit, ApiError> {
     limiter.0.try_acquire_owned().map_err(|_| {
@@ -460,7 +473,7 @@ fn acquire_engram_readiness(
     })
 }
 
-async fn full_audit_project_engram(
+pub(crate) async fn full_audit_project_engram(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
     axum::Extension(limiter): axum::Extension<EngramAuditLimiter>,

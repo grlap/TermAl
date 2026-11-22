@@ -12,19 +12,21 @@
 // is the RAII guard that signals the background executor to cancel
 // when the HTTP response is dropped mid-stream.
 
-const TERMINAL_COMMAND_MAX_CHARS: usize = 20_000;
+use super::*;
+
+pub(crate) const TERMINAL_COMMAND_MAX_CHARS: usize = 20_000;
 /// Upper bound on the `workdir` field of a terminal command request. Real
 /// filesystem paths stay well under this; the cap is a defense-in-depth
 /// limit so a client cannot POST a megabyte of whitespace-stripped text
 /// that then flows into `resolve_project_scoped_requested_path` or over
 /// the wire to the remote proxy. Paired with explicit NUL-byte rejection
 /// in `validate_terminal_workdir`.
-const TERMINAL_WORKDIR_MAX_CHARS: usize = 4_096;
+pub(crate) const TERMINAL_WORKDIR_MAX_CHARS: usize = 4_096;
 /// Maximum captured terminal output per stream. Stdout and stderr each get
 /// their own budget on both local runs and remote JSON proxy responses.
-const TERMINAL_OUTPUT_MAX_BYTES: usize = 512 * 1024;
-const TERMINAL_STREAM_EVENT_QUEUE_CAPACITY: usize = 256;
-const TERMINAL_COMMAND_CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
+pub(crate) const TERMINAL_OUTPUT_MAX_BYTES: usize = 512 * 1024;
+pub(crate) const TERMINAL_STREAM_EVENT_QUEUE_CAPACITY: usize = 256;
+pub(crate) const TERMINAL_COMMAND_CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// Upper bound on the bytes the remote proxy will buffer while waiting to
 /// find the next SSE frame delimiter. A completion frame carries the full
 /// `TerminalCommandResponse`, including up to `TERMINAL_OUTPUT_MAX_BYTES` of
@@ -35,51 +37,51 @@ const TERMINAL_COMMAND_CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(10
 /// `TERMINAL_OUTPUT_MAX_BYTES * 12 + ~200 KiB`. Cap at 16× the raw output
 /// limit (8 MiB) so that envelope fits with comfortable headroom while still
 /// bounding memory if a remote misbehaves and never emits a delimiter.
-const TERMINAL_REMOTE_SSE_PENDING_MAX_BYTES: usize = TERMINAL_OUTPUT_MAX_BYTES * 16;
+pub(crate) const TERMINAL_REMOTE_SSE_PENDING_MAX_BYTES: usize = TERMINAL_OUTPUT_MAX_BYTES * 16;
 
 /// Remote proxy timeout for terminal commands. This must cover the remote child
 /// wait, post-timeout process cleanup, stdout/stderr reader joins, JSON
 /// encoding/decoding, and a small network scheduling margin.
-const REMOTE_TERMINAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
+pub(crate) const REMOTE_TERMINAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Maximum time to wait for terminal output-reader threads after the child
 /// process exits. Background children that inherit stdout/stderr can keep the
 /// pipe open indefinitely; this prevents the request from blocking forever.
-const TERMINAL_OUTPUT_READER_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const TERMINAL_OUTPUT_READER_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Represents a terminal command request.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TerminalCommandRequest {
-    command: String,
-    workdir: String,
+pub(crate) struct TerminalCommandRequest {
+    pub(crate) command: String,
+    pub(crate) workdir: String,
     #[serde(default)]
-    project_id: Option<String>,
+    pub(crate) project_id: Option<String>,
     #[serde(default)]
-    session_id: Option<String>,
+    pub(crate) session_id: Option<String>,
 }
 
 /// Represents a terminal command response.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TerminalCommandResponse {
-    command: String,
-    duration_ms: u64,
+pub(crate) struct TerminalCommandResponse {
+    pub(crate) command: String,
+    pub(crate) duration_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    exit_code: Option<i32>,
-    output_truncated: bool,
-    shell: String,
-    stderr: String,
-    stdout: String,
-    success: bool,
-    timed_out: bool,
-    workdir: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) output_truncated: bool,
+    pub(crate) shell: String,
+    pub(crate) stderr: String,
+    pub(crate) stdout: String,
+    pub(crate) success: bool,
+    pub(crate) timed_out: bool,
+    pub(crate) workdir: String,
 }
 
-type TerminalCommandStreamSender = tokio::sync::mpsc::Sender<TerminalCommandStreamEvent>;
+pub(crate) type TerminalCommandStreamSender = tokio::sync::mpsc::Sender<TerminalCommandStreamEvent>;
 
-struct TerminalStreamCancelGuard {
-    cancellation: Arc<AtomicBool>,
+pub(crate) struct TerminalStreamCancelGuard {
+    pub(crate) cancellation: Arc<AtomicBool>,
 }
 
 impl Drop for TerminalStreamCancelGuard {
@@ -103,9 +105,9 @@ impl Drop for TerminalStreamCancelGuard {
 /// one `TERMINAL_COMMAND_CANCEL_POLL_INTERVAL` tick before the next
 /// `try_send` sees the flag, regressing cancellation latency without
 /// failing any existing test.
-struct TerminalCommandSseStream {
-    event_rx: tokio::sync::mpsc::Receiver<TerminalCommandStreamEvent>,
-    _cancel_on_drop: TerminalStreamCancelGuard,
+pub(crate) struct TerminalCommandSseStream {
+    pub(crate) event_rx: tokio::sync::mpsc::Receiver<TerminalCommandStreamEvent>,
+    pub(crate) _cancel_on_drop: TerminalStreamCancelGuard,
 }
 
 impl futures_core::Stream for TerminalCommandSseStream {
@@ -126,7 +128,7 @@ impl futures_core::Stream for TerminalCommandSseStream {
     }
 }
 
-enum TerminalCommandStreamEvent {
+pub(crate) enum TerminalCommandStreamEvent {
     Output {
         stream: TerminalOutputStream,
         text: String,
@@ -141,24 +143,24 @@ enum TerminalCommandStreamEvent {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TerminalOutputStream {
+pub(crate) enum TerminalOutputStream {
     Stdout,
     Stderr,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TerminalOutputStreamPayload {
-    stream: TerminalOutputStream,
-    text: String,
+pub(crate) struct TerminalOutputStreamPayload {
+    pub(crate) stream: TerminalOutputStream,
+    pub(crate) text: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct TerminalStreamErrorPayload {
-    error: String,
+pub(crate) struct TerminalStreamErrorPayload {
+    pub(crate) error: String,
     #[serde(default)]
-    status: Option<u16>,
+    pub(crate) status: Option<u16>,
     #[serde(flatten)]
-    details: serde_json::Map<String, Value>,
+    pub(crate) details: serde_json::Map<String, Value>,
 }

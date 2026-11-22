@@ -1,17 +1,19 @@
 // Owns bounded machine-to-machine federation HTTP, not routing or mailbox state.
 // New async transport beside remote.rs; it never forwards through a browser.
 
+use super::*;
+
 #[derive(Clone)]
-struct FederationRpcClient {
-    client: reqwest::Client,
-    address: SocketAddr,
-    channel: FederationChannel,
-    ensure_current: FederationAuthorityCheck,
+pub(crate) struct FederationRpcClient {
+    pub(crate) client: reqwest::Client,
+    pub(crate) address: SocketAddr,
+    pub(crate) channel: FederationChannel,
+    pub(crate) ensure_current: FederationAuthorityCheck,
     #[cfg(test)]
-    allocation_blocked: Arc<dyn Fn(u64) + Send + Sync>,
+    pub(crate) allocation_blocked: Arc<dyn Fn(u64) + Send + Sync>,
 }
 
-enum FederationRpcRoute {
+pub(crate) enum FederationRpcRoute {
     Health(FederationLinkLease),
     HostUtilization(FederationLinkLease),
     Onboarding(FederationLinkLease, FederationOnboardingRpc),
@@ -27,7 +29,7 @@ enum FederationRpcRoute {
 }
 
 impl FederationRpcClient {
-    fn new(
+    pub(crate) fn new(
         port: u16,
         channel: FederationChannel,
         ensure_current: FederationAuthorityCheck,
@@ -63,25 +65,32 @@ impl FederationRpcClient {
     }
 
     #[cfg(test)]
-    async fn open_link(&self) -> Result<FederationLinkLease, ApiError> {
+    pub(crate) async fn open_link(&self) -> Result<FederationLinkLease, ApiError> {
         let context = self.channel.security_context()?;
         self.channel.security_current(&context)?;
         self.channel.current_lease()
     }
-    async fn health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
+    pub(crate) async fn health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
         // Onboarding reports are diagnostic; their probes do not own the
         // lifetime of this already authenticated connection.
         self.authenticated_health(lease).await
     }
 
-    async fn authenticated_health(&self, lease: &FederationLinkLease) -> Result<(), ApiError> {
+    pub(crate) async fn authenticated_health(
+        &self,
+        lease: &FederationLinkLease,
+    ) -> Result<(), ApiError> {
         let response = self
             .request(FederationRpcRoute::Health(lease.clone()))
             .await?;
         self.validate_health(lease, response)
     }
 
-    fn retain_health_refusal(&self, lease: &FederationLinkLease, error: &ApiError) -> bool {
+    pub(crate) fn retain_health_refusal(
+        &self,
+        lease: &FederationLinkLease,
+        error: &ApiError,
+    ) -> bool {
         if lease.with_incarnation(|| Ok(())).is_err() {
             // MAC, verify, authority and incarnation failures, and unsigned or
             // over-limit replies, already fenced this context in the
@@ -91,7 +100,10 @@ impl FederationRpcClient {
             return false;
         }
         if let Err(authority) = self.channel.current_authority_checked(false) {
-            if !matches!(authority.status, StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS) {
+            if !matches!(
+                authority.status,
+                StatusCode::LOCKED | StatusCode::TOO_MANY_REQUESTS
+            ) {
                 self.channel.invalidate_if_current(lease);
                 return false;
             }
@@ -99,11 +111,12 @@ impl FederationRpcClient {
         // A signed application refusal (including 409) is diagnostic while
         // the actual pair authority is current. Its status is not a new fence.
         let _ = error;
-        self.channel.observe_attestation_failure(None, "health", "diagnosticUnavailable", false);
+        self.channel
+            .observe_attestation_failure(None, "health", "diagnosticUnavailable", false);
         true
     }
 
-    fn validate_health(
+    pub(crate) fn validate_health(
         &self,
         lease: &FederationLinkLease,
         health: FederationHealth,
@@ -126,7 +139,7 @@ impl FederationRpcClient {
     }
 }
 
-fn federation_transport_unavailable() -> ApiError {
+pub(crate) fn federation_transport_unavailable() -> ApiError {
     ApiError::from_status(
         StatusCode::SERVICE_UNAVAILABLE,
         "federation peer unavailable; original operation outcome may be unknown",

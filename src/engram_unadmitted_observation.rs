@@ -16,15 +16,18 @@
 // created instead of growing it. The runtime observation worker builds and
 // delivers these requests independently of admission and grants.
 
-const ENGRAM_OBSERVATION_MAX_CHECKS: usize = 16;
+use super::*;
+
+pub(crate) const ENGRAM_OBSERVATION_MAX_CHECKS: usize = 16;
 const ENGRAM_OBSERVATION_MAX_LABEL_BYTES: usize = 128;
 const ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES: usize = 2_048;
-const ENGRAM_OBSERVATION_MAX_SOURCE_BYTES: usize = 512;
-const ENGRAM_OBSERVATION_MAX_REQUEST_BYTES: usize = 2 * ENGRAM_SOURCE_JSON_LIMIT + 64 * 1_024;
+pub(crate) const ENGRAM_OBSERVATION_MAX_SOURCE_BYTES: usize = 512;
+pub(crate) const ENGRAM_OBSERVATION_MAX_REQUEST_BYTES: usize =
+    2 * ENGRAM_SOURCE_JSON_LIMIT + 64 * 1_024;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramObservedCheckResult {
+pub(crate) enum EngramObservedCheckResult {
     Passed,
     Failed,
     Indeterminate,
@@ -34,36 +37,36 @@ enum EngramObservedCheckResult {
 /// never verification evidence. A passed or failed result has finished.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
-struct EngramObservedCheck {
-    host_check_id: String,
-    check_kind: EngramVerificationKind,
-    observed_result: EngramObservedCheckResult,
+pub(crate) struct EngramObservedCheck {
+    pub(crate) host_check_id: String,
+    pub(crate) check_kind: EngramVerificationKind,
+    pub(crate) observed_result: EngramObservedCheckResult,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    started_at: Option<String>,
+    pub(crate) started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    finished_at: Option<String>,
-    observed_at: String,
+    pub(crate) finished_at: Option<String>,
+    pub(crate) observed_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_basis: Option<EngramExecutionSourceBasis>,
+    pub(crate) source_basis: Option<EngramExecutionSourceBasis>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    host_evidence_ref: Option<String>,
+    pub(crate) host_evidence_ref: Option<String>,
 }
 
 /// The facts every unadmitted occurrence carries besides the occurrence
 /// itself: the exact binding and canonical root basis at the capture cut,
 /// the window actually observed and the accounting policy.
 #[derive(Clone, Debug)]
-struct EngramUnadmittedObservationBasis {
-    idempotency_key: String,
-    binding: EngramControlWorkBinding,
-    root_basis: EngramObservationRootBasis,
-    observed_interval: EngramObservationInterval,
-    policy_basis: EngramObservationPolicyBasis,
+pub(crate) struct EngramUnadmittedObservationBasis {
+    pub(crate) idempotency_key: String,
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) root_basis: EngramObservationRootBasis,
+    pub(crate) observed_interval: EngramObservationInterval,
+    pub(crate) policy_basis: EngramObservationPolicyBasis,
 }
 
 /// The execution_observe request for an unadmitted turn, validated as built
 /// at `built_at`.
-fn engram_unadmitted_turn_request(
+pub(crate) fn engram_unadmitted_turn_request(
     basis: EngramUnadmittedObservationBasis,
     host_turn_ref: String,
     source_change: Option<EngramObservedSourceChange>,
@@ -72,14 +75,19 @@ fn engram_unadmitted_turn_request(
 ) -> Result<EngramControlRequest, EngramTransportError> {
     engram_unadmitted_request(
         basis,
-        EngramInterTurnOccurrence::UnadmittedTurn { host_turn_ref, source_change, observed_checks, observed_outcome: None },
+        EngramInterTurnOccurrence::UnadmittedTurn {
+            host_turn_ref,
+            source_change,
+            observed_checks,
+            observed_outcome: None,
+        },
         built_at,
     )
 }
 
 /// The execution_observe request for one check of an unadmitted turn,
 /// reported on its own, validated as built at `built_at`.
-fn engram_observed_check_request(
+pub(crate) fn engram_observed_check_request(
     basis: EngramUnadmittedObservationBasis,
     host_turn_ref: String,
     check: EngramObservedCheck,
@@ -87,22 +95,29 @@ fn engram_observed_check_request(
 ) -> Result<EngramControlRequest, EngramTransportError> {
     engram_unadmitted_request(
         basis,
-        EngramInterTurnOccurrence::ObservedCheck { host_turn_ref, check },
+        EngramInterTurnOccurrence::ObservedCheck {
+            host_turn_ref,
+            check,
+        },
         built_at,
     )
 }
 
 // A real point-in-time source measurement, independent of whether a change
 // or a check was observed. It supplies no mutation or verification credit.
-fn engram_source_sighting_request(
+pub(crate) fn engram_source_sighting_request(
     basis: EngramUnadmittedObservationBasis,
     sighting: EngramMeasuredSighting,
     built_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<EngramControlRequest, EngramTransportError> {
-    engram_unadmitted_request(basis, EngramInterTurnOccurrence::SourceSighting {
-        source_basis: sighting.source_basis,
-        observed_at: sighting.observed_at,
-    }, built_at)
+    engram_unadmitted_request(
+        basis,
+        EngramInterTurnOccurrence::SourceSighting {
+            source_basis: sighting.source_basis,
+            observed_at: sighting.observed_at,
+        },
+        built_at,
+    )
 }
 
 fn engram_unadmitted_request(
@@ -119,13 +134,14 @@ fn engram_unadmitted_request(
         causality: EngramObservationCausality::Unknown {},
         policy_basis: basis.policy_basis,
     };
-    engram_validate_unadmitted_observation(&observation, built_at)
-        .map_err(|reason| EngramTransportError::protocol(format!("unadmitted observation refused: {reason}")))?;
-    let request = EngramControlRequest::ExecutionObserve {
-        observation,
-    };
+    engram_validate_unadmitted_observation(&observation, built_at).map_err(|reason| {
+        EngramTransportError::protocol(format!("unadmitted observation refused: {reason}"))
+    })?;
+    let request = EngramControlRequest::ExecutionObserve { observation };
     let bytes = serde_json::to_vec(&request).map_err(|_| {
-        EngramTransportError::protocol("unadmitted observation refused: the request could not serialize")
+        EngramTransportError::protocol(
+            "unadmitted observation refused: the request could not serialize",
+        )
     })?;
     if bytes.len() > ENGRAM_OBSERVATION_MAX_REQUEST_BYTES {
         return Err(EngramTransportError::protocol(format!(
@@ -136,15 +152,24 @@ fn engram_unadmitted_request(
     Ok(request)
 }
 
-fn engram_observation_instant(value: &str, label: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+pub(crate) fn engram_observation_instant(
+    value: &str,
+    label: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|at| at.with_timezone(&chrono::Utc))
         .map_err(|_| format!("{label} is not an RFC 3339 time"))
 }
 
-fn engram_observation_text(value: &str, max_bytes: usize, label: &str) -> Result<(), String> {
+pub(crate) fn engram_observation_text(
+    value: &str,
+    max_bytes: usize,
+    label: &str,
+) -> Result<(), String> {
     if value.trim().is_empty() || value.trim() != value || value.len() > max_bytes {
-        return Err(format!("{label} must be trimmed, nonblank and at most {max_bytes} bytes"));
+        return Err(format!(
+            "{label} must be trimmed, nonblank and at most {max_bytes} bytes"
+        ));
     }
     Ok(())
 }
@@ -162,16 +187,27 @@ fn engram_observation_within(
     Ok(at)
 }
 
-fn engram_observation_source_basis(basis: &EngramExecutionSourceBasis, label: &str) -> Result<(), String> {
-    engram_observation_text(&basis.workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, &format!("{label}.workspace_id"))?;
+fn engram_observation_source_basis(
+    basis: &EngramExecutionSourceBasis,
+    label: &str,
+) -> Result<(), String> {
+    engram_observation_text(
+        &basis.workspace_id,
+        ENGRAM_OBSERVATION_MAX_SOURCE_BYTES,
+        &format!("{label}.workspace_id"),
+    )?;
     if !engram_observation_identity_valid(&basis.source_revision, basis.source_id.as_ref()) {
-        return Err(format!("{label} needs one complete bounded source_id and no source_revision"));
+        return Err(format!(
+            "{label} needs one complete bounded source_id and no source_revision"
+        ));
     }
     if !matches!(
         (basis.source_root_generation, basis.source_root_state),
         (None, None) | (Some(1..), Some(_))
     ) {
-        return Err(format!("{label} names a root generation and state only together, the generation positive"));
+        return Err(format!(
+            "{label} names a root generation and state only together, the generation positive"
+        ));
     }
     Ok(())
 }
@@ -179,52 +215,98 @@ fn engram_observation_source_basis(basis: &EngramExecutionSourceBasis, label: &s
 /// The producer's shape rules for a grant-free occurrence, checked before
 /// sending: each bound, the relations between the facts, and every time
 /// inside the observed window, which ends no later than `built_at`.
-fn engram_validate_unadmitted_observation(
+pub(crate) fn engram_validate_unadmitted_observation(
     observation: &EngramInterTurnObservation,
     built_at: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), String> {
-    engram_observation_text(&observation.idempotency_key, ENGRAM_OBSERVATION_MAX_LABEL_BYTES, "idempotency_key")?;
+    engram_observation_text(
+        &observation.idempotency_key,
+        ENGRAM_OBSERVATION_MAX_LABEL_BYTES,
+        "idempotency_key",
+    )?;
     if observation.binding.work_revision < 1 || observation.binding.claim_fence < 1 {
         return Err("binding work_revision and claim_fence must be positive".into());
     }
     // A policy built in code is not decoded, so its record ids are checked
     // here as the inter-turn builder checks them.
-    let EngramObservationPolicyBasis::AccountIfEligible { project_policy_epoch, policy, obligation_rule_set } =
-        &observation.policy_basis;
-    if *project_policy_epoch < 1 || !engram_observation_object_id(policy)
+    let EngramObservationPolicyBasis::AccountIfEligible {
+        project_policy_epoch,
+        policy,
+        obligation_rule_set,
+    } = &observation.policy_basis;
+    if *project_policy_epoch < 1
+        || !engram_observation_object_id(policy)
         || !engram_observation_object_id(obligation_rule_set)
     {
-        return Err("policy_basis needs a positive epoch and record ids for its policy and rule set".into());
+        return Err(
+            "policy_basis needs a positive epoch and record ids for its policy and rule set".into(),
+        );
     }
     let root = &observation.root_basis;
-    if root.capture_run_cut < 1 || root.latest_event.as_ref().is_some_and(|id| !engram_observation_object_id(id)) {
+    if root.capture_run_cut < 1
+        || root
+            .latest_event
+            .as_ref()
+            .is_some_and(|id| !engram_observation_object_id(id))
+    {
         return Err("root_basis needs a positive capture cut and a record id or none".into());
     }
-    let from = engram_observation_instant(&observation.observed_interval.from, "observed_interval.from")?;
-    let through = engram_observation_instant(&observation.observed_interval.through, "observed_interval.through")?;
+    let from = engram_observation_instant(
+        &observation.observed_interval.from,
+        "observed_interval.from",
+    )?;
+    let through = engram_observation_instant(
+        &observation.observed_interval.through,
+        "observed_interval.through",
+    )?;
     if from > through {
         return Err("observed_interval.from is after observed_interval.through".into());
     }
     if through > built_at {
         return Err("observed_interval.through is after the request was built".into());
     }
-    if let EngramInterTurnOccurrence::SourceSighting { source_basis, observed_at } = &observation.occurrence {
+    if let EngramInterTurnOccurrence::SourceSighting {
+        source_basis,
+        observed_at,
+    } = &observation.occurrence
+    {
         engram_observation_source_basis(source_basis, "source_sighting.source_basis")?;
         engram_observation_within(observed_at, from, through, "source_sighting.observed_at")?;
-        validate_engram_measured_source_sighting(&observation.root_basis, &EngramMeasuredSighting {
-            source_basis: source_basis.clone(), observed_at: observed_at.clone(),
-        }).map_err(|error| error.message)?;
+        validate_engram_measured_source_sighting(
+            &observation.root_basis,
+            &EngramMeasuredSighting {
+                source_basis: source_basis.clone(),
+                observed_at: observed_at.clone(),
+            },
+        )
+        .map_err(|error| error.message)?;
         return Ok(());
     }
     let (host_turn_ref, source_change, checks) = match &observation.occurrence {
-        EngramInterTurnOccurrence::UnadmittedTurn { host_turn_ref, source_change, observed_checks, .. } =>
-            (host_turn_ref, source_change.as_ref(), observed_checks.as_slice()),
-        EngramInterTurnOccurrence::ObservedCheck { host_turn_ref, check } =>
-            (host_turn_ref, None, std::slice::from_ref(check)),
-        EngramInterTurnOccurrence::InterTurnChange { .. } | EngramInterTurnOccurrence::SourceSighting { .. } =>
-            return Err("an inter-turn change is not an unadmitted occurrence".into()),
+        EngramInterTurnOccurrence::UnadmittedTurn {
+            host_turn_ref,
+            source_change,
+            observed_checks,
+            ..
+        } => (
+            host_turn_ref,
+            source_change.as_ref(),
+            observed_checks.as_slice(),
+        ),
+        EngramInterTurnOccurrence::ObservedCheck {
+            host_turn_ref,
+            check,
+        } => (host_turn_ref, None, std::slice::from_ref(check)),
+        EngramInterTurnOccurrence::InterTurnChange { .. }
+        | EngramInterTurnOccurrence::SourceSighting { .. } => {
+            return Err("an inter-turn change is not an unadmitted occurrence".into());
+        }
     };
-    engram_observation_text(host_turn_ref, ENGRAM_OBSERVATION_MAX_LABEL_BYTES, "host_turn_ref")?;
+    engram_observation_text(
+        host_turn_ref,
+        ENGRAM_OBSERVATION_MAX_LABEL_BYTES,
+        "host_turn_ref",
+    )?;
     if let Some(change) = source_change {
         engram_validate_observed_source_change(change, from, through)?;
     }
@@ -237,37 +319,85 @@ fn engram_validate_observed_source_change(
     through: chrono::DateTime<chrono::Utc>,
 ) -> Result<(), String> {
     match change {
-        EngramObservedSourceChange::ContentComparison { workspace_id, baseline, sighting } => {
-            engram_observation_text(workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "source_change.workspace_id")?;
-            engram_observation_text(&baseline.workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "source_change.baseline.workspace_id")?;
-            if !engram_observation_identity_valid(&baseline.source_revision, baseline.source_id.as_ref()) {
-                return Err("source_change.baseline needs one complete bounded source identity".into());
+        EngramObservedSourceChange::ContentComparison {
+            workspace_id,
+            baseline,
+            sighting,
+        } => {
+            engram_observation_text(
+                workspace_id,
+                ENGRAM_OBSERVATION_MAX_SOURCE_BYTES,
+                "source_change.workspace_id",
+            )?;
+            engram_observation_text(
+                &baseline.workspace_id,
+                ENGRAM_OBSERVATION_MAX_SOURCE_BYTES,
+                "source_change.baseline.workspace_id",
+            )?;
+            if !engram_observation_identity_valid(
+                &baseline.source_revision,
+                baseline.source_id.as_ref(),
+            ) {
+                return Err(
+                    "source_change.baseline needs one complete bounded source identity".into(),
+                );
             }
-            engram_observation_source_basis(&sighting.source_basis, "source_change.sighting.source_basis")?;
-            if &baseline.workspace_id != workspace_id || &sighting.source_basis.workspace_id != workspace_id {
+            engram_observation_source_basis(
+                &sighting.source_basis,
+                "source_change.sighting.source_basis",
+            )?;
+            if &baseline.workspace_id != workspace_id
+                || &sighting.source_basis.workspace_id != workspace_id
+            {
                 return Err("a measured source change names one workspace throughout".into());
             }
             if !engram_observation_source_formats_match(
-                baseline.source_id.as_ref(), sighting.source_basis.source_id.as_ref(),
+                baseline.source_id.as_ref(),
+                sighting.source_basis.source_id.as_ref(),
             ) {
                 return Err("a source comparison cannot mix identity formats".into());
             }
             if engram_observation_same_source(baseline, &sighting.source_basis) {
                 return Err("content_comparison needs two different revisions".into());
             }
-            let seen_before = engram_observation_within(&baseline.observed_at, from, through, "source_change.baseline")?;
-            let seen_after = engram_observation_within(&sighting.observed_at, from, through, "source_change.sighting")?;
+            let seen_before = engram_observation_within(
+                &baseline.observed_at,
+                from,
+                through,
+                "source_change.baseline",
+            )?;
+            let seen_after = engram_observation_within(
+                &sighting.observed_at,
+                from,
+                through,
+                "source_change.sighting",
+            )?;
             if seen_before > seen_after {
                 return Err("source_change.baseline was observed after its sighting".into());
             }
         }
-        EngramObservedSourceChange::AssumedMissingBaseline { workspace_id, sighting } => {
-            engram_observation_text(workspace_id, ENGRAM_OBSERVATION_MAX_SOURCE_BYTES, "source_change.workspace_id")?;
-            engram_observation_source_basis(&sighting.source_basis, "source_change.sighting.source_basis")?;
+        EngramObservedSourceChange::AssumedMissingBaseline {
+            workspace_id,
+            sighting,
+        } => {
+            engram_observation_text(
+                workspace_id,
+                ENGRAM_OBSERVATION_MAX_SOURCE_BYTES,
+                "source_change.workspace_id",
+            )?;
+            engram_observation_source_basis(
+                &sighting.source_basis,
+                "source_change.sighting.source_basis",
+            )?;
             if &sighting.source_basis.workspace_id != workspace_id {
                 return Err("a measured source change names one workspace throughout".into());
             }
-            engram_observation_within(&sighting.observed_at, from, through, "source_change.sighting")?;
+            engram_observation_within(
+                &sighting.observed_at,
+                from,
+                through,
+                "source_change.sighting",
+            )?;
         }
     }
     Ok(())
@@ -286,27 +416,44 @@ fn engram_validate_observed_checks(
     }
     let mut ids = std::collections::HashSet::new();
     for check in checks {
-        engram_observation_text(&check.host_check_id, ENGRAM_OBSERVATION_MAX_LABEL_BYTES, "observed check host_check_id")?;
+        engram_observation_text(
+            &check.host_check_id,
+            ENGRAM_OBSERVATION_MAX_LABEL_BYTES,
+            "observed check host_check_id",
+        )?;
         if !ids.insert(check.host_check_id.as_str()) {
             return Err("an observed check id appears twice in one request".into());
         }
         let label = format!("observed check {:?}", check.host_check_id);
-        let started = check.started_at.as_deref()
+        let started = check
+            .started_at
+            .as_deref()
             .map(|at| engram_observation_within(at, from, through, &format!("{label} started_at")))
             .transpose()?;
-        let finished = check.finished_at.as_deref()
+        let finished = check
+            .finished_at
+            .as_deref()
             .map(|at| engram_observation_within(at, from, through, &format!("{label} finished_at")))
             .transpose()?;
-        engram_observation_within(&check.observed_at, from, through, &format!("{label} observed_at"))?;
+        engram_observation_within(
+            &check.observed_at,
+            from,
+            through,
+            &format!("{label} observed_at"),
+        )?;
         if let (Some(started), Some(finished)) = (started, finished)
             && started > finished
         {
             return Err(format!("{label} started after it finished"));
         }
-        if matches!(check.observed_result, EngramObservedCheckResult::Passed | EngramObservedCheckResult::Failed)
-            && finished.is_none()
+        if matches!(
+            check.observed_result,
+            EngramObservedCheckResult::Passed | EngramObservedCheckResult::Failed
+        ) && finished.is_none()
         {
-            return Err(format!("{label} reports a finished result without finished_at; an unfinished check is indeterminate"));
+            return Err(format!(
+                "{label} reports a finished result without finished_at; an unfinished check is indeterminate"
+            ));
         }
         if let Some(basis) = &check.source_basis {
             if basis.source_id.is_some() {
@@ -315,7 +462,11 @@ fn engram_validate_observed_checks(
             engram_observation_source_basis(basis, &format!("{label} source_basis"))?;
         }
         if let Some(reference) = &check.host_evidence_ref {
-            engram_observation_text(reference, ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES, &format!("{label} host_evidence_ref"))?;
+            engram_observation_text(
+                reference,
+                ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES,
+                &format!("{label} host_evidence_ref"),
+            )?;
         }
     }
     Ok(())
@@ -335,13 +486,15 @@ impl EngramSourceObservationReceipt {
     /// checks, each uncredited, and account for a reported change as a change
     /// (or a repeat), for no reported change as no change, or keep the record
     /// for a terminal historical reason.
-    fn from_unadmitted_result(
+    pub(crate) fn from_unadmitted_result(
         value: Value,
         request: &EngramInterTurnObservation,
         observing_session: &str,
     ) -> Result<Self, EngramTransportError> {
         if serde_json::to_vec(&value).map_or(true, |bytes| bytes.len() > 16 * 1024) {
-            return Err(EngramTransportError::protocol("unadmitted observation receipt exceeds its bound"));
+            return Err(EngramTransportError::protocol(
+                "unadmitted observation receipt exceeds its bound",
+            ));
         }
         let receipt: Self = serde_json::from_value(value).map_err(|_| {
             EngramTransportError::protocol("invalid unadmitted observation receipt schema")
@@ -356,34 +509,58 @@ impl EngramSourceObservationReceipt {
         observing_session: &str,
     ) -> Result<(), EngramTransportError> {
         let (reported_change, mut sent): (bool, Vec<&str>) = match &request.occurrence {
-            EngramInterTurnOccurrence::UnadmittedTurn { source_change, observed_checks, .. } => (
+            EngramInterTurnOccurrence::UnadmittedTurn {
+                source_change,
+                observed_checks,
+                ..
+            } => (
                 source_change.is_some(),
-                observed_checks.iter().map(|check| check.host_check_id.as_str()).collect(),
+                observed_checks
+                    .iter()
+                    .map(|check| check.host_check_id.as_str())
+                    .collect(),
             ),
-            EngramInterTurnOccurrence::ObservedCheck { check, .. } => (false, vec![check.host_check_id.as_str()]),
-            EngramInterTurnOccurrence::InterTurnChange { .. } | EngramInterTurnOccurrence::SourceSighting { .. } => {
+            EngramInterTurnOccurrence::ObservedCheck { check, .. } => {
+                (false, vec![check.host_check_id.as_str()])
+            }
+            EngramInterTurnOccurrence::InterTurnChange { .. }
+            | EngramInterTurnOccurrence::SourceSighting { .. } => {
                 return Err(EngramTransportError::protocol(
                     "an inter-turn change receipt is not an unadmitted observation receipt",
                 ));
             }
         };
-        let summaries = self.observed_checks.iter()
+        let summaries = self
+            .observed_checks
+            .iter()
             .map(|summary| serde_json::from_value::<EngramObservedCheckSummary>(summary.clone()))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| EngramTransportError::protocol("invalid observed check summary on the receipt"))?;
-        let mut recorded: Vec<&str> = summaries.iter().map(|summary| summary.host_check_id.as_str()).collect();
+            .map_err(|_| {
+                EngramTransportError::protocol("invalid observed check summary on the receipt")
+            })?;
+        let mut recorded: Vec<&str> = summaries
+            .iter()
+            .map(|summary| summary.host_check_id.as_str())
+            .collect();
         sent.sort_unstable();
         recorded.sort_unstable();
         let checks_recorded = sent == recorded
-            && summaries.iter().all(|summary| summary.credit == "uncredited");
+            && summaries
+                .iter()
+                .all(|summary| summary.credit == "uncredited");
         let accounted = if reported_change {
             self.is_accounted() || self.is_historical()
         } else {
-            (matches!(self.accounting, EngramObservationAccounting::NoSourceChange {})
-                && self.opened_obligations.is_empty())
+            (matches!(
+                self.accounting,
+                EngramObservationAccounting::NoSourceChange {}
+            ) && self.opened_obligations.is_empty())
                 || self.is_historical()
         };
-        if !self.recorded_scope_matches(request, observing_session)? || !checks_recorded || !accounted {
+        if !self.recorded_scope_matches(request, observing_session)?
+            || !checks_recorded
+            || !accounted
+        {
             return Err(EngramTransportError::protocol(
                 "unadmitted observation receipt does not record the observed occurrence under its scope and policy",
             ));
@@ -406,10 +583,13 @@ mod unadmitted_observation_tests {
 
     fn source(seed: &str) -> EngramExecutionSourceBasis {
         EngramExecutionSourceBasis {
-            source_id: Some(serde_json::from_value(json!({
-                "commit": "a".repeat(40), "tree": &sha256_hex(seed.as_bytes())[..40],
-                "submodules": [], "changes": []
-            })).unwrap()),
+            source_id: Some(
+                serde_json::from_value(json!({
+                    "commit": "a".repeat(40), "tree": &sha256_hex(seed.as_bytes())[..40],
+                    "submodules": [], "changes": []
+                }))
+                .unwrap(),
+            ),
             workspace_id: "workspace-unadmitted".into(),
             source_revision: String::new(),
             source_root_generation: Some(2),
@@ -421,20 +601,28 @@ mod unadmitted_observation_tests {
         EngramUnadmittedObservationBasis {
             idempotency_key: "termal-unadmitted:turn-1".into(),
             binding: EngramControlWorkBinding {
-                root_execution_id: "root-unadmitted".into(), work_id: "work-unadmitted".into(),
-                run_id: "run-unadmitted".into(), claim_id: "claim-unadmitted".into(),
-                work_revision: 3, claim_fence: 4,
+                root_execution_id: "root-unadmitted".into(),
+                work_id: "work-unadmitted".into(),
+                run_id: "run-unadmitted".into(),
+                claim_id: "claim-unadmitted".into(),
+                work_revision: 3,
+                claim_fence: 4,
             },
             root_basis: serde_json::from_value(json!({
                 "capture_run_cut": 11, "latest_event": "c".repeat(32),
                 "state": { "state": "bound", "workspace_id": "workspace-unadmitted",
                     "generation": 2, "named_at": at(0) },
-            })).unwrap(),
-            observed_interval: EngramObservationInterval { from: at(10), through: at(50) },
+            }))
+            .unwrap(),
+            observed_interval: EngramObservationInterval {
+                from: at(10),
+                through: at(50),
+            },
             policy_basis: serde_json::from_value(json!({
                 "mode": "account_if_eligible", "project_policy_epoch": 3,
                 "policy": "a".repeat(32), "obligation_rule_set": "b".repeat(64),
-            })).unwrap(),
+            }))
+            .unwrap(),
         }
     }
 
@@ -447,7 +635,10 @@ mod unadmitted_observation_tests {
                 source_revision: String::new(),
                 observed_at: at(10),
             },
-            sighting: EngramMeasuredSighting { source_basis: source("after"), observed_at: at(50) },
+            sighting: EngramMeasuredSighting {
+                source_basis: source("after"),
+                observed_at: at(50),
+            },
         }
     }
 
@@ -472,7 +663,9 @@ mod unadmitted_observation_tests {
     }
 
     fn observation(request: &EngramControlRequest) -> &EngramInterTurnObservation {
-        let EngramControlRequest::ExecutionObserve { observation, .. } = request else { unreachable!() };
+        let EngramControlRequest::ExecutionObserve { observation, .. } = request else {
+            unreachable!()
+        };
         observation
     }
 
@@ -489,8 +682,15 @@ mod unadmitted_observation_tests {
         })
     }
 
-    fn decode(request: &EngramControlRequest, value: Value) -> Result<EngramSourceObservationReceipt, EngramTransportError> {
-        EngramSourceObservationReceipt::from_unadmitted_result(value, observation(request), "producer-session")
+    fn decode(
+        request: &EngramControlRequest,
+        value: Value,
+    ) -> Result<EngramSourceObservationReceipt, EngramTransportError> {
+        EngramSourceObservationReceipt::from_unadmitted_result(
+            value,
+            observation(request),
+            "producer-session",
+        )
     }
 
     #[test]
@@ -498,30 +698,56 @@ mod unadmitted_observation_tests {
         let request = turn(Some(change()), vec![check("check-1"), check("check-2")]).unwrap();
         let wire = serde_json::to_value(&request).unwrap();
         assert_eq!(wire["operation"], "execution_observe");
-        assert!(wire.get("routing_token").is_none(), "ordinary requests carry no admission credential");
+        assert!(
+            wire.get("routing_token").is_none(),
+            "ordinary requests carry no admission credential"
+        );
         assert_eq!(wire["causality"], json!({ "kind": "unknown" }));
-        assert_eq!(wire["observed_interval"], json!({ "from": at(10), "through": at(50) }));
+        assert_eq!(
+            wire["observed_interval"],
+            json!({ "from": at(10), "through": at(50) })
+        );
         let occurrence = &wire["occurrence"];
         assert_eq!(occurrence["kind"], "unadmitted_turn");
         assert_eq!(occurrence["host_turn_ref"], "turn-1");
-        assert_eq!(occurrence["source_change"]["detection"], "content_comparison");
-        assert_eq!(occurrence["observed_checks"][0], json!({
-            "host_check_id": "check-1", "check_kind": "test", "observed_result": "passed",
-            "started_at": at(20), "finished_at": at(30), "observed_at": at(30),
-            "host_evidence_ref": "termal-run:abc",
-        }));
+        assert_eq!(
+            occurrence["source_change"]["detection"],
+            "content_comparison"
+        );
+        assert_eq!(
+            occurrence["observed_checks"][0],
+            json!({
+                "host_check_id": "check-1", "check_kind": "test", "observed_result": "passed",
+                "started_at": at(20), "finished_at": at(30), "observed_at": at(30),
+                "host_evidence_ref": "termal-run:abc",
+            })
+        );
         let replay: EngramControlRequest = serde_json::from_value(wire.clone()).unwrap();
-        assert_eq!(serde_json::to_value(replay).unwrap(), wire, "a retained request replays the same facts");
+        assert_eq!(
+            serde_json::to_value(replay).unwrap(),
+            wire,
+            "a retained request replays the same facts"
+        );
 
         let unreported = serde_json::to_value(turn(None, Vec::new()).unwrap()).unwrap();
-        assert_eq!(unreported["occurrence"]["source_change"], Value::Null, "no reported change is an explicit null");
+        assert_eq!(
+            unreported["occurrence"]["source_change"],
+            Value::Null,
+            "no reported change is an explicit null"
+        );
         assert_eq!(unreported["occurrence"]["observed_checks"], json!([]));
         let missing = EngramObservedSourceChange::AssumedMissingBaseline {
             workspace_id: "workspace-unadmitted".into(),
-            sighting: EngramMeasuredSighting { source_basis: source("after"), observed_at: at(50) },
+            sighting: EngramMeasuredSighting {
+                source_basis: source("after"),
+                observed_at: at(50),
+            },
         };
         let assumed = serde_json::to_value(turn(Some(missing), Vec::new()).unwrap()).unwrap();
-        assert_eq!(assumed["occurrence"]["source_change"]["detection"], "assumed_missing_baseline");
+        assert_eq!(
+            assumed["occurrence"]["source_change"]["detection"],
+            "assumed_missing_baseline"
+        );
     }
 
     #[test]
@@ -531,27 +757,50 @@ mod unadmitted_observation_tests {
         unfinished.finished_at = None;
         unfinished.source_basis = None;
         unfinished.host_evidence_ref = None;
-        let request = engram_observed_check_request(basis(), "turn-1".into(), unfinished, built_at()).unwrap();
+        let request =
+            engram_observed_check_request(basis(), "turn-1".into(), unfinished, built_at())
+                .unwrap();
         let wire = serde_json::to_value(&request).unwrap();
-        assert_eq!(wire["occurrence"], json!({
-            "kind": "observed_check", "host_turn_ref": "turn-1",
-            "check": { "host_check_id": "check-17", "check_kind": "test",
-                "observed_result": "indeterminate", "started_at": at(20), "observed_at": at(30) },
-        }));
+        assert_eq!(
+            wire["occurrence"],
+            json!({
+                "kind": "observed_check", "host_turn_ref": "turn-1",
+                "check": { "host_check_id": "check-17", "check_kind": "test",
+                    "observed_result": "indeterminate", "started_at": at(20), "observed_at": at(30) },
+            })
+        );
         let replay: EngramControlRequest = serde_json::from_value(wire.clone()).unwrap();
         assert_eq!(serde_json::to_value(replay).unwrap(), wire);
     }
 
-    fn with_basis(change: impl FnOnce(&mut EngramUnadmittedObservationBasis)) -> Result<EngramControlRequest, EngramTransportError> {
+    fn with_basis(
+        change: impl FnOnce(&mut EngramUnadmittedObservationBasis),
+    ) -> Result<EngramControlRequest, EngramTransportError> {
         let mut changed = basis();
         change(&mut changed);
         engram_unadmitted_turn_request(changed, "turn-1".into(), None, Vec::new(), built_at())
     }
 
-    fn with_change(change: impl FnOnce(&mut EngramMeasuredBaseline, &mut EngramMeasuredSighting)) -> Result<EngramControlRequest, EngramTransportError> {
-        let EngramObservedSourceChange::ContentComparison { workspace_id, mut baseline, mut sighting } = change_fixture() else { unreachable!() };
+    fn with_change(
+        change: impl FnOnce(&mut EngramMeasuredBaseline, &mut EngramMeasuredSighting),
+    ) -> Result<EngramControlRequest, EngramTransportError> {
+        let EngramObservedSourceChange::ContentComparison {
+            workspace_id,
+            mut baseline,
+            mut sighting,
+        } = change_fixture()
+        else {
+            unreachable!()
+        };
         change(&mut baseline, &mut sighting);
-        turn(Some(EngramObservedSourceChange::ContentComparison { workspace_id, baseline, sighting }), Vec::new())
+        turn(
+            Some(EngramObservedSourceChange::ContentComparison {
+                workspace_id,
+                baseline,
+                sighting,
+            }),
+            Vec::new(),
+        )
     }
 
     fn change_fixture() -> EngramObservedSourceChange {
@@ -568,91 +817,188 @@ mod unadmitted_observation_tests {
                 Err(error) => error,
                 Ok(_) => panic!("expected observation refusal: {reason}"),
             };
-            assert!(error.message.starts_with("unadmitted observation refused: "), "{reason}: {}", error.message);
-            assert!(error.message.contains(reason), "expected {reason:?}, got {}", error.message);
+            assert!(
+                error
+                    .message
+                    .starts_with("unadmitted observation refused: "),
+                "{reason}: {}",
+                error.message
+            );
+            assert!(
+                error.message.contains(reason),
+                "expected {reason:?}, got {}",
+                error.message
+            );
         };
-        let checks = |count: usize| (0..count).map(|index| check(&format!("check-{index}"))).collect::<Vec<_>>();
+        let checks = |count: usize| {
+            (0..count)
+                .map(|index| check(&format!("check-{index}")))
+                .collect::<Vec<_>>()
+        };
         assert!(turn(None, checks(16)).is_ok(), "16 checks fit");
         refused(turn(None, checks(17)), "at most 16 observed checks");
-        refused(turn(None, vec![check("same"), check("same")]), "appears twice");
+        refused(
+            turn(None, vec![check("same"), check("same")]),
+            "appears twice",
+        );
 
         let mut finished_without_time = check("check-1");
         finished_without_time.finished_at = None;
-        refused(turn(None, vec![finished_without_time]), "without finished_at");
+        refused(
+            turn(None, vec![finished_without_time]),
+            "without finished_at",
+        );
         let mut failed_without_time = check("check-1");
         failed_without_time.observed_result = EngramObservedCheckResult::Failed;
         failed_without_time.finished_at = None;
         refused(turn(None, vec![failed_without_time]), "without finished_at");
         let mut outside = check("check-1");
         outside.observed_at = at(55);
-        refused(turn(None, vec![outside]), "observed_at lies outside observed_interval");
+        refused(
+            turn(None, vec![outside]),
+            "observed_at lies outside observed_interval",
+        );
         let mut backwards = check("check-1");
         backwards.started_at = Some(at(40));
         refused(turn(None, vec![backwards]), "started after it finished");
         let mut long_evidence = check("check-1");
         long_evidence.host_evidence_ref = Some("e".repeat(2_049));
-        refused(turn(None, vec![long_evidence]), "host_evidence_ref must be trimmed");
+        refused(
+            turn(None, vec![long_evidence]),
+            "host_evidence_ref must be trimmed",
+        );
         let mut padded = check("check-1");
         padded.host_check_id = " check-1".into();
         refused(turn(None, vec![padded]), "host_check_id must be trimmed");
-        refused(with_change(|_, sighting| sighting.source_basis.source_root_state = None),
-            "root generation and state only together");
+        refused(
+            with_change(|_, sighting| sighting.source_basis.source_root_state = None),
+            "root generation and state only together",
+        );
 
         refused(
             engram_unadmitted_turn_request(basis(), "t".repeat(129), None, Vec::new(), built_at()),
             "host_turn_ref must be trimmed",
         );
-        refused(with_basis(|basis| basis.idempotency_key = "k".repeat(129)), "idempotency_key must be trimmed");
-        refused(with_basis(|basis| basis.binding.work_revision = 0), "must be positive");
-        refused(with_basis(|basis| basis.binding.claim_fence = 0), "must be positive");
-        refused(with_basis(|basis| basis.root_basis.capture_run_cut = 0), "positive capture cut");
-        refused(with_basis(|basis| basis.root_basis.latest_event = Some("not-a-record-id".into())), "positive capture cut");
-        for (epoch, policy) in [(0, "a".repeat(32)), (-1, "a".repeat(32)), (3, "not-a-record-id".to_owned())] {
+        refused(
+            with_basis(|basis| basis.idempotency_key = "k".repeat(129)),
+            "idempotency_key must be trimmed",
+        );
+        refused(
+            with_basis(|basis| basis.binding.work_revision = 0),
+            "must be positive",
+        );
+        refused(
+            with_basis(|basis| basis.binding.claim_fence = 0),
+            "must be positive",
+        );
+        refused(
+            with_basis(|basis| basis.root_basis.capture_run_cut = 0),
+            "positive capture cut",
+        );
+        refused(
+            with_basis(|basis| basis.root_basis.latest_event = Some("not-a-record-id".into())),
+            "positive capture cut",
+        );
+        for (epoch, policy) in [
+            (0, "a".repeat(32)),
+            (-1, "a".repeat(32)),
+            (3, "not-a-record-id".to_owned()),
+        ] {
             refused(
-                with_basis(|basis| basis.policy_basis = EngramObservationPolicyBasis::AccountIfEligible {
-                    project_policy_epoch: epoch, policy, obligation_rule_set: "b".repeat(64),
+                with_basis(|basis| {
+                    basis.policy_basis = EngramObservationPolicyBasis::AccountIfEligible {
+                        project_policy_epoch: epoch,
+                        policy,
+                        obligation_rule_set: "b".repeat(64),
+                    }
                 }),
                 "policy_basis needs a positive epoch",
             );
         }
-        refused(with_basis(|basis| basis.observed_interval.through = "2026-10-11T00:01:30Z".into()), "after the request was built");
         refused(
-            with_basis(|basis| basis.observed_interval = EngramObservationInterval { from: at(50), through: at(10) }),
+            with_basis(|basis| basis.observed_interval.through = "2026-10-11T00:01:30Z".into()),
+            "after the request was built",
+        );
+        refused(
+            with_basis(|basis| {
+                basis.observed_interval = EngramObservationInterval {
+                    from: at(50),
+                    through: at(10),
+                }
+            }),
             "from is after observed_interval.through",
         );
 
-        refused(with_change(|baseline, sighting| baseline.source_id = sighting.source_basis.source_id.clone()), "two different revisions");
-        refused(with_change(|baseline, _| {
-            baseline.source_id = None;
-            baseline.source_revision = "content-v1:saved-baseline".into();
-        }), "baseline needs one complete bounded source identity");
-        refused(with_change(|baseline, _| baseline.workspace_id = "another-workspace".into()), "one workspace throughout");
-        refused(with_change(|baseline, sighting| { baseline.observed_at = at(45); sighting.observed_at = at(40); }), "observed after its sighting");
-        refused(with_change(|baseline, _| baseline.observed_at = at(5)), "source_change.baseline lies outside");
-        refused(with_change(|_, sighting| sighting.observed_at = at(55)), "source_change.sighting lies outside");
+        refused(
+            with_change(|baseline, sighting| {
+                baseline.source_id = sighting.source_basis.source_id.clone()
+            }),
+            "two different revisions",
+        );
+        refused(
+            with_change(|baseline, _| {
+                baseline.source_id = None;
+                baseline.source_revision = "content-v1:saved-baseline".into();
+            }),
+            "baseline needs one complete bounded source identity",
+        );
+        refused(
+            with_change(|baseline, _| baseline.workspace_id = "another-workspace".into()),
+            "one workspace throughout",
+        );
+        refused(
+            with_change(|baseline, sighting| {
+                baseline.observed_at = at(45);
+                sighting.observed_at = at(40);
+            }),
+            "observed after its sighting",
+        );
+        refused(
+            with_change(|baseline, _| baseline.observed_at = at(5)),
+            "source_change.baseline lies outside",
+        );
+        refused(
+            with_change(|_, sighting| sighting.observed_at = at(55)),
+            "source_change.sighting lies outside",
+        );
         let mut long_revision = source("legacy");
         long_revision.source_id = None;
         long_revision.source_revision = "r".repeat(513);
         long_revision.source_root_generation = None;
         long_revision.source_root_state = None;
         refused(
-            turn(Some(EngramObservedSourceChange::AssumedMissingBaseline {
-                workspace_id: "workspace-unadmitted".into(),
-                sighting: EngramMeasuredSighting { source_basis: long_revision, observed_at: at(50) },
-            }), Vec::new()),
+            turn(
+                Some(EngramObservedSourceChange::AssumedMissingBaseline {
+                    workspace_id: "workspace-unadmitted".into(),
+                    sighting: EngramMeasuredSighting {
+                        source_basis: long_revision,
+                        observed_at: at(50),
+                    },
+                }),
+                Vec::new(),
+            ),
             "needs one complete bounded source_id",
         );
         // Escaped check metadata used to exceed the old 64 KiB frame. It now
         // fits the observation frame, and every check must survive intact.
-        let large_checks: Vec<_> = (0..16).map(|index| {
-            let mut item = check(&format!("large-{index}"));
-            item.host_evidence_ref = Some("\\".repeat(ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES));
-            item
-        }).collect();
+        let large_checks: Vec<_> = (0..16)
+            .map(|index| {
+                let mut item = check(&format!("large-{index}"));
+                item.host_evidence_ref =
+                    Some("\\".repeat(ENGRAM_OBSERVATION_MAX_EVIDENCE_REF_BYTES));
+                item
+            })
+            .collect();
         let accepted = turn(None, large_checks.clone()).unwrap();
-        let EngramControlRequest::ExecutionObserve { observation } = accepted else { unreachable!() };
-        let EngramInterTurnOccurrence::UnadmittedTurn { observed_checks, .. } = observation.occurrence
-            else { unreachable!() };
+        let EngramControlRequest::ExecutionObserve { observation } = accepted else {
+            unreachable!()
+        };
+        let EngramInterTurnOccurrence::UnadmittedTurn {
+            observed_checks, ..
+        } = observation.occurrence
+        else {
+            unreachable!()
+        };
         assert_eq!(observed_checks, large_checks);
 
         // Two individually admissible identities leave only the frame's
@@ -662,22 +1008,33 @@ mod unadmitted_observation_tests {
             "commit": "a".repeat(40), "tree": "b".repeat(40), "submodules": [],
             "changes": [{"path": "p", "status": "??", "origin": null,
                 "blob": "c".repeat(40), "mode": "100644"}],
-        })).unwrap();
+        }))
+        .unwrap();
         let overhead = serde_json::to_vec(&full).unwrap().len() - 1;
         full.changes[0].path = "p".repeat(ENGRAM_SOURCE_JSON_LIMIT - overhead);
-        assert_eq!(serde_json::to_vec(&full).unwrap().len(), ENGRAM_SOURCE_JSON_LIMIT);
+        assert_eq!(
+            serde_json::to_vec(&full).unwrap().len(),
+            ENGRAM_SOURCE_JSON_LIMIT
+        );
         let mut over_bound = change();
-        let EngramObservedSourceChange::ContentComparison { baseline, sighting, .. } = &mut over_bound
-            else { unreachable!() };
+        let EngramObservedSourceChange::ContentComparison {
+            baseline, sighting, ..
+        } = &mut over_bound
+        else {
+            unreachable!()
+        };
         baseline.source_revision.clear();
         baseline.source_id = Some(full.clone());
         full.changes[0].blob = Some("d".repeat(40));
         sighting.source_basis.source_revision.clear();
         sighting.source_basis.source_id = Some(full);
-        let metadata = large_checks.into_iter().map(|mut check| {
-            check.source_basis = None;
-            check
-        }).collect();
+        let metadata = large_checks
+            .into_iter()
+            .map(|mut check| {
+                check.source_basis = None;
+                check
+            })
+            .collect();
         refused(turn(Some(over_bound), metadata), "byte bound");
     }
 
@@ -690,46 +1047,149 @@ mod unadmitted_observation_tests {
             { "host_check_id": "check-1", "credit": "uncredited" },
         ]);
         let change_accounting = json!({ "kind": "source_change", "source_change": "d".repeat(32) });
-        assert!(decode(&with_change, receipt(&with_change, change_accounting.clone(), both.clone())).is_ok());
-        assert!(decode(&with_change, receipt(&with_change,
-            json!({ "kind": "repeat", "source_change": "f".repeat(32) }), both.clone())).is_ok());
-        assert!(decode(&with_change, receipt(&with_change,
-            json!({ "kind": "audit_only", "reason": "finished_run" }), both.clone())).is_ok());
+        assert!(
+            decode(
+                &with_change,
+                receipt(&with_change, change_accounting.clone(), both.clone())
+            )
+            .is_ok()
+        );
+        assert!(
+            decode(
+                &with_change,
+                receipt(
+                    &with_change,
+                    json!({ "kind": "repeat", "source_change": "f".repeat(32) }),
+                    both.clone()
+                )
+            )
+            .is_ok()
+        );
+        assert!(
+            decode(
+                &with_change,
+                receipt(
+                    &with_change,
+                    json!({ "kind": "audit_only", "reason": "finished_run" }),
+                    both.clone()
+                )
+            )
+            .is_ok()
+        );
 
         let unreported = turn(None, checks).unwrap();
         let no_change = json!({ "kind": "no_source_change" });
-        assert!(decode(&unreported, receipt(&unreported, no_change.clone(), both.clone())).is_ok());
-        assert!(decode(&unreported, receipt(&unreported,
-            json!({ "kind": "audit_only", "reason": "historical_binding" }), both.clone())).is_ok(),
-            "a terminal historical audit also settles no reported change");
-        let standalone = engram_observed_check_request(basis(), "turn-1".into(), check("check-3"), built_at()).unwrap();
-        assert!(decode(&standalone, receipt(&standalone, no_change.clone(),
-            json!([{ "host_check_id": "check-3", "credit": "uncredited" }]))).is_ok());
+        assert!(
+            decode(
+                &unreported,
+                receipt(&unreported, no_change.clone(), both.clone())
+            )
+            .is_ok()
+        );
+        assert!(
+            decode(
+                &unreported,
+                receipt(
+                    &unreported,
+                    json!({ "kind": "audit_only", "reason": "historical_binding" }),
+                    both.clone()
+                )
+            )
+            .is_ok(),
+            "a terminal historical audit also settles no reported change"
+        );
+        let standalone =
+            engram_observed_check_request(basis(), "turn-1".into(), check("check-3"), built_at())
+                .unwrap();
+        assert!(
+            decode(
+                &standalone,
+                receipt(
+                    &standalone,
+                    no_change.clone(),
+                    json!([{ "host_check_id": "check-3", "credit": "uncredited" }])
+                )
+            )
+            .is_ok()
+        );
 
         let refused = |request: &EngramControlRequest, value: Value, case: &str| {
             assert!(decode(request, value).is_err(), "accepted {case}");
         };
-        refused(&with_change, receipt(&with_change, change_accounting.clone(), json!([
-            { "host_check_id": "check-1", "credit": "credited" },
-            { "host_check_id": "check-2", "credit": "uncredited" },
-        ])), "a credited check");
-        refused(&with_change, receipt(&with_change, change_accounting.clone(),
-            json!([{ "host_check_id": "check-1", "credit": "uncredited" }])), "a missing check");
-        refused(&with_change, receipt(&with_change, change_accounting.clone(), json!([
-            { "host_check_id": "check-1", "credit": "uncredited" },
-            { "host_check_id": "check-2", "credit": "uncredited" },
-            { "host_check_id": "check-9", "credit": "uncredited" },
-        ])), "an extra check");
-        refused(&with_change, receipt(&with_change, change_accounting.clone(), json!([
-            { "host_check_id": "check-1", "credit": "uncredited", "verified": true },
-            { "host_check_id": "check-2", "credit": "uncredited" },
-        ])), "an unknown summary field");
-        refused(&with_change, receipt(&with_change,
-            json!({ "kind": "source_change", "source_change": "f".repeat(32) }), both.clone()), "a change naming another record");
-        refused(&with_change, receipt(&with_change, no_change.clone(), both.clone()), "no change for a reported change");
-        refused(&unreported, receipt(&unreported, change_accounting.clone(), both.clone()), "a change for no reported change");
-        refused(&unreported, receipt(&unreported,
-            json!({ "kind": "audit_only", "reason": "explicit_audit" }), both.clone()), "explicit audit");
+        refused(
+            &with_change,
+            receipt(
+                &with_change,
+                change_accounting.clone(),
+                json!([
+                    { "host_check_id": "check-1", "credit": "credited" },
+                    { "host_check_id": "check-2", "credit": "uncredited" },
+                ]),
+            ),
+            "a credited check",
+        );
+        refused(
+            &with_change,
+            receipt(
+                &with_change,
+                change_accounting.clone(),
+                json!([{ "host_check_id": "check-1", "credit": "uncredited" }]),
+            ),
+            "a missing check",
+        );
+        refused(
+            &with_change,
+            receipt(
+                &with_change,
+                change_accounting.clone(),
+                json!([
+                    { "host_check_id": "check-1", "credit": "uncredited" },
+                    { "host_check_id": "check-2", "credit": "uncredited" },
+                    { "host_check_id": "check-9", "credit": "uncredited" },
+                ]),
+            ),
+            "an extra check",
+        );
+        refused(
+            &with_change,
+            receipt(
+                &with_change,
+                change_accounting.clone(),
+                json!([
+                    { "host_check_id": "check-1", "credit": "uncredited", "verified": true },
+                    { "host_check_id": "check-2", "credit": "uncredited" },
+                ]),
+            ),
+            "an unknown summary field",
+        );
+        refused(
+            &with_change,
+            receipt(
+                &with_change,
+                json!({ "kind": "source_change", "source_change": "f".repeat(32) }),
+                both.clone(),
+            ),
+            "a change naming another record",
+        );
+        refused(
+            &with_change,
+            receipt(&with_change, no_change.clone(), both.clone()),
+            "no change for a reported change",
+        );
+        refused(
+            &unreported,
+            receipt(&unreported, change_accounting.clone(), both.clone()),
+            "a change for no reported change",
+        );
+        refused(
+            &unreported,
+            receipt(
+                &unreported,
+                json!({ "kind": "audit_only", "reason": "explicit_audit" }),
+                both.clone(),
+            ),
+            "explicit audit",
+        );
         let mut opened = receipt(&unreported, no_change.clone(), both.clone());
         opened["opened_obligations"] = json!(["e".repeat(32)]);
         refused(&unreported, opened, "obligations opened by no change");

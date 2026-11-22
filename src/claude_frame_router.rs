@@ -26,9 +26,11 @@
 // the result's finalization) were inline in the stdout reader loop of
 // `claude_spawn.rs`.
 
+use super::*;
+
 /// Where a frame sits in the runtime's conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeFrameScope {
+pub(crate) enum ClaudeFrameScope {
     /// The runtime's own frames: `init` and control traffic.
     Process,
     /// The top-level conversation.
@@ -39,7 +41,7 @@ enum ClaudeFrameScope {
 
 /// What the parser does with a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClaudeParserStep {
+pub(crate) enum ClaudeParserStep {
     /// Not fed: lifecycle bookkeeping, a subagent's result, or a late frame
     /// of an attempt that has ended.
     Skip,
@@ -66,7 +68,7 @@ enum ClaudeParserStep {
 /// router. The control transport is the runtime's, but each request's effects
 /// belong to the context it came from (`claude_frame_application.rs`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeControlOrigin {
+pub(crate) enum ClaudeControlOrigin {
     /// The top-level conversation: the turn open now, or the turn no prompt
     /// owns that a request outside every turn opens.
     Root,
@@ -79,7 +81,7 @@ enum ClaudeControlOrigin {
 
 /// A control frame's step, with its resolved origin.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeControlStep {
+pub(crate) enum ClaudeControlStep {
     /// A permission or question request, to be answered or queued.
     Request(ClaudeControlOrigin),
     /// A cancellation of an earlier request.
@@ -93,7 +95,7 @@ enum ClaudeControlStep {
 
 /// What a frame does to the replay prompt.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ClaudeReplayStep {
+pub(crate) enum ClaudeReplayStep {
     /// The replay prompt stays as it is.
     Retain,
     /// A barrier: the open host attempt may no longer be replayed.
@@ -105,40 +107,40 @@ enum ClaudeReplayStep {
 
 /// An automatic retry of the host attempt a transient error result ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeRetryPlan {
-    ticket: ClaudeRetryTicket,
-    delay: Duration,
-    status: u16,
+pub(crate) struct ClaudeRetryPlan {
+    pub(crate) ticket: ClaudeRetryTicket,
+    pub(crate) delay: Duration,
+    pub(crate) status: u16,
     /// The attempts made so far, the failed one included.
-    completed_attempts: u32,
+    pub(crate) completed_attempts: u32,
 }
 
 /// The decision for one frame, which the stdout reader applies.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ClaudeFramePlan {
-    scope: ClaudeFrameScope,
+pub(crate) struct ClaudeFramePlan {
+    pub(crate) scope: ClaudeFrameScope,
     /// What the frame did to the runtime's turns, for the session effects
     /// (`AppState::apply_claude_frame_ownership`).
-    ownership: ClaudeFrameOwnership,
-    parser: ClaudeParserStep,
-    replay: ClaudeReplayStep,
-    retry: Option<ClaudeRetryPlan>,
+    pub(crate) ownership: ClaudeFrameOwnership,
+    pub(crate) parser: ClaudeParserStep,
+    pub(crate) replay: ClaudeReplayStep,
+    pub(crate) retry: Option<ClaudeRetryPlan>,
     /// The turn a top-level `result` ended. `None` for every other frame, a
     /// retried result and a late duplicate.
-    terminal: Option<ClaudeResultOwner>,
+    pub(crate) terminal: Option<ClaudeResultOwner>,
     /// A control frame's request or cancellation, with its origin.
-    control: Option<ClaudeControlStep>,
+    pub(crate) control: Option<ClaudeControlStep>,
     /// The turn the frame's work belongs to, which its observations carry
     /// to the Engram sink (`claude_outstanding_work.rs`): the prompt attempt
     /// whose turn is open, for a top-level frame of it; nobody's otherwise (a
     /// turn no prompt owns, an unresolved turn, no turn, or any subagent's
     /// frame, whose work is credited to no grant). It is a candidate only:
     /// the sink checks it against the session's live turn and runtime.
-    origin: ClaudeWorkOrigin,
+    pub(crate) origin: ClaudeWorkOrigin,
 }
 
 impl ClaudeFramePlan {
-    fn new(
+    pub(crate) fn new(
         scope: ClaudeFrameScope,
         ownership: ClaudeFrameOwnership,
         parser: ClaudeParserStep,
@@ -224,18 +226,18 @@ fn claude_frame_is_bookkeeping(
 /// Decides, frame by frame, what each stdout frame of one Claude runtime may
 /// do (`ClaudeFramePlan`). It lives on the runtime's stdout reader; the turn
 /// ownership and the replay prompt are shared with the writer.
-struct ClaudeFrameRouter {
-    ownership: ClaudeTurnOwnership,
-    replay_prompt: ClaudeReplayPrompt,
-    session_id: String,
+pub(crate) struct ClaudeFrameRouter {
+    pub(crate) ownership: ClaudeTurnOwnership,
+    pub(crate) replay_prompt: ClaudeReplayPrompt,
+    pub(crate) session_id: String,
     /// The host attempt (its uuid) the root parser was opened for.
-    parser_attempt: Option<String>,
+    pub(crate) parser_attempt: Option<String>,
     /// A barrier frame arrived at top level while no turn was open and a
     /// written prompt waited; the next host attempt inherits it.
-    barrier_between_turns: bool,
+    pub(crate) barrier_between_turns: bool,
     /// The prompt (its replay generation) whose automatic retries so far are
     /// counted, and their count.
-    retries: Option<(String, u32)>,
+    pub(crate) retries: Option<(String, u32)>,
     /// The runtime reported its first `init`. A process's startup hooks come
     /// before it; a SessionStart hook frame after it (a compaction's, or one
     /// TermAl cannot place) is no startup bookkeeping. A later `init`, such
@@ -247,7 +249,7 @@ struct ClaudeFrameRouter {
 }
 
 impl ClaudeFrameRouter {
-    fn new(
+    pub(crate) fn new(
         ownership: ClaudeTurnOwnership,
         replay_prompt: ClaudeReplayPrompt,
         session_id: impl Into<String>,
@@ -266,7 +268,7 @@ impl ClaudeFrameRouter {
 
     /// The plan for `message`. `parser_replay_safe` says whether the root
     /// parser has seen no barrier since it opened for the current attempt.
-    fn route(&mut self, message: &Value, parser_replay_safe: bool) -> ClaudeFramePlan {
+    pub(crate) fn route(&mut self, message: &Value, parser_replay_safe: bool) -> ClaudeFramePlan {
         let frame_type = message.get("type").and_then(Value::as_str);
         let request_id = message.get("request_id").and_then(Value::as_str);
         match frame_type {
@@ -627,7 +629,7 @@ impl ClaudeFrameRouter {
 /// clears the subagents' turn-local state with it, but not their pending
 /// tool calls, whose results may arrive after the root turn ended
 /// (`clear_claude_subagent_turn_state`).
-fn apply_claude_parser_step(
+pub(crate) fn apply_claude_parser_step(
     step: ClaudeParserStep,
     message: &Value,
     session_id: &mut Option<String>,

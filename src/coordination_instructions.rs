@@ -1,7 +1,9 @@
 // Shared host coordination teaching, extracted from the Codex managed section.
 // Owns protocol text and local-root eligibility, not mailbox operations or wakes.
 // docs/features/agent-mailboxes.md is the prose contract mirrored here.
-const TERMAL_MAILBOX_GUIDANCE: &str = r#"TermAl root coordination; not for delegation children.
+
+use super::*;
+pub(crate) const TERMAL_MAILBOX_GUIDANCE: &str = r#"TermAl root coordination; not for delegation children.
 Read: termal_read_mailbox; omit afterSequence, save receipt. Reading never acknowledges.
 Process bodies in order; reply: termal_send_to_session, stable idempotencyKey; retry identical intent/key.
 Ack: termal_acknowledge_mailbox with mailboxId and unchanged receipt after processing the whole page, even after sending. Gap: re-read.
@@ -14,17 +16,19 @@ mailbox acknowledge --mailbox-id <id> --receipt <receipt> --json
 mailbox list is discovery only."#;
 
 // A separately bounded addition keeps the original receipt protocol unchanged.
-const TERMAL_MAILBOX_COVERAGE_GUIDANCE: &str = "ACK alone never suppresses a queued continuation. For standalone local mailboxes, the host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a standalone local receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it. For native relay and central-domain mailboxes, ACK the unchanged receipt without the flag and keep the owed continuation.";
+pub(crate) const TERMAL_MAILBOX_COVERAGE_GUIDANCE: &str = "ACK alone never suppresses a queued continuation. For standalone local mailboxes, the host may cover it with an exact read and receipt ACK in the same later active turn, through its boundary, when nothing is unread. Set noContinuation (CLI --no-continuation) on a standalone local receipt acknowledgement only when you have fully handled every message through that receipt, sent every reply they need, and owe no work in a later turn. Never set it when you promised a follow-up, are waiting for a delegation, evaluator or gate result that will not arrive as mail, or have not read the whole page. It covers only that mailbox and receipt boundary; a later message, including a reply you await, re-arms the wake. Numeric ACK cannot carry it. For native relay and central-domain mailboxes, ACK the unchanged receipt without the flag and keep the owed continuation.";
 
-const TERMAL_MAILBOX_WAKE_GUIDANCE: &str = "Routing-only domain mail is saved without waking its recipient unless a current explicit executor grant authorizes that wake. Automatic domain participation grants no executor wake. For new routine native mail, use the exact local native session ID or host:<host UUID>::<native session ID> from the session listing's name, where the direct authenticated pair and current native authority exist. A canonical domain ID in the listing is not a native-wake promise; otherwise coordinate an existing authorized relay channel. Never switch routes or mint a new intent to replay unresolved mail: retries keep the original message, key and route. A later grant does not change an earlier delivery decision. durableButNotWoken alone does not establish a missed wake; read the receipt's exact messageId with termal_read_mailbox_message for current status.";
+pub(crate) const TERMAL_MAILBOX_WAKE_GUIDANCE: &str = "Routing-only domain mail is saved without waking its recipient unless a current explicit executor grant authorizes that wake. Automatic domain participation grants no executor wake. For new routine native mail, use the exact local native session ID or host:<host UUID>::<native session ID> from the session listing's name, where the direct authenticated pair and current native authority exist. A canonical domain ID in the listing is not a native-wake promise; otherwise coordinate an existing authorized relay channel. Never switch routes or mint a new intent to replay unresolved mail: retries keep the original message, key and route. A later grant does not change an earlier delivery decision. durableButNotWoken alone does not establish a missed wake; read the receipt's exact messageId with termal_read_mailbox_message for current status.";
 
-fn render_termal_host_guidance() -> String {
-    format!("TermAl host guidance\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}\n{TERMAL_MAILBOX_WAKE_GUIDANCE}")
+pub(crate) fn render_termal_host_guidance() -> String {
+    format!(
+        "TermAl host guidance\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}\n{TERMAL_MAILBOX_WAKE_GUIDANCE}"
+    )
 }
 
 /// Check live ownership at the injection boundary, not a cached agent label.
 /// Shared Codex homes also carry this text, whose first line excludes children.
-fn termal_root_mailbox_guidance(state: &AppState, session_id: &str) -> Option<String> {
+pub(crate) fn termal_root_mailbox_guidance(state: &AppState, session_id: &str) -> Option<String> {
     let inner = state.inner.lock().expect("state mutex poisoned");
     let index = inner.find_session_index(session_id)?;
     let record = &inner.sessions[index];

@@ -7,8 +7,10 @@
 // subsystem lives in one place. The crate still compiles as one flat
 // module, so no visibility changes are required.
 
+use super::*;
+
 /// Runs a terminal command.
-async fn run_terminal_command(
+pub(crate) async fn run_terminal_command(
     State(state): State<AppState>,
     Json(request): Json<TerminalCommandRequest>,
 ) -> Result<Json<TerminalCommandResponse>, ApiError> {
@@ -150,7 +152,7 @@ async fn run_terminal_command(
 }
 
 /// Streams a terminal command, emitting stdout/stderr chunks before the final result.
-async fn run_terminal_command_stream(
+pub(crate) async fn run_terminal_command_stream(
     State(state): State<AppState>,
     Json(request): Json<TerminalCommandRequest>,
 ) -> Result<Sse<impl futures_core::Stream<Item = std::result::Result<Event, Infallible>>>, ApiError>
@@ -301,7 +303,7 @@ async fn run_terminal_command_stream(
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
-fn spawn_terminal_stream_worker<F>(event_tx: TerminalCommandStreamSender, future: F)
+pub(crate) fn spawn_terminal_stream_worker<F>(event_tx: TerminalCommandStreamSender, future: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
@@ -330,7 +332,7 @@ where
     });
 }
 
-async fn send_terminal_stream_result(
+pub(crate) async fn send_terminal_stream_result(
     event_tx: &TerminalCommandStreamSender,
     result: Result<TerminalCommandResponse, ApiError>,
 ) {
@@ -345,7 +347,7 @@ async fn send_terminal_stream_result(
     let _ = event_tx.send(event).await;
 }
 
-fn terminal_command_sse_event(event: TerminalCommandStreamEvent) -> Event {
+pub(crate) fn terminal_command_sse_event(event: TerminalCommandStreamEvent) -> Event {
     match event {
         TerminalCommandStreamEvent::Output { stream, text } => {
             match encode_sse_json("output", &TerminalOutputStreamPayload { stream, text }) {
@@ -357,17 +359,21 @@ fn terminal_command_sse_event(event: TerminalCommandStreamEvent) -> Event {
                 ),
             }
         }
-        TerminalCommandStreamEvent::Complete(response) => match encode_sse_json("complete", &response) {
-            Ok(data) => Event::default().event("complete").data(data),
-            Err(OutputEncodingError::Limit { .. }) => terminal_output_limit_error_event(),
-            Err(err) => terminal_error_sse_event(
-                format!("failed to serialize terminal command response: {err}"),
-                StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
-            ),
-        },
-        TerminalCommandStreamEvent::Error { error, status, kind } => {
-            terminal_api_error_sse_event(error, status, kind)
+        TerminalCommandStreamEvent::Complete(response) => {
+            match encode_sse_json("complete", &response) {
+                Ok(data) => Event::default().event("complete").data(data),
+                Err(OutputEncodingError::Limit { .. }) => terminal_output_limit_error_event(),
+                Err(err) => terminal_error_sse_event(
+                    format!("failed to serialize terminal command response: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR.as_u16(),
+                ),
+            }
         }
+        TerminalCommandStreamEvent::Error {
+            error,
+            status,
+            kind,
+        } => terminal_api_error_sse_event(error, status, kind),
     }
 }
 
@@ -414,7 +420,7 @@ fn validate_terminal_command(command: &str) -> Result<String, ApiError> {
     Ok(command.to_owned())
 }
 
-fn validate_terminal_workdir(workdir: &str) -> Result<String, ApiError> {
+pub(crate) fn validate_terminal_workdir(workdir: &str) -> Result<String, ApiError> {
     let workdir = workdir.trim();
     if workdir.is_empty() {
         return Err(ApiError::bad_request("terminal workdir cannot be empty"));
@@ -446,7 +452,7 @@ fn validate_terminal_workdir(workdir: &str) -> Result<String, ApiError> {
 /// anything on their local machine. Prefixing the message with the
 /// remote's display name disambiguates the two cases without changing the
 /// wire contract (status code and `{ error: string }` shape).
-fn annotate_remote_terminal_429(err: ApiError, remote_name: &str) -> ApiError {
+pub(crate) fn annotate_remote_terminal_429(err: ApiError, remote_name: &str) -> ApiError {
     if err.status != StatusCode::TOO_MANY_REQUESTS {
         return err;
     }
@@ -459,7 +465,7 @@ fn annotate_remote_terminal_429(err: ApiError, remote_name: &str) -> ApiError {
 }
 
 /// Runs a terminal shell command in the requested workdir.
-fn run_terminal_shell_command(
+pub(crate) fn run_terminal_shell_command(
     command: &str,
     workdir: &FsPath,
 ) -> Result<TerminalCommandResponse, ApiError> {
@@ -486,7 +492,7 @@ fn run_terminal_shell_command_streaming(
 }
 
 #[cfg(test)]
-fn run_terminal_shell_command_with_timeout(
+pub(crate) fn run_terminal_shell_command_with_timeout(
     command: &str,
     workdir: &FsPath,
     timeout: Duration,
@@ -704,7 +710,7 @@ fn run_terminal_shell_command_with_timeout_and_stream(
 
 /// What a signal sent before the reap leaves to confirm after it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TerminalGroupSignal {
+pub(crate) enum TerminalGroupSignal {
     /// The tree was signalled, or was already gone.
     Delivered,
     /// The group refused the signal because all its members had exited
@@ -714,30 +720,30 @@ enum TerminalGroupSignal {
 }
 
 #[cfg(windows)]
-struct TerminalProcessTree {
-    job: TerminalJobObject,
+pub(crate) struct TerminalProcessTree {
+    pub(crate) job: TerminalJobObject,
 }
 
 #[cfg(windows)]
-struct TerminalJobObject {
-    handle: std::os::windows::io::OwnedHandle,
+pub(crate) struct TerminalJobObject {
+    pub(crate) handle: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(windows)]
 impl TerminalProcessTree {
-    fn attach(process: &Arc<SharedChild>) -> Result<Self> {
+    pub(crate) fn attach(process: &Arc<SharedChild>) -> Result<Self> {
         let job = create_terminal_job_object().context("failed to create terminal job object")?;
         assign_terminal_process_to_job(&job, process)
             .context("failed to assign terminal process to job object")?;
         Ok(Self { job })
     }
 
-    fn kill(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    pub(crate) fn kill(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
         terminate_terminal_job(&self.job, label)?;
         kill_child_process(process, label)
     }
 
-    fn kill_before_reap(
+    pub(crate) fn kill_before_reap(
         &self,
         process: &Arc<SharedChild>,
         label: &str,
@@ -746,18 +752,22 @@ impl TerminalProcessTree {
         Ok(TerminalGroupSignal::Delivered)
     }
 
-    fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
+    pub(crate) fn resume_after_attach(&self, process: &Arc<SharedChild>) -> Result<()> {
         resume_terminal_process_threads(process.id())
             .context("failed to resume suspended terminal process")
     }
 
-    fn cleanup_after_shell_exit(&self, _process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    pub(crate) fn cleanup_after_shell_exit(
+        &self,
+        _process: &Arc<SharedChild>,
+        label: &str,
+    ) -> Result<()> {
         terminate_terminal_job(&self.job, label)
     }
 }
 
 #[cfg(windows)]
-fn terminate_terminal_job(job: &TerminalJobObject, label: &str) -> Result<()> {
+pub(crate) fn terminate_terminal_job(job: &TerminalJobObject, label: &str) -> Result<()> {
     use std::os::windows::io::AsRawHandle;
 
     unsafe {
@@ -880,15 +890,15 @@ fn resume_terminal_process_threads(process_id: u32) -> io::Result<()> {
 }
 
 #[cfg(not(windows))]
-struct TerminalProcessTree;
+pub(crate) struct TerminalProcessTree;
 
 #[cfg(not(windows))]
 impl TerminalProcessTree {
-    fn attach(_process: &Arc<SharedChild>) -> Result<Self> {
+    pub(crate) fn attach(_process: &Arc<SharedChild>) -> Result<Self> {
         Ok(Self)
     }
 
-    fn kill(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
+    pub(crate) fn kill(&self, process: &Arc<SharedChild>, label: &str) -> Result<()> {
         // This is called on the timeout path, when
         // `wait_for_shared_child_exit_timeout` returned `None`. In the common
         // case the shell is genuinely still alive and `process.id()` maps to
@@ -926,7 +936,7 @@ impl TerminalProcessTree {
         kill_child_process(process, label)
     }
 
-    fn kill_before_reap(
+    pub(crate) fn kill_before_reap(
         &self,
         process: &Arc<SharedChild>,
         label: &str,
@@ -964,11 +974,15 @@ impl TerminalProcessTree {
         Ok(signal)
     }
 
-    fn resume_after_attach(&self, _process: &Arc<SharedChild>) -> Result<()> {
+    pub(crate) fn resume_after_attach(&self, _process: &Arc<SharedChild>) -> Result<()> {
         Ok(())
     }
 
-    fn cleanup_after_shell_exit(&self, _process: &Arc<SharedChild>, _label: &str) -> Result<()> {
+    pub(crate) fn cleanup_after_shell_exit(
+        &self,
+        _process: &Arc<SharedChild>,
+        _label: &str,
+    ) -> Result<()> {
         // Intentionally a no-op on Unix. See the terminal-hardening preamble
         // in `docs/bugs.md` for the full rationale.
         //
@@ -1051,7 +1065,7 @@ fn terminal_leader_exit_observed(process: &Arc<SharedChild>) -> bool {
 /// gone now that the leader is reaped. The group is only observed, never
 /// signalled: its numeric id may already belong to another group.
 #[cfg(not(windows))]
-fn terminal_process_group_absent_after_reap(pgid: libc::pid_t) -> bool {
+pub(crate) fn terminal_process_group_absent_after_reap(pgid: libc::pid_t) -> bool {
     let deadline = std::time::Instant::now() + TERMINAL_GROUP_ABSENCE_PROBE;
     loop {
         if unsafe { libc::kill(-pgid, 0) } == -1
@@ -1067,12 +1081,12 @@ fn terminal_process_group_absent_after_reap(pgid: libc::pid_t) -> bool {
 }
 
 #[cfg(not(windows))]
-fn terminal_process_group_id(process_id: u32, label: &str) -> Result<libc::pid_t> {
+pub(crate) fn terminal_process_group_id(process_id: u32, label: &str) -> Result<libc::pid_t> {
     libc::pid_t::try_from(process_id)
         .map_err(|_| anyhow!("{label} process id {process_id} cannot fit in pid_t"))
 }
 
-trait TerminalWait: Send + Sync + 'static {
+pub(crate) trait TerminalWait: Send + Sync + 'static {
     fn terminal_wait(&self) -> io::Result<std::process::ExitStatus>;
     fn terminal_timeout(
         process: &Arc<Self>,
@@ -1112,7 +1126,7 @@ fn terminal_wait_timeout<P: TerminalWait>(
 ) -> Result<Option<std::process::ExitStatus>> {
     P::terminal_timeout(process, timeout, label)
 }
-fn wait_for_terminal_command_status<P: TerminalWait>(
+pub(crate) fn wait_for_terminal_command_status<P: TerminalWait>(
     process: &Arc<P>,
     timeout: Option<Duration>,
     cancellation: Option<&AtomicBool>,
@@ -1163,14 +1177,14 @@ fn wait_for_terminal_command_status<P: TerminalWait>(
 }
 
 #[cfg(windows)]
-fn configure_terminal_process_tree(command: &mut Command) {
+pub(crate) fn configure_terminal_process_tree(command: &mut Command) {
     use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
 
     command.creation_flags(CREATE_SUSPENDED);
 }
 
 #[cfg(not(windows))]
-fn configure_terminal_process_tree(command: &mut Command) {
+pub(crate) fn configure_terminal_process_tree(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
     unsafe {
@@ -1184,7 +1198,7 @@ fn configure_terminal_process_tree(command: &mut Command) {
 }
 
 #[cfg(windows)]
-fn create_terminal_job_object() -> io::Result<TerminalJobObject> {
+pub(crate) fn create_terminal_job_object() -> io::Result<TerminalJobObject> {
     use std::mem::size_of;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::ptr;
@@ -1280,8 +1294,8 @@ fn assign_terminal_process_to_job(
 #[cfg(windows)]
 type TerminalShellCommand = windows_launch::LaunchSpec;
 #[cfg(not(windows))]
-type TerminalShellCommand = Command;
-fn build_terminal_shell_command(command: &str) -> (&'static str, TerminalShellCommand) {
+pub(crate) type TerminalShellCommand = Command;
+pub(crate) fn build_terminal_shell_command(command: &str) -> (&'static str, TerminalShellCommand) {
     #[cfg(windows)]
     {
         let mut shell = TerminalShellCommand::new("powershell.exe");
@@ -1331,13 +1345,13 @@ fn build_terminal_shell_command(command: &str) -> (&'static str, TerminalShellCo
 /// pipe write end). Without a shared buffer, the main thread would have
 /// to drop the `JoinHandle` and lose the entire accumulated prefix.
 #[derive(Default)]
-struct TerminalOutputBuffer {
-    bytes: Vec<u8>,
-    emitted_bytes: usize,
-    truncated: bool,
+pub(crate) struct TerminalOutputBuffer {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) emitted_bytes: usize,
+    pub(crate) truncated: bool,
 }
 
-type SharedTerminalOutputBuffer = Arc<Mutex<TerminalOutputBuffer>>;
+pub(crate) type SharedTerminalOutputBuffer = Arc<Mutex<TerminalOutputBuffer>>;
 
 #[derive(Clone)]
 struct TerminalOutputStreamer {
@@ -1372,11 +1386,13 @@ impl TerminalOutputStreamer {
     }
 }
 
-fn new_terminal_output_buffer() -> SharedTerminalOutputBuffer {
+pub(crate) fn new_terminal_output_buffer() -> SharedTerminalOutputBuffer {
     Arc::new(Mutex::new(TerminalOutputBuffer::default()))
 }
 
-fn snapshot_terminal_output_buffer(buffer: &SharedTerminalOutputBuffer) -> (String, bool) {
+pub(crate) fn snapshot_terminal_output_buffer(
+    buffer: &SharedTerminalOutputBuffer,
+) -> (String, bool) {
     let guard = buffer
         .lock()
         .expect("terminal output buffer mutex poisoned");
@@ -1387,7 +1403,7 @@ fn snapshot_terminal_output_buffer(buffer: &SharedTerminalOutputBuffer) -> (Stri
 }
 
 #[cfg(test)]
-fn read_capped_terminal_output_into(
+pub(crate) fn read_capped_terminal_output_into(
     reader: impl std::io::Read,
     buffer: &SharedTerminalOutputBuffer,
 ) -> io::Result<()> {
@@ -1447,7 +1463,7 @@ fn read_capped_terminal_output_into_with_stream(
     Ok(())
 }
 
-fn terminal_output_delta_locked(
+pub(crate) fn terminal_output_delta_locked(
     buffer: &mut TerminalOutputBuffer,
     flush_incomplete_utf8: bool,
 ) -> Option<String> {
@@ -1462,7 +1478,10 @@ fn terminal_output_delta_locked(
     Some(chunk)
 }
 
-fn terminal_streamable_utf8_prefix_len(bytes: &[u8], flush_incomplete_utf8: bool) -> usize {
+pub(crate) fn terminal_streamable_utf8_prefix_len(
+    bytes: &[u8],
+    flush_incomplete_utf8: bool,
+) -> usize {
     match std::str::from_utf8(bytes) {
         Ok(_) => bytes.len(),
         Err(err) if err.error_len().is_none() && !flush_incomplete_utf8 => err.valid_up_to(),
@@ -1475,7 +1494,9 @@ fn terminal_streamable_utf8_prefix_len(bytes: &[u8], flush_incomplete_utf8: bool
 /// owns its own buffer; production call sites use the shared-buffer form
 /// directly so they can recover the prefix on a reader-join timeout.
 #[cfg(test)]
-fn read_capped_terminal_output(reader: impl std::io::Read) -> io::Result<(String, bool)> {
+pub(crate) fn read_capped_terminal_output(
+    reader: impl std::io::Read,
+) -> io::Result<(String, bool)> {
     let buffer = new_terminal_output_buffer();
     read_capped_terminal_output_into_with_stream(reader, &buffer, None)?;
     Ok(snapshot_terminal_output_buffer(&buffer))
@@ -1495,7 +1516,7 @@ fn read_capped_terminal_output(reader: impl std::io::Read) -> io::Result<(String
 /// `()` on exit — no polling tick latency. The previous design polled
 /// `handle.is_finished()` with a 10ms sleep, which added ~10ms of P50
 /// latency to every local terminal command.
-fn join_terminal_output_reader(
+pub(crate) fn join_terminal_output_reader(
     handle: std::thread::JoinHandle<io::Result<()>>,
     done_rx: std::sync::mpsc::Receiver<()>,
     buffer: SharedTerminalOutputBuffer,

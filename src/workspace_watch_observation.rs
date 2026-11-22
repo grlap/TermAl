@@ -2,21 +2,21 @@
 // These clocks describe receipt and processing, never the time of the write.
 // They do not authorize a source-event exemption or identify an OS writer.
 #[derive(Clone, Copy)]
-struct WorkspaceWatchObservation {
-    observed: u64,
-    received_at: std::time::Instant,
-    observed_at: chrono::DateTime<chrono::Utc>,
-    kind: notify::EventKind,
-    tracker: Option<usize>,
-    pid: Option<u32>,
-    rescan: bool,
-    info_present: bool,
+pub(crate) struct WorkspaceWatchObservation {
+    pub(crate) observed: u64,
+    pub(crate) received_at: std::time::Instant,
+    pub(crate) observed_at: chrono::DateTime<chrono::Utc>,
+    pub(crate) kind: notify::EventKind,
+    pub(crate) tracker: Option<usize>,
+    pub(crate) pid: Option<u32>,
+    pub(crate) rescan: bool,
+    pub(crate) info_present: bool,
     source_present: bool,
     path_count: usize,
 }
 
 impl WorkspaceWatchObservation {
-    fn capture(event: &notify::Event) -> Self {
+    pub(crate) fn capture(event: &notify::Event) -> Self {
         // Info/source are backend-supplied strings. Retain their presence,
         // not their contents (which can contain paths or private details).
         Self {
@@ -33,7 +33,7 @@ impl WorkspaceWatchObservation {
         }
     }
 
-    fn processing(&self, processed: u64, started_at: std::time::Instant) -> String {
+    pub(crate) fn processing(&self, processed: u64, started_at: std::time::Instant) -> String {
         let tracker = self.tracker.map(|id| id.to_string());
         let pid = self.pid.map(|id| id.to_string());
         format!(
@@ -59,14 +59,14 @@ impl WorkspaceWatchObservation {
 }
 
 #[cfg(test)]
-fn workspace_watch_unknown_observation() -> String {
+pub(crate) fn workspace_watch_unknown_observation() -> String {
     format!(
         "raw_kind=unknown observed=unknown writer_pid=unknown processed={} queue_us=unknown",
         engram_interference_tick(),
     )
 }
 
-const WORKSPACE_WATCH_PROVENANCE_LIMIT: usize = 1400;
+pub(crate) const WORKSPACE_WATCH_PROVENANCE_LIMIT: usize = 1400;
 
 #[cfg(test)]
 thread_local! {
@@ -75,12 +75,12 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn take_workspace_watch_diagnostics() -> Vec<String> {
+pub(crate) fn take_workspace_watch_diagnostics() -> Vec<String> {
     TEST_WORKSPACE_WATCH_DIAGNOSTICS.with(|lines| lines.borrow_mut().drain(..).collect())
 }
 
 impl AppState {
-    fn process_workspace_dirty_batch(&self, batch: Vec<(PathBuf, WorkspaceDirtyFact)>) -> Vec<WorkspaceFileChangeEvent> {
+    pub(crate) fn process_workspace_dirty_batch(&self, batch: Vec<(PathBuf, WorkspaceDirtyFact)>) -> Vec<WorkspaceFileChangeEvent> {
         if batch.is_empty() { return Vec::new(); }
         let roots = collect_workspace_file_watch_scopes(self).into_iter()
             .map(|scope| scope.root_path).collect::<Vec<_>>();
@@ -123,7 +123,7 @@ impl AppState {
         publication
     }
 
-    fn publish_workspace_watch_diagnostics(&self, diagnostics: Vec<String>) {
+    pub(crate) fn publish_workspace_watch_diagnostics(&self, diagnostics: Vec<String>) {
         #[cfg(test)]
         assert!(self.inner.is_not_held_by_current_thread_for_test());
         for diagnostic in diagnostics {
@@ -146,7 +146,7 @@ impl AppState {
     // (`EngramHost::watcher_arrival_now`); the Engram fence orders it against
     // a check's launch. The observation stays diagnostic only.
     #[cfg(test)]
-    fn process_workspace_watch_event(
+    pub(crate) fn process_workspace_watch_event(
         &self,
         event: &notify::Event,
         observation: &WorkspaceWatchObservation,

@@ -7,27 +7,29 @@
 // codex_delegation_release.rs owns archive execution; runtime startup,
 // unarchive RPC execution, and ordinary turn lifecycle remain elsewhere.
 
-struct FollowupAdmissionReservation {
-    reservation_id: Uuid,
-    host_acceptance_attempt: bool,
-    last_user_prompt_id: Option<String>,
-    canceled: bool,
-    admitted: Option<(u64, DelegationRecord)>,
-    failure: Option<DetachedDelegationChildRuntime>,
-    review_custody: Option<ReviewAttemptSnapshot>,
-    review_capture_reservation: Option<String>,
-    review_custody_required: bool,
+use super::*;
+
+pub(crate) struct FollowupAdmissionReservation {
+    pub(crate) reservation_id: Uuid,
+    pub(crate) host_acceptance_attempt: bool,
+    pub(crate) last_user_prompt_id: Option<String>,
+    pub(crate) canceled: bool,
+    pub(crate) admitted: Option<(u64, DelegationRecord)>,
+    pub(crate) failure: Option<DetachedDelegationChildRuntime>,
+    pub(crate) review_custody: Option<ReviewAttemptSnapshot>,
+    pub(crate) review_capture_reservation: Option<String>,
+    pub(crate) review_custody_required: bool,
 }
 
-struct FollowupReviewRecut {
-    reservation_id: Uuid,
-    previous: DelegationRecord,
-    custody: ReviewAttemptSnapshot,
+pub(crate) struct FollowupReviewRecut {
+    pub(crate) reservation_id: Uuid,
+    pub(crate) previous: DelegationRecord,
+    pub(crate) custody: ReviewAttemptSnapshot,
     capture_reservation: String,
 }
 
 impl FollowupReviewRecut {
-    fn still_owned(&self, inner: &StateInner) -> bool {
+    pub(crate) fn still_owned(&self, inner: &StateInner) -> bool {
         inner
             .delegation_followup_admissions
             .get(&self.previous.id)
@@ -51,7 +53,7 @@ impl FollowupReviewRecut {
     }
 }
 
-fn codex_followup_may_restore_record(record: &SessionRecord) -> bool {
+pub(crate) fn codex_followup_may_restore_record(record: &SessionRecord) -> bool {
     record_has_archived_codex_thread(record)
         || record
             .codex_delegation_release
@@ -60,9 +62,9 @@ fn codex_followup_may_restore_record(record: &SessionRecord) -> bool {
 }
 
 #[derive(Debug)]
-struct QueuedFollowupStartFailure {
-    delegation_id: String,
-    prompt_id: String,
+pub(crate) struct QueuedFollowupStartFailure {
+    pub(crate) delegation_id: String,
+    pub(crate) prompt_id: String,
 }
 
 impl std::fmt::Display for QueuedFollowupStartFailure {
@@ -74,7 +76,7 @@ impl std::error::Error for QueuedFollowupStartFailure {}
 
 // Tag failures at the locked promotion boundary, not before off-lock Engram
 // work. Only this exact persisted first-prompt identity may be settled later.
-fn annotate_queued_followup_start_failure(
+pub(crate) fn annotate_queued_followup_start_failure(
     inner: &StateInner,
     child: usize,
     error: anyhow::Error,
@@ -102,7 +104,7 @@ fn annotate_queued_followup_start_failure(
 }
 
 impl FollowupAdmissionReservation {
-    fn new(last_user_prompt_id: Option<String>) -> Self {
+    pub(crate) fn new(last_user_prompt_id: Option<String>) -> Self {
         Self {
             reservation_id: Uuid::new_v4(),
             host_acceptance_attempt: false,
@@ -118,7 +120,7 @@ impl FollowupAdmissionReservation {
 }
 
 impl AppState {
-    fn capture_followup_review_recut(
+    pub(crate) fn capture_followup_review_recut(
         &self,
         previous: Option<&DelegationRecord>,
     ) -> Result<Option<FollowupReviewRecut>, ApiError> {
@@ -153,7 +155,7 @@ impl AppState {
         Ok(Some(recut))
     }
 
-    fn refresh_followup_review_custody(
+    pub(crate) fn refresh_followup_review_custody(
         &self,
         recut: Option<&FollowupReviewRecut>,
     ) -> Result<(), ApiError> {
@@ -208,7 +210,7 @@ impl AppState {
         Ok(())
     }
 
-    fn validate_followup_review_custody_locked(
+    pub(crate) fn validate_followup_review_custody_locked(
         &self,
         inner: &StateInner,
         previous: &DelegationRecord,
@@ -234,7 +236,7 @@ impl AppState {
         ApiError::internal(format!("{error:#}"))
     }
 
-    fn finish_queued_followup_start_error(&self, error: anyhow::Error) -> ApiError {
+    pub(crate) fn finish_queued_followup_start_error(&self, error: anyhow::Error) -> ApiError {
         if let Some(failure) = error.downcast_ref::<QueuedFollowupStartFailure>() {
             if let Err(cleanup) =
                 self.settle_queued_followup_start_failure(failure, &format!("{error:#}"))
@@ -250,7 +252,7 @@ impl AppState {
     // Wait consumption and the parent's queued wake are one transaction. No
     // runtime work happens here, so restoring these records under the same
     // lock safely leaves the wait available for a later successful refresh.
-    fn commit_followup_wait_refresh_locked(
+    pub(crate) fn commit_followup_wait_refresh_locked(
         &self,
         inner: &mut StateInner,
         delegation_id: Option<&str>,
@@ -308,7 +310,7 @@ impl AppState {
         }
     }
 
-    fn settle_queued_followup_start_failure(
+    pub(crate) fn settle_queued_followup_start_failure(
         &self,
         failure: &QueuedFollowupStartFailure,
         detail: &str,
@@ -375,7 +377,7 @@ impl AppState {
     /// runtime-spawn errors outside re-arm, and publish its delta with this
     /// exact commit revision before releasing the state lock.
     #[cfg(test)]
-    fn commit_followup_prompt_locked(
+    pub(crate) fn commit_followup_prompt_locked(
         &self,
         inner: &mut StateInner,
         previous: Option<&DelegationRecord>,
@@ -383,7 +385,10 @@ impl AppState {
         full_snapshot: bool,
     ) -> Result<u64> {
         self.commit_followup_prompt_locked_for_session(
-            inner, previous, prompt_id, full_snapshot,
+            inner,
+            previous,
+            prompt_id,
+            full_snapshot,
             previous.map(|row| row.child_session_id.as_str()),
         )
     }
@@ -391,7 +396,7 @@ impl AppState {
     // Keep the existing follow-up custody and error rollback owner. Ordinary
     // dispatch supplies its session too; callers with a separate exact fence
     // keep the existing interface above.
-    fn commit_followup_prompt_locked_for_session(
+    pub(crate) fn commit_followup_prompt_locked_for_session(
         &self,
         inner: &mut StateInner,
         previous: Option<&DelegationRecord>,
@@ -451,7 +456,8 @@ impl AppState {
             self.commit_persisted_delta_locked_with_outcome(inner)
         } else {
             self.bump_revision_and_persist_locked_with_outcome(inner)
-        }.and_then(|(revision, outcome)| {
+        }
+        .and_then(|(revision, outcome)| {
             if let Some(session_id) = session_id {
                 outcome.require_session_saved(session_id)?;
             }
@@ -548,7 +554,7 @@ impl AppState {
 
     /// Removing a rejected reservation makes its retained terminal result
     /// eligible for waits again. Dispatch resumes only after releasing the lock.
-    fn release_delegation_followup_reservation(
+    pub(crate) fn release_delegation_followup_reservation(
         &self,
         delegation_id: &str,
         reservation_id: Uuid,
@@ -610,12 +616,12 @@ impl AppState {
 /// Must never be dropped while holding the state mutex: release/Drop locks it.
 /// Panic unwinding deliberately leaves the reservation fenced until restart;
 /// cleanup must not risk a second panic or admit work through poisoned state.
-struct DelegationFollowupAdmission {
-    state: AppState,
-    reservation_id: Uuid,
-    previous: DelegationRecord,
-    restore_candidate: bool,
-    released: bool,
+pub(crate) struct DelegationFollowupAdmission {
+    pub(crate) state: AppState,
+    pub(crate) reservation_id: Uuid,
+    pub(crate) previous: DelegationRecord,
+    pub(crate) restore_candidate: bool,
+    pub(crate) released: bool,
 }
 
 impl Drop for DelegationFollowupAdmission {
@@ -633,7 +639,7 @@ impl Drop for DelegationFollowupAdmission {
 // another User or Human prompt remains, it owns the same not-yet-started attempt.
 // Automatic mailbox/orchestrator wakes cannot replace an explicit follow-up;
 // otherwise settle explicitly rather than deriving a result from old output.
-fn reconcile_removed_followup_prompt_locked(
+pub(crate) fn reconcile_removed_followup_prompt_locked(
     inner: &mut StateInner,
     child_id: &str,
     removed_id: &str,
@@ -657,10 +663,12 @@ fn reconcile_removed_followup_prompt_locked(
     let successor = inner
         .find_session_index(child_id)
         .and_then(|child| {
-            inner.sessions[child]
-                .queued_prompts
-                .iter()
-                .find(|queued| matches!(queued.source, QueuedPromptSource::User | QueuedPromptSource::Human))
+            inner.sessions[child].queued_prompts.iter().find(|queued| {
+                matches!(
+                    queued.source,
+                    QueuedPromptSource::User | QueuedPromptSource::Human
+                )
+            })
         })
         .map(|queued| queued.pending_prompt.id.clone());
     if successor.is_some() {
@@ -681,7 +689,7 @@ fn reconcile_removed_followup_prompt_locked(
     }
 }
 
-fn delegation_followup_awaits_first_turn(
+pub(crate) fn delegation_followup_awaits_first_turn(
     inner: &StateInner,
     delegation: &DelegationRecord,
 ) -> bool {
@@ -706,7 +714,7 @@ fn delegation_followup_awaits_first_turn(
         })
 }
 
-fn reserved_followup_is_admissible_locked(
+pub(crate) fn reserved_followup_is_admissible_locked(
     inner: &StateInner,
     session_id: &str,
     previous: Option<&DelegationRecord>,
@@ -723,7 +731,10 @@ fn reserved_followup_is_admissible_locked(
     })
 }
 
-fn delegation_last_user_prompt_id_locked(inner: &StateInner, session_id: &str) -> Option<String> {
+pub(crate) fn delegation_last_user_prompt_id_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> Option<String> {
     inner.find_session_index(session_id).and_then(|index| {
         inner.sessions[index]
             .session
@@ -745,7 +756,7 @@ impl DelegationFollowupAdmission {
     // The admitted snapshot, before delivery; responses read the delegation
     // after it instead (`delegation_status_after_followup_turn`).
     #[cfg(test)]
-    fn admitted_response(&self) -> Option<DelegationStatusResponse> {
+    pub(crate) fn admitted_response(&self) -> Option<DelegationStatusResponse> {
         let inner = self.state.inner.lock().expect("state mutex poisoned");
         let (revision, delegation) = inner
             .delegation_followup_admissions
@@ -761,7 +772,7 @@ impl DelegationFollowupAdmission {
         })
     }
 
-    fn fail_queued_start(&self, detail: &str) {
+    pub(crate) fn fail_queued_start(&self, detail: &str) {
         let mut inner = self.state.inner.lock().expect("state mutex poisoned");
         if !inner
             .delegation_followup_admissions
@@ -779,7 +790,7 @@ impl DelegationFollowupAdmission {
         }
     }
 
-    fn release(&mut self) -> Result<()> {
+    pub(crate) fn release(&mut self) -> Result<()> {
         if self.released {
             return Ok(());
         }
@@ -790,7 +801,7 @@ impl DelegationFollowupAdmission {
             .release_delegation_followup_reservation(&self.previous.id, self.reservation_id)
     }
 
-    fn rollback_before_prompt(&self) -> Result<bool, ApiError> {
+    pub(crate) fn rollback_before_prompt(&self) -> Result<bool, ApiError> {
         let inner = self.state.inner.lock().expect("state mutex poisoned");
         let Some(before_prompt) = inner.delegation_followup_admissions.get(&self.previous.id)
         else {

@@ -19,17 +19,19 @@
 // Extracted from state.rs so state.rs can stay focused on `StateInner`
 // + commit_locked() + SSE broadcasting.
 
+use super::*;
+
 // Stop writes this exact assistant transcript message; delegation result
 // synthesis treats the same text as a terminal sentinel rather than review
 // output. Keep both call sites tied to this neutral message contract.
-const SESSION_STOPPED_BY_USER_MESSAGE: &str = "Turn stopped by user.";
-const SESSION_STOPPING_MESSAGE: &str = "Stopping current turn...";
-const SESSION_IN_MEMORY_MESSAGE_LIMIT: usize = 64;
-const SESSION_PROMPT_HISTORY_LIMIT: usize = 64;
-const SESSION_PROMPT_HISTORY_MAX_BYTES: usize = 512 * 1024;
+pub(crate) const SESSION_STOPPED_BY_USER_MESSAGE: &str = "Turn stopped by user.";
+pub(crate) const SESSION_STOPPING_MESSAGE: &str = "Stopping current turn...";
+pub(crate) const SESSION_IN_MEMORY_MESSAGE_LIMIT: usize = 64;
+pub(crate) const SESSION_PROMPT_HISTORY_LIMIT: usize = 64;
+pub(crate) const SESSION_PROMPT_HISTORY_MAX_BYTES: usize = 512 * 1024;
 
 /// Returns the transcript count carried by session-scoped SSE deltas.
-fn session_message_count(record: &SessionRecord) -> u32 {
+pub(crate) fn session_message_count(record: &SessionRecord) -> u32 {
     debug_assert!(
         record
             .message_start_index
@@ -50,13 +52,13 @@ fn session_message_count(record: &SessionRecord) -> u32 {
     }
 }
 
-fn global_message_index(record: &SessionRecord, local_message_index: usize) -> usize {
+pub(crate) fn global_message_index(record: &SessionRecord, local_message_index: usize) -> usize {
     record
         .message_start_index
         .saturating_add(local_message_index)
 }
 
-fn sync_retained_transcript_metadata(record: &mut SessionRecord) {
+pub(crate) fn sync_retained_transcript_metadata(record: &mut SessionRecord) {
     let retained_end = record
         .message_start_index
         .saturating_add(record.session.messages.len());
@@ -65,13 +67,13 @@ fn sync_retained_transcript_metadata(record: &mut SessionRecord) {
 }
 
 #[cfg(test)]
-fn trim_retained_session_messages(record: &mut SessionRecord, limit: usize) {
+pub(crate) fn trim_retained_session_messages(record: &mut SessionRecord, limit: usize) {
     drop(detach_retained_session_messages(record, limit));
 }
 
 /// Replaces the resident window without destroying its previous storage.
 /// A shared-state caller drops that storage after releasing StateInner.
-fn detach_retained_session_messages(
+pub(crate) fn detach_retained_session_messages(
     record: &mut SessionRecord,
     limit: usize,
 ) -> Option<(MessageSequence, HashMap<String, usize>)> {
@@ -88,7 +90,7 @@ fn detach_retained_session_messages(
     Some((retired, retired_positions))
 }
 
-fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<String> {
+pub(crate) fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut history = Vec::new();
     let mut retained_bytes = 0_usize;
     for prompt in prompts {
@@ -108,7 +110,7 @@ fn normalize_prompt_history(prompts: impl IntoIterator<Item = String>) -> Vec<St
     history
 }
 
-fn prompt_history_from_messages<'a, I>(messages: I) -> Vec<String>
+pub(crate) fn prompt_history_from_messages<'a, I>(messages: I) -> Vec<String>
 where
     I: IntoIterator<Item = &'a Message>,
     I::IntoIter: DoubleEndedIterator,
@@ -154,12 +156,12 @@ fn append_prompt_history(record: &mut SessionRecord, prompt: &str) {
     set_prompt_history_on_record(record, normalize_prompt_history(prompts));
 }
 
-struct InterruptedSessionRecovery {
-    text: String,
-    expanded_text: Option<String>,
+pub(crate) struct InterruptedSessionRecovery {
+    pub(crate) text: String,
+    pub(crate) expanded_text: Option<String>,
 }
 
-fn session_needs_interruption_recovery(record: &SessionRecord) -> bool {
+pub(crate) fn session_needs_interruption_recovery(record: &SessionRecord) -> bool {
     matches!(
         record.session.status,
         SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
@@ -168,7 +170,9 @@ fn session_needs_interruption_recovery(record: &SessionRecord) -> bool {
 
 /// Recovers interrupted session record, including observation custody whose
 /// process-local adoption marker deliberately does not survive a restart.
-fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<InterruptedSessionRecovery> {
+pub(crate) fn recover_interrupted_session_record(
+    record: &mut SessionRecord,
+) -> Option<InterruptedSessionRecovery> {
     if !session_needs_interruption_recovery(record) {
         return None;
     }
@@ -207,12 +211,15 @@ fn recover_interrupted_session_record(record: &mut SessionRecord) -> Option<Inte
         ));
         serde_json::to_string_pretty(&trace).unwrap_or_else(|_| format!("{trace:#?}"))
     });
-    Some(InterruptedSessionRecovery { text: notice, expanded_text })
+    Some(InterruptedSessionRecovery {
+        text: notice,
+        expanded_text,
+    })
 }
 
 // Select through shared references before obtaining a mutable body. A
 // no-op recovery/stop scan must not detach every retained persistence body.
-trait MutableMessages {
+pub(crate) trait MutableMessages {
     fn matching_mut(
         &mut self,
         predicate: fn(&Message) -> bool,
@@ -272,7 +279,9 @@ fn pending_interaction_message(message: &Message) -> bool {
 }
 
 /// Expires pending interaction messages.
-fn expire_pending_interaction_messages<C: MutableMessages + ?Sized>(messages: &mut C) -> usize {
+pub(crate) fn expire_pending_interaction_messages<C: MutableMessages + ?Sized>(
+    messages: &mut C,
+) -> usize {
     let mut count = 0;
     for (_, message) in messages.matching_mut(pending_interaction_message) {
         match message {
@@ -307,7 +316,7 @@ fn expire_pending_interaction_messages<C: MutableMessages + ?Sized>(messages: &m
 }
 
 /// Cancels pending interaction messages.
-fn cancel_pending_interaction_messages<C: MutableMessages + ?Sized>(
+pub(crate) fn cancel_pending_interaction_messages<C: MutableMessages + ?Sized>(
     messages: &mut C,
 ) -> Vec<usize> {
     let mut changed_indices = Vec::new();
@@ -343,32 +352,32 @@ fn cancel_pending_interaction_messages<C: MutableMessages + ?Sized>(
     changed_indices
 }
 
-struct MessageUpdatedDeltaParts {
-    session_id: String,
-    message_id: String,
-    message_index: usize,
-    message_count: u32,
-    message: Message,
-    preview: String,
-    status: SessionStatus,
-    session_mutation_stamp: u64,
-    session_seq: u64,
+pub(crate) struct MessageUpdatedDeltaParts {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
+    pub(crate) message_index: usize,
+    pub(crate) message_count: u32,
+    pub(crate) message: Message,
+    pub(crate) preview: String,
+    pub(crate) status: SessionStatus,
+    pub(crate) session_mutation_stamp: u64,
+    pub(crate) session_seq: u64,
 }
 
-struct MessageCreatedDeltaParts {
-    session_id: String,
-    message_id: String,
-    message_index: usize,
-    message_count: u32,
-    message: Message,
-    preview: String,
-    status: SessionStatus,
-    session_queue: Option<SessionQueueDelta>,
-    session_mutation_stamp: u64,
-    session_seq: u64,
+pub(crate) struct MessageCreatedDeltaParts {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
+    pub(crate) message_index: usize,
+    pub(crate) message_count: u32,
+    pub(crate) message: Message,
+    pub(crate) preview: String,
+    pub(crate) status: SessionStatus,
+    pub(crate) session_queue: Option<SessionQueueDelta>,
+    pub(crate) session_mutation_stamp: u64,
+    pub(crate) session_seq: u64,
 }
 
-fn message_updated_delta_parts_for_indices(
+pub(crate) fn message_updated_delta_parts_for_indices(
     record: &mut SessionRecord,
     message_indices: Vec<usize>,
 ) -> Vec<MessageUpdatedDeltaParts> {
@@ -397,7 +406,7 @@ fn message_updated_delta_parts_for_indices(
         .collect()
 }
 
-fn message_created_delta_parts_for_indices(
+pub(crate) fn message_created_delta_parts_for_indices(
     record: &mut SessionRecord,
     message_indices: Vec<usize>,
 ) -> Vec<MessageCreatedDeltaParts> {
@@ -452,7 +461,7 @@ fn message_created_delta_parts_for_indices(
 }
 
 impl AppState {
-    fn publish_message_created_delta_parts(
+    pub(crate) fn publish_message_created_delta_parts(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -479,7 +488,7 @@ impl AppState {
         }
     }
 
-    fn publish_message_updated_delta_parts(
+    pub(crate) fn publish_message_updated_delta_parts(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -507,7 +516,7 @@ impl AppState {
 }
 
 /// Marks running command messages as failed.
-fn fail_running_command_messages<C: MutableMessages + ?Sized>(messages: &mut C) {
+pub(crate) fn fail_running_command_messages<C: MutableMessages + ?Sized>(messages: &mut C) {
     for (_, message) in messages.matching_mut(|message| {
         matches!(
             message,
@@ -526,7 +535,7 @@ fn fail_running_command_messages<C: MutableMessages + ?Sized>(messages: &mut C) 
 }
 
 /// Builds message positions.
-fn build_message_positions<'a>(
+pub(crate) fn build_message_positions<'a>(
     messages: impl IntoIterator<Item = &'a Message>,
 ) -> HashMap<String, usize> {
     messages
@@ -536,7 +545,10 @@ fn build_message_positions<'a>(
         .collect()
 }
 
-fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Option<usize> {
+pub(crate) fn message_index_on_record(
+    record: &mut SessionRecord,
+    message_id: &str,
+) -> Option<usize> {
     if let Some(index) = record.message_positions.get(message_id).copied() {
         if record
             .session
@@ -554,7 +566,10 @@ fn message_index_on_record(record: &mut SessionRecord, message_id: &str) -> Opti
 
 // A fresh prompt is expected to miss. Unlike the repairing lookup, this
 // membership check never rebuilds the transcript index on that normal path.
-fn cached_message_index_on_record(record: &SessionRecord, message_id: &str) -> Option<usize> {
+pub(crate) fn cached_message_index_on_record(
+    record: &SessionRecord,
+    message_id: &str,
+) -> Option<usize> {
     record
         .message_positions
         .get(message_id)
@@ -568,7 +583,11 @@ fn cached_message_index_on_record(record: &SessionRecord, message_id: &str) -> O
         })
 }
 
-fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: Message) -> usize {
+pub(crate) fn insert_message_on_record(
+    record: &mut SessionRecord,
+    index: usize,
+    message: Message,
+) -> usize {
     record.mark_body_changed(message.id());
     let index = index.min(record.session.messages.len());
     let prompt = message.user_prompt_text().map(str::to_owned);
@@ -594,7 +613,7 @@ fn insert_message_on_record(record: &mut SessionRecord, index: usize, message: M
 }
 
 /// Pushes message on record.
-fn push_message_on_record(record: &mut SessionRecord, mut message: Message) -> usize {
+pub(crate) fn push_message_on_record(record: &mut SessionRecord, mut message: Message) -> usize {
     if let Message::EngramControl { card, .. } = &mut message
         && let Some(cause) = &mut card.causal_failure
     {
@@ -604,7 +623,7 @@ fn push_message_on_record(record: &mut SessionRecord, mut message: Message) -> u
 }
 
 /// Keeps a short post-turn window for watcher events that arrive after completion.
-fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
+pub(crate) fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
     record.active_turn_mailbox_notification = None;
     if record.active_turn_start_message_count.take().is_some() {
         record.active_turn_file_change_grace_deadline =
@@ -633,7 +652,7 @@ fn finish_active_turn_file_change_tracking(record: &mut SessionRecord) {
 /// misleading, either because no completed turn should be summarized or because
 /// a failed persistence step rolled back the terminal message that would have
 /// owned the summary.
-fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
+pub(crate) fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
     record.file_change_tracking = None;
     record.active_turn_mailbox_notification = None;
     record.active_turn_start_message_count = None;
@@ -641,14 +660,28 @@ fn clear_active_turn_file_change_tracking(record: &mut SessionRecord) {
     record.active_turn_file_change_grace_deadline = None;
 }
 
-fn file_change_summary_title(tracking: &Option<Arc<FileChangeTrackingLifetime>>, files: &[FileChangeSummaryEntry]) -> String {
-    let (observed, bounded) = tracking.as_ref().map(|tracking| {
-        let publication = tracking.publication.lock().expect("file tracking mutex poisoned");
-        (publication.observed_changes, publication.bounded)
-    }).unwrap_or((files.len(), false));
+pub(crate) fn file_change_summary_title(
+    tracking: &Option<Arc<FileChangeTrackingLifetime>>,
+    files: &[FileChangeSummaryEntry],
+) -> String {
+    let (observed, bounded) = tracking
+        .as_ref()
+        .map(|tracking| {
+            let publication = tracking
+                .publication
+                .lock()
+                .expect("file tracking mutex poisoned");
+            (publication.observed_changes, publication.bounded)
+        })
+        .unwrap_or((files.len(), false));
     if bounded {
-        format!("{observed} workspace change notifications during turn (bounded sample and directory markers)")
-    } else if files.iter().any(|file| file.kind == WorkspaceFileChangeKind::Subtree) {
+        format!(
+            "{observed} workspace change notifications during turn (bounded sample and directory markers)"
+        )
+    } else if files
+        .iter()
+        .any(|file| file.kind == WorkspaceFileChangeKind::Subtree)
+    {
         "Workspace changes during turn (includes directory markers)".to_owned()
     } else if files.len() == 1 {
         "1 file changed during turn".to_owned()
@@ -658,7 +691,10 @@ fn file_change_summary_title(tracking: &Option<Arc<FileChangeTrackingLifetime>>,
 }
 
 /// Pushes the active turn file-change summary on record.
-fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_id: String) -> bool {
+pub(crate) fn push_active_turn_file_changes_on_record(
+    record: &mut SessionRecord,
+    message_id: String,
+) -> bool {
     if record.active_turn_file_changes.is_empty() {
         return false;
     }
@@ -682,7 +718,10 @@ fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_i
     {
         // The first late card has its own notifications and bounding state.
         // Subsequent captures may amend that card without recounting this one.
-        let mut publication = tracking.publication.lock().expect("file tracking mutex poisoned");
+        let mut publication = tracking
+            .publication
+            .lock()
+            .expect("file tracking mutex poisoned");
         publication.observed_changes = 0;
         publication.bounded = false;
     }
@@ -700,7 +739,7 @@ fn push_active_turn_file_changes_on_record(record: &mut SessionRecord, message_i
 }
 
 /// Pushes session markdown note on record.
-fn push_session_markdown_note_on_record(
+pub(crate) fn push_session_markdown_note_on_record(
     record: &mut SessionRecord,
     message_id: String,
     title: &str,
@@ -720,7 +759,7 @@ fn push_session_markdown_note_on_record(
 }
 
 /// Replaces session messages on record.
-fn replace_session_messages_on_record(
+pub(crate) fn replace_session_messages_on_record(
     record: &mut SessionRecord,
     messages: Vec<Message>,
     fallback_preview: Option<String>,
@@ -748,7 +787,10 @@ fn replace_session_messages_on_record(
 }
 
 /// Handles Codex thread messages from JSON.
-fn codex_thread_messages_from_json(inner: &mut StateInner, thread: &Value) -> Option<Vec<Message>> {
+pub(crate) fn codex_thread_messages_from_json(
+    inner: &mut StateInner,
+    thread: &Value,
+) -> Option<Vec<Message>> {
     let turns = thread.get("turns").and_then(Value::as_array)?;
     let mut messages = Vec::new();
     for turn in turns {

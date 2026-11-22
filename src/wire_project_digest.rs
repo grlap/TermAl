@@ -5,52 +5,54 @@
 // done-summary hint. This file owns the DTOs plus the formatters that
 // build their text from a compact SessionRecord projection / GitStatusResponse.
 
+use super::*;
+
 /// Temporary operational kill switch. Digest requests previously amplified
 /// resource pressure into process-wide state-lock stalls, so both HTTP handlers
 /// return 404 before touching `StateInner` while this remains false.
-const PROJECT_DIGESTS_ENABLED: bool = false;
+pub(crate) const PROJECT_DIGESTS_ENABLED: bool = false;
 
 // DTOs
 /// Enumerates project digest actions.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ProjectDigestAction {
-    id: String,
-    label: String,
+pub(crate) struct ProjectDigestAction {
+    pub(crate) id: String,
+    pub(crate) label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    prompt: Option<String>,
-    requires_confirmation: bool,
+    pub(crate) prompt: Option<String>,
+    pub(crate) requires_confirmation: bool,
 }
 
 /// Represents the project digest response payload.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ProjectDigestResponse {
-    project_id: String,
-    headline: String,
-    done_summary: String,
-    current_status: String,
+pub(crate) struct ProjectDigestResponse {
+    pub(crate) project_id: String,
+    pub(crate) headline: String,
+    pub(crate) done_summary: String,
+    pub(crate) current_status: String,
     /// Session id used by digest actions and deep links. For live approval,
     /// interaction, and active states this points at the session that produced
     /// the digest status. For error, dirty-worktree, and idle states it points
     /// at the latest non-delegation prompt target so follow-up actions continue
     /// in the parent session even when the summary came from another session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    primary_session_id: Option<String>,
+    pub(crate) primary_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    proposed_actions: Vec<ProjectDigestAction>,
+    pub(crate) proposed_actions: Vec<ProjectDigestAction>,
     /// Project URL, optionally focused on `primarySessionId` when one exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    deep_link: Option<String>,
+    pub(crate) deep_link: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    source_message_ids: Vec<String>,
+    pub(crate) source_message_ids: Vec<String>,
 }
 
 /// Represents project digest inputs.
 #[derive(Clone)]
-struct ProjectDigestInputs {
-    project: Project,
-    sessions: Vec<ProjectDigestSession>,
+pub(crate) struct ProjectDigestInputs {
+    pub(crate) project: Project,
+    pub(crate) sessions: Vec<ProjectDigestSession>,
 }
 
 /// Compact per-session facts needed by the project digest.
@@ -61,16 +63,16 @@ struct ProjectDigestInputs {
 /// bounded recent tail rather than deep-cloning or fully scanning a session
 /// merely to render a small digest card.
 #[derive(Clone)]
-struct ProjectDigestSession {
-    id: String,
-    parent_delegation_id: Option<String>,
-    status: SessionStatus,
-    preview: String,
-    pending_prompt_count: usize,
-    has_messages: bool,
-    latest_progress_summary: Option<(String, String)>,
-    pending_approval_message_id: Option<String>,
-    pending_interaction_message_id: Option<String>,
+pub(crate) struct ProjectDigestSession {
+    pub(crate) id: String,
+    pub(crate) parent_delegation_id: Option<String>,
+    pub(crate) status: SessionStatus,
+    pub(crate) preview: String,
+    pub(crate) pending_prompt_count: usize,
+    pub(crate) has_messages: bool,
+    pub(crate) latest_progress_summary: Option<(String, String)>,
+    pub(crate) pending_approval_message_id: Option<String>,
+    pub(crate) pending_interaction_message_id: Option<String>,
 }
 
 /// Maximum recent messages inspected while the process-wide state mutex is
@@ -81,27 +83,27 @@ const PROJECT_DIGEST_MESSAGE_SCAN_LIMIT: usize = SESSION_IN_MEMORY_MESSAGE_LIMIT
 
 /// Represents the project approval target.
 #[derive(Clone)]
-struct ProjectApprovalTarget {
-    session_id: String,
-    message_id: String,
+pub(crate) struct ProjectApprovalTarget {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
 }
 
 /// Summarizes project digest.
-struct ProjectDigestSummary {
-    project_id: String,
-    headline: String,
-    done_summary: String,
-    current_status: String,
-    primary_session_id: Option<String>,
-    proposed_actions: Vec<ProjectActionId>,
-    deep_link: Option<String>,
-    pending_approval_target: Option<ProjectApprovalTarget>,
-    source_message_ids: Vec<String>,
+pub(crate) struct ProjectDigestSummary {
+    pub(crate) project_id: String,
+    pub(crate) headline: String,
+    pub(crate) done_summary: String,
+    pub(crate) current_status: String,
+    pub(crate) primary_session_id: Option<String>,
+    pub(crate) proposed_actions: Vec<ProjectActionId>,
+    pub(crate) deep_link: Option<String>,
+    pub(crate) pending_approval_target: Option<ProjectApprovalTarget>,
+    pub(crate) source_message_ids: Vec<String>,
 }
 
 impl ProjectDigestSummary {
     /// Converts the value into response.
-    fn into_response(self) -> ProjectDigestResponse {
+    pub(crate) fn into_response(self) -> ProjectDigestResponse {
         ProjectDigestResponse {
             project_id: self.project_id,
             headline: self.headline,
@@ -121,7 +123,7 @@ impl ProjectDigestSummary {
 
 /// Defines the project action ID variants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectActionId {
+pub(crate) enum ProjectActionId {
     Approve,
     Reject,
     ReviewInTermal,
@@ -135,7 +137,7 @@ enum ProjectActionId {
 impl ProjectActionId {
     /// Parses a digest-action id from the URL path. Returns `None`
     /// for unknown ids so the route can 404 instead of panicking.
-    fn parse(value: &str) -> Result<Self, ApiError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, ApiError> {
         match value.trim() {
             "approve" => Ok(Self::Approve),
             "reject" => Ok(Self::Reject),
@@ -152,7 +154,7 @@ impl ProjectActionId {
     }
 
     /// Returns the str representation.
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Approve => "approve",
             Self::Reject => "reject",
@@ -165,7 +167,7 @@ impl ProjectActionId {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Approve => "Approve",
             Self::Reject => "Reject",
@@ -181,7 +183,7 @@ impl ProjectActionId {
     /// Returns the prompt text that should be sent to the agent
     /// when the user triggers this digest action (or `None` for
     /// actions like Reject that don't send a prompt).
-    fn prompt(self) -> Option<&'static str> {
+    pub(crate) fn prompt(self) -> Option<&'static str> {
         match self {
             Self::FixIt => Some(
                 "The last run failed. Fix the issue, rerun the relevant verification, and summarize what changed.",
@@ -199,12 +201,12 @@ impl ProjectActionId {
         }
     }
 
-    fn requires_confirmation(self) -> bool {
+    pub(crate) fn requires_confirmation(self) -> bool {
         matches!(self, Self::Stop)
     }
 
     /// Converts the value into digest action.
-    fn into_digest_action(self) -> ProjectDigestAction {
+    pub(crate) fn into_digest_action(self) -> ProjectDigestAction {
         ProjectDigestAction {
             id: self.as_str().to_owned(),
             label: self.label().to_owned(),
@@ -216,7 +218,7 @@ impl ProjectActionId {
 
 // Project text/status helpers
 /// Builds project deep link.
-fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String {
+pub(crate) fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String {
     let mut query = format!("/?projectId={}", encode_uri_component(project_id));
     if let Some(session_id) = session_id {
         query.push_str("&sessionId=");
@@ -226,7 +228,7 @@ fn build_project_deep_link(project_id: &str, session_id: Option<&str>) -> String
 }
 
 /// Normalizes project text.
-fn normalize_project_text(value: &str, fallback: &str) -> String {
+pub(crate) fn normalize_project_text(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         fallback.to_owned()
@@ -236,7 +238,7 @@ fn normalize_project_text(value: &str, fallback: &str) -> String {
 }
 
 /// Returns the active project status text.
-fn active_project_status_text(record: &ProjectDigestSession) -> String {
+pub(crate) fn active_project_status_text(record: &ProjectDigestSession) -> String {
     let queued_count = record.pending_prompt_count;
     match queued_count {
         0 => "Agent is working.".to_owned(),
@@ -246,7 +248,7 @@ fn active_project_status_text(record: &ProjectDigestSession) -> String {
 }
 
 /// Handles select project done summary.
-fn select_project_done_summary(
+pub(crate) fn select_project_done_summary(
     primary_session: Option<&ProjectDigestSession>,
     git_status: Option<&GitStatusResponse>,
     prefer_git: bool,
@@ -339,7 +341,7 @@ fn project_progress_summary_for_message(message: &Message) -> Option<String> {
 }
 
 /// Finds latest project pending approval.
-fn find_latest_project_pending_approval<'a>(
+pub(crate) fn find_latest_project_pending_approval<'a>(
     sessions: &'a [ProjectDigestSession],
 ) -> Option<(&'a ProjectDigestSession, String)> {
     sessions.iter().rev().find_map(|record| {
@@ -392,12 +394,14 @@ fn latest_registered_message_id<'a>(
 /// registries. ACP uses FIFO resolution, so its queue head wins over later ACP
 /// cards while it remains resident; the resulting ACP candidate is still
 /// compared with newer Claude/Codex approvals.
-fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<String> {
+pub(crate) fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<String> {
     let acp_head = record
         .pending_acp_approval_order
         .front()
         .filter(|message_id| {
-            record.pending_acp_approvals.get(*message_id)
+            record
+                .pending_acp_approvals
+                .get(*message_id)
                 .is_some_and(|pending| pending.question.is_none())
         })
         .and_then(|message_id| {
@@ -410,7 +414,9 @@ fn registered_pending_approval_message_id(record: &SessionRecord) -> Option<Stri
     let acp_candidate = acp_head.or_else(|| {
         latest_registered_message(
             record,
-            record.pending_acp_approvals.iter()
+            record
+                .pending_acp_approvals
+                .iter()
                 .filter(|(_, pending)| pending.question.is_none())
                 .map(|(id, _)| id),
         )
@@ -441,14 +447,18 @@ fn registered_pending_interaction_message_id(record: &SessionRecord) -> Option<S
             .chain(record.pending_claude_user_inputs.keys())
             .chain(record.pending_codex_mcp_elicitations.keys())
             .chain(record.pending_codex_app_requests.keys())
-            .chain(record.pending_acp_approvals.iter()
-                .filter(|(_, pending)| pending.question.is_some())
-                .map(|(id, _)| id)),
+            .chain(
+                record
+                    .pending_acp_approvals
+                    .iter()
+                    .filter(|(_, pending)| pending.question.is_some())
+                    .map(|(id, _)| id),
+            ),
     )
 }
 
 /// Finds latest project pending nonapproval interaction.
-fn find_latest_project_pending_nonapproval_interaction<'a>(
+pub(crate) fn find_latest_project_pending_nonapproval_interaction<'a>(
     sessions: &'a [ProjectDigestSession],
 ) -> Option<(&'a ProjectDigestSession, String)> {
     sessions.iter().rev().find_map(|record| {
@@ -460,7 +470,7 @@ fn find_latest_project_pending_nonapproval_interaction<'a>(
 }
 
 /// Projects one session into the bounded metadata needed by project digests.
-fn project_digest_session_from_record(record: &SessionRecord) -> ProjectDigestSession {
+pub(crate) fn project_digest_session_from_record(record: &SessionRecord) -> ProjectDigestSession {
     let mut latest_progress_summary = None;
     let mut pending_approval_message_id = registered_pending_approval_message_id(record);
     let mut pending_interaction_message_id = registered_pending_interaction_message_id(record);

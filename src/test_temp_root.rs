@@ -5,17 +5,19 @@
 // New module; consolidates the private temp-root guards previously scattered
 // across state, mailbox, board-route, and agent-command tests.
 
+use super::*;
+
 /// Suffix of the sibling file that names the test which created a root.
 const TEST_TEMP_ROOT_OWNER_SUFFIX: &str = ".owner";
 
-struct TestTempRoot {
-    path: PathBuf,
-    cleanup_observers: Mutex<Vec<mpsc::Sender<std::result::Result<(), String>>>>,
-    retain_for_diagnosis: std::sync::atomic::AtomicBool,
+pub(crate) struct TestTempRoot {
+    pub(crate) path: PathBuf,
+    pub(crate) cleanup_observers: Mutex<Vec<mpsc::Sender<std::result::Result<(), String>>>>,
+    pub(crate) retain_for_diagnosis: std::sync::atomic::AtomicBool,
 }
 
 thread_local! {
-    static TEST_TEMP_ROOT_DIRECTORY: std::cell::RefCell<Option<PathBuf>> = const {
+    pub(crate) static TEST_TEMP_ROOT_DIRECTORY: std::cell::RefCell<Option<PathBuf>> = const {
         std::cell::RefCell::new(None)
     };
     /// The guarded root that an AppState constructed on this thread holds
@@ -30,7 +32,7 @@ thread_local! {
 /// (an Engram recovery worker, the broadcast worker). Every clone then shares
 /// the root, so it is removed only after the last of them drops. The previous
 /// slot comes back afterwards, also when `boot` unwinds.
-fn boot_on_test_temp_root<T>(root: &Arc<TestTempRoot>, boot: impl FnOnce() -> T) -> T {
+pub(crate) fn boot_on_test_temp_root<T>(root: &Arc<TestTempRoot>, boot: impl FnOnce() -> T) -> T {
     struct Restore(Option<Arc<TestTempRoot>>);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -45,20 +47,20 @@ fn boot_on_test_temp_root<T>(root: &Arc<TestTempRoot>, boot: impl FnOnce() -> T)
 }
 
 /// The root a state constructed now must hold, if a test boot named one.
-fn test_boot_temp_root() -> Option<Arc<TestTempRoot>> {
+pub(crate) fn test_boot_temp_root() -> Option<Arc<TestTempRoot>> {
     TEST_BOOT_TEMP_ROOT.with(|slot| slot.borrow().clone())
 }
 
 /// Test-thread-only placement for repository-owned fixtures. It does not
 /// mutate process environment or follow worker threads; construct fixtures
 /// while this scope is held. Restoration also happens during unwinding.
-struct TestTempRootDirectoryScope {
-    previous: Option<PathBuf>,
-    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
+pub(crate) struct TestTempRootDirectoryScope {
+    pub(crate) previous: Option<PathBuf>,
+    pub(crate) _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl TestTempRootDirectoryScope {
-    fn repository_local() -> Self {
+    pub(crate) fn repository_local() -> Self {
         let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
         // Created first so that the check below always measures the canonical
         // spelling that fixture roots will use, even on first use.
@@ -72,7 +74,7 @@ impl TestTempRootDirectoryScope {
         Self::within(directory)
     }
 
-    fn within(directory: PathBuf) -> Self {
+    pub(crate) fn within(directory: PathBuf) -> Self {
         ensure_plain_test_directory(&directory).expect("plain repository test directory");
         let previous = TEST_TEMP_ROOT_DIRECTORY.with(|slot| slot.replace(Some(directory)));
         Self {
@@ -107,7 +109,7 @@ impl AsRef<FsPath> for TestTempRoot {
 }
 
 impl TestTempRoot {
-    fn create(prefix: &str) -> Self {
+    pub(crate) fn create(prefix: &str) -> Self {
         assert!(
             !prefix.is_empty()
                 && prefix
@@ -159,13 +161,13 @@ impl TestTempRoot {
     }
 
     /// The sibling file naming the test that created `root`.
-    fn owner_marker(root: &FsPath) -> PathBuf {
+    pub(crate) fn owner_marker(root: &FsPath) -> PathBuf {
         let mut name = root.as_os_str().to_owned();
         name.push(TEST_TEMP_ROOT_OWNER_SUFFIX);
         PathBuf::from(name)
     }
 
-    fn own(path: PathBuf) -> Self {
+    pub(crate) fn own(path: PathBuf) -> Self {
         Self {
             path,
             cleanup_observers: Mutex::new(Vec::new()),
@@ -175,20 +177,20 @@ impl TestTempRoot {
 
     /// A fixture may retain its failed run before its last worker drops this
     /// guard. The decision must survive that drop occurring on another thread.
-    fn retain_for_diagnosis(&self) {
+    pub(crate) fn retain_for_diagnosis(&self) {
         self.retain_for_diagnosis
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn path(&self) -> &FsPath {
+    pub(crate) fn path(&self) -> &FsPath {
         &self.path
     }
 
-    fn database_path(&self) -> PathBuf {
+    pub(crate) fn database_path(&self) -> PathBuf {
         self.path.join("termal.sqlite")
     }
 
-    fn observe_cleanup(&self) -> mpsc::Receiver<std::result::Result<(), String>> {
+    pub(crate) fn observe_cleanup(&self) -> mpsc::Receiver<std::result::Result<(), String>> {
         let (tx, rx) = mpsc::channel();
         self.cleanup_observers
             .lock()
@@ -252,16 +254,16 @@ impl Drop for TestTempRoot {
 /// Test fixture owner for production continuations which retain AppState.
 /// Release them through their normal cancellation path before dropping state;
 /// then wait for the last resource owner, not a scheduler delay or Arc poll.
-struct TestAppStateCleanup<F: FnOnce() -> std::result::Result<(), String>> {
-    state: Option<AppState>,
-    release: Option<F>,
-    cleaned: mpsc::Receiver<std::result::Result<(), String>>,
-    holder: &'static str,
-    path: PathBuf,
+pub(crate) struct TestAppStateCleanup<F: FnOnce() -> std::result::Result<(), String>> {
+    pub(crate) state: Option<AppState>,
+    pub(crate) release: Option<F>,
+    pub(crate) cleaned: mpsc::Receiver<std::result::Result<(), String>>,
+    pub(crate) holder: &'static str,
+    pub(crate) path: PathBuf,
 }
 
 impl<F: FnOnce() -> std::result::Result<(), String>> TestAppStateCleanup<F> {
-    fn new(state: AppState, holder: &'static str, release: F) -> Self {
+    pub(crate) fn new(state: AppState, holder: &'static str, release: F) -> Self {
         let root = state.test_temp_root.as_ref().expect("fixture temp root");
         let cleaned = root.observe_cleanup();
         let path = root.path().to_owned();
@@ -274,7 +276,7 @@ impl<F: FnOnce() -> std::result::Result<(), String>> TestAppStateCleanup<F> {
         }
     }
 
-    fn finish(self) {
+    pub(crate) fn finish(self) {
         drop(self);
     }
 }

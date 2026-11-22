@@ -9,9 +9,11 @@
 // tree cleanup, or the staged-readiness/expired-launch seams. Included from
 // main.rs only under cfg(test).
 
-struct TestEngramDoctorDeadlineState {
+use super::*;
+
+pub(crate) struct TestEngramDoctorDeadlineState {
     startup_deadline: std::time::Instant,
-    receiver: Mutex<Option<mpsc::Receiver<std::time::Instant>>>,
+    pub(crate) receiver: Mutex<Option<mpsc::Receiver<std::time::Instant>>>,
 }
 
 static TEST_ENGRAM_DOCTOR_DEADLINE_HOMES: LazyLock<
@@ -19,14 +21,14 @@ static TEST_ENGRAM_DOCTOR_DEADLINE_HOMES: LazyLock<
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[must_use = "retain the registration until the fixture worker has finished"]
-struct TestEngramDoctorDeadlineArm {
-    home: PathBuf,
-    state: Arc<TestEngramDoctorDeadlineState>,
-    sender: Option<mpsc::Sender<std::time::Instant>>,
+pub(crate) struct TestEngramDoctorDeadlineArm {
+    pub(crate) home: PathBuf,
+    pub(crate) state: Arc<TestEngramDoctorDeadlineState>,
+    pub(crate) sender: Option<mpsc::Sender<std::time::Instant>>,
 }
 
 impl TestEngramDoctorDeadlineArm {
-    fn arm(&mut self) -> std::result::Result<(), String> {
+    pub(crate) fn arm(&mut self) -> std::result::Result<(), String> {
         self.sender
             .take()
             .ok_or_else(|| "doctor fixture deadline was already armed".to_owned())?
@@ -52,7 +54,7 @@ impl Drop for TestEngramDoctorDeadlineArm {
     }
 }
 
-fn register_test_engram_doctor_deadline(
+pub(crate) fn register_test_engram_doctor_deadline(
     home: &FsPath,
     startup_guard: Duration,
 ) -> TestEngramDoctorDeadlineArm {
@@ -81,7 +83,7 @@ fn register_test_engram_doctor_deadline(
     }
 }
 
-fn test_engram_doctor_deadline_state(
+pub(crate) fn test_engram_doctor_deadline_state(
     home: &FsPath,
     diagnostic: &str,
 ) -> Option<Arc<TestEngramDoctorDeadlineState>> {
@@ -96,14 +98,14 @@ fn test_engram_doctor_deadline_state(
         .cloned()
 }
 
-fn test_engram_doctor_fixture_startup_deadline(
+pub(crate) fn test_engram_doctor_fixture_startup_deadline(
     state: Option<&TestEngramDoctorDeadlineState>,
     original: std::time::Instant,
 ) -> std::time::Instant {
     state.map_or(original, |state| state.startup_deadline)
 }
 
-fn test_engram_doctor_fixture_armed_deadline(
+pub(crate) fn test_engram_doctor_fixture_armed_deadline(
     state: Option<&TestEngramDoctorDeadlineState>,
     original: std::time::Instant,
     budget: Duration,

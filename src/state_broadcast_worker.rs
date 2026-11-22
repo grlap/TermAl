@@ -8,15 +8,17 @@
 // reads only owned cuts, never the cache. Closing accepts late work; Stopped
 // is set under StateInner only after drain, before synchronous fallback.
 
+use super::*;
+
 #[derive(PartialEq, Eq)]
-struct StateProjectionKey {
-    mutation_stamp: u64,
-    body_seq: Option<u64>,
-    queue_paused: bool,
+pub(crate) struct StateProjectionKey {
+    pub(crate) mutation_stamp: u64,
+    pub(crate) body_seq: Option<u64>,
+    pub(crate) queue_paused: bool,
 }
 
 impl StateProjectionKey {
-    fn for_record(record: &SessionRecord) -> Self {
+    pub(crate) fn for_record(record: &SessionRecord) -> Self {
         Self {
             mutation_stamp: record.mutation_stamp,
             body_seq: if record.is_local_session() {
@@ -30,20 +32,21 @@ impl StateProjectionKey {
 }
 
 #[derive(Default)]
-struct StateProjectionCache {
-    server_instance_id: String,
-    sessions: HashMap<String, CachedStateSessionSummary>,
-    test_runs: Option<Arc<TestRunHistoryProjection>>,
-    test_run_version: u64,
+pub(crate) struct StateProjectionCache {
+    pub(crate) server_instance_id: String,
+    pub(crate) sessions: HashMap<String, CachedStateSessionSummary>,
+    pub(crate) test_runs: Option<Arc<TestRunHistoryProjection>>,
+    pub(crate) test_run_version: u64,
     #[cfg(test)]
-    before_materialize: Option<Box<dyn FnOnce() + Send>>,
+    pub(crate) before_materialize: Option<Box<dyn FnOnce() + Send>>,
     #[cfg(test)]
-    capture_sink: Option<mpsc::Sender<(std::time::Instant, Duration, std::thread::ThreadId)>>,
+    pub(crate) capture_sink:
+        Option<mpsc::Sender<(std::time::Instant, Duration, std::thread::ThreadId)>>,
 }
 
-struct CachedStateSessionSummary {
-    key: StateProjectionKey,
-    summary: Arc<StateSessionSummary>,
+pub(crate) struct CachedStateSessionSummary {
+    pub(crate) key: StateProjectionKey,
+    pub(crate) summary: Arc<StateSessionSummary>,
     // Only the local public hash's inputs, with no queued text/attachments.
     // They are captured with summary under StateInner and compared even when
     // a producer forgot to advance its session's mutation stamp.
@@ -51,18 +54,18 @@ struct CachedStateSessionSummary {
     queue_identities: Option<Vec<(String, bool, bool)>>,
 }
 
-struct ImmutableStateSnapshot {
-    header: StateResponse,
-    sessions: Vec<Arc<StateSessionSummary>>,
+pub(crate) struct ImmutableStateSnapshot {
+    pub(crate) header: StateResponse,
+    pub(crate) sessions: Vec<Arc<StateSessionSummary>>,
     /// The full-state request generation read under StateInner when this cut
     /// was captured (`state_broadcast_diff.rs`).
-    request_generation: u64,
+    pub(crate) request_generation: u64,
     #[cfg(test)]
-    before_materialize: Option<Box<dyn FnOnce() + Send>>,
+    pub(crate) before_materialize: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl ImmutableStateSnapshot {
-    fn materialize(mut self) -> StateResponse {
+    pub(crate) fn materialize(mut self) -> StateResponse {
         #[cfg(test)]
         if let Some(hook) = self.before_materialize.take() {
             hook();
@@ -223,17 +226,20 @@ impl AppState {
                     .then(|| bounded_live_activity_summary(&session.live_activity))
                     .flatten()
             && match (local, queue_identities) {
-                (true, Some(identities)) => projected_pending_prompt_identities(record).eq(
-                    identities.iter().map(|(id, interrupted, retained)| {
-                        (id.as_str(), *interrupted, *retained)
-                    }),
-                ),
+                (true, Some(identities)) => {
+                    projected_pending_prompt_identities(record).eq(identities
+                        .iter()
+                        .map(|(id, interrupted, retained)| (id.as_str(), *interrupted, *retained)))
+                }
                 (false, None) => queue_projection_hash == &session.queue_projection_hash,
                 _ => false,
             }
     }
 
-    fn immutable_state_snapshot_locked(&self, inner: &StateInner) -> ImmutableStateSnapshot {
+    pub(crate) fn immutable_state_snapshot_locked(
+        &self,
+        inner: &StateInner,
+    ) -> ImmutableStateSnapshot {
         #[cfg(test)]
         let capture_started = std::time::Instant::now();
         #[cfg(test)]
@@ -276,17 +282,24 @@ impl AppState {
                     record,
                 ));
                 let queue_identities = if record.is_local_session() {
-                    Some(projected_pending_prompt_identities(record)
-                        .map(|(id, interrupted, retained)| (id.to_owned(), interrupted, retained))
-                        .collect())
+                    Some(
+                        projected_pending_prompt_identities(record)
+                            .map(|(id, interrupted, retained)| {
+                                (id.to_owned(), interrupted, retained)
+                            })
+                            .collect(),
+                    )
                 } else {
                     None
                 };
-                cache.sessions.insert(id.to_owned(), CachedStateSessionSummary {
-                    key,
-                    summary: summary.clone(),
-                    queue_identities,
-                });
+                cache.sessions.insert(
+                    id.to_owned(),
+                    CachedStateSessionSummary {
+                        key,
+                        summary: summary.clone(),
+                        queue_identities,
+                    },
+                );
                 summary
             })
             .collect();
@@ -323,7 +336,7 @@ impl AppState {
         snapshot
     }
 
-    fn warm_state_projection_cache(&self) {
+    pub(crate) fn warm_state_projection_cache(&self) {
         let inner = self.inner.lock().expect("state mutex poisoned");
         // One-time startup cost precedes requests; the shared projections stay.
         self.immutable_state_snapshot_locked(&inner);
@@ -348,20 +361,20 @@ impl AppState {
         }
     }
 
-    fn shutdown_state_broadcast_blocking(&self) {
+    pub(crate) fn shutdown_state_broadcast_blocking(&self) {
         if let Some(worker) = &self.state_broadcast_worker {
             worker.shutdown();
         }
     }
 }
 
-struct StateBroadcastWorker {
-    mailbox: Arc<StateBroadcastMailbox>,
-    handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+pub(crate) struct StateBroadcastWorker {
+    pub(crate) mailbox: Arc<StateBroadcastMailbox>,
+    pub(crate) handle: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl StateBroadcastWorker {
-    fn start(mut state: AppState) -> Self {
+    pub(crate) fn start(mut state: AppState) -> Self {
         // The worker must not retain its own join owner through AppState.
         state.state_broadcast_worker = None;
         let mailbox = state
@@ -405,7 +418,7 @@ impl StateBroadcastWorker {
         }
     }
 
-    fn shutdown(&self) {
+    pub(crate) fn shutdown(&self) {
         // Serialize joiners: returning means the final drain has finished.
         let mut handle = self.handle.lock().expect("broadcast worker mutex poisoned");
         self.mailbox.begin_shutdown();
@@ -426,14 +439,14 @@ impl Drop for StateBroadcastWorker {
 }
 
 impl StateBroadcastMailbox {
-    fn is_stopped(&self) -> bool {
+    pub(crate) fn is_stopped(&self) -> bool {
         self.pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned")
             .stopped
     }
 
-    fn begin_shutdown(&self) {
+    pub(crate) fn begin_shutdown(&self) {
         self.pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned")

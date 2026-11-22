@@ -15,12 +15,17 @@ Each adapter translates agent-native protocol events into recorder callbacks so
 the rest of the backend can work with one message model.
 */
 
+use super::*;
+
 /// Deterministic, session-stable jitter percentage in `75..=125`.
 ///
 /// Peers released by the same saturation event dephase because their session
 /// ids hash to different schedules, while one session's schedule remains exact
 /// and testable.
-fn session_stable_retry_jitter_percent(session_id: &str, completed_attempts: u32) -> u32 {
+pub(crate) fn session_stable_retry_jitter_percent(
+    session_id: &str,
+    completed_attempts: u32,
+) -> u32 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in session_id.bytes().chain(completed_attempts.to_le_bytes()) {
         hash ^= u64::from(byte);
@@ -31,7 +36,7 @@ fn session_stable_retry_jitter_percent(session_id: &str, completed_attempts: u32
 
 /// Exponential retry delay after the Nth failed attempt, scaled by the
 /// session's deterministic jitter percentage.
-fn session_stable_retry_delay(
+pub(crate) fn session_stable_retry_delay(
     base_delay: Duration,
     session_id: &str,
     completed_attempts: u32,
@@ -42,7 +47,7 @@ fn session_stable_retry_delay(
 
 /// Represents a Codex runtime command.
 #[derive(Clone)]
-enum CodexRuntimeCommand {
+pub(crate) enum CodexRuntimeCommand {
     Prompt {
         session_id: String,
         command: CodexPromptCommand,
@@ -106,25 +111,25 @@ enum CodexRuntimeCommand {
 
 /// Represents a Codex prompt command.
 #[derive(Clone)]
-struct CodexPromptCommand {
-    active_turn_generation: u64,
-    approval_policy: CodexApprovalPolicy,
-    attachments: Vec<PromptImageAttachment>,
-    cwd: String,
-    model: String,
-    prompt: String,
-    reasoning_effort: CodexReasoningEffort,
-    service_tier: Option<String>,
-    resume_thread_id: Option<String>,
-    sandbox_mode: CodexSandboxMode,
+pub(crate) struct CodexPromptCommand {
+    pub(crate) active_turn_generation: u64,
+    pub(crate) approval_policy: CodexApprovalPolicy,
+    pub(crate) attachments: Vec<PromptImageAttachment>,
+    pub(crate) cwd: String,
+    pub(crate) model: String,
+    pub(crate) prompt: String,
+    pub(crate) reasoning_effort: CodexReasoningEffort,
+    pub(crate) service_tier: Option<String>,
+    pub(crate) resume_thread_id: Option<String>,
+    pub(crate) sandbox_mode: CodexSandboxMode,
     /// The receipted attempt this command carries, set at its promotion;
     /// `None` only for a prompt that was never receipted
     /// (prompt_delivery.rs).
-    delivery_receipt: Option<CodexPromptReceipt>,
+    pub(crate) delivery_receipt: Option<CodexPromptReceipt>,
 }
 
 /// Finds Fast in the active model's advertised service tiers.
-fn codex_fast_service_tier<'a>(
+pub(crate) fn codex_fast_service_tier<'a>(
     model: &str,
     options: &'a [SessionModelOption],
 ) -> Option<&'a SessionModelServiceTier> {
@@ -138,17 +143,17 @@ fn codex_fast_service_tier<'a>(
 }
 
 /// The retry must keep Fast enabled; only an explicit user choice selects Standard.
-fn unresolved_codex_fast_error(model: &str) -> anyhow::Error {
+pub(crate) fn unresolved_codex_fast_error(model: &str) -> anyhow::Error {
     anyhow!(
         "Codex Fast is enabled, but the current model catalog does not advertise a Fast service tier for '{model}'. Retry after refreshing the model catalog, or use /fast or settings to select Standard"
     )
 }
 
-fn codex_model_supports_fast(model: &str, model_options: &[SessionModelOption]) -> bool {
+pub(crate) fn codex_model_supports_fast(model: &str, model_options: &[SessionModelOption]) -> bool {
     codex_fast_service_tier(model, model_options).is_some()
 }
 
-fn codex_fast_service_tier_value(
+pub(crate) fn codex_fast_service_tier_value(
     model: &str,
     model_options: &[SessionModelOption],
     fast_mode: bool,
@@ -163,18 +168,18 @@ fn codex_fast_service_tier_value(
 
 /// Represents a Codex JSON RPC response command.
 #[derive(Clone, Debug, PartialEq)]
-enum CodexJsonRpcResponsePayload {
+pub(crate) enum CodexJsonRpcResponsePayload {
     Result(Value),
     Error { code: i64, message: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct CodexJsonRpcResponseCommand {
-    request_id: Value,
-    payload: CodexJsonRpcResponsePayload,
+pub(crate) struct CodexJsonRpcResponseCommand {
+    pub(crate) request_id: Value,
+    pub(crate) payload: CodexJsonRpcResponsePayload,
 }
 
-const JSON_RPC_VERSION: &str = "2.0";
+pub(crate) const JSON_RPC_VERSION: &str = "2.0";
 
 #[derive(Serialize)]
 struct JsonRpcNotificationMessage<'a> {
@@ -211,14 +216,14 @@ struct JsonRpcErrorResponseMessage {
 }
 
 /// Tracks an in-flight Codex JSON-RPC request.
-struct PendingCodexJsonRpcRequest {
-    request_id: String,
-    response_rx: mpsc::Receiver<std::result::Result<Value, CodexResponseError>>,
+pub(crate) struct PendingCodexJsonRpcRequest {
+    pub(crate) request_id: String,
+    pub(crate) response_rx: mpsc::Receiver<std::result::Result<Value, CodexResponseError>>,
 }
 
 /// Enumerates Codex approval kinds.
 #[derive(Clone)]
-enum CodexApprovalKind {
+pub(crate) enum CodexApprovalKind {
     CommandExecution,
     FileChange,
     Permissions { requested_permissions: Value },
@@ -226,49 +231,49 @@ enum CodexApprovalKind {
 
 /// Represents Codex pending approval.
 #[derive(Clone)]
-struct CodexPendingApproval {
-    kind: CodexApprovalKind,
-    request_id: Value,
+pub(crate) struct CodexPendingApproval {
+    pub(crate) kind: CodexApprovalKind,
+    pub(crate) request_id: Value,
 }
 
 /// Represents Codex pending user input.
 #[derive(Clone)]
-struct CodexPendingUserInput {
-    questions: Vec<UserInputQuestion>,
-    request_id: Value,
+pub(crate) struct CodexPendingUserInput {
+    pub(crate) questions: Vec<UserInputQuestion>,
+    pub(crate) request_id: Value,
 }
 
 /// Represents Codex pending MCP elicitation.
 #[derive(Clone)]
-struct CodexPendingMcpElicitation {
-    request: McpElicitationRequestPayload,
-    request_id: Value,
+pub(crate) struct CodexPendingMcpElicitation {
+    pub(crate) request: McpElicitationRequestPayload,
+    pub(crate) request_id: Value,
 }
 
 /// Represents the Codex pending app request payload.
 #[derive(Clone)]
-struct CodexPendingAppRequest {
-    request_id: Value,
+pub(crate) struct CodexPendingAppRequest {
+    pub(crate) request_id: Value,
 }
 
 /// Represents a Claude prompt command.
 #[derive(Clone)]
-struct ClaudePromptCommand {
-    attachments: Vec<PromptImageAttachment>,
+pub(crate) struct ClaudePromptCommand {
+    pub(crate) attachments: Vec<PromptImageAttachment>,
     /// Identifies the exact accepted turn whose prompt may be replayed.
     /// Delayed retry commands carry this value so they cannot replay a newer
     /// turn that reached the same persistent runtime in the meantime.
-    replay_generation: String,
-    text: String,
+    pub(crate) replay_generation: String,
+    pub(crate) text: String,
     /// The session turn generation this prompt was dispatched under: a
     /// `result` of the turn this prompt opens finalizes that generation only
     /// (`claude_turn_ownership.rs`).
-    turn_generation: u64,
+    pub(crate) turn_generation: u64,
 }
 
 /// Represents a Claude runtime command.
 #[derive(Clone)]
-enum ClaudeRuntimeCommand {
+pub(crate) enum ClaudeRuntimeCommand {
     Prompt(ClaudePromptCommand),
     /// Internal: replays the last accepted prompt after a transient Claude API
     /// rejection. The writer owns the saved prompt so the retry cannot drift
@@ -289,31 +294,31 @@ enum ClaudeRuntimeCommand {
 
 /// Represents prompt image attachment.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct PromptImageAttachment {
-    data: String,
-    metadata: MessageImageAttachment,
+pub(crate) struct PromptImageAttachment {
+    pub(crate) data: String,
+    pub(crate) metadata: MessageImageAttachment,
 }
 
 /// Represents Claude pending approval.
 #[derive(Clone)]
-struct ClaudePendingApproval {
-    permission_mode_for_session: Option<String>,
-    request_id: String,
-    tool_input: Value,
+pub(crate) struct ClaudePendingApproval {
+    pub(crate) permission_mode_for_session: Option<String>,
+    pub(crate) request_id: String,
+    pub(crate) tool_input: Value,
 }
 
 /// Represents an AskUserQuestion permission request waiting for structured
 /// answers.
 #[derive(Clone)]
-struct ClaudePendingUserInput {
-    input: Value,
-    questions: Vec<UserInputQuestion>,
-    request_id: String,
+pub(crate) struct ClaudePendingUserInput {
+    pub(crate) input: Value,
+    pub(crate) questions: Vec<UserInputQuestion>,
+    pub(crate) request_id: String,
 }
 
 /// Enumerates Claude permission decisions.
 #[derive(Clone)]
-enum ClaudePermissionDecision {
+pub(crate) enum ClaudePermissionDecision {
     Allow {
         request_id: String,
         updated_input: Value,
@@ -325,7 +330,7 @@ enum ClaudePermissionDecision {
 }
 
 /// Enumerates Claude control request actions.
-enum ClaudeControlRequestAction {
+pub(crate) enum ClaudeControlRequestAction {
     QueueApproval {
         title: String,
         command: String,
@@ -359,7 +364,7 @@ enum ClaudeControlRequestAction {
 }
 
 /// Represents a ACP runtime command.
-enum AcpRuntimeCommand {
+pub(crate) enum AcpRuntimeCommand {
     Prompt(AcpPromptCommand),
     JsonRpcMessage(Value),
     Cancel,
@@ -381,47 +386,47 @@ enum AcpRuntimeCommand {
 
 /// Holds ACP launch options.
 #[derive(Clone, Copy, Default)]
-struct AcpLaunchOptions {
-    gemini_approval_mode: Option<GeminiApprovalMode>,
+pub(crate) struct AcpLaunchOptions {
+    pub(crate) gemini_approval_mode: Option<GeminiApprovalMode>,
 }
 
 /// Represents a ACP prompt command.
 #[derive(Clone)]
-struct AcpPromptCommand {
-    cwd: String,
-    cursor_mode: Option<CursorMode>,
-    model: String,
-    opencode_effort: Option<String>,
-    opencode_mode: Option<String>,
-    prompt: String,
-    resume_session_id: Option<String>,
+pub(crate) struct AcpPromptCommand {
+    pub(crate) cwd: String,
+    pub(crate) cursor_mode: Option<CursorMode>,
+    pub(crate) model: String,
+    pub(crate) opencode_effort: Option<String>,
+    pub(crate) opencode_mode: Option<String>,
+    pub(crate) prompt: String,
+    pub(crate) resume_session_id: Option<String>,
 }
 
 /// Names the three independently optional OpenCode authority changes so
 /// model, effort, and mode cannot be transposed at call sites.
 #[derive(Clone, Default)]
-struct OpenCodeConfigSelections {
-    model: Option<String>,
-    effort: Option<String>,
-    mode: Option<String>,
+pub(crate) struct OpenCodeConfigSelections {
+    pub(crate) model: Option<String>,
+    pub(crate) effort: Option<String>,
+    pub(crate) mode: Option<String>,
 }
 
 /// Carries one authoritative OpenCode option-list update from ACP.
 #[derive(Clone)]
-struct OpenCodeConfigOptionUpdate {
-    selection: String,
-    current: Option<String>,
-    options: Vec<SessionModelOption>,
+pub(crate) struct OpenCodeConfigOptionUpdate {
+    pub(crate) selection: String,
+    pub(crate) current: Option<String>,
+    pub(crate) options: Vec<SessionModelOption>,
 }
 
 /// Groups the independently optional config lists advertised in one ACP
 /// handshake/update payload.
 #[derive(Clone, Default)]
-struct OpenCodeConfigUpdate {
-    model: Option<OpenCodeConfigOptionUpdate>,
-    effort: Option<OpenCodeConfigOptionUpdate>,
-    mode: Option<OpenCodeConfigOptionUpdate>,
-    notices: Vec<String>,
+pub(crate) struct OpenCodeConfigUpdate {
+    pub(crate) model: Option<OpenCodeConfigOptionUpdate>,
+    pub(crate) effort: Option<OpenCodeConfigOptionUpdate>,
+    pub(crate) mode: Option<OpenCodeConfigOptionUpdate>,
+    pub(crate) notices: Vec<String>,
 }
 
 /// Bounded OpenCode config facts delivered directly from the ACP reader to the
@@ -429,41 +434,41 @@ struct OpenCodeConfigUpdate {
 /// never enters runtime state; option extraction applies the normal ingress
 /// bounds before this value is constructed.
 #[derive(Clone, Default)]
-struct OpenCodeConfigNotification {
-    model: Option<String>,
-    effort: Option<(Option<String>, Vec<SessionModelOption>)>,
-    mode: Option<(Option<String>, Vec<SessionModelOption>)>,
+pub(crate) struct OpenCodeConfigNotification {
+    pub(crate) model: Option<String>,
+    pub(crate) effort: Option<(Option<String>, Vec<SessionModelOption>)>,
+    pub(crate) mode: Option<(Option<String>, Vec<SessionModelOption>)>,
 }
 
 /// Snapshots the OpenCode authority and live option state at writer execution.
 #[derive(Clone)]
-struct OpenCodeConfigSnapshot {
-    model_selection: String,
-    effective_model: String,
-    model_options: Vec<SessionModelOption>,
-    effort_selection: String,
-    current_effort: Option<String>,
-    effort_options: Vec<SessionModelOption>,
-    mode_selection: String,
-    current_mode: Option<String>,
-    mode_options: Vec<SessionModelOption>,
+pub(crate) struct OpenCodeConfigSnapshot {
+    pub(crate) model_selection: String,
+    pub(crate) effective_model: String,
+    pub(crate) model_options: Vec<SessionModelOption>,
+    pub(crate) effort_selection: String,
+    pub(crate) current_effort: Option<String>,
+    pub(crate) effort_options: Vec<SessionModelOption>,
+    pub(crate) mode_selection: String,
+    pub(crate) current_mode: Option<String>,
+    pub(crate) mode_options: Vec<SessionModelOption>,
 }
 
 /// Represents ACP pending approval.
 #[derive(Clone)]
-struct AcpPendingApproval {
-    question: Option<UserInputQuestion>,
-    allow_once_option_id: Option<String>,
-    allow_always_option_id: Option<String>,
-    reject_option_id: Option<String>,
-    request_id: Value,
+pub(crate) struct AcpPendingApproval {
+    pub(crate) question: Option<UserInputQuestion>,
+    pub(crate) allow_once_option_id: Option<String>,
+    pub(crate) allow_always_option_id: Option<String>,
+    pub(crate) reject_option_id: Option<String>,
+    pub(crate) request_id: Value,
 }
 
 impl AcpPendingApproval {
     /// Returns only the user decisions represented by this request's exact
     /// protocol options. The UI uses this to avoid offering actions that the
     /// fail-closed backend cannot honor.
-    fn supported_decisions(&self) -> Vec<ApprovalDecision> {
+    pub(crate) fn supported_decisions(&self) -> Vec<ApprovalDecision> {
         let mut decisions = Vec::new();
         if self.allow_once_option_id.is_some() {
             decisions.push(ApprovalDecision::Accepted);
@@ -491,30 +496,30 @@ impl AcpPendingApproval {
 /// - `is_loading_history` is true only during an in-flight `session/load`
 ///   call. Outside that window it must be false.
 #[derive(Default)]
-struct AcpRuntimeState {
+pub(crate) struct AcpRuntimeState {
     // Set by the serialized prompt writer before the request is flushed.
     // Reader events retain this owner rather than borrowing a successor's.
-    observation_turn_generation: Option<u64>,
+    pub(crate) observation_turn_generation: Option<u64>,
     /// Writer-owned: set only after the first host-guided prompt is flushed.
     /// Process-local; external-session resume skips teaching independently.
-    host_guidance_sent: bool,
+    pub(crate) host_guidance_sent: bool,
     /// Writer-owned: true from the moment Kimi acknowledged Default mode for
     /// the current prompt until that prompt settles. The read-only gate's
     /// mode guard acts only inside this window, so a mode Kimi reports during
     /// session setup, before TermAl sets Default, never fails a child.
-    kimi_mode_gate_armed: bool,
-    capabilities: Option<AcpCapabilities>,
-    current_session_id: Option<String>,
-    is_loading_history: bool,
+    pub(crate) kimi_mode_gate_armed: bool,
+    pub(crate) capabilities: Option<AcpCapabilities>,
+    pub(crate) current_session_id: Option<String>,
+    pub(crate) is_loading_history: bool,
     /// Recent OpenCode authority/config snapshots reconciled from unsolicited
     /// updates. A bounded history breaks both exact duplicate and alternating
     /// A/B/A notification cycles without permanently suppressing a later
     /// legitimate selection after the window rolls forward.
-    opencode_reconcile_fingerprints: VecDeque<Value>,
+    pub(crate) opencode_reconcile_fingerprints: VecDeque<Value>,
     /// The serialized writer installs one subscriber while a model change is
     /// awaiting model-specific effort/mode lists. The ACP reader signals it
     /// before queuing reconciliation, avoiding both writer deadlock and polling.
-    opencode_config_notification_tx: Option<Sender<OpenCodeConfigNotification>>,
+    pub(crate) opencode_config_notification_tx: Option<Sender<OpenCodeConfigNotification>>,
 }
 
 /// Capability bundle learned from the `initialize` response. `None`
@@ -522,64 +527,64 @@ struct AcpRuntimeState {
 /// completed yet"; once present, the contract is "the value inside is
 /// authoritative for this runtime's lifetime".
 #[derive(Clone, Default)]
-struct AcpCapabilities {
+pub(crate) struct AcpCapabilities {
     /// Only `Some(true)` from ACP v1 initialize permits `session/load`.
     /// An omitted flag is unsupported, not permission to probe.
-    supports_session_load: Option<bool>,
+    pub(crate) supports_session_load: Option<bool>,
     /// `Some(true)` means the agent explicitly advertised ACP
     /// `session/resume`, which restores a session without replaying its
     /// transcript. An omitted or malformed capability is unsupported.
-    supports_session_resume: Option<bool>,
+    pub(crate) supports_session_resume: Option<bool>,
 }
 
 impl AcpCapabilities {
     /// Returns whether initialize explicitly advertised `session/load`.
-    fn session_load_supported(&self) -> bool {
+    pub(crate) fn session_load_supported(&self) -> bool {
         self.supports_session_load == Some(true)
     }
 
     /// Returns whether the runtime explicitly advertised `session/resume`.
-    fn session_resume_supported(&self) -> bool {
+    pub(crate) fn session_resume_supported(&self) -> bool {
         self.supports_session_resume == Some(true)
     }
 }
 
 /// Tracks ACP turn state.
 #[derive(Default)]
-struct AcpTurnState {
-    current_agent_message_id: Option<String>,
-    thinking_buffer: String,
+pub(crate) struct AcpTurnState {
+    pub(crate) current_agent_message_id: Option<String>,
+    pub(crate) thinking_buffer: String,
     /// Kimi tool calls observed by the reader, for the read-only gate.
-    kimi_read_only: KimiReadOnlyObservations,
+    pub(crate) kimi_read_only: KimiReadOnlyObservations,
     #[cfg(test)]
-    before_cursor_permission_fallback: Option<fn(&AppState, &str)>,
+    pub(crate) before_cursor_permission_fallback: Option<fn(&AppState, &str)>,
 }
 
 /// Holds turn configuration.
 #[derive(Clone)]
-struct TurnConfig {
-    codex_approval_policy: Option<CodexApprovalPolicy>,
-    codex_reasoning_effort: Option<CodexReasoningEffort>,
-    codex_fast_mode: bool,
-    codex_sandbox_mode: Option<CodexSandboxMode>,
-    agent: Agent,
-    cwd: String,
-    model: String,
-    prompt: String,
-    external_session_id: Option<String>,
+pub(crate) struct TurnConfig {
+    pub(crate) codex_approval_policy: Option<CodexApprovalPolicy>,
+    pub(crate) codex_reasoning_effort: Option<CodexReasoningEffort>,
+    pub(crate) codex_fast_mode: bool,
+    pub(crate) codex_sandbox_mode: Option<CodexSandboxMode>,
+    pub(crate) agent: Agent,
+    pub(crate) cwd: String,
+    pub(crate) model: String,
+    pub(crate) prompt: String,
+    pub(crate) external_session_id: Option<String>,
 }
 
 /// Durable mailbox notification metadata that must not be marked delivered
 /// until the runtime command channel accepts the turn.
 #[derive(Clone, Debug)]
-struct MailboxNotificationDelivery {
-    mailbox_id: String,
-    session_id: String,
-    through_sequence: u64,
+pub(crate) struct MailboxNotificationDelivery {
+    pub(crate) mailbox_id: String,
+    pub(crate) session_id: String,
+    pub(crate) through_sequence: u64,
 }
 
 /// Defines the turn dispatch variants.
-enum TurnDispatch {
+pub(crate) enum TurnDispatch {
     PersistentClaude {
         human_prompt_id: Option<String>,
         federation_handoff: Option<FederationExecutorHandoffIdentity>,
@@ -618,39 +623,63 @@ enum TurnDispatch {
 }
 
 impl TurnDispatch {
-    fn human_prompt_id(&self) -> Option<&str> {
+    pub(crate) fn human_prompt_id(&self) -> Option<&str> {
         match self {
-            Self::PersistentClaude { human_prompt_id, .. }
-            | Self::PersistentCodex { human_prompt_id, .. }
-            | Self::PersistentAcp { human_prompt_id, .. } => human_prompt_id.as_deref(),
+            Self::PersistentClaude {
+                human_prompt_id, ..
+            }
+            | Self::PersistentCodex {
+                human_prompt_id, ..
+            }
+            | Self::PersistentAcp {
+                human_prompt_id, ..
+            } => human_prompt_id.as_deref(),
         }
     }
 
-    fn set_human_prompt_id(&mut self, prompt_id: String) {
+    pub(crate) fn set_human_prompt_id(&mut self, prompt_id: String) {
         match self {
-            Self::PersistentClaude { human_prompt_id, .. }
-            | Self::PersistentCodex { human_prompt_id, .. }
-            | Self::PersistentAcp { human_prompt_id, .. } => *human_prompt_id = Some(prompt_id),
+            Self::PersistentClaude {
+                human_prompt_id, ..
+            }
+            | Self::PersistentCodex {
+                human_prompt_id, ..
+            }
+            | Self::PersistentAcp {
+                human_prompt_id, ..
+            } => *human_prompt_id = Some(prompt_id),
         }
     }
 
-    fn federation_handoff(&self) -> Option<&FederationExecutorHandoffIdentity> {
+    pub(crate) fn federation_handoff(&self) -> Option<&FederationExecutorHandoffIdentity> {
         match self {
-            Self::PersistentClaude { federation_handoff, .. }
-            | Self::PersistentCodex { federation_handoff, .. }
-            | Self::PersistentAcp { federation_handoff, .. } => federation_handoff.as_ref(),
+            Self::PersistentClaude {
+                federation_handoff, ..
+            }
+            | Self::PersistentCodex {
+                federation_handoff, ..
+            }
+            | Self::PersistentAcp {
+                federation_handoff, ..
+            } => federation_handoff.as_ref(),
         }
     }
 
-    fn set_federation_handoff(&mut self, identity: FederationExecutorHandoffIdentity) {
+    pub(crate) fn set_federation_handoff(&mut self, identity: FederationExecutorHandoffIdentity) {
         match self {
-            Self::PersistentClaude { federation_handoff, .. }
-            | Self::PersistentCodex { federation_handoff, .. }
-            | Self::PersistentAcp { federation_handoff, .. } => *federation_handoff = Some(identity),
+            Self::PersistentClaude {
+                federation_handoff, ..
+            }
+            | Self::PersistentCodex {
+                federation_handoff, ..
+            }
+            | Self::PersistentAcp {
+                federation_handoff, ..
+            } => *federation_handoff = Some(identity),
         }
     }
 
-    fn session_id(&self) -> &str {
+    pub(crate) fn session_id(&self) -> &str {
         match self {
             Self::PersistentClaude { session_id, .. }
             | Self::PersistentCodex { session_id, .. }
@@ -658,7 +687,7 @@ impl TurnDispatch {
         }
     }
 
-    fn active_turn_generation(&self) -> u64 {
+    pub(crate) fn active_turn_generation(&self) -> u64 {
         match self {
             Self::PersistentClaude {
                 active_turn_generation,
@@ -675,7 +704,7 @@ impl TurnDispatch {
         }
     }
 
-    fn runtime_token(&self) -> &RuntimeToken {
+    pub(crate) fn runtime_token(&self) -> &RuntimeToken {
         match self {
             Self::PersistentClaude { runtime_token, .. }
             | Self::PersistentCodex { runtime_token, .. }
@@ -683,7 +712,7 @@ impl TurnDispatch {
         }
     }
 
-    fn mailbox_notification(&self) -> Option<&MailboxNotificationDelivery> {
+    pub(crate) fn mailbox_notification(&self) -> Option<&MailboxNotificationDelivery> {
         match self {
             Self::PersistentClaude {
                 mailbox_notification,
@@ -702,7 +731,7 @@ impl TurnDispatch {
 }
 
 /// Defines the dispatch turn result variants.
-enum DispatchTurnResult {
+pub(crate) enum DispatchTurnResult {
     Dispatched(TurnDispatch),
     /// The submitted prompt remained queued while a pre-existing queue head
     /// was dispatched to recover an otherwise-idle queue.
@@ -710,21 +739,21 @@ enum DispatchTurnResult {
     Queued,
 }
 
-type CodexPendingRequestMap =
+pub(crate) type CodexPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, CodexResponseError>>>>>;
-type AcpPendingRequestMap =
+pub(crate) type AcpPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, AcpResponseError>>>>>;
-type AcpTurnLifecycle = Arc<(Mutex<bool>, Condvar)>;
+pub(crate) type AcpTurnLifecycle = Arc<(Mutex<bool>, Condvar)>;
 
 /// Represents the pending ACP JSON RPC request payload.
-struct PendingAcpJsonRpcRequest {
-    request_id: String,
-    response_rx: mpsc::Receiver<std::result::Result<Value, AcpResponseError>>,
+pub(crate) struct PendingAcpJsonRpcRequest {
+    pub(crate) request_id: String,
+    pub(crate) response_rx: mpsc::Receiver<std::result::Result<Value, AcpResponseError>>,
 }
 
 /// Represents a Codex request failure.
 #[derive(Clone, Debug, PartialEq)]
-enum CodexResponseError {
+pub(crate) enum CodexResponseError {
     JsonRpc(String),
     /// The local wait for a Codex JSON-RPC response exceeded its deadline.
     /// Distinguished from `Transport` because a timeout does not indicate a
@@ -737,7 +766,7 @@ enum CodexResponseError {
 
 impl CodexResponseError {
     /// Maps typed RPC failures consistently at the HTTP boundary.
-    fn into_api_error(self, method: &str) -> ApiError {
+    pub(crate) fn into_api_error(self, method: &str) -> ApiError {
         match self {
             Self::Transport(detail) | Self::Timeout(detail) => ApiError::internal(detail),
             Self::JsonRpc(detail) => {
@@ -747,7 +776,7 @@ impl CodexResponseError {
     }
 
     /// Returns the transport detail when the request failed before Codex sent a JSON-RPC result.
-    fn as_transport(&self) -> Option<&str> {
+    pub(crate) fn as_transport(&self) -> Option<&str> {
         match self {
             Self::JsonRpc(_) | Self::Timeout(_) => None,
             Self::Transport(detail) => Some(detail),
@@ -769,10 +798,10 @@ impl std::error::Error for CodexResponseError {}
 
 /// Represents an ACP JSON RPC error payload.
 #[derive(Clone, Debug, PartialEq)]
-struct AcpJsonRpcError {
-    code: Option<i64>,
-    message: String,
-    data: Option<Value>,
+pub(crate) struct AcpJsonRpcError {
+    pub(crate) code: Option<i64>,
+    pub(crate) message: String,
+    pub(crate) data: Option<Value>,
 }
 
 impl std::fmt::Display for AcpJsonRpcError {
@@ -792,14 +821,14 @@ impl std::error::Error for AcpJsonRpcError {}
 
 /// Represents an ACP request failure.
 #[derive(Clone, Debug, PartialEq)]
-enum AcpResponseError {
+pub(crate) enum AcpResponseError {
     JsonRpc(AcpJsonRpcError),
     Transport(String),
 }
 
 impl AcpResponseError {
     /// Returns the JSON-RPC error details when the request reached the ACP runtime.
-    fn as_json_rpc(&self) -> Option<&AcpJsonRpcError> {
+    pub(crate) fn as_json_rpc(&self) -> Option<&AcpJsonRpcError> {
         match self {
             Self::JsonRpc(error) => Some(error),
             Self::Transport(_) => None,
@@ -819,46 +848,46 @@ impl std::fmt::Display for AcpResponseError {
 impl std::error::Error for AcpResponseError {}
 
 /// Represents pending subagent result.
-struct PendingSubagentResult {
-    title: String,
-    summary: String,
-    conversation_id: Option<String>,
-    turn_id: Option<String>,
+pub(crate) struct PendingSubagentResult {
+    pub(crate) title: String,
+    pub(crate) summary: String,
+    pub(crate) conversation_id: Option<String>,
+    pub(crate) turn_id: Option<String>,
 }
 
 /// Tracks Codex turn state.
 #[derive(Default)]
-struct CodexTurnState {
-    launcher_output: HashMap<String, CodexLauncherOutput>,
-    remote_compaction_progressed: bool,
-    current_agent_message_id: Option<String>,
-    streamed_agent_message_text_by_item_id: HashMap<String, String>,
-    streamed_agent_message_item_ids: HashSet<String>,
-    pending_subagent_results: Vec<PendingSubagentResult>,
-    assistant_output_started: bool,
-    first_visible_assistant_message_id: Option<String>,
+pub(crate) struct CodexTurnState {
+    pub(crate) launcher_output: HashMap<String, CodexLauncherOutput>,
+    pub(crate) remote_compaction_progressed: bool,
+    pub(crate) current_agent_message_id: Option<String>,
+    pub(crate) streamed_agent_message_text_by_item_id: HashMap<String, String>,
+    pub(crate) streamed_agent_message_item_ids: HashSet<String>,
+    pub(crate) pending_subagent_results: Vec<PendingSubagentResult>,
+    pub(crate) assistant_output_started: bool,
+    pub(crate) first_visible_assistant_message_id: Option<String>,
 }
 
 /// Tracks session recorder state.
 #[derive(Default)]
-struct SessionRecorderState {
-    command_messages: HashMap<String, String>,
-    parallel_agents_messages: HashMap<String, String>,
-    streaming_text_message_id: Option<String>,
+pub(crate) struct SessionRecorderState {
+    pub(crate) command_messages: HashMap<String, String>,
+    pub(crate) parallel_agents_messages: HashMap<String, String>,
+    pub(crate) streaming_text_message_id: Option<String>,
     /// Who produced what the recorder observes now (a Claude frame's runtime
     /// and turn), given to the Engram sink with each observation. Set by the
     /// caller for each frame; a turn reset leaves it.
-    observation_provenance: EngramObservationProvenance,
+    pub(crate) observation_provenance: EngramObservationProvenance,
     // Frame-local native execution proof; an ambient/replayed event cannot
     // acquire a new turn's opening snapshot.
-    native_tool_provenance: Option<EngramObservationProvenance>,
+    pub(crate) native_tool_provenance: Option<EngramObservationProvenance>,
     /// Commands whose message a turn reset keeps: a Claude subagent's tool
     /// calls still pending across the root turn's reset, so their late
     /// results update the same card.
-    kept_command_keys: HashSet<String>,
+    pub(crate) kept_command_keys: HashSet<String>,
 }
 
-fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
+pub(crate) fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
     recorder_state.native_tool_provenance = None;
     let kept = &recorder_state.kept_command_keys;
     recorder_state
@@ -881,8 +910,8 @@ fn reset_recorder_state_fields(recorder_state: &mut SessionRecorderState) {
 /// `resume_thread_id` here and superseded on a mismatch; that comparison was
 /// guarding an unreachable state, and it is what made a superseded waiter
 /// permanently suppress the session's own LIVE thread. Do not add it back.
-struct PendingCodexThreadSetup {
-    request_id: String,
+pub(crate) struct PendingCodexThreadSetup {
+    pub(crate) request_id: String,
     /// The newest prompt handed to this setup.
     ///
     /// `thread_id` is only populated when the setup response arrives, so a
@@ -903,38 +932,38 @@ struct PendingCodexThreadSetup {
     /// re-sends model/sandbox/approval/effort/cwd every time — so the turn is
     /// authoritative and a parked prompt never inherits stale ones. Only the
     /// thread's creation-time attributes come from the opener.
-    command: CodexPromptCommand,
+    pub(crate) command: CodexPromptCommand,
 }
 
 /// Tracks shared Codex session state.
 #[derive(Default)]
-struct SharedCodexSessionState {
+pub(crate) struct SharedCodexSessionState {
     // A replacement attachment can reuse the runtime, thread and turn ids.
     // Retain allocation identity while an off-lock terminal action is pending.
-    attachment: Arc<()>,
-    reviewer_mcp_setup_started: Option<std::time::Instant>,
-    reviewer_mcp_failure: Option<String>,
-    reviewer_mcp_gate: Option<String>,
-    pending_thread_setup: Option<PendingCodexThreadSetup>,
-    pending_turn_start_request_id: Option<String>,
-    turn_started_watchdog_cancel_tx: Option<mpsc::Sender<()>>,
+    pub(crate) attachment: Arc<()>,
+    pub(crate) reviewer_mcp_setup_started: Option<std::time::Instant>,
+    pub(crate) reviewer_mcp_failure: Option<String>,
+    pub(crate) reviewer_mcp_gate: Option<String>,
+    pub(crate) pending_thread_setup: Option<PendingCodexThreadSetup>,
+    pub(crate) pending_turn_start_request_id: Option<String>,
+    pub(crate) turn_started_watchdog_cancel_tx: Option<mpsc::Sender<()>>,
     /// An id-less `turn/started` can overtake the matching `turn/start`
     /// response on the reader thread. Keep that proof until the response
     /// waiter installs the response-derived turn id.
-    turn_started_before_response: bool,
+    pub(crate) turn_started_before_response: bool,
     /// Item routing may learn an id before the handshake proves it.
-    turn_id_provisional: bool,
-    deferred_terminals: Vec<DeferredCodexTerminal>,
-    terminal_identity_unresolved: bool,
+    pub(crate) turn_id_provisional: bool,
+    pub(crate) deferred_terminals: Vec<DeferredCodexTerminal>,
+    pub(crate) terminal_identity_unresolved: bool,
     /// Defense against delayed starts/terminals across subsequent requests.
-    retired_turn_ids: VecDeque<(String, String)>,
-    active_turn_generation: Option<u64>,
-    recorder: SessionRecorderState,
-    thread_id: Option<String>,
-    turn_id: Option<String>,
-    completed_turn_id: Option<String>,
-    turn_started: bool,
-    turn_state: CodexTurnState,
+    pub(crate) retired_turn_ids: VecDeque<(String, String)>,
+    pub(crate) active_turn_generation: Option<u64>,
+    pub(crate) recorder: SessionRecorderState,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) turn_id: Option<String>,
+    pub(crate) completed_turn_id: Option<String>,
+    pub(crate) turn_started: bool,
+    pub(crate) turn_state: CodexTurnState,
 }
 
 #[cfg(test)]
@@ -945,27 +974,27 @@ const SHARED_CODEX_COMPLETED_TURN_GRACE_PERIOD: Duration = Duration::from_secs(5
 // `aggregatedOutput` payloads from command executions. Keep enough
 // headroom that legitimate app-server JSON lines are not silently
 // drained before they reach the normal transcript/state path.
-const SHARED_CODEX_STDOUT_LINE_MAX_BYTES: usize = 32 * 1024 * 1024;
-const SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS: usize = 200;
-const SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES: usize = 5;
+pub(crate) const SHARED_CODEX_STDOUT_LINE_MAX_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) const SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS: usize = 200;
+pub(crate) const SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES: usize = 5;
 
 #[derive(Clone)]
-struct SharedCodexCompletedTurnCleanup {
-    owner: SharedCodexTerminalIdentity,
-    completed_turn_id: String,
-    due_at: std::time::Instant,
+pub(crate) struct SharedCodexCompletedTurnCleanup {
+    pub(crate) owner: SharedCodexTerminalIdentity,
+    pub(crate) completed_turn_id: String,
+    pub(crate) due_at: std::time::Instant,
 }
 
-struct SharedCodexSessions {
-    inner: Mutex<HashMap<String, SharedCodexSessionState>>,
-    cleanup_tx: mpsc::Sender<SharedCodexCompletedTurnCleanup>,
+pub(crate) struct SharedCodexSessions {
+    pub(crate) inner: Mutex<HashMap<String, SharedCodexSessionState>>,
+    pub(crate) cleanup_tx: mpsc::Sender<SharedCodexCompletedTurnCleanup>,
 }
 
-type SharedCodexSessionsGuard<'a> =
+pub(crate) type SharedCodexSessionsGuard<'a> =
     std::sync::MutexGuard<'a, HashMap<String, SharedCodexSessionState>>;
 
 impl SharedCodexSessions {
-    fn new() -> SharedCodexSessionMap {
+    pub(crate) fn new() -> SharedCodexSessionMap {
         let (cleanup_tx, cleanup_rx) = mpsc::channel();
         let sessions = Arc::new(Self {
             inner: Mutex::new(HashMap::new()),
@@ -975,15 +1004,15 @@ impl SharedCodexSessions {
         sessions
     }
 
-    fn lock(&self) -> std::sync::LockResult<SharedCodexSessionsGuard<'_>> {
+    pub(crate) fn lock(&self) -> std::sync::LockResult<SharedCodexSessionsGuard<'_>> {
         self.inner.lock()
     }
 
-    fn try_lock(&self) -> std::sync::TryLockResult<SharedCodexSessionsGuard<'_>> {
+    pub(crate) fn try_lock(&self) -> std::sync::TryLockResult<SharedCodexSessionsGuard<'_>> {
         self.inner.try_lock()
     }
 
-    fn schedule_completed_turn_cleanup(
+    pub(crate) fn schedule_completed_turn_cleanup(
         &self,
         owner: SharedCodexTerminalIdentity,
         completed_turn_id: &str,
@@ -996,8 +1025,8 @@ impl SharedCodexSessions {
     }
 }
 
-type SharedCodexSessionMap = Arc<SharedCodexSessions>;
-type SharedCodexThreadMap = Arc<Mutex<HashMap<String, String>>>;
+pub(crate) type SharedCodexSessionMap = Arc<SharedCodexSessions>;
+pub(crate) type SharedCodexThreadMap = Arc<Mutex<HashMap<String, String>>>;
 
 /// Parses Codex reasoning effort.
 fn parse_codex_reasoning_effort(value: &str) -> Option<CodexReasoningEffort> {
@@ -1029,7 +1058,7 @@ fn codex_reasoning_effort_rank(effort: CodexReasoningEffort) -> usize {
 }
 
 /// Handles Codex model option.
-fn codex_model_option<'a>(
+pub(crate) fn codex_model_option<'a>(
     model: &str,
     model_options: &'a [SessionModelOption],
 ) -> Option<&'a SessionModelOption> {
@@ -1037,7 +1066,7 @@ fn codex_model_option<'a>(
 }
 
 /// Returns the matching session model option value.
-fn matching_session_model_option_value(
+pub(crate) fn matching_session_model_option_value(
     requested_model: &str,
     model_options: &[SessionModelOption],
 ) -> Option<String> {
@@ -1056,7 +1085,7 @@ fn matching_session_model_option_value(
 }
 
 /// Returns the normalized Codex reasoning effort.
-fn normalized_codex_reasoning_effort(
+pub(crate) fn normalized_codex_reasoning_effort(
     model: &str,
     current_effort: CodexReasoningEffort,
     model_options: &[SessionModelOption],
@@ -1076,7 +1105,7 @@ fn normalized_codex_reasoning_effort(
 }
 
 /// Formats Codex reasoning efforts.
-fn format_codex_reasoning_efforts(efforts: &[CodexReasoningEffort]) -> String {
+pub(crate) fn format_codex_reasoning_efforts(efforts: &[CodexReasoningEffort]) -> String {
     let efforts = efforts
         .iter()
         .map(|effort| effort.as_api_value())
@@ -1093,7 +1122,7 @@ fn format_codex_reasoning_efforts(efforts: &[CodexReasoningEffort]) -> String {
 }
 
 /// Handles Codex model options.
-fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
+pub(crate) fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
     model_list_result
         .get("data")
         .and_then(Value::as_array)
@@ -1188,7 +1217,7 @@ fn codex_model_options(model_list_result: &Value) -> Vec<SessionModelOption> {
 }
 
 /// Writes Codex JSON RPC message.
-fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Result<()> {
+pub(crate) fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Result<()> {
     serde_json::to_writer(&mut *writer, message)
         .context("failed to encode Codex app-server message")?;
     writer
@@ -1199,7 +1228,7 @@ fn write_codex_json_rpc_message(writer: &mut impl Write, message: &Value) -> Res
         .context("failed to flush Codex app-server stdin")
 }
 
-fn json_rpc_notification_message(method: &str) -> Value {
+pub(crate) fn json_rpc_notification_message(method: &str) -> Value {
     serde_json::to_value(JsonRpcNotificationMessage {
         jsonrpc: JSON_RPC_VERSION,
         method,
@@ -1207,7 +1236,11 @@ fn json_rpc_notification_message(method: &str) -> Value {
     .expect("JSON-RPC notification should serialize")
 }
 
-fn json_rpc_request_message(request_id: impl Into<Value>, method: &str, params: Value) -> Value {
+pub(crate) fn json_rpc_request_message(
+    request_id: impl Into<Value>,
+    method: &str,
+    params: Value,
+) -> Value {
     serde_json::to_value(JsonRpcRequestMessage {
         jsonrpc: JSON_RPC_VERSION,
         id: request_id.into(),
@@ -1217,7 +1250,10 @@ fn json_rpc_request_message(request_id: impl Into<Value>, method: &str, params: 
     .expect("JSON-RPC request should serialize")
 }
 
-fn json_rpc_result_response_message(request_id: impl Into<Value>, result: Value) -> Value {
+pub(crate) fn json_rpc_result_response_message(
+    request_id: impl Into<Value>,
+    result: Value,
+) -> Value {
     serde_json::to_value(JsonRpcResultResponseMessage {
         jsonrpc: JSON_RPC_VERSION,
         id: request_id.into(),
@@ -1226,7 +1262,7 @@ fn json_rpc_result_response_message(request_id: impl Into<Value>, result: Value)
     .expect("JSON-RPC result response should serialize")
 }
 
-fn json_rpc_error_response_message(
+pub(crate) fn json_rpc_error_response_message(
     request_id: impl Into<Value>,
     code: i64,
     message: impl Into<String>,
@@ -1242,7 +1278,7 @@ fn json_rpc_error_response_message(
     .expect("JSON-RPC error response should serialize")
 }
 
-fn codex_json_rpc_response_message(response: &CodexJsonRpcResponseCommand) -> Value {
+pub(crate) fn codex_json_rpc_response_message(response: &CodexJsonRpcResponseCommand) -> Value {
     match &response.payload {
         CodexJsonRpcResponsePayload::Result(result) => {
             json_rpc_result_response_message(response.request_id.clone(), result.clone())
@@ -1254,14 +1290,14 @@ fn codex_json_rpc_response_message(response: &CodexJsonRpcResponseCommand) -> Va
 }
 
 /// Handles Codex request ID key.
-fn codex_request_id_key(id: &Value) -> String {
+pub(crate) fn codex_request_id_key(id: &Value) -> String {
     id.as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| id.to_string())
 }
 
 /// Summarizes Codex JSON RPC error.
-fn summarize_codex_json_rpc_error(error: &Value) -> String {
+pub(crate) fn summarize_codex_json_rpc_error(error: &Value) -> String {
     if let Some(message) = error.get("message").and_then(Value::as_str) {
         return message.to_owned();
     }
@@ -1270,7 +1306,7 @@ fn summarize_codex_json_rpc_error(error: &Value) -> String {
 }
 
 /// Handles Codex sandbox policy value.
-fn codex_sandbox_policy_value(mode: CodexSandboxMode) -> Value {
+pub(crate) fn codex_sandbox_policy_value(mode: CodexSandboxMode) -> Value {
     match mode {
         CodexSandboxMode::ReadOnly => json!({
             "type": "readOnly",

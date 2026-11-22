@@ -28,8 +28,10 @@
 // Both discovery routes short-circuit to the matching `proxy_remote_*`
 // helper when the session is remote-backed.
 
+use super::*;
+
 /// Reads file.
-async fn read_file(
+pub(crate) async fn read_file(
     State(state): State<AppState>,
     query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<Json<FileResponse>, ApiError> {
@@ -156,7 +158,7 @@ fn validate_file_base_hash(resolved_path: &FsPath, base_hash: &str) -> Result<()
     Ok(())
 }
 
-async fn write_file(
+pub(crate) async fn write_file(
     State(state): State<AppState>,
     Json(request): Json<WriteFileRequest>,
 ) -> Result<Response, ApiError> {
@@ -169,16 +171,18 @@ async fn write_file(
             request.session_id.as_deref(),
             request.project_id.as_deref(),
         )? {
-            return state.remote_put_json(
-                &scope,
-                "/api/file",
-                json!({
-                    "path": request.path.clone(),
-                    "content": request.content.clone(),
-                    "baseHash": request.base_hash.clone(),
-                    "overwrite": request.overwrite,
-                }),
-            ).map(|response| (response, ResponseMutationOutcome::Unknown));
+            return state
+                .remote_put_json(
+                    &scope,
+                    "/api/file",
+                    json!({
+                        "path": request.path.clone(),
+                        "content": request.content.clone(),
+                        "baseHash": request.base_hash.clone(),
+                        "overwrite": request.overwrite,
+                    }),
+                )
+                .map(|response| (response, ResponseMutationOutcome::Unknown));
         }
 
         state.ensure_read_only_delegation_allows_write_action(
@@ -244,21 +248,28 @@ async fn write_file(
         })?;
         let metadata = fs::metadata(&resolved_path).ok();
 
-        Ok((FileResponse {
-            path: resolved_path.to_string_lossy().into_owned(),
-            content_hash: Some(content_hash),
-            mtime_ms: metadata.as_ref().and_then(file_metadata_mtime_ms),
-            size_bytes: metadata.map(|metadata| metadata.len()),
-            content: request.content,
-            language: infer_language_from_path(&resolved_path).map(str::to_owned),
-        }, ResponseMutationOutcome::Committed))
+        Ok((
+            FileResponse {
+                path: resolved_path.to_string_lossy().into_owned(),
+                content_hash: Some(content_hash),
+                mtime_ms: metadata.as_ref().and_then(file_metadata_mtime_ms),
+                size_bytes: metadata.map(|metadata| metadata.len()),
+                content: request.content,
+                language: infer_language_from_path(&resolved_path).map(str::to_owned),
+            },
+            ResponseMutationOutcome::Committed,
+        ))
     })
     .await?;
-    Ok(json_output_response(&response.0, output_budget_bytes(), response.1))
+    Ok(json_output_response(
+        &response.0,
+        output_budget_bytes(),
+        response.1,
+    ))
 }
 
 /// Reads directory.
-async fn read_directory(
+pub(crate) async fn read_directory(
     State(state): State<AppState>,
     query: Result<Query<FileQuery>, QueryRejection>,
 ) -> Result<Json<DirectoryResponse>, ApiError> {
@@ -369,7 +380,7 @@ async fn read_directory(
 }
 
 /// Lists agent commands.
-async fn list_agent_commands(
+pub(crate) async fn list_agent_commands(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<AgentCommandsResponse>, ApiError> {
@@ -378,7 +389,7 @@ async fn list_agent_commands(
 }
 
 /// Resolves an agent command into the prompt payload used for send/delegate.
-async fn resolve_agent_command(
+pub(crate) async fn resolve_agent_command(
     AxumPath((session_id, command_name)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     payload: std::result::Result<Json<ResolveAgentCommandRequest>, JsonRejection>,
@@ -392,7 +403,7 @@ async fn resolve_agent_command(
 }
 
 /// Searches instructions.
-async fn search_instructions(
+pub(crate) async fn search_instructions(
     query: Result<Query<InstructionSearchQuery>, QueryRejection>,
     State(state): State<AppState>,
 ) -> Result<Json<InstructionSearchResponse>, ApiError> {
@@ -403,7 +414,7 @@ async fn search_instructions(
     Ok(Json(response))
 }
 
-const MAX_AGENT_COMMAND_FILE_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_AGENT_COMMAND_FILE_BYTES: usize = 1024 * 1024;
 
 #[cfg(unix)]
 fn open_agent_command_file(path: &FsPath) -> Result<fs::File, ApiError> {
@@ -439,7 +450,7 @@ fn open_agent_command_file(path: &FsPath) -> Result<fs::File, ApiError> {
     })
 }
 
-fn read_agent_command_file(path: &FsPath) -> Result<String, ApiError> {
+pub(crate) fn read_agent_command_file(path: &FsPath) -> Result<String, ApiError> {
     use std::io::Read as _;
 
     let file = open_agent_command_file(path)?;
@@ -481,7 +492,7 @@ fn read_agent_command_file(path: &FsPath) -> Result<String, ApiError> {
 }
 
 /// Reads Claude agent commands.
-fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, ApiError> {
+pub(crate) fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, ApiError> {
     let commands_dir = workdir.join(".claude").join("commands");
     let entries = match fs::read_dir(&commands_dir) {
         Ok(entries) => entries,
@@ -545,11 +556,11 @@ fn read_claude_agent_commands(workdir: &FsPath) -> Result<Vec<AgentCommand>, Api
     Ok(commands)
 }
 
-struct MarkdownCommandContent<'a> {
-    content: &'a str,
-    frontmatter: Option<&'a str>,
-    description: Option<String>,
-    argument_hint: Option<String>,
+pub(crate) struct MarkdownCommandContent<'a> {
+    pub(crate) content: &'a str,
+    pub(crate) frontmatter: Option<&'a str>,
+    pub(crate) description: Option<String>,
+    pub(crate) argument_hint: Option<String>,
 }
 
 // Command frontmatter intentionally uses a tiny YAML subset instead of a full
@@ -557,7 +568,7 @@ struct MarkdownCommandContent<'a> {
 // Unsupported non-TermAl YAML features are ignored. Project-local command
 // metadata may drive title generation, but delegation defaults require an
 // explicitly trusted command source.
-fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
+pub(crate) fn strip_markdown_frontmatter(content: &str) -> MarkdownCommandContent<'_> {
     let opening_len = if content.starts_with("---\r\n") {
         "---\r\n".len()
     } else if content.starts_with("---\n") {
@@ -627,7 +638,7 @@ fn strip_single_leading_blank_line(content: &str) -> &str {
     }
 }
 
-fn read_agent_command_resolver_metadata(
+pub(crate) fn read_agent_command_resolver_metadata(
     _workdir: &FsPath,
     command: &AgentCommand,
 ) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
@@ -683,7 +694,7 @@ fn looks_like_markdown_frontmatter(frontmatter: &str) -> bool {
     })
 }
 
-fn parse_agent_command_resolver_metadata(
+pub(crate) fn parse_agent_command_resolver_metadata(
     frontmatter: &str,
     trust_delegation_metadata: bool,
 ) -> Result<Option<AgentCommandResolverMetadata>, ApiError> {
@@ -1113,7 +1124,9 @@ fn parse_frontmatter_bool(value: &str, key: &str) -> Result<bool, ApiError> {
     }
 }
 
-fn parse_agent_command_delegation_mode(value: String) -> Result<DelegationMode, ApiError> {
+pub(crate) fn parse_agent_command_delegation_mode(
+    value: String,
+) -> Result<DelegationMode, ApiError> {
     match value.as_str() {
         "reviewer" => Ok(DelegationMode::Reviewer),
         "explorer" => Ok(DelegationMode::Explorer),

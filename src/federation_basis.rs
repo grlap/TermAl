@@ -2,42 +2,44 @@
 // Does not grant authority or own persistence/SSH. Split from federation_link.rs
 // and federation_runtime.rs so detached completions retain the same worker fence.
 
-struct FederationTransportBasis {
-    snapshot: RwLock<FederationPeerSnapshot>,
-    settling: AtomicU64,
+use super::*;
+
+pub(crate) struct FederationTransportBasis {
+    pub(crate) snapshot: RwLock<FederationPeerSnapshot>,
+    pub(crate) settling: AtomicU64,
 }
 
 impl FederationTransportBasis {
-    fn new(snapshot: FederationPeerSnapshot) -> Self {
+    pub(crate) fn new(snapshot: FederationPeerSnapshot) -> Self {
         Self {
             snapshot: RwLock::new(snapshot),
             settling: AtomicU64::new(0),
         }
     }
 
-    fn read(
+    pub(crate) fn read(
         &self,
     ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, FederationPeerSnapshot>> {
         self.snapshot.read()
     }
 
-    fn write(
+    pub(crate) fn write(
         &self,
     ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, FederationPeerSnapshot>> {
         self.snapshot.write()
     }
 
-    fn is_settling(&self) -> bool {
+    pub(crate) fn is_settling(&self) -> bool {
         self.settling.load(Ordering::Acquire) != 0
     }
 
-    fn begin_settlement(self: &Arc<Self>) -> FederationBasisSettlement {
+    pub(crate) fn begin_settlement(self: &Arc<Self>) -> FederationBasisSettlement {
         self.settling.fetch_add(1, Ordering::AcqRel);
         FederationBasisSettlement(self.clone())
     }
 }
 
-struct FederationBasisSettlement(Arc<FederationTransportBasis>);
+pub(crate) struct FederationBasisSettlement(pub(crate) Arc<FederationTransportBasis>);
 
 impl Drop for FederationBasisSettlement {
     fn drop(&mut self) {

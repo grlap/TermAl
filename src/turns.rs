@@ -10,8 +10,13 @@ The REPL path and the server path share the same recorder vocabulary so each
 agent integration only needs one normalization layer.
 */
 
+use super::*;
+
 /// Runs a blocking turn for the selected agent.
-fn run_turn_blocking(config: TurnConfig, recorder: &mut dyn TurnRecorder) -> Result<String> {
+pub(crate) fn run_turn_blocking(
+    config: TurnConfig,
+    recorder: &mut dyn TurnRecorder,
+) -> Result<String> {
     match config.agent {
         Agent::Codex => run_codex_turn(
             &config.cwd,
@@ -288,7 +293,7 @@ fn run_codex_turn(
 }
 
 /// Returns the default Codex sandbox mode.
-fn default_codex_sandbox_mode() -> CodexSandboxMode {
+pub(crate) fn default_codex_sandbox_mode() -> CodexSandboxMode {
     match std::env::var("TERMAL_CODEX_SANDBOX").ok().as_deref() {
         Some("read-only") => CodexSandboxMode::ReadOnly,
         Some("danger-full-access") => CodexSandboxMode::DangerFullAccess,
@@ -297,7 +302,7 @@ fn default_codex_sandbox_mode() -> CodexSandboxMode {
 }
 
 /// Returns the default Codex approval policy.
-fn default_codex_approval_policy() -> CodexApprovalPolicy {
+pub(crate) fn default_codex_approval_policy() -> CodexApprovalPolicy {
     match std::env::var("TERMAL_CODEX_APPROVAL").ok().as_deref() {
         Some("untrusted") => CodexApprovalPolicy::Untrusted,
         Some("on-request") => CodexApprovalPolicy::OnRequest,
@@ -308,7 +313,7 @@ fn default_codex_approval_policy() -> CodexApprovalPolicy {
 }
 
 /// Returns the default Codex reasoning effort.
-fn default_codex_reasoning_effort() -> CodexReasoningEffort {
+pub(crate) fn default_codex_reasoning_effort() -> CodexReasoningEffort {
     match std::env::var("TERMAL_CODEX_REASONING_EFFORT")
         .ok()
         .as_deref()
@@ -325,21 +330,21 @@ fn default_codex_reasoning_effort() -> CodexReasoningEffort {
 }
 
 /// Returns the default Claude approval mode.
-fn default_claude_approval_mode() -> ClaudeApprovalMode {
+pub(crate) fn default_claude_approval_mode() -> ClaudeApprovalMode {
     ClaudeApprovalMode::Ask
 }
 
 /// Returns the default Claude effort.
-fn default_claude_effort() -> ClaudeEffortLevel {
+pub(crate) fn default_claude_effort() -> ClaudeEffortLevel {
     ClaudeEffortLevel::Default
 }
 
-const LOCAL_REMOTE_ID: &str = "local";
+pub(crate) const LOCAL_REMOTE_ID: &str = "local";
 const LOCAL_REMOTE_NAME: &str = "Local";
-const DEFAULT_SSH_REMOTE_PORT: u16 = 22;
+pub(crate) const DEFAULT_SSH_REMOTE_PORT: u16 = 22;
 
 /// Returns the default local remote ID.
-fn default_local_remote_id() -> String {
+pub(crate) fn default_local_remote_id() -> String {
     LOCAL_REMOTE_ID.to_owned()
 }
 
@@ -349,14 +354,14 @@ fn default_remote_enabled() -> bool {
 }
 
 /// Returns the default remote configs.
-fn default_remote_configs() -> Vec<RemoteConfig> {
+pub(crate) fn default_remote_configs() -> Vec<RemoteConfig> {
     vec![RemoteConfig::local()]
 }
 
 /// Defines the remote transport variants.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum RemoteTransport {
+pub(crate) enum RemoteTransport {
     Local,
     Ssh,
 }
@@ -364,23 +369,23 @@ enum RemoteTransport {
 /// Holds remote configuration.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RemoteConfig {
-    id: String,
-    name: String,
-    transport: RemoteTransport,
+pub(crate) struct RemoteConfig {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) transport: RemoteTransport,
     #[serde(default = "default_remote_enabled")]
-    enabled: bool,
+    pub(crate) enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    host: Option<String>,
+    pub(crate) host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    port: Option<u16>,
+    pub(crate) port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    user: Option<String>,
+    pub(crate) user: Option<String>,
 }
 
 impl RemoteConfig {
     /// Builds the local default value.
-    fn local() -> Self {
+    pub(crate) fn local() -> Self {
         Self {
             id: default_local_remote_id(),
             name: LOCAL_REMOTE_NAME.to_owned(),
@@ -396,44 +401,44 @@ impl RemoteConfig {
 /// Represents app preferences.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AppPreferences {
+pub(crate) struct AppPreferences {
     #[serde(default)]
-    federation: FederationSettings,
+    pub(crate) federation: FederationSettings,
     #[serde(default = "default_model_preference")]
-    default_codex_model: String,
+    pub(crate) default_codex_model: String,
     #[serde(default = "default_codex_sandbox_mode")]
-    default_codex_sandbox_mode: CodexSandboxMode,
+    pub(crate) default_codex_sandbox_mode: CodexSandboxMode,
     #[serde(default = "default_codex_approval_policy")]
-    default_codex_approval_policy: CodexApprovalPolicy,
+    pub(crate) default_codex_approval_policy: CodexApprovalPolicy,
     #[serde(default = "default_model_preference")]
-    default_claude_model: String,
+    pub(crate) default_claude_model: String,
     #[serde(default = "default_model_preference")]
-    default_cursor_model: String,
+    pub(crate) default_cursor_model: String,
     #[serde(default = "default_model_preference")]
-    default_gemini_model: String,
+    pub(crate) default_gemini_model: String,
     #[serde(default = "default_model_preference")]
-    default_kimi_model: String,
+    pub(crate) default_kimi_model: String,
     #[serde(default = "default_model_preference", rename = "defaultOpenCodeModel")]
-    default_opencode_model: String,
+    pub(crate) default_opencode_model: String,
     #[serde(default, rename = "defaultOpenCodeApprovalMode")]
-    default_opencode_approval_mode: OpenCodeApprovalMode,
+    pub(crate) default_opencode_approval_mode: OpenCodeApprovalMode,
     #[serde(default)]
-    default_kimi_approval_mode: KimiApprovalMode,
+    pub(crate) default_kimi_approval_mode: KimiApprovalMode,
     /// `auto` leaves new Kimi sessions on the CLI's current effort.
     #[serde(default = "default_kimi_effort_preference")]
-    default_kimi_effort: String,
+    pub(crate) default_kimi_effort: String,
     #[serde(default = "default_codex_reasoning_effort")]
-    default_codex_reasoning_effort: CodexReasoningEffort,
+    pub(crate) default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_approval_mode")]
-    default_claude_approval_mode: ClaudeApprovalMode,
+    pub(crate) default_claude_approval_mode: ClaudeApprovalMode,
     #[serde(default = "default_claude_effort")]
-    default_claude_effort: ClaudeEffortLevel,
+    pub(crate) default_claude_effort: ClaudeEffortLevel,
     #[serde(default = "default_remote_configs")]
-    remotes: Vec<RemoteConfig>,
+    pub(crate) remotes: Vec<RemoteConfig>,
     #[serde(default, skip_serializing_if = "telegram_ui_config_is_default")]
-    telegram: TelegramUiConfig,
+    pub(crate) telegram: TelegramUiConfig,
     #[serde(default)]
-    engram: EngramHostSettings,
+    pub(crate) engram: EngramHostSettings,
 }
 
 /// Machine-scoped Engram process and principal configuration. Repositories opt
@@ -441,13 +446,13 @@ struct AppPreferences {
 /// store, and stable developer principal shared by every local project.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramHostSettings {
+pub(crate) struct EngramHostSettings {
     #[serde(default = "default_engram_developer_name")]
-    developer_name: String,
+    pub(crate) developer_name: String,
     #[serde(default = "default_engram_binary_path")]
-    binary_path: String,
+    pub(crate) binary_path: String,
     #[serde(default = "default_engram_host_home")]
-    home: String,
+    pub(crate) home: String,
 }
 
 impl Default for EngramHostSettings {
@@ -460,11 +465,11 @@ impl Default for EngramHostSettings {
     }
 }
 
-fn default_engram_binary_path() -> String {
+pub(crate) fn default_engram_binary_path() -> String {
     "engram".to_owned()
 }
 
-fn default_engram_developer_name() -> String {
+pub(crate) fn default_engram_developer_name() -> String {
     "dev".to_owned()
 }
 
@@ -505,7 +510,7 @@ impl Default for AppPreferences {
 
 impl AppPreferences {
     /// Resolves the persisted model preference for a newly-created session.
-    fn default_model_for_agent(&self, agent: Agent) -> String {
+    pub(crate) fn default_model_for_agent(&self, agent: Agent) -> String {
         debug_assert_eq!(Agent::Claude.default_model(), default_model_preference());
         let preference = match agent {
             Agent::Codex => &self.default_codex_model,
@@ -536,30 +541,30 @@ impl AppPreferences {
 }
 
 /// Returns the default model preference marker.
-fn default_model_preference() -> String {
+pub(crate) fn default_model_preference() -> String {
     "default".to_owned()
 }
 
 /// The Kimi effort preference that leaves new sessions on the CLI's choice.
-fn default_kimi_effort_preference() -> String {
+pub(crate) fn default_kimi_effort_preference() -> String {
     "auto".to_owned()
 }
 
 /// Returns the default cursor mode.
-fn default_cursor_mode() -> CursorMode {
+pub(crate) fn default_cursor_mode() -> CursorMode {
     CursorMode::Agent
 }
 
 /// Returns the default Gemini approval mode.
-fn default_gemini_approval_mode() -> GeminiApprovalMode {
+pub(crate) fn default_gemini_approval_mode() -> GeminiApprovalMode {
     GeminiApprovalMode::Default
 }
 
-fn log_unhandled_codex_event(context: &str, message: &Value) {
+pub(crate) fn log_unhandled_codex_event(context: &str, message: &Value) {
     eprintln!("codex diagnostic> {context}: {message}");
 }
 
-fn flatten_structured_patch(patches: &[Value]) -> String {
+pub(crate) fn flatten_structured_patch(patches: &[Value]) -> String {
     patches
         .iter()
         .filter_map(|patch| patch.get("lines").and_then(Value::as_array))
@@ -570,7 +575,7 @@ fn flatten_structured_patch(patches: &[Value]) -> String {
         .join("\n")
 }
 
-fn fallback_file_diff(original: &str, updated: &str) -> String {
+pub(crate) fn fallback_file_diff(original: &str, updated: &str) -> String {
     let mut lines = Vec::new();
     for line in original.lines() {
         lines.push(format!("-{line}"));
@@ -581,7 +586,7 @@ fn fallback_file_diff(original: &str, updated: &str) -> String {
     lines.join("\n")
 }
 
-fn short_file_name(file_path: &str) -> &str {
+pub(crate) fn short_file_name(file_path: &str) -> &str {
     file_path
         .rsplit('/')
         .next()
@@ -590,7 +595,7 @@ fn short_file_name(file_path: &str) -> &str {
 }
 
 /// Summarizes error.
-fn summarize_error(value: &Value) -> String {
+pub(crate) fn summarize_error(value: &Value) -> String {
     summarize_structured_error(value).unwrap_or_else(|| {
         serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
     })
@@ -650,12 +655,12 @@ fn summarize_retryable_connectivity_error(value: &Value) -> Option<String> {
 }
 
 /// Returns whether retryable connectivity error.
-fn is_retryable_connectivity_error(value: &Value) -> bool {
+pub(crate) fn is_retryable_connectivity_error(value: &Value) -> bool {
     codex_error_will_retry(value) && has_connectivity_marker(value)
 }
 
 /// Handles Codex error will retry.
-fn codex_error_will_retry(value: &Value) -> bool {
+pub(crate) fn codex_error_will_retry(value: &Value) -> bool {
     value
         .get("willRetry")
         .and_then(Value::as_bool)
@@ -741,7 +746,7 @@ fn is_connectivity_text(text: &str) -> bool {
 }
 
 /// Builds preview.
-fn make_preview(text: &str) -> String {
+pub(crate) fn make_preview(text: &str) -> String {
     let first_line = text.lines().next().unwrap_or("").trim();
     let compact = first_line.replace('\t', " ");
     let compact = compact.trim();
@@ -765,7 +770,7 @@ fn image_attachment_summary(count: usize) -> String {
     }
 }
 
-fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> String {
+pub(crate) fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> String {
     let trimmed = text.trim();
     if !trimmed.is_empty() {
         return make_preview(trimmed);
@@ -774,12 +779,12 @@ fn prompt_preview_text(text: &str, attachments: &[MessageImageAttachment]) -> St
     make_preview(&image_attachment_summary(attachments.len()))
 }
 
-fn shell_language() -> &'static str {
+pub(crate) fn shell_language() -> &'static str {
     "bash"
 }
 
 /// Infers language from path.
-fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
+pub(crate) fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
     let file_name = path.file_name()?.to_str()?.to_ascii_lowercase();
     match file_name.as_str() {
         "dockerfile" => return Some("dockerfile"),
@@ -808,7 +813,7 @@ fn infer_language_from_path(path: &FsPath) -> Option<&'static str> {
 }
 
 /// Infers command output language.
-fn infer_command_output_language(command: &str) -> Option<&'static str> {
+pub(crate) fn infer_command_output_language(command: &str) -> Option<&'static str> {
     let normalized = command.to_ascii_lowercase();
     if normalized.contains("git diff")
         || normalized
@@ -866,7 +871,10 @@ fn clean_command_path_hint(token: &str) -> &str {
 }
 
 /// Handles Codex user input items.
-fn codex_user_input_items(prompt: &str, attachments: &[PromptImageAttachment]) -> Vec<Value> {
+pub(crate) fn codex_user_input_items(
+    prompt: &str,
+    attachments: &[PromptImageAttachment],
+) -> Vec<Value> {
     let mut input = Vec::with_capacity(attachments.len() + usize::from(!prompt.is_empty()));
 
     if !prompt.is_empty() {
@@ -895,7 +903,7 @@ fn codex_image_data_url(attachment: &PromptImageAttachment) -> String {
 }
 
 /// Parses prompt image attachments.
-fn parse_prompt_image_attachments(
+pub(crate) fn parse_prompt_image_attachments(
     requests: &[SendMessageAttachmentRequest],
 ) -> std::result::Result<Vec<PromptImageAttachment>, ApiError> {
     requests
@@ -906,7 +914,7 @@ fn parse_prompt_image_attachments(
 }
 
 /// Parses prompt image attachment.
-fn parse_prompt_image_attachment(
+pub(crate) fn parse_prompt_image_attachment(
     index: usize,
     request: &SendMessageAttachmentRequest,
 ) -> std::result::Result<PromptImageAttachment, ApiError> {
@@ -986,6 +994,6 @@ fn sanitize_attachment_file_name(value: &str) -> String {
 }
 
 /// Stamps now.
-fn stamp_now() -> String {
+pub(crate) fn stamp_now() -> String {
     Local::now().format("%H:%M:%S").to_string()
 }

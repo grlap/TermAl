@@ -1,5 +1,7 @@
 // Host-local executable provenance for the producer-owned source command.
 // Metadata proves the executable/schema, never a source verdict or claim.
+
+use super::*;
 static ENGRAM_SOURCE_OWNER_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
@@ -47,18 +49,20 @@ fn engram_source_warning_diagnostic(output: &std::process::Output) -> Result<&st
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramSourceOwnerPin {
-    binary_path: String,
-    sha256: String,
-    binary_version: String,
-    source_version: u32,
+pub(crate) struct EngramSourceOwnerPin {
+    pub(crate) binary_path: String,
+    pub(crate) sha256: String,
+    pub(crate) binary_version: String,
+    pub(crate) source_version: u32,
 }
 
 impl EngramSourceOwnerPin {
-    fn validate(&self) -> Result<()> {
-        if self.binary_path.len() > 4096 || self.binary_path.chars().any(char::is_control)
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.binary_path.len() > 4096
+            || self.binary_path.chars().any(char::is_control)
             || !FsPath::new(&self.binary_path).is_absolute()
-            || !is_lowercase_sha256(&self.sha256) || self.source_version != 1
+            || !is_lowercase_sha256(&self.sha256)
+            || self.source_version != 1
             || !engram_source_binary_version_valid(&self.binary_version)
         {
             bail!("Engram source owner pin is malformed or unsupported");
@@ -67,34 +71,52 @@ impl EngramSourceOwnerPin {
     }
 }
 
-fn test_run_request_source_owner(request: &Value) -> Result<Option<EngramSourceOwnerPin>, ApiError> {
-    request.get("sourceOwner").map(|value| {
-        let pin: EngramSourceOwnerPin = serde_json::from_value(value.clone())
-            .map_err(|_| ApiError::bad_request("test run source owner pin is malformed"))?;
-        pin.validate().map_err(|_| ApiError::bad_request("test run source owner pin is malformed or unsupported"))?;
-        Ok(pin)
-    }).transpose()
+pub(crate) fn test_run_request_source_owner(
+    request: &Value,
+) -> Result<Option<EngramSourceOwnerPin>, ApiError> {
+    request
+        .get("sourceOwner")
+        .map(|value| {
+            let pin: EngramSourceOwnerPin = serde_json::from_value(value.clone())
+                .map_err(|_| ApiError::bad_request("test run source owner pin is malformed"))?;
+            pin.validate().map_err(|_| {
+                ApiError::bad_request("test run source owner pin is malformed or unsupported")
+            })?;
+            Ok(pin)
+        })
+        .transpose()
 }
 
 fn engram_source_binary_version_valid(version: &str) -> bool {
-    version.starts_with("engram ") && version.len() > 7 && version.len() <= 512
+    version.starts_with("engram ")
+        && version.len() > 7
+        && version.len() <= 512
         && version.bytes().all(|byte| (b' '..=b'~').contains(&byte))
 }
 
-fn engram_source_binary(configured: &FsPath, deadline: std::time::Instant) -> Result<PathBuf> {
+pub(crate) fn engram_source_binary(
+    configured: &FsPath,
+    deadline: std::time::Instant,
+) -> Result<PathBuf> {
     engram_source_before_deadline(deadline)?;
     if !configured.is_absolute() {
-        bail!("Engram source owner requires an explicitly configured absolute binaryPath; PATH lookup is refused");
+        bail!(
+            "Engram source owner requires an explicitly configured absolute binaryPath; PATH lookup is refused"
+        );
     }
-    let binary = fs::canonicalize(configured).context("Engram source owner executable is unavailable")?;
+    let binary =
+        fs::canonicalize(configured).context("Engram source owner executable is unavailable")?;
     if !binary.is_file() {
         bail!("Engram source owner executable is not a file");
     }
     // The digest pins the program itself, not an interpreter's mutable script
     // or a command resolved through PATHEXT. Other Engram transports are unchanged.
     #[cfg(windows)]
-    if !binary.extension().and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe")) {
+    if !binary
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+    {
         bail!("Engram source owner requires a native executable");
     }
     #[cfg(unix)]
@@ -104,7 +126,9 @@ fn engram_source_binary(configured: &FsPath, deadline: std::time::Instant) -> Re
         std::io::Read::read_exact(&mut file, &mut header)
             .context("Engram source owner native executable header is unavailable")?;
         if !engram_source_native_header(&header) {
-            bail!("Engram source owner requires a native ELF or Mach-O executable; interpreter scripts are refused");
+            bail!(
+                "Engram source owner requires a native ELF or Mach-O executable; interpreter scripts are refused"
+            );
         }
     }
     engram_source_before_deadline(deadline)?;
@@ -112,30 +136,46 @@ fn engram_source_binary(configured: &FsPath, deadline: std::time::Instant) -> Re
 }
 
 #[cfg(any(unix, test))]
-fn engram_source_native_header(header: &[u8; 4]) -> bool {
-    matches!(*header, [0x7f, b'E', b'L', b'F']
-        | [0xfe, 0xed, 0xfa, 0xce] | [0xce, 0xfa, 0xed, 0xfe]
-        | [0xfe, 0xed, 0xfa, 0xcf] | [0xcf, 0xfa, 0xed, 0xfe]
-        | [0xca, 0xfe, 0xba, 0xbe] | [0xbe, 0xba, 0xfe, 0xca]
-        | [0xca, 0xfe, 0xba, 0xbf] | [0xbf, 0xba, 0xfe, 0xca])
+pub(crate) fn engram_source_native_header(header: &[u8; 4]) -> bool {
+    matches!(
+        *header,
+        [0x7f, b'E', b'L', b'F']
+            | [0xfe, 0xed, 0xfa, 0xce]
+            | [0xce, 0xfa, 0xed, 0xfe]
+            | [0xfe, 0xed, 0xfa, 0xcf]
+            | [0xcf, 0xfa, 0xed, 0xfe]
+            | [0xca, 0xfe, 0xba, 0xbe]
+            | [0xbe, 0xba, 0xfe, 0xca]
+            | [0xca, 0xfe, 0xba, 0xbf]
+            | [0xbf, 0xba, 0xfe, 0xca]
+    )
 }
 
-fn engram_source_binary_hash(binary: &FsPath, deadline: std::time::Instant) -> Result<String> {
+pub(crate) fn engram_source_binary_hash(
+    binary: &FsPath,
+    deadline: std::time::Instant,
+) -> Result<String> {
     engram_source_before_deadline(deadline)?;
-    let mut file = fs::File::open(binary).context("Engram source owner executable cannot be read")?;
+    let mut file =
+        fs::File::open(binary).context("Engram source owner executable cannot be read")?;
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
         engram_source_before_deadline(deadline)?;
         let count = std::io::Read::read(&mut file, &mut buffer)?;
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         hash.update(&buffer[..count]);
     }
     engram_source_before_deadline(deadline)?;
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn engram_source_owner_verify_bytes(pin: &EngramSourceOwnerPin, deadline: std::time::Instant) -> Result<PathBuf> {
+pub(crate) fn engram_source_owner_verify_bytes(
+    pin: &EngramSourceOwnerPin,
+    deadline: std::time::Instant,
+) -> Result<PathBuf> {
     pin.validate()?;
     let binary = engram_source_binary(FsPath::new(&pin.binary_path), deadline)
         .context("Engram source owner executable no longer matches the pin")?;
@@ -147,9 +187,12 @@ fn engram_source_owner_verify_bytes(pin: &EngramSourceOwnerPin, deadline: std::t
     Ok(binary)
 }
 
-fn engram_source_owner_run(
-    binary: &FsPath, cwd: &FsPath, args: &[String],
-    deadline: std::time::Instant, limit: usize,
+pub(crate) fn engram_source_owner_run(
+    binary: &FsPath,
+    cwd: &FsPath,
+    args: &[String],
+    deadline: std::time::Instant,
+    limit: usize,
 ) -> Result<std::process::Output> {
     engram_source_before_deadline(deadline)?;
     let mut command = BoundedReadCommand::new(binary);
@@ -157,7 +200,11 @@ fn engram_source_owner_run(
     // Source opens no store. It owns Git isolation; inherited Git selectors
     // must not redirect even its initial repository discovery.
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_") {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("GIT_")
+        {
             command.env_remove(key);
         }
     }
@@ -170,17 +217,29 @@ fn engram_source_owner_run(
         run_engram_bounded_read_command(&mut command, deadline, limit, operation)
     } else {
         run_engram_bounded_read_command_with_stderr_limit(
-            &mut command, deadline, limit, operation, Some(ENGRAM_SOURCE_WARNING_LIMIT),
+            &mut command,
+            deadline,
+            limit,
+            operation,
+            Some(ENGRAM_SOURCE_WARNING_LIMIT),
         )
     }
 }
 
-fn engram_source_owner_metadata_with(
-    configured: &FsPath, root: &FsPath, cwd: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
-    run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
+pub(crate) fn engram_source_owner_metadata_with(
+    configured: &FsPath,
+    root: &FsPath,
+    cwd: &FsPath,
+    deadline: impl Into<EngramSourcePhasePlan>,
+    run: impl FnMut(
+        &FsPath,
+        &FsPath,
+        &[String],
+        std::time::Instant,
+        usize,
+    ) -> Result<std::process::Output>,
 ) -> Result<EngramSourceOwnerPin> {
-    engram_source_owner_observe_with(configured, root, cwd, deadline, run)
-        .map(|(pin, _)| pin)
+    engram_source_owner_observe_with(configured, root, cwd, deadline, run).map(|(pin, _)| pin)
 }
 
 // Bootstrap and the first measurement share this actual observation. Metadata-only
@@ -190,12 +249,21 @@ fn engram_source_owner_metadata_with(
 thread_local! {
     // One source-admission sample, installed by the version callback on the
     // same capture worker. It never changes filesystem or authority clocks.
-    static TEST_ENGRAM_SOURCE_OWNER_NOW: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    pub(crate) static TEST_ENGRAM_SOURCE_OWNER_NOW: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
 
-fn engram_source_owner_observe_with(
-    configured: &FsPath, root: &FsPath, cwd: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
-    run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
+pub(crate) fn engram_source_owner_observe_with(
+    configured: &FsPath,
+    root: &FsPath,
+    cwd: &FsPath,
+    deadline: impl Into<EngramSourcePhasePlan>,
+    run: impl FnMut(
+        &FsPath,
+        &FsPath,
+        &[String],
+        std::time::Instant,
+        usize,
+    ) -> Result<std::process::Output>,
 ) -> Result<(EngramSourceOwnerPin, EngramSourceObservation)> {
     engram_source_owner_observe_with_clock(configured, root, cwd, deadline.into(), run, || {
         #[cfg(test)]
@@ -206,9 +274,18 @@ fn engram_source_owner_observe_with(
     })
 }
 
-fn engram_source_owner_observe_with_clock(
-    configured: &FsPath, root: &FsPath, cwd: &FsPath, plan: EngramSourcePhasePlan,
-    mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>,
+pub(crate) fn engram_source_owner_observe_with_clock(
+    configured: &FsPath,
+    root: &FsPath,
+    cwd: &FsPath,
+    plan: EngramSourcePhasePlan,
+    mut run: impl FnMut(
+        &FsPath,
+        &FsPath,
+        &[String],
+        std::time::Instant,
+        usize,
+    ) -> Result<std::process::Output>,
     now: impl Fn() -> std::time::Instant,
 ) -> Result<(EngramSourceOwnerPin, EngramSourceObservation)> {
     plan.check()?;
@@ -227,7 +304,9 @@ fn engram_source_owner_observe_with_clock(
         bail!("Engram source owner version probe failed");
     }
     let binary_version = std::str::from_utf8(&version.stdout)
-        .context("Engram source owner version is not UTF-8")?.trim().to_owned();
+        .context("Engram source owner version is not UTF-8")?
+        .trim()
+        .to_owned();
     if !engram_source_binary_version_valid(&binary_version) {
         bail!("Engram source owner version probe returned unsupported output");
     }
@@ -240,17 +319,23 @@ fn engram_source_owner_observe_with_clock(
     // Only an actual validated source envelope establishes sourceVersion.
     // A well-formed unavailable result establishes the schema too, but cannot
     // supply a complete source identity.
-    let observed = parse_engram_source_observation(&output.stdout, output.status.code(), &root, deadline)?;
+    let observed =
+        parse_engram_source_observation(&output.stdout, output.status.code(), &root, deadline)?;
     if resolve_engram_source_program(configured, &root, deadline)
-        .context("Engram source owner executable changed during probing")? != binary
+        .context("Engram source owner executable changed during probing")?
+        != binary
         || engram_source_binary_hash(&binary, deadline)? != sha256
     {
         bail!("Engram source owner executable changed during probing");
     }
     let pin = EngramSourceOwnerPin {
-        binary_path: normalize_user_facing_path(&binary).to_str()
-            .context("Engram source owner executable path is not UTF-8")?.to_owned(),
-        sha256, binary_version, source_version: observed.version,
+        binary_path: normalize_user_facing_path(&binary)
+            .to_str()
+            .context("Engram source owner executable path is not UTF-8")?
+            .to_owned(),
+        sha256,
+        binary_version,
+        source_version: observed.version,
     };
     pin.validate()?;
     engram_source_before_deadline(deadline)?;
@@ -264,25 +349,42 @@ fn engram_source_owner_observe_with_clock(
 // between captures. This function returns the entire owner value, including
 // local changes; it imposes no clean-commit policy on future consumers.
 #[cfg_attr(not(test), allow(dead_code))]
-fn engram_source_id_until(
-    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
+pub(crate) fn engram_source_id_until(
+    pin: &EngramSourceOwnerPin,
+    root: &FsPath,
+    deadline: impl Into<EngramSourcePhasePlan>,
 ) -> Result<EngramSourceId> {
     engram_source_id_with(pin, root, deadline, engram_source_owner_run)
 }
 
-fn engram_source_id_with(
-    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
-    mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
-        -> Result<std::process::Output>,
+pub(crate) fn engram_source_id_with(
+    pin: &EngramSourceOwnerPin,
+    root: &FsPath,
+    deadline: impl Into<EngramSourcePhasePlan>,
+    mut run: impl FnMut(
+        &FsPath,
+        &FsPath,
+        &[String],
+        std::time::Instant,
+        usize,
+    ) -> Result<std::process::Output>,
 ) -> Result<EngramSourceId> {
     let plan = deadline.into();
-    engram_source_observation_with(pin, root, plan, &mut run)?.into_source_id(plan.completion_deadline)
+    engram_source_observation_with(pin, root, plan, &mut run)?
+        .into_source_id(plan.completion_deadline)
 }
 
-fn engram_source_observation_with(
-    pin: &EngramSourceOwnerPin, root: &FsPath, deadline: impl Into<EngramSourcePhasePlan>,
-    mut run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize)
-        -> Result<std::process::Output>,
+pub(crate) fn engram_source_observation_with(
+    pin: &EngramSourceOwnerPin,
+    root: &FsPath,
+    deadline: impl Into<EngramSourcePhasePlan>,
+    mut run: impl FnMut(
+        &FsPath,
+        &FsPath,
+        &[String],
+        std::time::Instant,
+        usize,
+    ) -> Result<std::process::Output>,
 ) -> Result<EngramSourceObservation> {
     let plan = deadline.into();
     plan.check()?;
@@ -291,10 +393,17 @@ fn engram_source_observation_with(
     let root = fs::canonicalize(root).context("Engram source root is unavailable")?;
     let deadline = plan.source_deadline_at(std::time::Instant::now())?;
     let args = engram_source_command_args(&root, deadline)?;
-    let output = run(&binary, &root, &args, deadline, ENGRAM_SOURCE_JSON_LIMIT + 1)?;
+    let output = run(
+        &binary,
+        &root,
+        &args,
+        deadline,
+        ENGRAM_SOURCE_JSON_LIMIT + 1,
+    )?;
     engram_source_before_deadline(deadline)?;
     let diagnostic = engram_source_warning_diagnostic(&output)?;
-    let observed = parse_engram_source_observation(&output.stdout, output.status.code(), &root, deadline)?;
+    let observed =
+        parse_engram_source_observation(&output.stdout, output.status.code(), &root, deadline)?;
     engram_source_owner_verify_bytes(pin, deadline)?;
     if !diagnostic.is_empty() {
         eprint!("{diagnostic}");
@@ -303,33 +412,44 @@ fn engram_source_observation_with(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramSourceOwnerAuthority {
-    project_id: String,
-    project_root: String,
-    settings: EngramProjectSettings,
-    host_settings: EngramHostSettings,
+pub(crate) struct EngramSourceOwnerAuthority {
+    pub(crate) project_id: String,
+    pub(crate) project_root: String,
+    pub(crate) settings: EngramProjectSettings,
+    pub(crate) host_settings: EngramHostSettings,
     session_generation: u64,
-    native_creation_id: String,
+    pub(crate) native_creation_id: String,
 }
 
-fn engram_source_owner_authority_locked(inner: &StateInner, session: &str)
-    -> Result<EngramSourceOwnerAuthority, ApiError>
-{
+pub(crate) fn engram_source_owner_authority_locked(
+    inner: &StateInner,
+    session: &str,
+) -> Result<EngramSourceOwnerAuthority, ApiError> {
     if AppState::engram_session_has_child_binding_shape_locked(inner, session) {
-        return Err(ApiError::conflict("source owner metadata requires a native local root session"));
+        return Err(ApiError::conflict(
+            "source owner metadata requires a native local root session",
+        ));
     }
-    let index = inner.find_session_index(session)
+    let index = inner
+        .find_session_index(session)
         .ok_or_else(|| ApiError::not_found("source owner session is unavailable"))?;
     let record = &inner.sessions[index];
     if record.hidden || !record.is_local_session() {
-        return Err(ApiError::conflict("source owner metadata requires a visible native local root session"));
+        return Err(ApiError::conflict(
+            "source owner metadata requires a visible native local root session",
+        ));
     }
     let project = engram_project_for_session_locked(inner, session)
         .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
         .ok_or_else(|| ApiError::conflict("source owner session has no local project"))?;
-    let settings = project.engram.clone().ok_or_else(engram_source_owner_unconfigured)?;
+    let settings = project
+        .engram
+        .clone()
+        .ok_or_else(engram_source_owner_unconfigured)?;
     Ok(EngramSourceOwnerAuthority {
-        project_id: project.id.clone(), project_root: project.root_path.clone(), settings,
+        project_id: project.id.clone(),
+        project_root: project.root_path.clone(),
+        settings,
         host_settings: inner.preferences.engram.clone(),
         session_generation: record.active_turn_generation,
         native_creation_id: record.federation_native_creation_id.clone(),
@@ -338,78 +458,129 @@ fn engram_source_owner_authority_locked(inner: &StateInner, session: &str)
 
 /// The refusal for a project with no Engram binaryPath, typed so the launcher
 /// can name its own remedy instead of a retry.
-fn engram_source_owner_unconfigured() -> ApiError {
+pub(crate) fn engram_source_owner_unconfigured() -> ApiError {
     ApiError::conflict("Engram source owner binaryPath is not configured for this project")
         .with_kind(ApiErrorKind::EngramSourceOwnerUnconfigured)
 }
 
 /// Test-run registration refuses an unconfigured project with its earlier,
 /// untyped reply: the code belongs to the source-owner metadata GET alone.
-fn engram_source_owner_registration_refusal(mut error: ApiError) -> ApiError {
+pub(crate) fn engram_source_owner_registration_refusal(mut error: ApiError) -> ApiError {
     if error.kind == Some(ApiErrorKind::EngramSourceOwnerUnconfigured) {
         error.kind = None;
     }
     error
 }
 
-fn engram_source_owner_error(error: anyhow::Error) -> ApiError {
-    let reason: String = error.to_string().chars().take(512)
-        .map(|ch| if ch.is_control() { '?' } else { ch }).collect();
+pub(crate) fn engram_source_owner_error(error: anyhow::Error) -> ApiError {
+    let reason: String = error
+        .to_string()
+        .chars()
+        .take(512)
+        .map(|ch| if ch.is_control() { '?' } else { ch })
+        .collect();
     ApiError::conflict(format!("source owner unavailable: {reason}"))
 }
 
 impl AppState {
-    fn source_owner_metadata_until(&self, session: &str, deadline: impl Into<EngramSourcePhasePlan>)
-        -> Result<EngramSourceOwnerPin, ApiError>
-    {
+    pub(crate) fn source_owner_metadata_until(
+        &self,
+        session: &str,
+        deadline: impl Into<EngramSourcePhasePlan>,
+    ) -> Result<EngramSourceOwnerPin, ApiError> {
         self.source_owner_metadata_with(session, deadline, engram_source_owner_run)
     }
 
-    fn source_owner_metadata_with(&self, session: &str, deadline: impl Into<EngramSourcePhasePlan>,
-        run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>)
-        -> Result<EngramSourceOwnerPin, ApiError>
-    {
-        self.source_owner_metadata_snapshot_with(session, deadline, run).map(|(pin, _)| pin)
+    pub(crate) fn source_owner_metadata_with(
+        &self,
+        session: &str,
+        deadline: impl Into<EngramSourcePhasePlan>,
+        run: impl FnMut(
+            &FsPath,
+            &FsPath,
+            &[String],
+            std::time::Instant,
+            usize,
+        ) -> Result<std::process::Output>,
+    ) -> Result<EngramSourceOwnerPin, ApiError> {
+        self.source_owner_metadata_snapshot_with(session, deadline, run)
+            .map(|(pin, _)| pin)
     }
 
-    fn source_owner_metadata_snapshot_with(&self, session: &str, deadline: impl Into<EngramSourcePhasePlan>,
-        run: impl FnMut(&FsPath, &FsPath, &[String], std::time::Instant, usize) -> Result<std::process::Output>)
-        -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError>
-    {
+    pub(crate) fn source_owner_metadata_snapshot_with(
+        &self,
+        session: &str,
+        deadline: impl Into<EngramSourcePhasePlan>,
+        run: impl FnMut(
+            &FsPath,
+            &FsPath,
+            &[String],
+            std::time::Instant,
+            usize,
+        ) -> Result<std::process::Output>,
+    ) -> Result<(EngramSourceOwnerPin, EngramSourceOwnerAuthority), ApiError> {
         let plan = deadline.into();
         plan.check().map_err(engram_source_owner_error)?;
         let authority = engram_source_owner_authority_locked(
-            &self.inner.lock().expect("state mutex poisoned"), session)?;
-        let configured = authority.settings.binary_path.as_deref()
+            &self.inner.lock().expect("state mutex poisoned"),
+            session,
+        )?;
+        let configured = authority
+            .settings
+            .binary_path
+            .as_deref()
             .filter(|path| !path.is_empty())
             .ok_or_else(engram_source_owner_unconfigured)?;
         let cwd = engram_host_workdir(self.persistence_path.as_ref())
             .map_err(|error| engram_source_owner_error(error.into()))?;
-        let pin = engram_source_owner_metadata_with(FsPath::new(configured),
-            FsPath::new(&authority.project_root), &cwd, plan, run)
-            .map_err(engram_source_owner_error)?;
+        let pin = engram_source_owner_metadata_with(
+            FsPath::new(configured),
+            FsPath::new(&authority.project_root),
+            &cwd,
+            plan,
+            run,
+        )
+        .map_err(engram_source_owner_error)?;
         let current = engram_source_owner_authority_locked(
-            &self.inner.lock().expect("state mutex poisoned"), session)?;
+            &self.inner.lock().expect("state mutex poisoned"),
+            session,
+        )?;
         if current != authority {
-            return Err(ApiError::conflict("source owner session or project configuration changed during probing"));
+            return Err(ApiError::conflict(
+                "source owner session or project configuration changed during probing",
+            ));
         }
-        engram_source_before_deadline(plan.completion_deadline).map_err(engram_source_owner_error)?;
+        engram_source_before_deadline(plan.completion_deadline)
+            .map_err(engram_source_owner_error)?;
         Ok((pin, authority))
     }
 }
 
-async fn get_session_source_owner(
-    State(state): State<AppState>, AxumPath(session): AxumPath<String>,
+pub(crate) async fn get_session_source_owner(
+    State(state): State<AppState>,
+    AxumPath(session): AxumPath<String>,
     request: axum::extract::Request,
 ) -> Result<Json<EngramSourceOwnerPin>, ApiError> {
-    if request.uri().query().is_some() || axum::body::to_bytes(request.into_body(), 0).await.is_err() {
-        return Err(ApiError::bad_request("source owner metadata accepts no query or body parameters"));
+    if request.uri().query().is_some()
+        || axum::body::to_bytes(request.into_body(), 0).await.is_err()
+    {
+        return Err(ApiError::bad_request(
+            "source owner metadata accepts no query or body parameters",
+        ));
     }
-    let _permit = ENGRAM_SOURCE_OWNER_PERMITS.clone().try_acquire_owned()
-        .map_err(|_| ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, "source owner probe busy"))?;
-    let deadline = EngramSourcePhasePlan::from(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
+    let _permit = ENGRAM_SOURCE_OWNER_PERMITS
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            ApiError::from_status(StatusCode::TOO_MANY_REQUESTS, "source owner probe busy")
+        })?;
+    let deadline =
+        EngramSourcePhasePlan::from(std::time::Instant::now() + ENGRAM_SOURCE_COMMAND_BUDGET);
     run_blocking_api(move || {
         let _permit = _permit;
-        state.source_owner_metadata_until(&session, deadline).map(Json)
-    }).await
+        state
+            .source_owner_metadata_until(&session, deadline)
+            .map(Json)
+    })
+    .await
 }

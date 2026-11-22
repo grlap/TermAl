@@ -1,16 +1,18 @@
 // Owns bounded, post-commit delivery of central-native mailbox wake obligations.
 // The federation supervisor joins this worker; HTTP never owns its lifetime.
 
+use super::*;
+
 #[derive(Default)]
-struct FederationMailboxWakeWorker {
-    after: i64,
-    observed_kick: u64,
-    pending: Option<tokio::sync::oneshot::Receiver<(i64, bool)>>,
-    task: Option<tokio::task::JoinHandle<()>>,
+pub(crate) struct FederationMailboxWakeWorker {
+    pub(crate) after: i64,
+    pub(crate) observed_kick: u64,
+    pub(crate) pending: Option<tokio::sync::oneshot::Receiver<(i64, bool)>>,
+    pub(crate) task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl FederationMailboxWakeWorker {
-    async fn tick(&mut self, app: &AppState, fallback: bool) {
+    pub(crate) async fn tick(&mut self, app: &AppState, fallback: bool) {
         if app.federation_executor_wake_signal.is_stopping() {
             return;
         }
@@ -31,7 +33,10 @@ impl FederationMailboxWakeWorker {
                 }
             }
         }
-        let generation = app.federation_executor_wake_signal.generation.load(Ordering::SeqCst);
+        let generation = app
+            .federation_executor_wake_signal
+            .generation
+            .load(Ordering::SeqCst);
         if !fallback && !more && generation == self.observed_kick {
             return;
         }
@@ -47,18 +52,16 @@ impl FederationMailboxWakeWorker {
         let after = self.after;
         self.task = Some(tokio::spawn(async move {
             let worker = app.clone();
-            let next = run_blocking_api(move || {
-                Ok(worker.run_native_mailbox_wake_batch(after))
-            })
-            .await
-            .unwrap_or((after, false));
+            let next = run_blocking_api(move || Ok(worker.run_native_mailbox_wake_batch(after)))
+                .await
+                .unwrap_or((after, false));
             let _ = send.send(next);
             app.federation_executor_wake_signal.notify.notify_one();
         }));
         self.pending = Some(receive);
     }
 
-    async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         if let Some(task) = self.task {
             if let Err(error) = task.await {
                 eprintln!("native mailbox wake worker failed during shutdown: {error}");
@@ -68,7 +71,7 @@ impl FederationMailboxWakeWorker {
 }
 
 impl AppState {
-    fn run_native_mailbox_wake_batch(&self, after: i64) -> (i64, bool) {
+    pub(crate) fn run_native_mailbox_wake_batch(&self, after: i64) -> (i64, bool) {
         let central = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             match federation_mailbox_central_checked(&inner, false) {
@@ -122,7 +125,9 @@ impl AppState {
         message_id: &str,
         binding: &FederationMailboxBinding,
     ) -> Result<()> {
-        let message = self.mailbox_store.read_message(&binding.participant_key(), message_id)?;
+        let message = self
+            .mailbox_store
+            .read_message(&binding.participant_key(), message_id)?;
         #[cfg(test)]
         {
             let hook = self.mailbox_store.before_native_wake.lock().unwrap().take();
@@ -134,22 +139,30 @@ impl AppState {
             return Ok(());
         }
         let wake = self.mailbox_store.unread_wakeup_for_mailbox_through(
-            &binding.participant_key(), &message.mailbox_id, message.sequence,
+            &binding.participant_key(),
+            &message.mailbox_id,
+            message.sequence,
         )?;
         let Some(wake) = wake else {
             // Already acknowledged mail cannot create a new continuation.
-            self.mailbox_store.record_initial_dispatch_outcome(message_id, "durableButNotWoken")?;
+            self.mailbox_store
+                .record_initial_dispatch_outcome(message_id, "durableButNotWoken")?;
             return Ok(());
         };
         let session = &binding.identity.session_id;
         let outcome = self.queue_mailbox_wakeups_for_binding_outcome(
-            session, vec![wake], MailboxWakeupRecovery::NeverWoken, false, Some(binding),
+            session,
+            vec![wake],
+            MailboxWakeupRecovery::NeverWoken,
+            false,
+            Some(binding),
         )?;
         if !outcome.accepted {
             return Ok(());
         }
         self.mailbox_store.record_initial_dispatch_outcome(
-            message_id, self.mailbox_queued_wake_disposition(session),
+            message_id,
+            self.mailbox_queued_wake_disposition(session),
         )?;
         if self.federation_executor_wake_signal.is_stopping() {
             return Ok(());
@@ -164,14 +177,17 @@ impl AppState {
 }
 
 impl MailboxStore {
-    fn native_mailbox_wake_pending(&self, message_id: &str) -> Result<bool> {
+    pub(crate) fn native_mailbox_wake_pending(&self, message_id: &str) -> Result<bool> {
         let connection = self.connection()?;
-        connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM federation_mailbox_wake_obligations w
+        connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM federation_mailbox_wake_obligations w
              JOIN mailbox_messages m ON m.id=w.message_id
              WHERE w.message_id=?1 AND m.dispatch_outcome IS NULL)",
-            [message_id], |row| row.get(0),
-        ).map_err(Into::into)
+                [message_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
     }
 
     fn native_mailbox_wake_page(&self, after: i64) -> Result<Vec<(i64, String, String, bool)>> {
@@ -191,6 +207,7 @@ impl MailboxStore {
         let rows = statement.query_map([after], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 }

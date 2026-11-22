@@ -2,20 +2,22 @@
 // runtime provenance. Generic observations remain uncredited; explicit native
 // registration owns verification evidence and its producer receipts.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
     // This thread's deterministic clock and optional post-resolution step.
     // Production never uses the fixture clock or bookkeeping hook.
-    static TEST_ENGRAM_COMMAND_START_TIMING: std::cell::RefCell<Option<(String, Option<String>)>> = const {
+    pub(crate) static TEST_ENGRAM_COMMAND_START_TIMING: std::cell::RefCell<Option<(String, Option<String>)>> = const {
         std::cell::RefCell::new(None)
     };
 }
 
-fn engram_command_started_at() -> String {
+pub(crate) fn engram_command_started_at() -> String {
     #[cfg(test)]
-    if let Some(now) = TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
-        slot.borrow().as_ref().map(|(now, _)| now.clone())
-    }) {
+    if let Some(now) = TEST_ENGRAM_COMMAND_START_TIMING
+        .with(|slot| slot.borrow().as_ref().map(|(now, _)| now.clone()))
+    {
         return now;
     }
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
@@ -23,13 +25,13 @@ fn engram_command_started_at() -> String {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramVerificationKind {
+pub(crate) enum EngramVerificationKind {
     Test,
     Build,
 }
 
 impl EngramVerificationKind {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Test => "test",
             Self::Build => "build",
@@ -38,35 +40,35 @@ impl EngramVerificationKind {
 }
 
 // Bounds shared by actual command facts and explicit registered verification.
-const ENGRAM_TURN_CHECK_LIMIT: usize = 16;
-const ENGRAM_CHECK_SUMMARY_MAX_BYTES: usize = 4096;
-const ENGRAM_CHECK_REF_MAX_BYTES: usize = 1024;
+pub(crate) const ENGRAM_TURN_CHECK_LIMIT: usize = 16;
+pub(crate) const ENGRAM_CHECK_SUMMARY_MAX_BYTES: usize = 4096;
+pub(crate) const ENGRAM_CHECK_REF_MAX_BYTES: usize = 1024;
 
 /// Something a check captures on its own thread, so a runtime's event reader
 /// is never held up by the processes it spawns: a source snapshot
 /// (`EngramBasisCapture`) or a toolchain label (`EngramToolchainCapture`).
 #[derive(Debug, Default)]
-struct EngramCapture<T> {
+pub(crate) struct EngramCapture<T> {
     /// The captured value once the capture finished; unset while it runs.
-    result: Mutex<Option<T>>,
+    pub(crate) result: Mutex<Option<T>>,
     /// UTC completion of this measurement, published with its result. It is
     /// never reconstructed from a command's end or a later closing turn.
-    measured_at: Mutex<Option<String>>,
-    ready: std::sync::Condvar,
+    pub(crate) measured_at: Mutex<Option<String>>,
+    pub(crate) ready: std::sync::Condvar,
     /// When it finished, on the interference clock
     /// (`engram_claude_interference.rs`), set under `result`'s lock with the
     /// value, so whoever sees the value sees the instant too. It is taken
     /// from the clock alone, never under the state lock.
-    ready_tick: std::sync::atomic::AtomicU64,
+    pub(crate) ready_tick: std::sync::atomic::AtomicU64,
 }
 
 /// A content-revision source basis, or `None` when it could not be taken.
-type EngramBasisCapture = EngramCapture<Option<EngramExecutionSourceBasis>>;
+pub(crate) type EngramBasisCapture = EngramCapture<Option<EngramExecutionSourceBasis>>;
 
 /// A toolchain label (`engram_toolchain_label`), or `None` when TermAl
 /// cannot name the toolchain.
 #[cfg(test)]
-type EngramToolchainCapture = EngramCapture<Option<String>>;
+pub(crate) type EngramToolchainCapture = EngramCapture<Option<String>>;
 
 /// At most this many capture workers of one session run at once
 /// (`capture_workers`): a new check starts only while fewer run. A kept check
@@ -75,12 +77,12 @@ type EngramToolchainCapture = EngramCapture<Option<String>>;
 /// left by its grant) keeps its workers until they finish, so without this a
 /// stream of fast tests on a slow worktree could pile up snapshots without
 /// bound.
-const ENGRAM_CAPTURE_WORKER_LIMIT: usize = 2 * ENGRAM_TURN_CHECK_LIMIT;
+pub(crate) const ENGRAM_CAPTURE_WORKER_LIMIT: usize = 2 * ENGRAM_TURN_CHECK_LIMIT;
 
 /// The source basis at `place` (a check's target: its worktree, or exactly
 /// the turn's named source root), taken on its own thread counted in
 /// `workers`.
-fn engram_spawn_basis_capture(
+pub(crate) fn engram_spawn_basis_capture(
     place: EngramBasisPlace,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
     provenance: EngramRootCapture,
@@ -88,10 +90,14 @@ fn engram_spawn_basis_capture(
     state: AppState,
     session: String,
 ) -> Arc<EngramBasisCapture> {
-    EngramCapture::spawn(workers, lifetime, move || provenance.stamp(
-        state.engram_observation_source_capture(&session, &place, ENGRAM_SOURCE_COMMAND_BUDGET)
-            .ok().flatten(),
-    ))
+    EngramCapture::spawn(workers, lifetime, move || {
+        provenance.stamp(
+            state
+                .engram_observation_source_capture(&session, &place, ENGRAM_SOURCE_COMMAND_BUDGET)
+                .ok()
+                .flatten(),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -99,7 +105,7 @@ thread_local! {
     /// The toolchain label a check started on this test thread gets in place
     /// of the host's (`engram_toolchain_label`), so a test's evidence does
     /// not depend on the toolchain the machine running it has installed.
-    static TEST_ENGRAM_TOOLCHAIN_LABEL: std::cell::RefCell<Option<Option<String>>> =
+    pub(crate) static TEST_ENGRAM_TOOLCHAIN_LABEL: std::cell::RefCell<Option<Option<String>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -145,7 +151,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     /// Runs `capture` on its own thread, counted in `workers` while it runs:
     /// the count drops before the result is published, so a caller that saw
     /// the capture ready also sees it no longer counted.
-    fn spawn(
+    pub(crate) fn spawn(
         workers: &Arc<std::sync::atomic::AtomicUsize>,
         lifetime: &Arc<CaptureLifetime>,
         capture: impl FnOnce() -> T + Send + 'static,
@@ -171,7 +177,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     }
 
     /// A capture that is already finished with `value`.
-    fn settled(value: T) -> Arc<Self> {
+    pub(crate) fn settled(value: T) -> Arc<Self> {
         let settled = Arc::new(Self {
             result: Mutex::new(None),
             measured_at: Mutex::new(None),
@@ -182,9 +188,12 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
         settled
     }
 
-    fn finish(&self, value: T) {
+    pub(crate) fn finish(&self, value: T) {
         let mut result = self.result.lock().expect("Engram capture mutex poisoned");
-        *self.measured_at.lock().expect("Engram capture time mutex poisoned") =
+        *self
+            .measured_at
+            .lock()
+            .expect("Engram capture time mutex poisoned") =
             Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
         self.ready_tick.store(
             engram_interference_tick(),
@@ -197,14 +206,17 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
 
     /// Inspect a completed measurement without waiting for its worker or a
     /// contended publication lock. Missing metadata remains unknown.
-    fn measured_value(&self) -> Option<(T, String)> {
+    pub(crate) fn measured_value(&self) -> Option<(T, String)> {
         let result = self.result.try_lock().ok()?;
-        Some((result.as_ref()?.clone(), self.measured_at.try_lock().ok()?.clone()?))
+        Some((
+            result.as_ref()?.clone(),
+            self.measured_at.try_lock().ok()?.clone()?,
+        ))
     }
 
     /// When the capture finished, on the interference clock; `None` while it
     /// runs.
-    fn ready_tick(&self) -> Option<u64> {
+    pub(crate) fn ready_tick(&self) -> Option<u64> {
         let result = self.result.lock().expect("Engram capture mutex poisoned");
         result
             .is_some()
@@ -212,7 +224,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
     }
 
     /// Whether the capture has finished, with or without a value.
-    fn is_ready(&self) -> bool {
+    pub(crate) fn is_ready(&self) -> bool {
         self.result
             .lock()
             .expect("Engram capture mutex poisoned")
@@ -221,7 +233,7 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
 
     /// The captured value, waiting for it until `deadline`; `None` when it is
     /// not ready in time.
-    fn wait_until(&self, deadline: std::time::Instant) -> Option<T> {
+    pub(crate) fn wait_until(&self, deadline: std::time::Instant) -> Option<T> {
         let mut result = self.result.lock().expect("Engram capture mutex poisoned");
         loop {
             if let Some(captured) = result.as_ref() {
@@ -240,37 +252,37 @@ impl<T: Clone + Send + 'static> EngramCapture<T> {
 /// A test the agent ran during the turn `host_turn_ref` mediates, as TermAl saw it
 /// start and end.
 #[derive(Clone, Debug)]
-struct EngramTurnCheck {
-    host_turn_ref: String,
-    key: String,
+pub(crate) struct EngramTurnCheck {
+    pub(crate) host_turn_ref: String,
+    pub(crate) key: String,
     /// The check's place in the turn, which keeps its observation ids unique
     /// even when a runtime reuses a key (Codex falls back to the command).
-    sequence: usize,
-    command: EngramCheckCommand,
+    pub(crate) sequence: usize,
+    pub(crate) command: EngramCheckCommand,
     /// For a declared test command (`engram_declared_tests.rs`): the entry it
     /// matched, the declaration's hash and the artifact's start image, kept
     /// from its start and verified again at its end. `None` for a built-in.
-    declared: Option<Box<EngramDeclaredBinding>>,
+    pub(crate) declared: Option<Box<EngramDeclaredBinding>>,
     /// Where the command ran and which worktree it is credited to; a repeated
     /// start that says otherwise drops the check.
-    target: EngramCheckTarget,
+    pub(crate) target: EngramCheckTarget,
     /// The toolchain label, taken as the check started from the directory
     /// the command ran in, whose toolchain overrides chose what it ran with
     /// (`engram_toolchain_label`), so a toolchain file edited after the check
     /// cannot relabel it.
     #[cfg(test)]
-    toolchain: Arc<EngramToolchainCapture>,
-    started_at: String,
+    pub(crate) toolchain: Arc<EngramToolchainCapture>,
+    pub(crate) started_at: String,
     /// Its start's point in the watcher order (`engram_watcher_order_tick`),
     /// taken with `started_at` before its source snapshot: a watcher
     /// notification that arrived before it cannot fence it. `None` fences on
     /// every notification.
-    started_order: Option<u64>,
+    pub(crate) started_order: Option<u64>,
     /// The Codex sandbox mode the turn ran under, when known. Other
     /// runtimes' approval modes are not sandboxes, so they have none.
     #[cfg(test)]
-    sandbox: Option<String>,
-    start_basis: Arc<EngramBasisCapture>,
+    pub(crate) sandbox: Option<String>,
+    pub(crate) start_basis: Arc<EngramBasisCapture>,
     /// Another command of the same agent that may write in the check's
     /// worktree (`engram_mark_own_checks_for_command`; not one that only
     /// reads or runs in another worktree), a file edit from the same agent,
@@ -278,29 +290,29 @@ struct EngramTurnCheck {
     /// while it was open to writes (`open_to_writes`), so its snapshots may
     /// have read content it did not test: its outcome is unknown. Set when the
     /// overlap happens, never reconstructed later.
-    overlapped: bool,
+    pub(crate) overlapped: bool,
     /// What overlapped it first, as the holder is told
     /// (`EngramTurnCheck::note_overlap`): another command of this session
     /// that started, ran there or was still running, a session that may write
     /// where it ran and why that session matched, or a write TermAl made
     /// there. `None` when nothing named it.
-    overlap_cause: Option<String>,
+    pub(crate) overlap_cause: Option<String>,
     /// Why Claude work with no verified completion fenced it, stored when it
     /// was fenced (`claude_outstanding_work.rs`): the reason a successful run
     /// of it earns no credit is told as that cause, not as an overlap to run
     /// again, and a later end of that work does not erase it.
-    fenced_by_outstanding: Option<ClaudeHazardCause>,
+    pub(crate) fenced_by_outstanding: Option<ClaudeHazardCause>,
     /// For a launcher full gate still being launched: a file change the
     /// workspace watcher saw in its worktree meanwhile. It carries over as the
     /// fence of the carried check (`engram_carry_check`), since the run may
     /// have tested that change.
-    watcher_fence: Option<String>,
+    pub(crate) watcher_fence: Option<String>,
     /// Bounded first-notification provenance, kept separate from the legacy
     /// refusal text and logged off-lock when the fence is installed.
-    watcher_provenance: Option<String>,
+    pub(crate) watcher_provenance: Option<String>,
     /// Exact-root Cargo sibling events awaiting a carried gate's terminal
     /// settlement. Kept on the check so launch-time events carry with it.
-    watcher_cargo_candidates: Vec<EngramCargoTargetCandidate>,
+    pub(crate) watcher_cargo_candidates: Vec<EngramCargoTargetCandidate>,
     /// For a launcher full gate: the cause of the first watcher change that
     /// did not fence it because its notification arrived before the gate's
     /// start stamp (`started_order`), and the latest such arrival in the
@@ -308,65 +320,63 @@ struct EngramTurnCheck {
     /// settlement refuses the gate with this cause unless its run's
     /// registration with this host came after that arrival
     /// (`engram_settle_carried_check`).
-    watcher_exempted: Option<(String, u64)>,
+    pub(crate) watcher_exempted: Option<(String, u64)>,
     /// The runtime supplied only part of the output. Diagnostic metadata,
     /// never passing evidence; the persisted file path is not retained.
-    runtime_output_cut: bool,
-    end: Option<EngramTurnCheckEnd>,
+    pub(crate) runtime_output_cut: bool,
+    pub(crate) end: Option<EngramTurnCheckEnd>,
     /// When its command's end was recorded on the interference clock
     /// (`engram_claude_interference.rs`). Its evidence interval closes only
     /// once its snapshots are taken as well (`interference_end`).
-    ended_at: Option<u64>,
+    pub(crate) ended_at: Option<u64>,
     /// Its runtime keyed it by its own command line, as Codex keys a command
     /// whose item has no id: such a key names no one run, so it is never
     /// carried to wait for a later end (`engram_reported_ends.rs`).
-    keyed_by_line: bool,
+    pub(crate) keyed_by_line: bool,
 }
 
 #[derive(Clone, Debug)]
-struct EngramTurnCheckEnd {
+pub(crate) struct EngramTurnCheckEnd {
     #[cfg(test)]
-    exit: EngramCommandExit,
+    pub(crate) exit: EngramCommandExit,
     /// Build, or focused Node Test, ingress/rejection facts, never used as
     /// eligible exit references.
     #[cfg(test)]
-    build_diagnostic: Option<EngramBuildDiagnostic>,
+    pub(crate) build_diagnostic: Option<EngramBuildDiagnostic>,
     /// The runner's result lines (`engram_check_result_lines`).
     #[cfg(test)]
-    result_lines: Vec<String>,
+    pub(crate) result_lines: Vec<String>,
     /// The result lines show at least one test passed
     /// (`engram_check_showed_passing_tests`); without that a check cannot
     /// claim success.
     #[cfg(test)]
-    showed_passing_tests: bool,
+    pub(crate) showed_passing_tests: bool,
     /// A focused launcher run whose records back a pass but whose summary
     /// has no `focused:` stage line (`engram_focused_stage_line_missing`).
     #[cfg(test)]
-    focused_stage_line_missing: bool,
+    pub(crate) focused_stage_line_missing: bool,
     /// A launcher run whose own terminal record says it ran no stage
     /// (`engram_launcher_output_ran_no_stage`): its failed exit is no test's
     /// failure, so the check ends unknown (`engram_check_end_outcome`).
     #[cfg(test)]
-    launcher_ran_no_stage: bool,
-    end_basis: Arc<EngramBasisCapture>,
+    pub(crate) launcher_ran_no_stage: bool,
+    pub(crate) end_basis: Arc<EngramBasisCapture>,
     /// A declared check's result, judged from its artifact on its own thread
     /// as its command ended (`engram_declared_result`); it decides the
     /// outcome in place of the exit and the result lines.
-    declared: Option<Arc<EngramCapture<EngramDeclaredResult>>>,
+    pub(crate) declared: Option<Arc<EngramCapture<EngramDeclaredResult>>>,
 }
 
 /// A declared check's result as its end captured it, or `None` for a
 /// built-in check. A capture still in progress is UNKNOWN at this read.
 #[cfg(test)]
-fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredResult> {
+pub(crate) fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredResult> {
     end.declared.as_ref().map(|capture| {
         capture
             .wait_until(std::time::Instant::now())
             .unwrap_or_else(|| EngramDeclaredResult {
                 format: EngramDeclaredArtifactFormat::Trx,
-                verdict: EngramTrxVerdict::Unknown(
-                    "the artifact was not read in time".to_owned(),
-                ),
+                verdict: EngramTrxVerdict::Unknown("the artifact was not read in time".to_owned()),
                 artifact: None,
                 outcome: None,
                 counters: None,
@@ -377,7 +387,7 @@ fn engram_declared_result_of(end: &EngramTurnCheckEnd) -> Option<EngramDeclaredR
 /// Why a declared check ended UNKNOWN, or `None` for a built-in check or a
 /// declared one that passed or failed.
 #[cfg(test)]
-fn engram_declared_unknown_reason(end: &EngramTurnCheckEnd) -> Option<String> {
+pub(crate) fn engram_declared_unknown_reason(end: &EngramTurnCheckEnd) -> Option<String> {
     match engram_declared_result_of(end).map(|result| result.verdict) {
         Some(EngramTrxVerdict::Unknown(reason)) => Some(reason),
         _ => None,
@@ -385,7 +395,7 @@ fn engram_declared_unknown_reason(end: &EngramTurnCheckEnd) -> Option<String> {
 }
 
 /// A bounded identity for another command, without exposing its raw tool key.
-fn engram_session_command_label(key: &str) -> String {
+pub(crate) fn engram_session_command_label(key: &str) -> String {
     format!(
         "another command of this session (key {})",
         &sha256_hex(key.as_bytes())[..12]
@@ -454,13 +464,13 @@ fn engram_running_command_may_write_in(
 
 /// What overlapped a check, as the parenthesis its holder's line ends its
 /// reason with, or nothing when nothing named it.
-fn engram_overlap_cause_suffix(cause: Option<&str>) -> String {
+pub(crate) fn engram_overlap_cause_suffix(cause: Option<&str>) -> String {
     cause.map_or_else(String::new, |cause| format!(" ({cause})"))
 }
 
 /// Identifies an unrecorded check without copying command arguments or a
 /// runtime key, either of which may contain a secret.
-fn engram_unrecorded_check_line(command: &EngramCheckCommand, cause: &str) -> String {
+pub(crate) fn engram_unrecorded_check_line(command: &EngramCheckCommand, cause: &str) -> String {
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} a {} {} (check {}) was not recorded: {cause}.",
         command.program,
@@ -477,9 +487,9 @@ fn engram_unrecorded_check_line(command: &EngramCheckCommand, cause: &str) -> St
 /// under the key, whose ends are its own; a start that starts no check keeps
 /// it.
 #[derive(Clone, Debug)]
-struct EngramUnendedClosure {
-    key: String,
-    command: EngramCheckCommand,
+pub(crate) struct EngramUnendedClosure {
+    pub(crate) key: String,
+    pub(crate) command: EngramCheckCommand,
 }
 
 /// At most this many closures are kept for late ends, newest last.
@@ -494,7 +504,7 @@ const ENGRAM_UNENDED_CLOSURE_LIMIT: usize = ENGRAM_TURN_CHECK_LIMIT;
 /// without verified correlation it receives the same honest Unknown closure
 /// and registered-run advice. Each closure is kept for a late end
 /// (`engram_late_end_line`). Runs only at a turn boundary: no timer.
-fn engram_close_unended_checks(
+pub(crate) fn engram_close_unended_checks(
     engram: &mut EngramSessionState,
     host_turn_ref: Option<&str>,
     boundary: &str,
@@ -515,10 +525,12 @@ fn engram_close_unended_checks(
         engram
             .unended_check_closures
             .retain(|closed| closed.key != check.key);
-        engram.unended_check_closures.push_back(EngramUnendedClosure {
-            key: check.key.clone(),
-            command: check.command.clone(),
-        });
+        engram
+            .unended_check_closures
+            .push_back(EngramUnendedClosure {
+                key: check.key.clone(),
+                command: check.command.clone(),
+            });
         while engram.unended_check_closures.len() > ENGRAM_UNENDED_CLOSURE_LIMIT {
             engram.unended_check_closures.pop_front();
         }
@@ -535,7 +547,7 @@ fn engram_close_unended_checks(
 /// command arguments or runtime key: the ended command is named by its check
 /// label when it is a recognised check, and otherwise by a fingerprint of its
 /// text.
-fn engram_late_end_line(
+pub(crate) fn engram_late_end_line(
     closed: &EngramCheckCommand,
     ended: &str,
     exit: Option<EngramCommandExit>,
@@ -565,7 +577,7 @@ fn engram_late_end_line(
 
 /// A missing provider end cannot establish whether an independently
 /// registered launcher run is still alive or already terminal.
-fn engram_registered_run_advice(command: &EngramCheckCommand) -> Option<&'static str> {
+pub(crate) fn engram_registered_run_advice(command: &EngramCheckCommand) -> Option<&'static str> {
     engram_launcher_words(command).is_some().then_some(
         "check registered launcher runs for this root and input before starting another run; \
          rerun only if none covers the intended check",
@@ -590,7 +602,7 @@ fn engram_check_label(command: &EngramCheckCommand) -> String {
 /// Publish only after the caller accepts this notice for the live owner.
 /// The bounded prompt line can discard older notices; its host-log fallback
 /// must retain each complete redacted identity and cause before that merge.
-fn engram_publish_check_notice(
+pub(crate) fn engram_publish_check_notice(
     session_id: &str,
     engram: &mut EngramSessionState,
     line: String,
@@ -600,18 +612,23 @@ fn engram_publish_check_notice(
     // A first credit line bypasses merge truncation. Retain the complete
     // diagnostic above, but apply the same prompt budget before publication.
     let line = if line.starts_with(ENGRAM_CHECK_CREDIT_LINE_PREFIX)
-        && line.len() > ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES {
+        && line.len() > ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES
+    {
         let suffix = " ... (remaining details in the host log)";
         let mut end = ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES.saturating_sub(suffix.len());
-        while !line.is_char_boundary(end) { end -= 1; }
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
         format!("{}{suffix}", &line[..end])
-    } else { line };
+    } else {
+        line
+    };
     engram.set_pending_source_root_line(line);
 }
 
 /// Whether the session at `index` may write: a read-only delegation child
 /// cannot.
-fn engram_session_may_write(inner: &StateInner, index: usize) -> bool {
+pub(crate) fn engram_session_may_write(inner: &StateInner, index: usize) -> bool {
     let session_id = &inner.sessions[index].session.id;
     !inner.delegations.iter().any(|delegation| {
         &delegation.child_session_id == session_id
@@ -646,7 +663,7 @@ const ENGRAM_RUNNING_COMMAND_LIMIT: usize = 64;
 /// cannot follow `ran`: such a line keeps only absolute targets, which lead
 /// where they do from any place. Resolves on the file system, so never under
 /// the state lock.
-fn engram_command_worktrees(
+pub(crate) fn engram_command_worktrees(
     workdir: &str,
     places: &EngramCommandPlaces,
     ran: Option<&str>,
@@ -721,7 +738,7 @@ fn engram_command_worktrees(
 /// it holds a grant. The record keeps the root after the turn ends, until the
 /// next grant begins, so it counts only while a grant is held: a later turn
 /// that begins none does not work there.
-fn engram_turn_named_root_key(record: &SessionRecord) -> Option<String> {
+pub(crate) fn engram_turn_named_root_key(record: &SessionRecord) -> Option<String> {
     record
         .engram
         .observed_source_root()
@@ -768,7 +785,7 @@ fn engram_place_command_worktrees(
 /// (`engram_command_reads_only`). Another runtime's line may run under a
 /// shell whose reading differs, and a command whose line TermAl was not told
 /// cannot be read at all, so neither does.
-fn engram_session_command_reads_only(record: &SessionRecord, ran: Option<&str>) -> bool {
+pub(crate) fn engram_session_command_reads_only(record: &SessionRecord, ran: Option<&str>) -> bool {
     record.session.agent == Agent::Claude
         && ran.is_some_and(|ran| engram_command_reads_only(ran, &record.session.workdir))
 }
@@ -804,7 +821,7 @@ fn engram_note_command_worktrees(
 /// Claude work still outstanding (`claude_outstanding_work.rs`), which may go
 /// on writing where it was placed; and it may now write under a check another
 /// session of its worktree has open.
-fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
+pub(crate) fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
     let record = &mut inner.sessions[index];
     let outstanding = &record.claude_outstanding;
     record
@@ -828,7 +845,7 @@ fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
 /// session. `None` when it was never resolved for this workdir; such a
 /// worktree is taken to be the one a check ran in, which can only make the
 /// check unknown.
-fn engram_session_worktree(record: &SessionRecord) -> Option<String> {
+pub(crate) fn engram_session_worktree(record: &SessionRecord) -> Option<String> {
     record
         .engram
         .workdir_worktree
@@ -850,7 +867,7 @@ fn engram_note_session_worktree(record: &mut SessionRecord, workdir: &str, key: 
 /// and those of its running commands (`running_command_worktrees`), which may
 /// run elsewhere: in a directory their runtime reports, or where their shell
 /// was moved.
-fn engram_writer_worktrees(inner: &StateInner, index: usize) -> Vec<Option<String>> {
+pub(crate) fn engram_writer_worktrees(inner: &StateInner, index: usize) -> Vec<Option<String>> {
     let record = &inner.sessions[index];
     std::iter::once(engram_session_worktree(record))
         // A session whose turn works in its claim's named source root writes
@@ -871,7 +888,7 @@ fn engram_writer_worktrees(inner: &StateInner, index: usize) -> Vec<Option<Strin
 
 /// Whether `worktrees` may hold the worktree with key `root`: one of them is
 /// it, or one is a worktree TermAl could not name.
-fn engram_worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
+pub(crate) fn engram_worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
     worktrees
         .iter()
         .any(|worktree| worktree.as_deref().is_none_or(|worktree| worktree == root))
@@ -889,7 +906,11 @@ fn engram_worktrees_may_hold(worktrees: &[Option<String>], root: &str) -> bool {
 /// (`engram_writer_match`), for the line its holder is told. A Codex test
 /// still running after another session's turn closed also counts, under
 /// that session's current runtime, until its reported end or runtime exit.
-fn engram_other_writer_cause(inner: &StateInner, index: usize, root: &str) -> Option<String> {
+pub(crate) fn engram_other_writer_cause(
+    inner: &StateInner,
+    index: usize,
+    root: &str,
+) -> Option<String> {
     inner.sessions.iter().enumerate().find_map(|(other, record)| {
         if other == index || !engram_session_may_write(inner, other) {
             return None;
@@ -923,7 +944,7 @@ fn engram_session_in_turn(record: &SessionRecord) -> bool {
 /// naming it, or `None` when it may not: the same places
 /// `engram_writer_worktrees` holds, as `engram_worktrees_may_hold` reads
 /// them, each told as the reason it matched.
-fn engram_writer_match(inner: &StateInner, other: usize, root: &str) -> Option<String> {
+pub(crate) fn engram_writer_match(inner: &StateInner, other: usize, root: &str) -> Option<String> {
     let record = &inner.sessions[other];
     let why = match engram_session_worktree(record) {
         // A proxy's workdir is the other host's path; TermAl never resolves
@@ -937,9 +958,9 @@ fn engram_writer_match(inner: &StateInner, other: usize, root: &str) -> Option<S
             "has an UNRESOLVED worktree, not resolved yet, so it counts in every one".to_owned(),
         ),
         // A proxy keeps the key an earlier turn start resolved for it.
-        Some(worktree) if worktree == root && record.remote_id.is_some() => {
-            Some(format!("works in this worktree (its resolved key {worktree})"))
-        }
+        Some(worktree) if worktree == root && record.remote_id.is_some() => Some(format!(
+            "works in this worktree (its resolved key {worktree})"
+        )),
         Some(worktree) if worktree == root => Some("works in this worktree".to_owned()),
         Some(_) => None,
     }
@@ -1000,7 +1021,9 @@ fn engram_unresolved_writers(inner: &StateInner, except: usize) -> Vec<(String, 
 
 /// Resolves on the file system, never under the state lock, the worktree of
 /// each workdir `engram_unresolved_writers` read.
-fn engram_resolve_writer_worktrees(writers: Vec<(String, String)>) -> Vec<(String, String, String)> {
+fn engram_resolve_writer_worktrees(
+    writers: Vec<(String, String)>,
+) -> Vec<(String, String, String)> {
     writers
         .into_iter()
         .map(|(session_id, workdir)| {
@@ -1039,7 +1062,7 @@ fn engram_note_writer_worktrees(inner: &mut StateInner, resolved: Vec<(String, S
 /// full gate rather than of one command, is fenced only for what `act` says
 /// the writer did (`engram_fence_carried_for_other_session`): its presence in
 /// a turn fences none.
-fn engram_mark_checks_overlapped_by(
+pub(crate) fn engram_mark_checks_overlapped_by(
     inner: &mut StateInner,
     writer: usize,
     act: EngramWriterAct<'_>,
@@ -1134,7 +1157,7 @@ impl EngramTurnCheck {
     /// write before any of them may be in what it recorded. `None` while it is
     /// open to writes or any of those instants is unknown, which counts as
     /// still open.
-    fn interference_end(&self) -> Option<u64> {
+    pub(crate) fn interference_end(&self) -> Option<u64> {
         if self.open_to_writes() {
             return None;
         }
@@ -1156,7 +1179,7 @@ impl EngramTurnCheck {
     /// or, for a declared check, its declaration and artifact are not read
     /// yet. The artifact is git-ignored, so no snapshot can see it change:
     /// this fence is all that keeps a later write out of its result.
-    fn open_to_writes(&self) -> bool {
+    pub(crate) fn open_to_writes(&self) -> bool {
         !self.start_basis.is_ready()
             || self.end.as_ref().is_none_or(|end| {
                 !end.end_basis.is_ready()
@@ -1174,21 +1197,19 @@ impl EngramTurnCheck {
 /// end without its report (a compensating close, a project reset), leaving
 /// its checks until the next grant clears them; they will never be
 /// reported, so they no longer count.
-fn engram_has_open_check(record: &SessionRecord) -> bool {
+pub(crate) fn engram_has_open_check(record: &SessionRecord) -> bool {
     let engram = &record.engram;
     engram.active_turn_checks.iter().any(|check| {
-        runtime_observation_check_owner(record) == Some(check.host_turn_ref.as_str()) && check.open_to_writes()
-    }) || engram
-        .carried_checks
-        .iter()
-        .any(|carried| {
-            carried.fence.is_none()
-                && !carried.ended()
-                && (carried.ends_by_report
-                    || (!carried.launcher_gone
-                        && !carried.run_missing
-                        && !engram_carried_check_expired(carried, chrono::Utc::now())))
-        })
+        runtime_observation_check_owner(record) == Some(check.host_turn_ref.as_str())
+            && check.open_to_writes()
+    }) || engram.carried_checks.iter().any(|carried| {
+        carried.fence.is_none()
+            && !carried.ended()
+            && (carried.ends_by_report
+                || (!carried.launcher_gone
+                    && !carried.run_missing
+                    && !engram_carried_check_expired(carried, chrono::Utc::now())))
+    })
 }
 
 // A command's reported location is a fact, separate from whether its arguments
@@ -1213,9 +1234,9 @@ fn engram_observed_command_worktree(
             engram_resolve_shell_move(Some(workdir), directory.as_deref().unwrap_or(workdir))?;
         let root = engram_worktree_root_path(FsPath::new(&resolved));
         if !root.join(".git").exists()
-            || observed.as_ref().is_some_and(|prior| {
-                engram_exact_path_key(prior) != engram_exact_path_key(&root)
-            })
+            || observed
+                .as_ref()
+                .is_some_and(|prior| engram_exact_path_key(prior) != engram_exact_path_key(&root))
         {
             return None;
         }
@@ -1249,14 +1270,22 @@ impl AppState {
                 )
             } else if let Some(row) = inner.test_run_observations.get(&id) {
                 if row.command_fingerprint != EngramHost::check_fingerprint(command)
-                    || row.summary.ended_at.is_some() || row.summary.worktree.is_empty()
+                    || row.summary.ended_at.is_some()
+                    || row.summary.worktree.is_empty()
                 {
                     return None;
                 }
-                return Some((PathBuf::from(&row.summary.worktree), row.summary.started_at.clone()?));
+                return Some((
+                    PathBuf::from(&row.summary.worktree),
+                    row.summary.started_at.clone()?,
+                ));
             } else {
                 let (workdir, directories, at) = fresh?;
-                (workdir.to_owned(), directories.map(|places| places.to_vec()), at.to_owned())
+                (
+                    workdir.to_owned(),
+                    directories.map(|places| places.to_vec()),
+                    at.to_owned(),
+                )
             }
         };
         engram_observed_command_worktree(command, &workdir, directories.as_deref())
@@ -1287,7 +1316,7 @@ impl AppState {
     /// and from where the commands before it left that shell
     /// (`engram_command_directories`), a `cd` counting once its command has
     /// run; where TermAl could not follow them no check is kept.
-    fn note_engram_command_started(
+    pub(crate) fn note_engram_command_started(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -1303,8 +1332,9 @@ impl AppState {
         // readers supply Ambient provenance, which establishes no dialect.
         let dialect = match provenance {
             EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
-            EngramObservationProvenance::Ambient
-            | EngramObservationProvenance::Runtime { .. } => EngramShellDialect::Unknown,
+            EngramObservationProvenance::Ambient | EngramObservationProvenance::Runtime { .. } => {
+                EngramShellDialect::Unknown
+            }
         };
         let recognised = ran.and_then(|ran| engram_check_command_in(ran, dialect));
         let unsupported_focused = recognised
@@ -1365,7 +1395,8 @@ impl AppState {
                         .map_or_else(|| binding.work_id.clone(), |root| root.short_ref.clone())
                 }),
                 (mediated && recognised.is_some())
-                    .then(|| EngramOtherRootNoticeRead::capture(&inner, index)).flatten(),
+                    .then(|| EngramOtherRootNoticeRead::capture(&inner, index))
+                    .flatten(),
                 record.runtime.runtime_token(),
                 cwd.map(str::to_owned)
                     .or_else(|| engram.running_command_keys.get(key).cloned().flatten()),
@@ -1392,7 +1423,12 @@ impl AppState {
             )
         };
         if ran.is_none() {
-            self.remember_unclassified_test_command(test_run_origin.clone(), workdir.clone(), started_at.clone(), places.clone());
+            self.remember_unclassified_test_command(
+                test_run_origin.clone(),
+                workdir.clone(),
+                started_at.clone(),
+                places.clone(),
+            );
         }
         // Where the command's `cd` leads, from where its shell is presumed to
         // be; it moves the shell only once the command has run. A line TermAl
@@ -1450,10 +1486,14 @@ impl AppState {
         // recognition boundary; this extra declared read cannot admit credit.
         let mut visibility_declared = if !mediated && recognised.is_none() {
             engram_declared_start(ran, FsPath::new(&workdir), places.as_deref(), None).0
-        } else { None };
+        } else {
+            None
+        };
         let applied = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            inner.find_session_index(session_id).map(|index| inner.sessions[index].project_environment.clone())
+            inner
+                .find_session_index(session_id)
+                .map(|index| inner.sessions[index].project_environment.clone())
                 .unwrap_or_default()
         };
         for (_, _, binding) in declared.iter_mut().chain(visibility_declared.iter_mut()) {
@@ -1462,39 +1502,59 @@ impl AppState {
         // ACP may repeat a start when it first supplies command text. Consume
         // any saved original observation before considering a new start; this
         // does not create a retroactive check or borrow the current grant.
-        let original_launch_location = self.observed_full_launch_location(
-            &test_run_origin, recognised.as_ref(), cwd, None,
-        );
-        let original_start = self.observe_test_command_description(
-            session_id, provenance, key, ran, cwd,
-        );
+        let original_launch_location =
+            self.observed_full_launch_location(&test_run_origin, recognised.as_ref(), cwd, None);
+        let original_start =
+            self.observe_test_command_description(session_id, provenance, key, ran, cwd);
         let has_original_start = original_start != TestCommandOriginalStart::None;
         // An Ambient description may select an older or ambiguous original
         // start. If the exact original was not recoverable above, do not
         // substitute this frame's timestamp or current turn identity.
         let launch_location = original_launch_location.or_else(|| {
-            (!has_original_start).then(|| self.observed_full_launch_location(
-                &test_run_origin, recognised.as_ref(), cwd,
-                Some((&workdir, places.as_deref(), &started_at)),
-            )).flatten()
+            (!has_original_start)
+                .then(|| {
+                    self.observed_full_launch_location(
+                        &test_run_origin,
+                        recognised.as_ref(),
+                        cwd,
+                        Some((&workdir, places.as_deref(), &started_at)),
+                    )
+                })
+                .flatten()
         });
-        if let Some(command) = recognised.as_ref()
+        if let Some(command) = recognised
+            .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))
             .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command))
-            && !has_original_start {
+            && !has_original_start
+        {
             // The same start's validated target is also the observation's
             // source. A named linked root must not be resolved again as the
             // session worktree, nor lent to a different command.
             let observed_root = match target.as_ref() {
-                Some((_, validated_command, target)) => (validated_command == command)
-                    .then(|| test_run_display_path(&target.root)),
+                Some((_, validated_command, target)) => {
+                    (validated_command == command).then(|| test_run_display_path(&target.root))
+                }
                 None => engram_check_worktree_from(
-                    command, FsPath::new(&workdir), places.as_deref(), None,
-                ).map(|target| test_run_display_path(&target.root)),
-            }.unwrap_or_default();
-            let declared_binding = declared.as_ref().map(|(_, _, binding)| binding)
+                    command,
+                    FsPath::new(&workdir),
+                    places.as_deref(),
+                    None,
+                )
+                .map(|target| test_run_display_path(&target.root)),
+            }
+            .unwrap_or_default();
+            let declared_binding = declared
+                .as_ref()
+                .map(|(_, _, binding)| binding)
                 .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
-            self.observe_test_command_start(test_run_origin, command, &observed_root, &started_at, declared_binding);
+            self.observe_test_command_start(
+                test_run_origin,
+                command,
+                &observed_root,
+                &started_at,
+                declared_binding,
+            );
         }
         #[cfg(test)]
         TEST_ENGRAM_COMMAND_START_TIMING.with(|slot| {
@@ -1515,14 +1575,21 @@ impl AppState {
             .map(|(root, common_dir_key)| (root.as_path(), common_dir_key.as_str()));
         // Resolve candidate places off-lock, but leave the optional held-claim
         // service read to a lifetime-owned worker after this frame is applied.
-        let other_claim_notice = other_roots_read.zip(bound_work).and_then(|(mut read, bound)| {
-            let command = recognised.as_ref().filter(|_| mediated && !child)?;
-            read.roots.retain(|entry| engram_check_worktree_from(
-                command, FsPath::new(&workdir), places.as_deref(),
-                Some((FsPath::new(&entry.root), entry.common_dir_key.as_str())),
-            ).is_some());
-            Some((read, bound, target.is_some()))
-        });
+        let other_claim_notice = other_roots_read
+            .zip(bound_work)
+            .and_then(|(mut read, bound)| {
+                let command = recognised.as_ref().filter(|_| mediated && !child)?;
+                read.roots.retain(|entry| {
+                    engram_check_worktree_from(
+                        command,
+                        FsPath::new(&workdir),
+                        places.as_deref(),
+                        Some((FsPath::new(&entry.root), entry.common_dir_key.as_str())),
+                    )
+                    .is_some()
+                });
+                Some((read, bound, target.is_some()))
+            });
         let withheld_line = {
             if !mediated {
                 None
@@ -1648,14 +1715,19 @@ impl AppState {
         // A built-in recognition wins; otherwise the declaration bound at
         // this start (with or without a claimed work binding) names the
         // check, so its end finds the same entry.
-        let observed_command = recognised.as_ref()
+        let observed_command = recognised
+            .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))
             .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command));
-        let observed_declaration = declared.as_ref().map(|(_, _, binding)| binding)
+        let observed_declaration = declared
+            .as_ref()
+            .map(|(_, _, binding)| binding)
             .or_else(|| visibility_declared.as_ref().map(|(_, _, binding)| binding));
         observe_runtime_unadmitted_recognized_command(
-            &mut inner.sessions[index], provenance,
-            &EngramRecorderObservation::CommandStarted { key, ran, cwd }, observed_command,
+            &mut inner.sessions[index],
+            provenance,
+            &EngramRecorderObservation::CommandStarted { key, ran, cwd },
+            observed_command,
             observed_declaration,
         );
         if disposition != ClaudeObservationDisposition::Current {
@@ -1682,7 +1754,8 @@ impl AppState {
             && record.runtime.runtime_token() == runtime
             && record.active_turn_generation == turn_generation
             && record.session.workdir == workdir
-            && (target.is_none() || record.engram.work_binding.is_none()
+            && (target.is_none()
+                || record.engram.work_binding.is_none()
                 || runtime_observation_check_owner(record).is_none())
             && let Some((root, original_start)) = launch_location
         {
@@ -1693,8 +1766,7 @@ impl AppState {
         // The ordinary execution record above keeps the original start even
         // without a claimed source. That absence is not a provider gate, and
         // a later binding cannot manufacture its missing source snapshots.
-        if record.engram.work_binding.is_none()
-            || runtime_observation_check_owner(record).is_none()
+        if record.engram.work_binding.is_none() || runtime_observation_check_owner(record).is_none()
         {
             return;
         }
@@ -1708,7 +1780,9 @@ impl AppState {
             // is measured as this turn's own.
             return;
         }
-        let host_turn_ref = runtime_observation_check_owner(record).map(str::to_owned).expect("observation owner checked above");
+        let host_turn_ref = runtime_observation_check_owner(record)
+            .map(str::to_owned)
+            .expect("observation owner checked above");
         let other_writer = target.as_ref().and_then(|(_, _, target)| {
             engram_other_writer_cause(&inner, index, &engram_path_key(&target.root))
         });
@@ -1748,12 +1822,7 @@ impl AppState {
                 })
                 .cloned()
                 .or_else(|| {
-                    engram_carried_running_key(
-                        &record.engram,
-                        current_runtime.as_ref(),
-                        &root,
-                        key,
-                    )
+                    engram_carried_running_key(&record.engram, current_runtime.as_ref(), &root, key)
                 })
         });
         let fresh = record
@@ -1797,7 +1866,8 @@ impl AppState {
             // Capture the order after this frame's own feedback. A later
             // read or published refusal supersedes this optional result.
             let engram = &mut inner.sessions[index].engram;
-            engram.uncredited_feedback_revision = engram.uncredited_feedback_revision.wrapping_add(1);
+            engram.uncredited_feedback_revision =
+                engram.uncredited_feedback_revision.wrapping_add(1);
             read.schedule(self, bound, shared, engram.uncredited_feedback_revision);
         }
         let record = &mut inner.sessions[index];
@@ -1844,7 +1914,10 @@ impl AppState {
         let workers = record.engram.capture_workers.clone();
         if workers.load(std::sync::atomic::Ordering::SeqCst) >= ENGRAM_CAPTURE_WORKER_LIMIT {
             if record.engram.withheld_command_keys.insert(key.to_owned()) {
-                record.engram.uncredited_command_notice_keys.insert(key.to_owned());
+                record
+                    .engram
+                    .uncredited_command_notice_keys
+                    .insert(key.to_owned());
                 engram_publish_check_notice(
                     session_id,
                     &mut record.engram,
@@ -1870,7 +1943,10 @@ impl AppState {
                 .position(|check| check.end.is_some())
             else {
                 if record.engram.withheld_command_keys.insert(key.to_owned()) {
-                    record.engram.uncredited_command_notice_keys.insert(key.to_owned());
+                    record
+                        .engram
+                        .uncredited_command_notice_keys
+                        .insert(key.to_owned());
                     engram_publish_check_notice(
                         session_id,
                         &mut record.engram,
@@ -1886,16 +1962,26 @@ impl AppState {
             };
             record.engram.active_turn_checks.remove(oldest);
         }
-        let start_basis =
-            engram_spawn_basis_capture(target.basis_place(), &workers, provenance,
-                &self.capture_lifetime, self.clone(), session_id.to_owned());
+        let start_basis = engram_spawn_basis_capture(
+            target.basis_place(),
+            &workers,
+            provenance,
+            &self.capture_lifetime,
+            self.clone(),
+            session_id.to_owned(),
+        );
         // The toolchain is named as the check starts, from the overrides it
         // ran under, not from whatever they say when the turn closes.
         #[cfg(test)]
         let toolchain_command = engram_build_toolchain_command(&command);
         #[cfg(test)]
         let toolchain = if engram_cargo_toolchain_selector(&toolchain_command).is_some() {
-            engram_spawn_toolchain_capture(toolchain_command, target.directory.clone(), &workers, &self.capture_lifetime)
+            engram_spawn_toolchain_capture(
+                toolchain_command,
+                target.directory.clone(),
+                &workers,
+                &self.capture_lifetime,
+            )
         } else {
             EngramToolchainCapture::settled(None)
         };
@@ -1907,7 +1993,12 @@ impl AppState {
         // What overlapped it from its start, told in this order. Restricting
         // Claude work is told as its own cause (`fenced_by_outstanding`).
         let overlap_cause = others_running
-            .map(|running| format!("{} was still running", engram_session_command_label(&running)))
+            .map(|running| {
+                format!(
+                    "{} was still running",
+                    engram_session_command_label(&running)
+                )
+            })
             .or(other_writer)
             .or_else(|| {
                 named_late.then(|| "its command was named a test only by a later start".to_owned())
@@ -1957,7 +2048,7 @@ impl AppState {
     /// key's directory is remembered, and a check it started stands only
     /// while it still names the same test in the same place. Nothing starts
     /// here: a check needs its first snapshot from before its test runs.
-    fn note_engram_command_described(
+    pub(crate) fn note_engram_command_described(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -1967,20 +2058,28 @@ impl AppState {
     ) {
         let (location_origin, location_workdir) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(index) = inner.find_session_index(session_id) else { return; };
-            (TestRunCommandOrigin::capture(&inner, index, provenance, key),
-                inner.sessions[index].session.workdir.clone())
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
+            (
+                TestRunCommandOrigin::capture(&inner, index, provenance, key),
+                inner.sessions[index].session.workdir.clone(),
+            )
         };
         let dialect = match provenance {
             EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
-            EngramObservationProvenance::Ambient
-            | EngramObservationProvenance::Runtime { .. } => EngramShellDialect::Unknown,
+            EngramObservationProvenance::Ambient | EngramObservationProvenance::Runtime { .. } => {
+                EngramShellDialect::Unknown
+            }
         };
         let described_command = ran.and_then(|line| engram_check_command_in(line, dialect));
         // Read the original placeholder before the ordinary description
         // owner consumes it. A description alone cannot invent a start.
         let launch_location = self.observed_full_launch_location(
-            &location_origin, described_command.as_ref(), cwd, None,
+            &location_origin,
+            described_command.as_ref(),
+            cwd,
+            None,
         );
         self.observe_test_command_description(session_id, provenance, key, ran, cwd);
         if ran.is_none() && cwd.is_none() {
@@ -2151,8 +2250,13 @@ impl AppState {
             );
         }
         if disposition == ClaudeObservationDisposition::Current
-            && diagnostics_enabled && location_current
-            && !record.engram.active_turn_checks.iter().any(|check| check.key == key)
+            && diagnostics_enabled
+            && location_current
+            && !record
+                .engram
+                .active_turn_checks
+                .iter()
+                .any(|check| check.key == key)
             && let Some((root, original_start)) = launch_location
         {
             engram_note_observed_launch_location(record, &root, &original_start);
@@ -2221,7 +2325,14 @@ impl AppState {
                     worktrees.clone()
                 },
             );
-            engram_mark_own_checks_for_command(record, key, &worktrees, reads_only, true, "runs there");
+            engram_mark_own_checks_for_command(
+                record,
+                key,
+                &worktrees,
+                reads_only,
+                true,
+                "runs there",
+            );
             let placed = !reads_only && record.claude_outstanding.holds(key);
             if placed {
                 record.claude_outstanding.place(key, &worktrees);
@@ -2246,7 +2357,7 @@ impl AppState {
     /// none or several, or once that row is gone, the native state stands.
     /// A failure may override a native exit 0, and the native exit code
     /// stays beside it; an unreadable or mismatched result is unknown.
-    fn apply_declared_verdict_to_test_run(
+    pub(crate) fn apply_declared_verdict_to_test_run(
         &self,
         ended: &[String],
         outcome: Option<EngramExecutionOutcome>,
@@ -2254,7 +2365,7 @@ impl AppState {
         self.apply_declared_verdict_to_test_run_with_detail(ended, outcome, None);
     }
 
-    fn apply_declared_verdict_to_test_run_with_detail(
+    pub(crate) fn apply_declared_verdict_to_test_run_with_detail(
         &self,
         ended: &[String],
         outcome: Option<EngramExecutionOutcome>,
@@ -2276,12 +2387,14 @@ impl AppState {
                 && (row.summary.state != state
                     || row.declared_verdict_pending
                     || (state == TestRunState::Unknown
-                        && unknown_detail.is_some_and(|detail|
-                            row.summary.error.as_deref() != Some(detail))));
+                        && unknown_detail
+                            .is_some_and(|detail| row.summary.error.as_deref() != Some(detail))));
             eligible.then(|| {
                 row.summary.state = state;
                 row.declared_verdict_pending = false;
-                if state == TestRunState::Unknown && let Some(detail) = unknown_detail {
+                if state == TestRunState::Unknown
+                    && let Some(detail) = unknown_detail
+                {
                     row.summary.error = Some(detail.to_owned());
                 }
                 row.clone()
@@ -2298,7 +2411,7 @@ impl AppState {
     /// A background command's result marks its launch: it keeps counting as
     /// running for the rest of the turn, since TermAl never sees it end.
     #[cfg(test)]
-    fn note_engram_command_finished(
+    pub(crate) fn note_engram_command_finished(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -2313,7 +2426,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn note_engram_command_finished_with_capture(
+    pub(crate) fn note_engram_command_finished_with_capture(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -2324,13 +2437,20 @@ impl AppState {
         runtime_output_cut: bool,
     ) {
         self.note_engram_command_finished_reported(
-            session_id, provenance, key, command, Some(command), output, exit, runtime_output_cut,
+            session_id,
+            provenance,
+            key,
+            command,
+            Some(command),
+            output,
+            exit,
+            runtime_output_cut,
         );
     }
 
     /// Preserves an ACP completion's actual command absence independently of
     /// the label shown in its transcript card.
-    fn note_engram_command_finished_reported(
+    pub(crate) fn note_engram_command_finished_reported(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -2342,12 +2462,20 @@ impl AppState {
         runtime_output_cut: bool,
     ) {
         self.note_engram_command_finished_reported_with_observation_hook(
-            session_id, provenance, key, command, reported_command, output, exit, runtime_output_cut,
-            #[cfg(test)] || {},
+            session_id,
+            provenance,
+            key,
+            command,
+            reported_command,
+            output,
+            exit,
+            runtime_output_cut,
+            #[cfg(test)]
+            || {},
         );
     }
 
-    fn note_engram_command_finished_reported_with_observation_hook(
+    pub(crate) fn note_engram_command_finished_reported_with_observation_hook(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
@@ -2366,9 +2494,18 @@ impl AppState {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner.find_session_index(session_id).and_then(|index| {
                 runtime_unadmitted_trace(&inner.sessions[index], provenance).and_then(|trace| {
-                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
-                    entry.declared.clone().map(|binding|
-                        (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(), binding))
+                    let entry = trace
+                        .commands
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.tool_key == key)?;
+                    entry.declared.clone().map(|binding| {
+                        (
+                            trace.host_turn_ref.clone(),
+                            entry.check.host_check_id.clone(),
+                            binding,
+                        )
+                    })
                 })
             })
         };
@@ -2377,21 +2514,41 @@ impl AppState {
         // The rows this exit ended, exactly: a declared verdict below applies
         // only to one of them, never to a row an earlier end closed.
         let ended_test_runs = if observed_declared.is_some() {
-            self.observe_test_command_end_awaiting_declared_verdict(session_id, provenance, key, exit)
+            self.observe_test_command_end_awaiting_declared_verdict(
+                session_id, provenance, key, exit,
+            )
         } else if let Some(ended) = self.end_untraced_declared_observation(
-            session_id, provenance, key, reported_command, exit,
-            #[cfg(test)] after_observation_end,
+            session_id,
+            provenance,
+            key,
+            reported_command,
+            exit,
+            #[cfg(test)]
+            after_observation_end,
         ) {
             ended
         } else {
             self.observe_test_command_end(session_id, provenance, key, exit)
         };
-        self.observe_test_command_artifact(session_id, provenance, key, command, output, runtime_output_cut);
+        self.observe_test_command_artifact(
+            session_id,
+            provenance,
+            key,
+            command,
+            output,
+            runtime_output_cut,
+        );
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
         // when a check of the command is running: most commands have none.
-        let (starting_check, workdir, unresolved_writers, launch_held_target,
-            observed_launcher, observed_completion) = {
+        let (
+            starting_check,
+            workdir,
+            unresolved_writers,
+            launch_held_target,
+            observed_launcher,
+            observed_completion,
+        ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
@@ -2401,7 +2558,8 @@ impl AppState {
                 .engram
                 .active_turn_checks
                 .iter()
-                .find(|check| check.key == key && check.end.is_none()).cloned();
+                .find(|check| check.key == key && check.end.is_none())
+                .cloned();
             // A launcher full gate with batch members reads the session's
             // held claims at its launch, off the lock below, so each member
             // carries the fence its claim has then (`engram_batch_binds.rs`).
@@ -2409,7 +2567,9 @@ impl AppState {
             // dropped launch, binds no member.
             let launch_held_target = starting_check
                 .as_ref()
-                .filter(|check| engram_launch_needs_held_read(&inner, index, session_id, check, exit))
+                .filter(|check| {
+                    engram_launch_needs_held_read(&inner, index, session_id, check, exit)
+                })
                 .and_then(|_| {
                     Self::engram_binding_target_for_session_shape_locked(&inner, session_id, true)
                         .ok()
@@ -2426,20 +2586,42 @@ impl AppState {
                 },
                 launch_held_target,
                 runtime_unadmitted_trace(record, provenance).and_then(|trace| {
-                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
+                    let entry = trace
+                        .commands
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.tool_key == key)?;
                     let command = entry.recognized_command.as_ref()?;
-                    (entry.declared.is_none() && !entry.launch_only
+                    (entry.declared.is_none()
+                        && !entry.launch_only
                         && command.kind == EngramVerificationKind::Test
                         && !runtime_observed_command_needs_completion(command)
                         && engram_launcher_words(command).is_some())
-                        .then(|| (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(),
-                            starting_check.as_ref().is_some_and(|check| check.command == *command)))
+                    .then(|| {
+                        (
+                            trace.host_turn_ref.clone(),
+                            entry.check.host_check_id.clone(),
+                            starting_check
+                                .as_ref()
+                                .is_some_and(|check| check.command == *command),
+                        )
+                    })
                 }),
                 runtime_unadmitted_trace(record, provenance).and_then(|trace| {
-                    let entry = trace.commands.iter().rev().find(|entry| entry.tool_key == key)?;
+                    let entry = trace
+                        .commands
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.tool_key == key)?;
                     let command = entry.recognized_command.as_ref()?;
                     (entry.declared.is_none() && runtime_observed_command_needs_completion(command))
-                        .then(|| (trace.host_turn_ref.clone(), entry.check.host_check_id.clone(), command.clone()))
+                        .then(|| {
+                            (
+                                trace.host_turn_ref.clone(),
+                                entry.check.host_check_id.clone(),
+                                command.clone(),
+                            )
+                        })
                 }),
             )
         };
@@ -2447,9 +2629,12 @@ impl AppState {
         // off the state lock. Shell success alone cannot prove a declared
         // test passed; a stale/mismatched completion remains indeterminate.
         let observed_declared = observed_declared.map(|(turn, check_id, binding)| {
-            let matches = reported_command.and_then(engram_declared_candidate)
-                .is_some_and(|(_, words)| engram_declared_words(&binding.entry.command)
-                    .is_ok_and(|expected| expected == words));
+            let matches = reported_command
+                .and_then(engram_declared_candidate)
+                .is_some_and(|(_, words)| {
+                    engram_declared_words(&binding.entry.command)
+                        .is_ok_and(|expected| expected == words)
+                });
             let (outcome, detail) = if matches {
                 let exit = exit.unwrap_or(EngramCommandExit::Unknown);
                 let result = engram_declared_result(&binding, exit);
@@ -2461,41 +2646,68 @@ impl AppState {
                     _ => None,
                 };
                 (engram_declared_outcome(exit, &result), detail)
-            } else { (Some(EngramExecutionOutcome::Unknown), None) };
+            } else {
+                (Some(EngramExecutionOutcome::Unknown), None)
+            };
             (turn, check_id, binding, outcome, detail)
         });
         if let Some((_, _, _, outcome, detail)) = &observed_declared {
-            self.apply_declared_verdict_to_test_run_with_detail(&ended_test_runs, *outcome, detail.as_deref());
+            self.apply_declared_verdict_to_test_run_with_detail(
+                &ended_test_runs,
+                *outcome,
+                detail.as_deref(),
+            );
         }
         // On the recorder's path, so bounded as the turn path's own held read.
         let launch_held = launch_held_target.map(|target| {
             target.adapter.read_held_claims(
                 &target.connection,
-                target.settings.call_timeout().min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT),
+                target
+                    .settings
+                    .call_timeout()
+                    .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT),
             )
         });
-        let reading =
-            engram_read_check_end(starting_check.as_ref(), session_id, reported_command, output, exit);
+        let reading = engram_read_check_end(
+            starting_check.as_ref(),
+            session_id,
+            reported_command,
+            output,
+            exit,
+        );
         // Share only the existing owner's validated completion. A
         // missing diagnostic start cannot be rebuilt from stdout or a title.
         let observed_completion = observed_completion.map(|(turn, check_id, command)| {
-            let completion = starting_check.as_ref()
+            let completion = starting_check
+                .as_ref()
                 .filter(|check| check.host_turn_ref == turn && check.command == command)
                 .and_then(|_| {
-                    reading.node_completion.as_ref().map(|(exit, lines, _, _)| (*exit, lines))
-                        .or_else(|| reading.build_completion.as_ref()
-                            .map(|(exit, lines, _)| (*exit, lines)))
+                    reading
+                        .node_completion
+                        .as_ref()
+                        .map(|(exit, lines, _, _)| (*exit, lines))
+                        .or_else(|| {
+                            reading
+                                .build_completion
+                                .as_ref()
+                                .map(|(exit, lines, _)| (*exit, lines))
+                        })
                 });
-            let outcome = completion.map_or(Some(EngramExecutionOutcome::Unknown), |(exit, lines)|
-                engram_check_command_outcome(&command, exit, lines));
+            let outcome = completion
+                .map_or(Some(EngramExecutionOutcome::Unknown), |(exit, lines)| {
+                    engram_check_command_outcome(&command, exit, lines)
+                });
             (turn, check_id, outcome)
         });
         // Reuse the launcher's own no-stage record, off the state lock, even
         // when its diagnostic check has left the bounded local collection.
         let observed_launcher = observed_launcher.filter(|(_, _, use_reading)| {
             exit != Some(EngramCommandExit::NotFinished)
-                && if *use_reading { reading.launcher_ran_no_stage }
-                    else { engram_launcher_output_ran_no_stage(output) }
+                && if *use_reading {
+                    reading.launcher_ran_no_stage
+                } else {
+                    engram_launcher_output_ran_no_stage(output)
+                }
         });
         // The session's worktree, resolved off the lock for overlap marking,
         // and those of the writers not resolved yet.
@@ -2537,7 +2749,8 @@ impl AppState {
         );
         // Only a check of the grant the session runs under can be reported;
         // one a grant left behind as it ended takes no closing snapshot.
-        let host_turn_ref = runtime_observation_check_owner(&inner.sessions[index]).map(str::to_owned);
+        let host_turn_ref =
+            runtime_observation_check_owner(&inner.sessions[index]).map(str::to_owned);
         let running_check = |check: &EngramTurnCheck| {
             check.key == key
                 && check.end.is_none()
@@ -2598,32 +2811,65 @@ impl AppState {
         // prompt owns hides is kept as unassigned, and still ends a check its
         // own key started.
         if let Some((turn, check_id, outcome)) = &observed_completion {
-            observe_runtime_unadmitted_captured_end(record, provenance,
+            observe_runtime_unadmitted_captured_end(
+                record,
+                provenance,
                 &EngramRecorderObservation::CommandFinished {
-                    key, command, reported_command, output, exit, runtime_output_cut,
-                }, turn, check_id, None, *outcome);
+                    key,
+                    command,
+                    reported_command,
+                    output,
+                    exit,
+                    runtime_output_cut,
+                },
+                turn,
+                check_id,
+                None,
+                *outcome,
+            );
         }
         if let Some((turn, check_id, _)) = &observed_launcher
             && runtime_unadmitted_trace(record, provenance).is_some_and(|trace| {
-                trace.host_turn_ref == *turn && trace.commands.iter().rev()
-                    .find(|entry| entry.tool_key == key)
-                    .is_some_and(|entry| entry.check.host_check_id == *check_id)
+                trace.host_turn_ref == *turn
+                    && trace
+                        .commands
+                        .iter()
+                        .rev()
+                        .find(|entry| entry.tool_key == key)
+                        .is_some_and(|entry| entry.check.host_check_id == *check_id)
             })
         {
             // Only EO receives the no-test outcome. Native diagnostics retain
             // the actual process exit and their independently read artifacts.
-            observe_runtime_unadmitted_command(record, provenance,
+            observe_runtime_unadmitted_command(
+                record,
+                provenance,
                 &EngramRecorderObservation::CommandFinished {
-                    key, command, reported_command, output,
-                    exit: Some(EngramCommandExit::Unknown), runtime_output_cut,
-                });
+                    key,
+                    command,
+                    reported_command,
+                    output,
+                    exit: Some(EngramCommandExit::Unknown),
+                    runtime_output_cut,
+                },
+            );
         }
         if let Some((turn, check_id, binding, outcome, _)) = &observed_declared {
             observe_runtime_unadmitted_declared_end(
-                record, provenance,
+                record,
+                provenance,
                 &EngramRecorderObservation::CommandFinished {
-                    key, command, reported_command, output, exit, runtime_output_cut,
-                }, turn, check_id, binding, *outcome,
+                    key,
+                    command,
+                    reported_command,
+                    output,
+                    exit,
+                    runtime_output_cut,
+                },
+                turn,
+                check_id,
+                binding,
+                *outcome,
             );
         }
         claude_exclude_observation(
@@ -2648,11 +2894,12 @@ impl AppState {
         // that starts no check, or name a command by a title only. A check
         // started under the key since retired the closure, so its own end is
         // never told here.
-        if exit != Some(EngramCommandExit::NotFinished) && !record
-            .engram
-            .active_turn_checks
-            .iter()
-            .any(|check| check.key == key && check.end.is_none())
+        if exit != Some(EngramCommandExit::NotFinished)
+            && !record
+                .engram
+                .active_turn_checks
+                .iter()
+                .any(|check| check.key == key && check.end.is_none())
             && let Some(position) = record
                 .engram
                 .unended_check_closures
@@ -2693,10 +2940,14 @@ impl AppState {
                 // unchanged captured start still identifies the launch. An
                 // explicitly reported command must match, even if unrecognized.
                 let matches = engram_check_end_matches(check, &reading, starting_check.as_ref())
-                    || (reported_command.is_none() && !check.command.literal_pipe
+                    || (reported_command.is_none()
+                        && !check.command.literal_pipe
                         && engram_check_start_matches(check, starting_check.as_ref()));
-                if matches { EngramLaunchDisposition::Carry }
-                else { EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_ASSOCIATION) }
+                if matches {
+                    EngramLaunchDisposition::Carry
+                } else {
+                    EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_ASSOCIATION)
+                }
             }
             other => other,
         };
@@ -2737,7 +2988,8 @@ impl AppState {
         // locator without ending the process. Keep a simple launcher check
         // open for the existing native running/carry and terminal owners.
         if exit == Some(EngramCommandExit::NotFinished)
-            && check.command.simple && !check.command.literal_pipe
+            && check.command.simple
+            && !check.command.literal_pipe
             && EngramHost::launcher_arguments(&check.command).is_some()
             && engram_check_end_matches(check, &reading, starting_check.as_ref())
         {
@@ -2765,13 +3017,18 @@ impl AppState {
     /// stay open to writes until the turn ends, and a `cd` it would have made
     /// moves nothing. Its existing execution observation retains the original
     /// start and the unknown terminal boundary without claiming verification.
-    fn note_engram_command_abandoned(
+    pub(crate) fn note_engram_command_abandoned(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,
         key: &str,
     ) {
-        self.observe_test_command_end(session_id, provenance, key, Some(EngramCommandExit::Unknown));
+        self.observe_test_command_end(
+            session_id,
+            provenance,
+            key,
+            Some(EngramCommandExit::Unknown),
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id) {
             let disposition = claude_observation_disposition(&inner.sessions[index], provenance);
@@ -2814,7 +3071,7 @@ impl AppState {
     /// The user wrote at `path` through TermAl itself (a file save, a Git
     /// file action, a terminal command starting or ending): a check still
     /// open to writes in any session of that worktree may read what changed.
-    fn note_engram_host_write(&self, path: &FsPath) {
+    pub(crate) fn note_engram_host_write(&self, path: &FsPath) {
         // The written path's worktree is resolved off the lock, and only
         // while some check is open. A check that opens after this look is
         // caught by the mark each write takes as it ends.
@@ -2841,7 +3098,7 @@ impl AppState {
     /// own worktree rather than every one: a session that has reported no
     /// command or edit since TermAl started (a chat-only turn) would
     /// otherwise count as writing anywhere. Called before a turn starts.
-    fn note_engram_session_worktree_off_lock(&self, session_id: &str) {
+    pub(crate) fn note_engram_session_worktree_off_lock(&self, session_id: &str) {
         let workdir = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -2867,7 +3124,7 @@ impl AppState {
     /// writes may see content the edit changed, in this session or in
     /// another of the same worktree. `target` is the file the tool named, if
     /// any; it only names the edit in a refusal and fences nothing by itself.
-    fn note_engram_workspace_edit(
+    pub(crate) fn note_engram_workspace_edit(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,

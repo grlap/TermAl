@@ -12,14 +12,16 @@ changes live in state.rs, runtime process logic lives in runtime.rs, and the
 turn normalization layer lives in turns.rs.
 */
 
+use super::*;
+
 /// Returns a stable content identity for source-editor conflict detection.
-fn file_content_hash(content: &[u8]) -> String {
+pub(crate) fn file_content_hash(content: &[u8]) -> String {
     let digest = Sha256::digest(content);
     format!("sha256:{digest:x}")
 }
 
 /// Converts filesystem modified time to JavaScript-friendly milliseconds.
-fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
+pub(crate) fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
     let millis = metadata
         .modified()
         .ok()?
@@ -30,7 +32,7 @@ fn file_metadata_mtime_ms(metadata: &fs::Metadata) -> Option<u64> {
 }
 
 #[cfg(test)]
-fn record_rejected_turn_dispatch(
+pub(crate) fn record_rejected_turn_dispatch(
     state: &AppState,
     session_id: &str,
     error_message: &str,
@@ -38,22 +40,39 @@ fn record_rejected_turn_dispatch(
     runtime_token: &RuntimeToken,
     active_turn_generation: u64,
 ) -> bool {
-    record_rejected_turn_dispatch_with_federation(state, session_id, error_message,
-        mailbox_notification, runtime_token, active_turn_generation, None)
+    record_rejected_turn_dispatch_with_federation(
+        state,
+        session_id,
+        error_message,
+        mailbox_notification,
+        runtime_token,
+        active_turn_generation,
+        None,
+    )
 }
 
 fn record_rejected_turn_dispatch_with_federation(
-    state: &AppState, session_id: &str, error_message: &str,
+    state: &AppState,
+    session_id: &str,
+    error_message: &str,
     mailbox_notification: Option<&MailboxNotificationDelivery>,
-    runtime_token: &RuntimeToken, active_turn_generation: u64,
+    runtime_token: &RuntimeToken,
+    active_turn_generation: u64,
     federation_identity: Option<&FederationExecutorHandoffIdentity>,
 ) -> bool {
     let failure = state.fail_rejected_turn_delivery_with_federation(
-        session_id, runtime_token, active_turn_generation, error_message, federation_identity);
+        session_id,
+        runtime_token,
+        active_turn_generation,
+        error_message,
+        federation_identity,
+    );
     match failure {
-        Ok(true) => {},
+        Ok(true) => {}
         Ok(false) => return false,
-        Err(error) => eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {error:#}"),
+        Err(error) => {
+            eprintln!("turn dispatch> failed recording rejection for `{session_id}`: {error:#}")
+        }
     }
     if let Some(notification) = mailbox_notification {
         if let Err(err) = state.requeue_mailbox_notification_with_rejection(notification, true) {
@@ -67,7 +86,7 @@ fn record_rejected_turn_dispatch_with_federation(
 }
 
 #[derive(Debug)]
-enum TurnDispatchDeliveryOutcome {
+pub(crate) enum TurnDispatchDeliveryOutcome {
     Delivered,
     Scheduled,
     Held { error: Option<ApiError> },
@@ -91,7 +110,7 @@ impl TurnDispatchDeliveryOutcome {
         }
     }
 
-    fn into_public_result(self) -> Result<(), ApiError> {
+    pub(crate) fn into_public_result(self) -> Result<(), ApiError> {
         match self {
             Self::Delivered | Self::Scheduled | Self::Held { error: None } | Self::Superseded => {
                 Ok(())
@@ -100,7 +119,7 @@ impl TurnDispatchDeliveryOutcome {
         }
     }
 
-    fn into_background_result(self, context: &str) -> Result<(), ApiError> {
+    pub(crate) fn into_background_result(self, context: &str) -> Result<(), ApiError> {
         match self {
             Self::Rejected(error) => Err(error),
             Self::Held { error: Some(error) } => {
@@ -117,33 +136,36 @@ impl TurnDispatchDeliveryOutcome {
     }
 
     #[cfg(test)]
-    fn expect(self, message: &str) {
+    pub(crate) fn expect(self, message: &str) {
         self.into_public_result().expect(message);
     }
 
     #[cfg(test)]
-    fn unwrap(self) {
+    pub(crate) fn unwrap(self) {
         self.into_public_result().unwrap();
     }
 
     #[cfg(test)]
-    fn expect_err(self, message: &str) -> ApiError {
+    pub(crate) fn expect_err(self, message: &str) -> ApiError {
         self.into_public_result().expect_err(message)
     }
 
     #[cfg(test)]
-    fn unwrap_err(self) -> ApiError {
+    pub(crate) fn unwrap_err(self) -> ApiError {
         self.into_public_result().unwrap_err()
     }
 
     #[cfg(test)]
-    fn is_err(&self) -> bool {
+    pub(crate) fn is_err(&self) -> bool {
         matches!(self, Self::Held { error: Some(_) } | Self::Rejected(_))
     }
 }
 
 /// Keeps transport readers free to route replies needed by Fast discovery.
-fn deliver_turn_dispatch(state: &AppState, dispatch: TurnDispatch) -> TurnDispatchDeliveryOutcome {
+pub(crate) fn deliver_turn_dispatch(
+    state: &AppState,
+    dispatch: TurnDispatch,
+) -> TurnDispatchDeliveryOutcome {
     deliver_turn_dispatch_holding(state, dispatch, None)
 }
 
@@ -230,7 +252,7 @@ fn deliver_turn_dispatch_holding(
 /// A dispatch may leave a delegation child held, start the attempt it was
 /// queued for, or release a hold; the delegation's attempt state follows
 /// whatever it left (a no-op for a session that is not a delegation child).
-fn deliver_turn_dispatch_now(
+pub(crate) fn deliver_turn_dispatch_now(
     state: &AppState,
     dispatch: TurnDispatch,
 ) -> TurnDispatchDeliveryOutcome {
@@ -274,8 +296,12 @@ fn deliver_turn_dispatch_now(
 /// a receipted head it promoted returns to pending through the ordinary
 /// still-queued outcome (prompt_delivery.rs). A parked dispatch that is itself
 /// delivered later keeps its hand-off.
-fn note_held_before_hand_off(state: &AppState, session_id: &str, active_turn_generation: u64,
-    federation: Option<&FederationExecutorHandoffIdentity>) {
+pub(crate) fn note_held_before_hand_off(
+    state: &AppState,
+    session_id: &str,
+    active_turn_generation: u64,
+    federation: Option<&FederationExecutorHandoffIdentity>,
+) {
     state.note_prompt_handoff_outcome(
         session_id,
         Some(active_turn_generation),
@@ -294,7 +320,9 @@ fn deliver_prepared_turn_dispatch_now(
     match handoff_prepared_turn_dispatch(state, dispatch) {
         Ok(HandoffPreparedTurnDispatchOutcome::Delivered) => TurnDispatchDeliveryOutcome::Delivered,
         Ok(HandoffPreparedTurnDispatchOutcome::Scheduled) => TurnDispatchDeliveryOutcome::Scheduled,
-        Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend) => TurnDispatchDeliveryOutcome::Held { error: None },
+        Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend) => {
+            TurnDispatchDeliveryOutcome::Held { error: None }
+        }
         Ok(HandoffPreparedTurnDispatchOutcome::Superseded) => {
             TurnDispatchDeliveryOutcome::Superseded
         }
@@ -303,7 +331,7 @@ fn deliver_prepared_turn_dispatch_now(
 }
 
 #[derive(Debug)]
-enum HandoffPreparedTurnDispatchOutcome {
+pub(crate) enum HandoffPreparedTurnDispatchOutcome {
     Delivered,
     Scheduled,
     Superseded,
@@ -312,7 +340,7 @@ enum HandoffPreparedTurnDispatchOutcome {
 
 // Admission and its durable receipt are complete. The Stop fence and provider
 // enqueue are arbitrated under the same lock; a pending Stop is not yet final.
-fn handoff_prepared_turn_dispatch(
+pub(crate) fn handoff_prepared_turn_dispatch(
     state: &AppState,
     mut dispatch: TurnDispatch,
 ) -> Result<HandoffPreparedTurnDispatchOutcome, ApiError> {
@@ -381,9 +409,7 @@ fn handoff_prepared_turn_dispatch(
                             .deferred_stop_callbacks
                             .push(DeferredStopCallback::TurnHandoff {
                                 active_turn_generation,
-                                dispatch: DeferredTurnHandoff(Arc::new(Mutex::new(Some(
-                                    dispatch,
-                                )))),
+                                dispatch: DeferredTurnHandoff(Arc::new(Mutex::new(Some(dispatch)))),
                             });
                         return Ok(HandoffPreparedTurnDispatchOutcome::Scheduled);
                     }
@@ -406,7 +432,7 @@ fn handoff_prepared_turn_dispatch(
                     &session_id,
                     &detail,
                     mailbox_notification.as_ref(),
-                        &runtime_token,
+                    &runtime_token,
                     active_turn_generation,
                     federation_identity.as_ref(),
                 ) {
@@ -419,29 +445,48 @@ fn handoff_prepared_turn_dispatch(
     }
 
     state.prepare_ordinary_opening_root_before_handoff(
-        &session_id, &runtime_token, active_turn_generation,
+        &session_id,
+        &runtime_token,
+        active_turn_generation,
     );
-    state.prepare_declared_run_before_handoff(
-        &session_id, &runtime_token, active_turn_generation,
-    );
+    state.prepare_declared_run_before_handoff(&session_id, &runtime_token, active_turn_generation);
     let reject_federation = |error: ApiError| {
-        if record_rejected_turn_dispatch_with_federation(state, &session_id, &error.message,
-            mailbox_notification.as_ref(), &runtime_token, active_turn_generation,
-            federation_identity.as_ref())
-        { Err(error) } else { Ok(HandoffPreparedTurnDispatchOutcome::Superseded) }
+        if record_rejected_turn_dispatch_with_federation(
+            state,
+            &session_id,
+            &error.message,
+            mailbox_notification.as_ref(),
+            &runtime_token,
+            active_turn_generation,
+            federation_identity.as_ref(),
+        ) {
+            Err(error)
+        } else {
+            Ok(HandoffPreparedTurnDispatchOutcome::Superseded)
+        }
     };
     let federation_handoff = match state.prepare_federation_executor_handoff(
-        &session_id, &runtime_token, active_turn_generation, federation_identity.as_ref(),
+        &session_id,
+        &runtime_token,
+        active_turn_generation,
+        federation_identity.as_ref(),
     ) {
         Ok(handoff) => handoff,
         Err(error) => return reject_federation(error),
     };
-    let relay_handoff = match mailbox_notification.as_ref().map(|notification|
-        state.prepare_mailbox_relay_dispatch_authority(notification)).transpose() {
+    let relay_handoff = match mailbox_notification
+        .as_ref()
+        .map(|notification| state.prepare_mailbox_relay_dispatch_authority(notification))
+        .transpose()
+    {
         Ok(authority) => authority.flatten(),
         Err(error) => return reject_federation(error),
     };
-    let admission = match relay_handoff.as_ref().map(|authority|authority.lock()).transpose() {
+    let admission = match relay_handoff
+        .as_ref()
+        .map(|authority| authority.lock())
+        .transpose()
+    {
         Ok(admission) => admission,
         Err(error) => return reject_federation(mailbox_api_error(error)),
     };
@@ -462,30 +507,42 @@ fn handoff_prepared_turn_dispatch(
         && inner.find_session_index(&session_id).is_some_and(|index| {
             let record = &inner.sessions[index];
             human_prompt_handoff_allowed(record, active_turn_generation)
-                && record.human_prompt_turn.as_ref().is_some_and(|owner|
-                    Some(owner.prompt_id.as_str()) == human_prompt_id.as_deref())
+                && record.human_prompt_turn.as_ref().is_some_and(|owner| {
+                    Some(owner.prompt_id.as_str()) == human_prompt_id.as_deref()
+                })
                 && !session_resource_reset_in_progress(&inner, record)
         });
     if human_prompt_id.is_some() && !human_handoff {
         drop(inner);
         drop(relay_link);
         let detail = "human prompt ownership or reset fence changed before provider handoff";
-        return match state.fail_rejected_turn_delivery(&session_id, &runtime_token,
-            active_turn_generation, detail)
-        {
+        return match state.fail_rejected_turn_delivery(
+            &session_id,
+            &runtime_token,
+            active_turn_generation,
+            detail,
+        ) {
             Ok(true) => Err(ApiError::conflict(detail)),
             Ok(false) => Ok(HandoffPreparedTurnDispatchOutcome::Superseded),
-            Err(error) => Err(ApiError::internal(format!("{detail}; failed to retain unsent turn: {error:#}"))),
+            Err(error) => Err(ApiError::internal(format!(
+                "{detail}; failed to retain unsent turn: {error:#}"
+            ))),
         };
     }
     let index = inner.find_session_index(&session_id);
     if index.is_some_and(|index| {
         let record = &inner.sessions[index];
-        record.engram.observation_delete_requested || session_resource_reset_in_progress(&inner, record)
+        record.engram.observation_delete_requested
+            || session_resource_reset_in_progress(&inner, record)
     }) {
         drop(inner);
         drop(relay_link);
-        note_held_before_hand_off(state, &session_id, active_turn_generation, federation_identity.as_ref());
+        note_held_before_hand_off(
+            state,
+            &session_id,
+            active_turn_generation,
+            federation_identity.as_ref(),
+        );
         return Ok(HandoffPreparedTurnDispatchOutcome::HeldBeforeSend);
     }
     let source_root_notice_delivery;
@@ -516,12 +573,19 @@ fn handoff_prepared_turn_dispatch(
         {
             source_root_notice_delivery =
                 refresh_engram_source_root_notices_locked(&mut inner, index);
-            let opening_unconfirmed = inner.sessions[index].engram.unadmitted_active_turn.as_ref()
-                .is_some_and(|trace| trace.generation == active_turn_generation && trace.opening_prepared)
+            let opening_unconfirmed = inner.sessions[index]
+                .engram
+                .unadmitted_active_turn
+                .as_ref()
+                .is_some_and(|trace| {
+                    trace.generation == active_turn_generation && trace.opening_prepared
+                })
                 .then(|| engram_turn_root_capture_explained_locked(&inner, &session_id).err())
                 .flatten();
             let record = &mut inner.sessions[index];
-            if opening_unconfirmed.is_some() { mark_runtime_observation_source_uncertain(record); }
+            if opening_unconfirmed.is_some() {
+                mark_runtime_observation_source_uncertain(record);
+            }
             refresh_engram_source_root_prompt_locked(
                 record,
                 &mut dispatch,
@@ -543,11 +607,15 @@ fn handoff_prepared_turn_dispatch(
     }
     if let Some((operation, write_ahead, _)) = &federation_handoff {
         let index = index.expect("current remote session checked");
-        let delivery = inner.sessions[index].prompt_deliveries.get_mut(&operation.queue_identity()).filter(|delivery|
-            delivery.turn_generation == Some(active_turn_generation)
-                && delivery.federation_operation.as_ref() == Some(operation)
-                && delivery.write_ahead == *write_ahead
-                && delivery.disposition == PromptDeliveryDisposition::HandingOff);
+        let delivery = inner.sessions[index]
+            .prompt_deliveries
+            .get_mut(&operation.queue_identity())
+            .filter(|delivery| {
+                delivery.turn_generation == Some(active_turn_generation)
+                    && delivery.federation_operation.as_ref() == Some(operation)
+                    && delivery.write_ahead == *write_ahead
+                    && delivery.disposition == PromptDeliveryDisposition::HandingOff
+            });
         let Some(delivery) = delivery else {
             // A changed nonce belongs to its successor. Nothing from the old
             // carrier may reject or settle that newer attempt.
@@ -598,7 +666,11 @@ fn handoff_prepared_turn_dispatch(
     };
     drop(host_shutdown);
     if let Some(index) = index {
-        observe_provider_handoff(&mut inner.sessions[index], active_turn_generation, sent.is_ok());
+        observe_provider_handoff(
+            &mut inner.sessions[index],
+            active_turn_generation,
+            sent.is_ok(),
+        );
     }
     if let Err(error) = sent {
         drop(inner);
@@ -622,7 +694,11 @@ fn handoff_prepared_turn_dispatch(
     if !source_root_notice_delivery.is_empty() {
         let index = index.expect("current notice handoff owns session");
         let session_id = inner.sessions[index].session.id.clone();
-        acknowledge_engram_root_retirements_locked(&mut inner, &session_id, &source_root_notice_delivery);
+        acknowledge_engram_root_retirements_locked(
+            &mut inner,
+            &session_id,
+            &source_root_notice_delivery,
+        );
         acknowledge_engram_source_root_notices_locked(
             &mut inner.sessions[index],
             &source_root_notice_delivery,
@@ -631,11 +707,18 @@ fn handoff_prepared_turn_dispatch(
     if human_handoff {
         let index = index.expect("human handoff owns session");
         let record = &mut inner.sessions[index];
-        let prompt_id = record.human_prompt_turn.as_ref().expect("human handoff owner").prompt_id.clone();
+        let prompt_id = record
+            .human_prompt_turn
+            .as_ref()
+            .expect("human handoff owner")
+            .prompt_id
+            .clone();
         // The qualified owner may be an explicit choice of a legacy envelope.
         // Its original source stays on the receipt; it is not relabelled Human.
-        if let Some(position) = record.queued_prompts.iter().position(|queued|
-            queued.pending_prompt.id == prompt_id)
+        if let Some(position) = record
+            .queued_prompts
+            .iter()
+            .position(|queued| queued.pending_prompt.id == prompt_id)
         {
             record.queued_prompts.remove(position);
             sync_pending_prompts(record);
@@ -656,9 +739,9 @@ fn handoff_prepared_turn_dispatch(
 }
 
 #[derive(Debug)]
-struct RemoteLifecycleActionGuard {
-    remote_id: String,
-    in_flight: Arc<Mutex<HashSet<String>>>,
+pub(crate) struct RemoteLifecycleActionGuard {
+    pub(crate) remote_id: String,
+    pub(crate) in_flight: Arc<Mutex<HashSet<String>>>,
 }
 
 impl Drop for RemoteLifecycleActionGuard {
@@ -672,7 +755,7 @@ impl Drop for RemoteLifecycleActionGuard {
 }
 
 #[cfg(test)]
-fn dispatch_turn_and_snapshot(
+pub(crate) fn dispatch_turn_and_snapshot(
     state: &AppState,
     session_id: &str,
     request: SendMessageRequest,
@@ -680,7 +763,7 @@ fn dispatch_turn_and_snapshot(
     dispatch_turn_and_snapshot_with_origin(state, session_id, request, None)
 }
 
-fn dispatch_turn_and_snapshot_with_origin(
+pub(crate) fn dispatch_turn_and_snapshot_with_origin(
     state: &AppState,
     session_id: &str,
     request: SendMessageRequest,
@@ -688,12 +771,16 @@ fn dispatch_turn_and_snapshot_with_origin(
 ) -> Result<SendMessageRouteResponse, ApiError> {
     let is_peer_message = request.source_session_id.is_some();
     if origin.is_some() && !explicit_human_request(&request) {
-        return Err(ApiError::bad_request("a human prompt cannot carry an automated sender"));
+        return Err(ApiError::bad_request(
+            "a human prompt cannot carry an automated sender",
+        ));
     }
     let mut accepted_prompt_id = None;
     let dispatch = match origin {
         Some(ExplicitPromptOrigin::Human) => state.dispatch_human_turn_with_acceptance(
-            session_id, request, &mut accepted_prompt_id,
+            session_id,
+            request,
+            &mut accepted_prompt_id,
         )?,
         None => state.dispatch_turn(session_id, request)?,
     };
@@ -707,7 +794,9 @@ fn dispatch_turn_and_snapshot_with_origin(
         DispatchTurnResult::Dispatched(dispatch)
         | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
             deliver_turn_dispatch(state, dispatch).into_intake_result(
-                state, session_id, accepted_prompt_id.as_deref(),
+                state,
+                session_id,
+                accepted_prompt_id.as_deref(),
             )?;
         }
         DispatchTurnResult::Queued => {}
@@ -720,9 +809,9 @@ fn dispatch_turn_and_snapshot_with_origin(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SendMessageRouteResponse {
+pub(crate) struct SendMessageRouteResponse {
     #[serde(flatten)]
-    state: StateResponse,
+    pub(crate) state: StateResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
     message_disposition: Option<PeerMessageDisposition>,
 }
@@ -735,7 +824,7 @@ enum PeerMessageDisposition {
 }
 
 /// Returns the backend health response.
-async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+pub(crate) async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         ok: true,
         server_instance_id: state.server_instance_id.clone(),
@@ -747,13 +836,15 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
 /// Captures an immutable metadata cut under StateInner, then materializes and
 /// serializes after release, all inside `spawn_blocking`. The async worker
 /// hands the resulting bytes to hyper without doing that synchronous work.
-async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
+pub(crate) async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> {
     let output_budget = output_budget_bytes();
     let (body, revision) = run_blocking_api(move || {
         let snapshot = state.summary_snapshot();
         encode_json_bounded(&snapshot, output_budget)
             .map(|body| (body, snapshot.revision))
-            .map_err(|err| output_encoding_api_error_at(err, "state", Some(snapshot.revision), None))
+            .map_err(|err| {
+                output_encoding_api_error_at(err, "state", Some(snapshot.revision), None)
+            })
     })
     .await?;
     Ok((
@@ -769,9 +860,9 @@ async fn get_state(State(state): State<AppState>) -> Result<Response, ApiError> 
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GetSessionQuery {
+pub(crate) struct GetSessionQuery {
     #[serde(default)]
-    tail: Option<usize>,
+    pub(crate) tail: Option<usize>,
     #[serde(default)]
     handoff_from: Option<String>,
     #[serde(default)]
@@ -780,19 +871,19 @@ struct GetSessionQuery {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GetSessionHistoryQuery {
+pub(crate) struct GetSessionHistoryQuery {
     #[serde(default)]
-    before: Option<String>,
+    pub(crate) before: Option<String>,
     #[serde(default)]
-    after: Option<String>,
+    pub(crate) after: Option<String>,
     #[serde(default)]
-    around: Option<usize>,
+    pub(crate) around: Option<usize>,
     #[serde(default)]
-    start: Option<usize>,
+    pub(crate) start: Option<usize>,
     #[serde(default)]
-    from: Option<String>,
+    pub(crate) from: Option<String>,
     #[serde(default = "default_session_history_page_limit")]
-    limit: usize,
+    pub(crate) limit: usize,
 }
 
 fn default_session_history_page_limit() -> usize {
@@ -800,7 +891,7 @@ fn default_session_history_page_limit() -> usize {
 }
 
 /// Gets one bounded recent suffix of a session.
-async fn get_session(
+pub(crate) async fn get_session(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
     query: Result<Query<GetSessionQuery>, QueryRejection>,
@@ -818,7 +909,10 @@ async fn get_session(
     };
     let handoff_from = parse_handoff_bound(&query.handoff_from)?;
     let handoff_to = parse_handoff_bound(&query.handoff_to)?;
-    if handoff_from.zip(handoff_to).is_some_and(|(from, to)| from >= to) {
+    if handoff_from
+        .zip(handoff_to)
+        .is_some_and(|(from, to)| from >= to)
+    {
         return Err(ApiError::bad_request("handoffFrom must precede handoffTo"));
     }
     if matches!(query.tail, Some(0)) {
@@ -848,7 +942,14 @@ async fn get_session(
         }
         encode_json_bounded(&response, output_budget)
             .map(|body| (body, response.revision))
-            .map_err(|err| output_encoding_api_error_at(err, "session_tail", Some(response.revision), Some(&session_id)))
+            .map_err(|err| {
+                output_encoding_api_error_at(
+                    err,
+                    "session_tail",
+                    Some(response.revision),
+                    Some(&session_id),
+                )
+            })
     })
     .await?;
     Ok((
@@ -863,7 +964,7 @@ async fn get_session(
 }
 
 /// Gets one bounded page of transcript history before an optional message id.
-async fn get_session_history(
+pub(crate) async fn get_session_history(
     State(state): State<AppState>,
     AxumPath(session_id): AxumPath<String>,
     query: Result<Query<GetSessionHistoryQuery>, QueryRejection>,
@@ -918,7 +1019,14 @@ async fn get_session_history(
         )?;
         encode_json_bounded(&response, output_budget)
             .map(|body| (body, response.revision))
-            .map_err(|err| output_encoding_api_error_at(err, "session_history", Some(response.revision), Some(&session_id)))
+            .map_err(|err| {
+                output_encoding_api_error_at(
+                    err,
+                    "session_history",
+                    Some(response.revision),
+                    Some(&session_id),
+                )
+            })
     })
     .await?;
     Ok((
@@ -933,7 +1041,7 @@ async fn get_session_history(
 }
 
 /// Lists workspace layouts.
-async fn list_workspace_layouts(
+pub(crate) async fn list_workspace_layouts(
     State(state): State<AppState>,
 ) -> Result<Json<WorkspaceLayoutsResponse>, ApiError> {
     let response = run_blocking_api(move || state.list_workspace_layouts()).await?;
@@ -941,7 +1049,7 @@ async fn list_workspace_layouts(
 }
 
 /// Gets workspace layout.
-async fn get_workspace_layout(
+pub(crate) async fn get_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
 ) -> Result<Json<WorkspaceLayoutResponse>, ApiError> {
@@ -954,7 +1062,7 @@ async fn get_workspace_layout(
 /// Intentionally returns the saved document, while DELETE on the same route
 /// returns the remaining summaries. Save callers may need the full persisted
 /// document; delete callers only need the switcher list.
-async fn put_workspace_layout(
+pub(crate) async fn put_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
     Json(request): Json<PutWorkspaceLayoutRequest>,
@@ -964,7 +1072,7 @@ async fn put_workspace_layout(
     Ok(Json(response))
 }
 
-async fn patch_workspace_label(
+pub(crate) async fn patch_workspace_label(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
     Json(request): Json<PatchWorkspaceLabelRequest>,
@@ -979,7 +1087,7 @@ async fn patch_workspace_label(
 /// Intentionally returns the remaining workspace summaries, while PUT on the
 /// same route returns the single saved document. See put_workspace_layout for
 /// the rationale behind the asymmetric response shapes.
-async fn delete_workspace_layout(
+pub(crate) async fn delete_workspace_layout(
     State(state): State<AppState>,
     AxumPath(workspace_id): AxumPath<String>,
 ) -> Result<Json<WorkspaceLayoutsResponse>, ApiError> {
@@ -992,7 +1100,10 @@ impl AppState {
     /// bot and mobile-dashboard surfaces. Thin wrapper around
     /// [`Self::build_project_digest_summary`] that converts into
     /// the wire response shape.
-    fn project_digest(&self, project_id: &str) -> Result<ProjectDigestResponse, ApiError> {
+    pub(crate) fn project_digest(
+        &self,
+        project_id: &str,
+    ) -> Result<ProjectDigestResponse, ApiError> {
         Ok(self
             .build_project_digest_summary(project_id)?
             .into_response())
@@ -1003,7 +1114,7 @@ impl AppState {
     /// `proposed_actions` set before dispatching — rejects with 409
     /// if the project state has advanced and the requested action is
     /// no longer valid.
-    fn execute_project_action(
+    pub(crate) fn execute_project_action(
         &self,
         project_id: &str,
         action_id: &str,
@@ -1065,7 +1176,9 @@ impl AppState {
                     DispatchTurnResult::Dispatched(dispatch)
                     | DispatchTurnResult::DispatchedAfterQueue(dispatch) => {
                         deliver_turn_dispatch(self, dispatch).into_intake_result(
-                            self, &session_id, accepted_prompt_id.as_deref(),
+                            self,
+                            &session_id,
+                            accepted_prompt_id.as_deref(),
                         )?;
                     }
                     DispatchTurnResult::Queued => {}
@@ -1093,7 +1206,7 @@ impl AppState {
             .ok_or_else(|| ApiError::not_found(format!("remote `{remote_id}` not found")))
     }
 
-    fn begin_remote_lifecycle_action(
+    pub(crate) fn begin_remote_lifecycle_action(
         &self,
         remote_id: &str,
         remote_name: &str,
@@ -1113,7 +1226,7 @@ impl AppState {
         })
     }
 
-    fn register_remote_termal(
+    pub(crate) fn register_remote_termal(
         &self,
         remote_id: &str,
         request: RemoteRegisterRequest,
@@ -1124,7 +1237,10 @@ impl AppState {
         run_remote_ssh_script(&remote, "registration", &script)
     }
 
-    fn upgrade_remote_termal(&self, remote_id: &str) -> Result<RemoteActionResponse, ApiError> {
+    pub(crate) fn upgrade_remote_termal(
+        &self,
+        remote_id: &str,
+    ) -> Result<RemoteActionResponse, ApiError> {
         let remote = self.remote_config_for_action(remote_id)?;
         let _guard = self.begin_remote_lifecycle_action(&remote.id, &remote.name)?;
         upgrade_remote_ssh(&remote)
@@ -1347,7 +1463,10 @@ impl AppState {
     /// + visible sessions + orchestrator instances) under a single
     /// state-mutex acquisition so the caller can compute the digest
     /// without re-locking per field.
-    fn project_digest_inputs(&self, project_id: &str) -> Result<ProjectDigestInputs, ApiError> {
+    pub(crate) fn project_digest_inputs(
+        &self,
+        project_id: &str,
+    ) -> Result<ProjectDigestInputs, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let project = inner
             .find_project(project_id)
@@ -1382,7 +1501,7 @@ impl AppState {
     }
 }
 
-fn latest_project_prompt_target_session(
+pub(crate) fn latest_project_prompt_target_session(
     sessions: &[ProjectDigestSession],
 ) -> Option<&ProjectDigestSession> {
     // Keep this aligned with `find_latest_telegram_project_prompt_session`;
@@ -1394,7 +1513,7 @@ fn latest_project_prompt_target_session(
 }
 
 /// Runs blocking API.
-async fn run_blocking_api<T, F>(operation: F) -> Result<T, ApiError>
+pub(crate) async fn run_blocking_api<T, F>(operation: F) -> Result<T, ApiError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, ApiError> + Send + 'static,
@@ -1404,7 +1523,7 @@ where
         .map_err(|err| ApiError::internal(format!("blocking task failed: {err}")))?
 }
 
-fn api_json_rejection(label: &str, rejection: JsonRejection) -> ApiError {
+pub(crate) fn api_json_rejection(label: &str, rejection: JsonRejection) -> ApiError {
     let status = match &rejection {
         JsonRejection::JsonDataError(_) | JsonRejection::JsonSyntaxError(_) => {
             StatusCode::UNPROCESSABLE_ENTITY
@@ -1417,7 +1536,7 @@ fn api_json_rejection(label: &str, rejection: JsonRejection) -> ApiError {
     )
 }
 
-fn api_query_rejection(label: &str, rejection: QueryRejection) -> ApiError {
+pub(crate) fn api_query_rejection(label: &str, rejection: QueryRejection) -> ApiError {
     ApiError::from_status(
         rejection.status(),
         format!("invalid {label}: {}", rejection.body_text()),
@@ -1425,7 +1544,7 @@ fn api_query_rejection(label: &str, rejection: QueryRejection) -> ApiError {
 }
 
 /// Creates session.
-async fn create_session(
+pub(crate) async fn create_session(
     State(state): State<AppState>,
     Json(request): Json<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
@@ -1434,7 +1553,7 @@ async fn create_session(
 }
 
 /// Creates a Phase 1 read-only child delegation session.
-async fn create_session_delegation(
+pub(crate) async fn create_session_delegation(
     AxumPath(parent_session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<CreateDelegationRequest>, JsonRejection>,
@@ -1450,7 +1569,7 @@ async fn create_session_delegation(
 /// 201 for a delegation whose turn was started; 202 when it was created but
 /// its turn is held, so a client that reads only the status still knows the
 /// work was accepted and has not run.
-fn delegation_turn_response_status(response: &DelegationResponse) -> StatusCode {
+pub(crate) fn delegation_turn_response_status(response: &DelegationResponse) -> StatusCode {
     if response
         .first_turn
         .as_ref()
@@ -1463,7 +1582,7 @@ fn delegation_turn_response_status(response: &DelegationResponse) -> StatusCode 
 }
 
 /// Lists compact delegation metadata owned by one parent session.
-async fn list_session_delegations(
+pub(crate) async fn list_session_delegations(
     AxumPath(parent_session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<DelegationListResponse>, ApiError> {
@@ -1472,7 +1591,7 @@ async fn list_session_delegations(
 }
 
 /// Gets delegation status and metadata.
-async fn get_delegation_status(
+pub(crate) async fn get_delegation_status(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<DelegationStatusResponse>, ApiError> {
@@ -1482,21 +1601,22 @@ async fn get_delegation_status(
 }
 
 /// Gets a completed delegation result packet.
-async fn get_delegation_result(
+pub(crate) async fn get_delegation_result(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     query: Result<Query<DelegationResultSelection>, QueryRejection>,
 ) -> Result<Json<DelegationResultResponse>, ApiError> {
-    let Query(selection) = query
-        .map_err(|rejection| api_query_rejection("delegation result query", rejection))?;
+    let Query(selection) =
+        query.map_err(|rejection| api_query_rejection("delegation result query", rejection))?;
     let response = run_blocking_api(move || {
         state.get_delegation_result_selected(&parent_session_id, &delegation_id, &selection)
-    }).await?;
+    })
+    .await?;
     Ok(Json(response))
 }
 
 /// Gets one bounded UTF-8-safe page of the authoritative final child output.
-async fn get_delegation_result_output(
+pub(crate) async fn get_delegation_result_output(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     query: Result<Query<DelegationResultOutputQuery>, QueryRejection>,
@@ -1520,7 +1640,7 @@ async fn get_delegation_result_output(
 }
 
 /// Cancels a running delegation child session.
-async fn cancel_delegation(
+pub(crate) async fn cancel_delegation(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<DelegationStatusResponse>, ApiError> {
@@ -1531,7 +1651,7 @@ async fn cancel_delegation(
 }
 
 /// Delivers a follow-up prompt to a completed delegation, resuming its child session.
-async fn followup_delegation(
+pub(crate) async fn followup_delegation(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<FollowupDelegationRequest>,
@@ -1561,7 +1681,7 @@ fn delegation_status_turn_response_status(response: &DelegationStatusResponse) -
 }
 
 /// Resumes a delegation's held turn when its hold offers that.
-async fn resume_delegation(
+pub(crate) async fn resume_delegation(
     AxumPath((parent_session_id, delegation_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<DelegationStatusResponse>), ApiError> {
@@ -1575,7 +1695,7 @@ async fn resume_delegation(
 }
 
 /// Schedules a parent resume after one or more delegations become terminal.
-async fn create_delegation_wait(
+pub(crate) async fn create_delegation_wait(
     AxumPath(parent_session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<CreateDelegationWaitRequest>, JsonRejection>,
@@ -1588,7 +1708,7 @@ async fn create_delegation_wait(
 }
 
 /// Lists conversation markers for one session.
-async fn list_session_markers(
+pub(crate) async fn list_session_markers(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ConversationMarkersResponse>, ApiError> {
@@ -1597,7 +1717,7 @@ async fn list_session_markers(
 }
 
 /// Creates a conversation marker.
-async fn create_session_marker(
+pub(crate) async fn create_session_marker(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<CreateConversationMarkerRequest>, JsonRejection>,
@@ -1610,7 +1730,7 @@ async fn create_session_marker(
 }
 
 /// Updates a conversation marker.
-async fn update_session_marker(
+pub(crate) async fn update_session_marker(
     AxumPath((session_id, marker_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     request: Result<Json<UpdateConversationMarkerRequest>, JsonRejection>,
@@ -1625,7 +1745,7 @@ async fn update_session_marker(
 }
 
 /// Deletes a conversation marker.
-async fn delete_session_marker(
+pub(crate) async fn delete_session_marker(
     AxumPath((session_id, marker_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<DeleteConversationMarkerResponse>, ApiError> {
@@ -1635,7 +1755,7 @@ async fn delete_session_marker(
 }
 
 /// Creates project.
-async fn create_project(
+pub(crate) async fn create_project(
     State(state): State<AppState>,
     Json(request): Json<CreateProjectRequest>,
 ) -> Result<(StatusCode, Json<CreateProjectResponse>), ApiError> {
@@ -1644,7 +1764,7 @@ async fn create_project(
 }
 
 /// Deletes project.
-async fn delete_project(
+pub(crate) async fn delete_project(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1654,7 +1774,7 @@ async fn delete_project(
 
 /// Patches a project's Engram host-adapter settings after validating the
 /// external installation without holding TermAl's global state mutex.
-async fn update_project_engram_settings(
+pub(crate) async fn update_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
     axum::Extension(limiter): axum::Extension<EngramReadinessLimiter>,
@@ -1678,7 +1798,7 @@ async fn update_project_engram_settings(
 
 /// Verifies proposed Engram settings without changing the project. The
 /// response is redacted and the subsequent PATCH repeats all validation.
-async fn verify_project_engram_settings(
+pub(crate) async fn verify_project_engram_settings(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
     axum::Extension(limiter): axum::Extension<EngramReadinessLimiter>,
@@ -1697,7 +1817,7 @@ async fn verify_project_engram_settings(
 
 /// Updates the machine-scoped Engram executable and home. Repository
 /// declarations and per-project tier selection are separate contracts.
-async fn update_engram_host_settings(
+pub(crate) async fn update_engram_host_settings(
     State(state): State<AppState>,
     request: Result<Json<UpdateEngramHostSettingsRequest>, JsonRejection>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1708,7 +1828,7 @@ async fn update_engram_host_settings(
 }
 
 /// Gets project digest.
-async fn get_project_digest(
+pub(crate) async fn get_project_digest(
     AxumPath(project_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ProjectDigestResponse>, ApiError> {
@@ -1722,7 +1842,7 @@ async fn get_project_digest(
 }
 
 /// Dispatches project action.
-async fn dispatch_project_action(
+pub(crate) async fn dispatch_project_action(
     AxumPath((project_id, action_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<ProjectDigestResponse>, ApiError> {
@@ -1737,7 +1857,7 @@ async fn dispatch_project_action(
 }
 
 /// Updates app settings.
-async fn update_app_settings(
+pub(crate) async fn update_app_settings(
     State(state): State<AppState>,
     Json(request): Json<UpdateAppSettingsRequest>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1745,7 +1865,7 @@ async fn update_app_settings(
     Ok(Json(response))
 }
 
-async fn register_remote_termal(
+pub(crate) async fn register_remote_termal(
     AxumPath(remote_id): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<RemoteRegisterRequest>, JsonRejection>,
@@ -1757,7 +1877,7 @@ async fn register_remote_termal(
     Ok(Json(response))
 }
 
-async fn upgrade_remote_termal(
+pub(crate) async fn upgrade_remote_termal(
     AxumPath(remote_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<RemoteActionResponse>, ApiError> {
@@ -1766,7 +1886,7 @@ async fn upgrade_remote_termal(
 }
 
 /// Picks project root.
-async fn pick_project_root(
+pub(crate) async fn pick_project_root(
     State(state): State<AppState>,
 ) -> Result<Json<PickProjectRootResponse>, ApiError> {
     let default_workdir = state.default_workdir.clone();
@@ -1777,7 +1897,7 @@ async fn pick_project_root(
 }
 
 /// Updates session settings.
-async fn update_session_settings(
+pub(crate) async fn update_session_settings(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     Json(request): Json<UpdateSessionSettingsRequest>,
@@ -1788,7 +1908,7 @@ async fn update_session_settings(
 }
 
 /// Refreshes session model options.
-async fn refresh_session_model_options(
+pub(crate) async fn refresh_session_model_options(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1798,7 +1918,7 @@ async fn refresh_session_model_options(
 }
 
 /// Lists the MCP servers visible to the owning Codex app-server.
-async fn list_codex_mcp_servers(
+pub(crate) async fn list_codex_mcp_servers(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<CodexMcpServersResponse>, ApiError> {
@@ -1807,7 +1927,7 @@ async fn list_codex_mcp_servers(
 }
 
 /// Forks Codex thread.
-async fn fork_codex_thread(
+pub(crate) async fn fork_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<CreateSessionResponse>), ApiError> {
@@ -1816,7 +1936,7 @@ async fn fork_codex_thread(
 }
 
 /// Archives Codex thread.
-async fn archive_codex_thread(
+pub(crate) async fn archive_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1825,7 +1945,7 @@ async fn archive_codex_thread(
 }
 
 /// Unarchives Codex thread.
-async fn unarchive_codex_thread(
+pub(crate) async fn unarchive_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1834,7 +1954,7 @@ async fn unarchive_codex_thread(
 }
 
 /// Compacts Codex thread.
-async fn compact_codex_thread(
+pub(crate) async fn compact_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1843,7 +1963,7 @@ async fn compact_codex_thread(
 }
 
 /// Rolls back Codex thread.
-async fn rollback_codex_thread(
+pub(crate) async fn rollback_codex_thread(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     Json(request): Json<CodexThreadRollbackRequest>,
@@ -1854,7 +1974,7 @@ async fn rollback_codex_thread(
     Ok(Json(response))
 }
 
-async fn send_message(
+pub(crate) async fn send_message(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     Json(route_request): Json<SendMessageRouteRequest>,
@@ -1863,9 +1983,14 @@ async fn send_message(
         let state = state.clone();
         let session_id = session_id.clone();
         move || {
-            let SendMessageRouteRequest { prompt: request, origin } = route_request;
+            let SendMessageRouteRequest {
+                prompt: request,
+                origin,
+            } = route_request;
             if origin.is_some() && !explicit_human_request(&request) {
-                return Err(ApiError::bad_request("a human prompt cannot carry an automated sender"));
+                return Err(ApiError::bad_request(
+                    "a human prompt cannot carry an automated sender",
+                ));
             }
             // Explicit UI input may reopen a finished child. Runtime queues and
             // peer deliveries still pass through the terminal dispatch fence.
@@ -1905,12 +2030,19 @@ async fn send_message(
     })
     .await?;
 
-    Ok((StatusCode::ACCEPTED, json_output_response(&snapshot, output_budget_bytes(),
-        ResponseMutationOutcome::Accepted)).into_response())
+    Ok((
+        StatusCode::ACCEPTED,
+        json_output_response(
+            &snapshot,
+            output_budget_bytes(),
+            ResponseMutationOutcome::Accepted,
+        ),
+    )
+        .into_response())
 }
 
 /// Cancels queued prompt.
-async fn cancel_queued_prompt(
+pub(crate) async fn cancel_queued_prompt(
     AxumPath((session_id, prompt_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1920,29 +2052,40 @@ async fn cancel_queued_prompt(
 }
 
 /// Resumes a queue paused by Stop.
-async fn resume_session_queue(
+pub(crate) async fn resume_session_queue(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     body: axum::body::Bytes,
 ) -> Result<Json<StateResponse>, ApiError> {
     // Existing clients send an empty JSON-typed POST. Optional<Json<_>>
     // still attempts to parse that empty body and rejects it before Resume.
-    let request = if body.is_empty() { None } else {
-        Some(serde_json::from_slice::<ResumeQueueRequest>(&body)
-            .map_err(|_| ApiError::bad_request("invalid queue resume request"))?)
+    let request = if body.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::from_slice::<ResumeQueueRequest>(&body)
+                .map_err(|_| ApiError::bad_request("invalid queue resume request"))?,
+        )
     };
     let response = run_blocking_api(move || match request {
-        Some(ResumeQueueRequest { origin: Some(ExplicitPromptOrigin::Human), human_choice: Some(selection) }) =>
-            state.resume_selected_human_prompt(&session_id, selection),
-        Some(ResumeQueueRequest { human_choice: Some(_), .. }) =>
-            Err(ApiError::bad_request("an exact human queue choice requires explicit human origin")),
+        Some(ResumeQueueRequest {
+            origin: Some(ExplicitPromptOrigin::Human),
+            human_choice: Some(selection),
+        }) => state.resume_selected_human_prompt(&session_id, selection),
+        Some(ResumeQueueRequest {
+            human_choice: Some(_),
+            ..
+        }) => Err(ApiError::bad_request(
+            "an exact human queue choice requires explicit human origin",
+        )),
         _ => state.resume_session_queue(&session_id),
-    }).await?;
+    })
+    .await?;
     Ok(Json(response))
 }
 
 /// Stops session.
-async fn stop_session(
+pub(crate) async fn stop_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1951,7 +2094,7 @@ async fn stop_session(
 }
 
 /// Kills session.
-async fn kill_session(
+pub(crate) async fn kill_session(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<StateResponse>, ApiError> {
@@ -1960,7 +2103,7 @@ async fn kill_session(
 }
 
 /// Submits approval.
-async fn submit_approval(
+pub(crate) async fn submit_approval(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<ApprovalRequest>,
@@ -1972,7 +2115,7 @@ async fn submit_approval(
 }
 
 /// Submits user input.
-async fn submit_user_input(
+pub(crate) async fn submit_user_input(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<UserInputSubmissionRequest>,
@@ -1985,7 +2128,7 @@ async fn submit_user_input(
 }
 
 /// Submits MCP elicitation.
-async fn submit_mcp_elicitation(
+pub(crate) async fn submit_mcp_elicitation(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<McpElicitationSubmissionRequest>,
@@ -2003,7 +2146,7 @@ async fn submit_mcp_elicitation(
 }
 
 /// Submits Codex app request.
-async fn submit_codex_app_request(
+pub(crate) async fn submit_codex_app_request(
     AxumPath((session_id, message_id)): AxumPath<(String, String)>,
     State(state): State<AppState>,
     Json(request): Json<CodexAppRequestSubmissionRequest>,

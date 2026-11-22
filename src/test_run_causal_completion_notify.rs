@@ -1,17 +1,22 @@
 // Runner-side completion-ready notifications. Disposable pending work is
 // queued only when an original native completion first latches, never by
 // traversing retained history. SQLite read-back still owns publication proof.
+
+use super::*;
 const CAUSAL_READY_NOTIFICATION_ATTEMPTS: u8 = 4;
 
-struct CausalReadyNotification {
-    hint: CausalTestCompletionReadyHint,
+pub(crate) struct CausalReadyNotification {
+    pub(crate) hint: CausalTestCompletionReadyHint,
     attempts_left: u8,
 }
 
 impl AppState {
     // Called under the state lock at the original completion transition.
     // Queue loss or expiry is harmless: requester pending custody is durable.
-    fn queue_causal_test_completion_notification(&self, registration: &TestRunRegistration) {
+    pub(crate) fn queue_causal_test_completion_notification(
+        &self,
+        registration: &TestRunRegistration,
+    ) {
         let Some(causal) = test_run_causal_request(registration) else {
             return;
         };
@@ -41,7 +46,7 @@ impl AppState {
         }
     }
 
-    async fn notify_causal_test_completions(&self) {
+    pub(crate) async fn notify_causal_test_completions(&self) {
         let pending = {
             let mut queue = self
                 .federation_executor_wake_signal

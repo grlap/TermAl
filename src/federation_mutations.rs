@@ -1,26 +1,28 @@
 // Owns content-fenced persistence, configuration and explicit continuity reset. Does not own credentials, transport or runtime execution.
 // Split from federation_registry.rs while implementing the new domain foundation.
 
+use super::*;
+
 /// Who is configuring federation: the local operator route, whose satellite
 /// changes must name the version they were read at, or a domain caller.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FederationSettingsFence {
+pub(crate) enum FederationSettingsFence {
     Operator,
     Domain,
 }
 
 /// Facts about this host that a federation mutation may guard on, read under
 /// the same state lock as the candidate it installs.
-struct FederationMutationContext<'a> {
+pub(crate) struct FederationMutationContext<'a> {
     // Borrow the same locked owner; never snapshot a second native roster.
-    native_state: &'a StateInner,
+    pub(crate) native_state: &'a StateInner,
     /// The central of each local session's domain mailbox binding.
     bound_centrals: Vec<FederationHostIdentity>,
 }
 
 impl<'a> FederationMutationContext<'a> {
-    fn locked(inner: &'a StateInner) -> Self {
+    pub(crate) fn locked(inner: &'a StateInner) -> Self {
         Self {
             native_state: inner,
             bound_centrals: inner
@@ -33,7 +35,10 @@ impl<'a> FederationMutationContext<'a> {
     }
 
     fn bound_to(&self, central: &FederationHostIdentity) -> usize {
-        self.bound_centrals.iter().filter(|bound| *bound == central).count()
+        self.bound_centrals
+            .iter()
+            .filter(|bound| *bound == central)
+            .count()
     }
 }
 
@@ -85,7 +90,9 @@ fn apply_federation_settings(
             current
                 .central
                 .as_ref()
-                .filter(|bound| current.role == FederationRole::Satellite && bound.host_id == next.host_id)
+                .filter(|bound| {
+                    current.role == FederationRole::Satellite && bound.host_id == next.host_id
+                })
                 .map(|bound| bound.host_generation),
             domain
                 .peers
@@ -125,10 +132,10 @@ fn apply_federation_settings(
                 && settings.central.as_ref() != Some(&peer.identity)
         })
     {
-        return Err(
-            ApiError::conflict("revoke incompatible peers before changing the central binding")
-                .with_kind(ApiErrorKind::FederationCentralMismatch),
-        );
+        return Err(ApiError::conflict(
+            "revoke incompatible peers before changing the central binding",
+        )
+        .with_kind(ApiErrorKind::FederationCentralMismatch));
     }
     if replaces
         && domain
@@ -157,7 +164,10 @@ fn apply_federation_settings(
 }
 
 /// Local sessions holding a domain mailbox binding to `central`.
-fn federation_bound_session_count(inner: &StateInner, central: &FederationHostIdentity) -> usize {
+pub(crate) fn federation_bound_session_count(
+    inner: &StateInner,
+    central: &FederationHostIdentity,
+) -> usize {
     inner
         .sessions
         .iter()
@@ -170,7 +180,7 @@ fn federation_bound_session_count(inner: &StateInner, central: &FederationHostId
 impl AppState {
     /// Mutation visibility is conservative until this exact content is durable.
     /// Concurrent changes may supersede a receipt, never silently retarget it.
-    fn mutate_federation<T>(
+    pub(crate) fn mutate_federation<T>(
         &self,
         update: impl FnOnce(&mut FederationState, &mut FederationSettings) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
@@ -193,7 +203,7 @@ impl AppState {
     // The receipt accounts for this exact in-memory installation even when
     // dispatch or its durability fence fails. It grants no current authority.
     // The callback may only capture the value, never perform IO or take locks.
-    fn mutate_federation_with_install_receipt<T>(
+    pub(crate) fn mutate_federation_with_install_receipt<T>(
         &self,
         reset_continuity: bool,
         update: impl FnOnce(&mut FederationState, &mut FederationSettings) -> Result<T, ApiError>,
@@ -211,7 +221,7 @@ impl AppState {
     // The one federation mutation path. `update` also sees facts about this
     // host read under the same state lock as the candidate, so a guard on
     // them cannot race a concurrent change.
-    fn mutate_federation_core<T>(
+    pub(crate) fn mutate_federation_core<T>(
         &self,
         reset_continuity: bool,
         update: impl FnOnce(
@@ -227,7 +237,7 @@ impl AppState {
 
     // The lease is held only while installing the candidate, never while
     // waiting for durability. Preserve the established link -> state order.
-    fn mutate_federation_core_on_link<T>(
+    pub(crate) fn mutate_federation_core_on_link<T>(
         &self,
         lease: Option<&FederationLinkLease>,
         reset_continuity: bool,
@@ -239,22 +249,37 @@ impl AppState {
         on_install: impl FnOnce(&T),
         clock: EngramBudgetClock,
     ) -> Result<T, ApiError> {
-        self.mutate_federation_core_on_link_with_budget(lease, reset_continuity, update,
-            on_install, clock, Duration::from_secs(5))
+        self.mutate_federation_core_on_link_with_budget(
+            lease,
+            reset_continuity,
+            update,
+            on_install,
+            clock,
+            Duration::from_secs(5),
+        )
     }
 
-    fn mutate_federation_core_on_link_with_budget<T>(
+    pub(crate) fn mutate_federation_core_on_link_with_budget<T>(
         &self,
         lease: Option<&FederationLinkLease>,
         reset_continuity: bool,
-        update: impl FnOnce(&mut FederationState, &mut FederationSettings,
-            &FederationMutationContext) -> Result<T, ApiError>,
+        update: impl FnOnce(
+            &mut FederationState,
+            &mut FederationSettings,
+            &FederationMutationContext,
+        ) -> Result<T, ApiError>,
         on_install: impl FnOnce(&T),
         clock: EngramBudgetClock,
         budget: Duration,
     ) -> Result<T, ApiError> {
         self.mutate_federation_core_with_replay(
-            lease, reset_continuity, update, on_install, clock, budget, false,
+            lease,
+            reset_continuity,
+            update,
+            on_install,
+            clock,
+            budget,
+            false,
         )
     }
 
@@ -262,15 +287,23 @@ impl AppState {
     // same owner. Only these callers opt out of an unchanged installation;
     // ordinary federation mutations retain their version/persistence behavior.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn mutate_federation_permission<T>(
+    pub(crate) fn mutate_federation_permission<T>(
         &self,
         lease: Option<&FederationLinkLease>,
-        update: impl FnOnce(&mut FederationState, &mut FederationSettings,
-            &FederationMutationContext) -> Result<T, ApiError>,
+        update: impl FnOnce(
+            &mut FederationState,
+            &mut FederationSettings,
+            &FederationMutationContext,
+        ) -> Result<T, ApiError>,
     ) -> Result<T, ApiError> {
         self.mutate_federation_core_with_replay(
-            lease, false, update, |_| {}, EngramBudgetClock::Real,
-            Duration::from_secs(5), true,
+            lease,
+            false,
+            update,
+            |_| {},
+            EngramBudgetClock::Real,
+            Duration::from_secs(5),
+            true,
         )
     }
 
@@ -278,8 +311,11 @@ impl AppState {
         &self,
         lease: Option<&FederationLinkLease>,
         reset_continuity: bool,
-        update: impl FnOnce(&mut FederationState, &mut FederationSettings,
-            &FederationMutationContext) -> Result<T, ApiError>,
+        update: impl FnOnce(
+            &mut FederationState,
+            &mut FederationSettings,
+            &FederationMutationContext,
+        ) -> Result<T, ApiError>,
         on_install: impl FnOnce(&T),
         clock: EngramBudgetClock,
         budget: Duration,
@@ -313,7 +349,8 @@ impl AppState {
                     .as_ref()
                     .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))?,
             )?;
-            if replay_unchanged && candidate == inner.federation
+            if replay_unchanged
+                && candidate == inner.federation
                 && settings == inner.preferences.federation
             {
                 return Ok((value, None));
@@ -341,7 +378,9 @@ impl AppState {
             Some(lease) => lease.with_incarnation(install)?,
             None => install()?,
         };
-        let Some((image, dispatch)) = persisted else { return Ok(value) };
+        let Some((image, dispatch)) = persisted else {
+            return Ok(value);
+        };
         self.finish_federation_durability_with_budget(&image, dispatch, clock, budget)?;
         if reset_continuity {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -353,17 +392,25 @@ impl AppState {
         Ok(value)
     }
 
-    fn finish_federation_durability_with_clock(
+    pub(crate) fn finish_federation_durability_with_clock(
         &self,
         image: &Value,
         dispatch: PersistDispatch,
         clock: EngramBudgetClock,
     ) -> Result<(), ApiError> {
-        self.finish_federation_durability_with_budget(image, dispatch, clock, Duration::from_secs(5))
+        self.finish_federation_durability_with_budget(
+            image,
+            dispatch,
+            clock,
+            Duration::from_secs(5),
+        )
     }
 
     fn finish_federation_durability_with_budget(
-        &self, image: &Value, dispatch: PersistDispatch, clock: EngramBudgetClock,
+        &self,
+        image: &Value,
+        dispatch: PersistDispatch,
+        clock: EngramBudgetClock,
         budget: Duration,
     ) -> Result<(), ApiError> {
         // Metadata may commit while a hot session is deferred by the bounded
@@ -379,13 +426,12 @@ impl AppState {
                 .iter()
                 .filter(|row| !row.hidden)
                 .filter_map(|row| {
-                    row.mailbox_binding().map(|binding| {
-                        FederationNativeBindingFence {
+                    row.mailbox_binding()
+                        .map(|binding| FederationNativeBindingFence {
                             binding: binding.clone(),
                             native_creation_id: row.federation_native_creation_id.clone(),
                             automatic: row.federation_mailbox_binding.is_none(),
-                        }
-                    })
+                        })
                 })
                 .collect::<Vec<_>>();
             if sessions.is_empty() {
@@ -400,27 +446,38 @@ impl AppState {
         if matches!(dispatch, PersistDispatch::BackgroundQueued) {
             let deadline = clock.now() + budget;
             let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock);
-            reference_publication_observe!("durability.send_fence", self.persist_tx
-                .send(PersistRequest::Fence(Box::new(fence))))
-                .map_err(|_| {
-                    ApiError::internal("federation persistence unavailable; admission remains held")
-                })?;
+            reference_publication_observe!(
+                "durability.send_fence",
+                self.persist_tx.send(PersistRequest::Fence(Box::new(fence)))
+            )
+            .map_err(|_| {
+                ApiError::internal("federation persistence unavailable; admission remains held")
+            })?;
             waiter
                 .wait_until(deadline)
                 .ok_or_else(|| {
                     #[cfg(test)]
-                    reference_publication_observe_error("durability.fence_deadline", &"no fence receipt before existing deadline");
+                    reference_publication_observe_error(
+                        "durability.fence_deadline",
+                        &"no fence receipt before existing deadline",
+                    );
                     #[cfg(test)]
-                    eprintln!("FEDERATION_DURABILITY_PROGRESS budget_ms={} {}",
-                        budget.as_millis(), waiter.progress().describe());
+                    eprintln!(
+                        "FEDERATION_DURABILITY_PROGRESS budget_ms={} {}",
+                        budget.as_millis(),
+                        waiter.progress().describe()
+                    );
                     ApiError::internal("federation durability unresolved; admission remains held")
                 })?
                 .map_err(|error| {
                     #[cfg(test)]
                     reference_publication_observe_error("durability.fence_error", &error);
                     #[cfg(test)]
-                    eprintln!("FEDERATION_DURABILITY_PROGRESS budget_ms={} {}",
-                        budget.as_millis(), waiter.progress().describe());
+                    eprintln!(
+                        "FEDERATION_DURABILITY_PROGRESS budget_ms={} {}",
+                        budget.as_millis(),
+                        waiter.progress().describe()
+                    );
                     #[cfg(not(test))]
                     let _ = error;
                     ApiError::internal("federation durability failed; admission remains held")
@@ -428,11 +485,16 @@ impl AppState {
         } else if matches!(&target, PersistFenceTarget::FederationBindings(_)) {
             // The legacy synchronous fallback has already committed. Keep its
             // row proof exact as well; never mark a quarantined row durable.
-            let connection = reference_publication_observe!("durability.open_readback", rusqlite::Connection::open(self.persistence_path.as_path()))
-                .map_err(|_| ApiError::internal("binding durability readback unavailable"))?;
-            if !reference_publication_observe!("durability.readback", target
-                .is_already_durable(&connection))
-                .map_err(|_| ApiError::internal("binding durability readback failed"))?
+            let connection = reference_publication_observe!(
+                "durability.open_readback",
+                rusqlite::Connection::open(self.persistence_path.as_path())
+            )
+            .map_err(|_| ApiError::internal("binding durability readback unavailable"))?;
+            if !reference_publication_observe!(
+                "durability.readback",
+                target.is_already_durable(&connection)
+            )
+            .map_err(|_| ApiError::internal("binding durability readback failed"))?
             {
                 return Err(ApiError::internal(
                     "binding durability unresolved; admission remains held",
@@ -450,30 +512,35 @@ impl AppState {
 
     /// An unresolved prior write can be re-confirmed; no new placement or
     /// version is minted while recovering its exact durability disposition.
-    fn reconcile_federation_durability(&self) -> Result<(), ApiError> {
+    pub(crate) fn reconcile_federation_durability(&self) -> Result<(), ApiError> {
         self.reconcile_federation_durability_with_clock(EngramBudgetClock::Real)
     }
 
     // Tests supply the existing scripted clock only for controlled success.
     // Production recovery always uses the real clock and unchanged deadline.
-    fn reconcile_federation_durability_with_clock(
+    pub(crate) fn reconcile_federation_durability_with_clock(
         &self,
         clock: EngramBudgetClock,
     ) -> Result<(), ApiError> {
         let (image, dispatch) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let image = federation_persist_image(&PersistedState::metadata_from_inner(&inner));
-            let dispatch = reference_publication_observe!("durability.reconcile_dispatch", self
-                .persist_internal_locked_with_dispatch(&inner))
-                .map_err(|_| {
-                    ApiError::internal("federation persistence failed; admission remains held")
-                })?;
+            let dispatch = reference_publication_observe!(
+                "durability.reconcile_dispatch",
+                self.persist_internal_locked_with_dispatch(&inner)
+            )
+            .map_err(|_| {
+                ApiError::internal("federation persistence failed; admission remains held")
+            })?;
             (image, dispatch)
         };
         self.finish_federation_durability_with_clock(&image, dispatch, clock)
     }
 
-    fn configure_federation(&self, settings: FederationSettings) -> Result<(), ApiError> {
+    pub(crate) fn configure_federation(
+        &self,
+        settings: FederationSettings,
+    ) -> Result<(), ApiError> {
         self.configure_federation_fenced(settings, None, FederationSettingsFence::Domain)
     }
 
@@ -481,7 +548,7 @@ impl AppState {
     /// callers share it. For the operator, a change from or to the satellite
     /// role is fenced on the domain version the operator read; any change
     /// that names a version is fenced on it.
-    fn configure_federation_fenced(
+    pub(crate) fn configure_federation_fenced(
         &self,
         settings: FederationSettings,
         expected_version: Option<u64>,
@@ -490,7 +557,14 @@ impl AppState {
         self.mutate_federation_core(
             false,
             |domain, current, context| {
-                apply_federation_settings(domain, current, context, settings, expected_version, fence)
+                apply_federation_settings(
+                    domain,
+                    current,
+                    context,
+                    settings,
+                    expected_version,
+                    fence,
+                )
             },
             |_| {},
             EngramBudgetClock::Real,
@@ -499,7 +573,7 @@ impl AppState {
 
     /// Explicit local continuity reset, never an automatic clone takeover.
     /// Existing placements remain retained; every peer must re-enroll.
-    fn reset_federation_continuity(
+    pub(crate) fn reset_federation_continuity(
         &self,
         expected: &FederationHostIdentity,
     ) -> Result<(), ApiError> {

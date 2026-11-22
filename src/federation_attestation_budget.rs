@@ -1,12 +1,17 @@
 // Owns separate SSH startup, peer-proof and local-install classifications.
 // Does not change durability deadlines or heartbeat liveness. Split from federation_monitor.rs.
 
-const FEDERATION_LINK_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+use super::*;
+
+pub(crate) const FEDERATION_LINK_STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 // The satellite durably installs before tag_s: allow its five-second fence
 // plus two network round trips. The central's own install is a later stage.
-const FEDERATION_ATTEST_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const FEDERATION_ATTEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn federation_timeout_setting(value: Option<&str>, default: Duration) -> (Duration, bool) {
+pub(crate) fn federation_timeout_setting(
+    value: Option<&str>,
+    default: Duration,
+) -> (Duration, bool) {
     match value {
         None => (default, false),
         Some(value) => match value.parse::<u64>() {
@@ -16,7 +21,7 @@ fn federation_timeout_setting(value: Option<&str>, default: Duration) -> (Durati
     }
 }
 
-fn federation_timeout_from_env(name: &str, default: Duration) -> Duration {
+pub(crate) fn federation_timeout_from_env(name: &str, default: Duration) -> Duration {
     let value = std::env::var_os(name);
     let (duration, invalid) = match value.as_ref() {
         None => (default, false),
@@ -28,7 +33,7 @@ fn federation_timeout_from_env(name: &str, default: Duration) -> Duration {
     duration
 }
 
-fn federation_attestation_error(
+pub(crate) fn federation_attestation_error(
     channel: &FederationChannel,
     owner: Option<u64>,
     stage: &'static str,
@@ -45,7 +50,7 @@ fn federation_attestation_error(
     error
 }
 
-async fn federation_attest_central_started(
+pub(crate) async fn federation_attest_central_started(
     channel: &FederationChannel,
     io: &mut FederationControlIo,
     started: tokio::time::Instant,
@@ -69,11 +74,11 @@ async fn federation_attest_central_started(
         // startup. A partial prefix/body cannot start or extend proof time.
         federation_read_frame(io).await
     };
-    let hello = match channel.control.clock.timeout_at(
-        started + channel.control.link_startup_timeout,
-        startup,
-    )
-    .await
+    let hello = match channel
+        .control
+        .clock
+        .timeout_at(started + channel.control.link_startup_timeout, startup)
+        .await
     {
         Ok(Ok(hello)) => hello,
         Ok(Err(error)) if error.status == StatusCode::CONFLICT => {
@@ -107,11 +112,14 @@ async fn federation_attest_central_started(
             ));
         }
     };
-    let context = match channel.control.clock.timeout(
-        channel.control.attest_timeout,
-        federation_prove_central(channel, io, owner, hello),
-    )
-    .await
+    let context = match channel
+        .control
+        .clock
+        .timeout(
+            channel.control.attest_timeout,
+            federation_prove_central(channel, io, owner, hello),
+        )
+        .await
     {
         Ok(Ok(context)) => context,
         Ok(Err(error)) => {

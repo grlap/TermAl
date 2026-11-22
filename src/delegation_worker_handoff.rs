@@ -2,7 +2,9 @@
 // Does not collect Git output, grant commit authority or mint verification.
 // Split from delegation prompt and terminal-result construction in delegations.rs.
 
-fn worker_handoff_prompt(delegation: &DelegationRecord) -> String {
+use super::*;
+
+pub(crate) fn worker_handoff_prompt(delegation: &DelegationRecord) -> String {
     let base = delegation.base_revision.as_deref().unwrap_or("unavailable");
     let worktree = worker_result_worktree_path(delegation).unwrap_or("unavailable");
     format!(
@@ -25,7 +27,7 @@ fn worker_result_worktree_path(delegation: &DelegationRecord) -> Option<&str> {
     }
 }
 
-fn worker_current_attempt_start(session: &Session) -> Option<usize> {
+pub(crate) fn worker_current_attempt_start(session: &Session) -> Option<usize> {
     session
         .messages
         .iter()
@@ -35,7 +37,7 @@ fn worker_current_attempt_start(session: &Session) -> Option<usize> {
 
 /// Called once when terminal result construction snapshots workspace observations.
 /// All input is resident state: no Git, filesystem lookup or verification lookup.
-fn record_worker_handoff(
+pub(crate) fn record_worker_handoff(
     inner: &StateInner,
     delegation: &DelegationRecord,
     result: &mut DelegationResult,

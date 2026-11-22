@@ -1,21 +1,23 @@
 // Owns bounded, memory-only timing observations for registration and rescans.
 // Does not decide admission, durability, index contents, or test credit.
 // Split from test_run_registration.rs's console-only diagnostics.
-const TEST_RUN_TRACE_CAPACITY: usize = 256;
-const TEST_RUN_TRACE_PHASES: usize = 32;
-const TEST_RUN_RECENT_RESCAN_LIMIT: usize = 20;
+
+use super::*;
+pub(crate) const TEST_RUN_TRACE_CAPACITY: usize = 256;
+pub(crate) const TEST_RUN_TRACE_PHASES: usize = 32;
+pub(crate) const TEST_RUN_RECENT_RESCAN_LIMIT: usize = 20;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_RUN_PHASE_FLUSH_CHECK: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_RUN_PHASE_FLUSH_CHECK: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Clone, Default)]
-struct TestRunPhaseTraces(Arc<Mutex<TestRunPhaseRing>>);
+pub(crate) struct TestRunPhaseTraces(pub(crate) Arc<Mutex<TestRunPhaseRing>>);
 
-struct TestRunPhaseRing {
-    epoch: std::time::Instant,
-    entries: VecDeque<TestRunPhaseSnapshot>,
+pub(crate) struct TestRunPhaseRing {
+    pub(crate) epoch: std::time::Instant,
+    pub(crate) entries: VecDeque<TestRunPhaseSnapshot>,
 }
 
 impl Default for TestRunPhaseRing {
@@ -29,48 +31,48 @@ impl Default for TestRunPhaseRing {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunPhaseSnapshot {
+pub(crate) struct TestRunPhaseSnapshot {
     trace_id: String,
-    operation_id: String,
-    run_id: Option<String>,
-    kind: &'static str,
-    phases: Vec<TestRunPhasePoint>,
-    completed: bool,
-    truncated: bool,
+    pub(crate) operation_id: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) kind: &'static str,
+    pub(crate) phases: Vec<TestRunPhasePoint>,
+    pub(crate) completed: bool,
+    pub(crate) truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    state_lock: Option<StateLockBlock>,
+    pub(crate) state_lock: Option<StateLockBlock>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    rescan: Option<TestRunRescanTrace>,
+    pub(crate) rescan: Option<TestRunRescanTrace>,
 }
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunPhasePoint {
-    phase: &'static str,
-    monotonic_micros: u64,
+pub(crate) struct TestRunPhasePoint {
+    pub(crate) phase: &'static str,
+    pub(crate) monotonic_micros: u64,
 }
 
-struct TestRunPhaseTrace {
-    ring: TestRunPhaseTraces,
+pub(crate) struct TestRunPhaseTrace {
+    pub(crate) ring: TestRunPhaseTraces,
     trace_id: String,
-    epoch: std::time::Instant,
+    pub(crate) epoch: std::time::Instant,
 }
 
 // Stack-owned while StateInner is held. Recording cannot allocate, format,
 // traverse state, or acquire the ring. Only flush, after unlock, touches it.
-struct TestRunPhaseBuffer {
-    epoch: std::time::Instant,
-    points: [Option<TestRunPhasePoint>; TEST_RUN_TRACE_PHASES],
-    len: usize,
-    truncated: bool,
+pub(crate) struct TestRunPhaseBuffer {
+    pub(crate) epoch: std::time::Instant,
+    pub(crate) points: [Option<TestRunPhasePoint>; TEST_RUN_TRACE_PHASES],
+    pub(crate) len: usize,
+    pub(crate) truncated: bool,
 }
 
 impl TestRunPhaseBuffer {
-    fn mark(&mut self, phase: &'static str) {
+    pub(crate) fn mark(&mut self, phase: &'static str) {
         self.mark_at(phase, std::time::Instant::now());
     }
 
-    fn mark_at(&mut self, phase: &'static str, at: std::time::Instant) {
+    pub(crate) fn mark_at(&mut self, phase: &'static str, at: std::time::Instant) {
         if self.len == self.points.len() {
             self.truncated = true;
             return;
@@ -88,45 +90,45 @@ impl TestRunPhaseBuffer {
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunRescanTrace {
-    origin: &'static str,
-    roots: usize,
-    scanned: usize,
-    indexed_before: usize,
-    projected: usize,
-    sessions: usize,
-    registrations: usize,
-    observations: usize,
-    compacted: usize,
-    removed: usize,
-    changed: usize,
-    restored: usize,
-    published_events: usize,
-    publication_failed: bool,
-    cards: usize,
-    compaction_population: usize,
-    compaction_eligible: usize,
-    persistence: TestRunTracePersistence,
+pub(crate) struct TestRunRescanTrace {
+    pub(crate) origin: &'static str,
+    pub(crate) roots: usize,
+    pub(crate) scanned: usize,
+    pub(crate) indexed_before: usize,
+    pub(crate) projected: usize,
+    pub(crate) sessions: usize,
+    pub(crate) registrations: usize,
+    pub(crate) observations: usize,
+    pub(crate) compacted: usize,
+    pub(crate) removed: usize,
+    pub(crate) changed: usize,
+    pub(crate) restored: usize,
+    pub(crate) published_events: usize,
+    pub(crate) publication_failed: bool,
+    pub(crate) cards: usize,
+    pub(crate) compaction_population: usize,
+    pub(crate) compaction_eligible: usize,
+    pub(crate) persistence: TestRunTracePersistence,
 }
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunTracePersistence {
-    background_queued: usize,
-    synchronous: usize,
-    failed: usize,
+pub(crate) struct TestRunTracePersistence {
+    pub(crate) background_queued: usize,
+    pub(crate) synchronous: usize,
+    pub(crate) failed: usize,
     // Calls hidden inside existing helpers are not guessed from worker liveness.
-    unobserved_helpers: usize,
+    pub(crate) unobserved_helpers: usize,
 }
 
 impl TestRunTracePersistence {
-    fn merge(&mut self, other: Self) {
+    pub(crate) fn merge(&mut self, other: Self) {
         self.background_queued += other.background_queued;
         self.synchronous += other.synchronous;
         self.failed += other.failed;
         self.unobserved_helpers += other.unobserved_helpers;
     }
-    fn observe(&mut self, dispatch: Result<PersistDispatch, ()>) {
+    pub(crate) fn observe(&mut self, dispatch: Result<PersistDispatch, ()>) {
         match dispatch {
             Ok(PersistDispatch::BackgroundQueued) => self.background_queued += 1,
             Ok(PersistDispatch::Synchronous) => self.synchronous += 1,
@@ -134,7 +136,7 @@ impl TestRunTracePersistence {
         }
     }
 
-    fn observe_compaction(&mut self, result: &Result<bool>) {
+    pub(crate) fn observe_compaction(&mut self, result: &Result<bool>) {
         self.observe(match result {
             Ok(true) => Ok(PersistDispatch::Synchronous),
             Ok(false) => Ok(PersistDispatch::BackgroundQueued),
@@ -144,7 +146,7 @@ impl TestRunTracePersistence {
 }
 
 impl TestRunPhaseTraces {
-    fn begin(
+    pub(crate) fn begin(
         &self,
         kind: &'static str,
         run_id: Option<&str>,
@@ -193,7 +195,7 @@ impl TestRunPhaseTraces {
         trace
     }
 
-    fn recent_rescans(&self, limit: usize) -> (Vec<TestRunPhaseSnapshot>, bool) {
+    pub(crate) fn recent_rescans(&self, limit: usize) -> (Vec<TestRunPhaseSnapshot>, bool) {
         let ring = self
             .0
             .lock()
@@ -207,7 +209,7 @@ impl TestRunPhaseTraces {
         (traces, recent.next().is_some())
     }
 
-    fn selected(
+    pub(crate) fn selected(
         &self,
         run_id: Option<&str>,
         operation_id: Option<&str>,
@@ -258,7 +260,7 @@ impl TestRunPhaseTraces {
 }
 
 impl TestRunPhaseTrace {
-    fn buffer(&self) -> TestRunPhaseBuffer {
+    pub(crate) fn buffer(&self) -> TestRunPhaseBuffer {
         TestRunPhaseBuffer {
             epoch: self.epoch,
             points: [None; TEST_RUN_TRACE_PHASES],
@@ -267,7 +269,11 @@ impl TestRunPhaseTrace {
         }
     }
 
-    fn flush(&self, buffer: &mut TestRunPhaseBuffer, rescan: Option<&TestRunRescanTrace>) {
+    pub(crate) fn flush(
+        &self,
+        buffer: &mut TestRunPhaseBuffer,
+        rescan: Option<&TestRunRescanTrace>,
+    ) {
         #[cfg(test)]
         TEST_RUN_PHASE_FLUSH_CHECK.with(|check| {
             if let Some(check) = check.borrow().as_ref() {
@@ -300,7 +306,7 @@ impl TestRunPhaseTrace {
         buffer.truncated = false;
     }
 
-    fn retain_state_lock(&self, block: &StateLockBlock) -> bool {
+    pub(crate) fn retain_state_lock(&self, block: &StateLockBlock) -> bool {
         let Ok(mut ring) = self.ring.0.try_lock() else {
             return false;
         };
@@ -315,7 +321,7 @@ impl TestRunPhaseTrace {
         true
     }
 
-    fn mark(&self, phase: &'static str) {
+    pub(crate) fn mark(&self, phase: &'static str) {
         let mut ring = self
             .ring
             .0
@@ -365,20 +371,20 @@ impl Drop for TestRunPhaseTrace {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TestRunPhaseQuery {
-    run_id: Option<String>,
-    operation_id: Option<String>,
-    recent: Option<TestRunRecentTraces>,
-    limit: Option<usize>,
+pub(crate) struct TestRunPhaseQuery {
+    pub(crate) run_id: Option<String>,
+    pub(crate) operation_id: Option<String>,
+    pub(crate) recent: Option<TestRunRecentTraces>,
+    pub(crate) limit: Option<usize>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum TestRunRecentTraces {
+pub(crate) enum TestRunRecentTraces {
     Rescans,
 }
 
-async fn get_test_run_phase_traces(
+pub(crate) async fn get_test_run_phase_traces(
     State(state): State<AppState>,
     query: Result<Query<TestRunPhaseQuery>, QueryRejection>,
 ) -> Result<Json<Value>, ApiError> {

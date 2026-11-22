@@ -1,5 +1,7 @@
 // A native root's already committed home-local history is its own data even
 // after the remote peer disconnects or is revoked. This grants no wake/send.
+
+use super::*;
 struct MailboxRelayLocalHistoryAuthority {
     app: AppState,
     actor: MailboxRelayPrincipal,
@@ -28,7 +30,7 @@ impl MailboxRelayLocalHistoryAuthority {
 }
 
 impl AppState {
-    fn execute_local_mailbox_relay_history(
+    pub(crate) fn execute_local_mailbox_relay_history(
         &self,
         actor: &MailboxRelayPrincipal,
         home: &MailboxRelayHome,
@@ -136,7 +138,8 @@ impl AppState {
                     .map_err(mailbox_api_error)?
                     .ok_or_else(|| ApiError::not_found("native mailbox association not found"))?;
                 conversation.require_home(home)?;
-                self.mailbox_store.attach_mailbox_relay_home_progress(&mut message)
+                self.mailbox_store
+                    .attach_mailbox_relay_home_progress(&mut message)
                     .map_err(mailbox_api_error)?;
                 let _guard = authority.lock().map_err(mailbox_api_error)?;
                 serde_json::to_value(message)

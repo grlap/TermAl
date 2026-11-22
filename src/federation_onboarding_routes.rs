@@ -2,14 +2,16 @@
 // Does not expose local APIs or accept commands/prompts. New O1 routes composed
 // into federation_listener.rs before its pair/authority/lease middleware.
 
+use super::*;
+
 #[derive(Clone)]
-struct FederationOnboardingHost {
-    app: AppState,
-    rpc: FederationRpcClient,
-    io: FederationOnboardingIo,
+pub(crate) struct FederationOnboardingHost {
+    pub(crate) app: AppState,
+    pub(crate) rpc: FederationRpcClient,
+    pub(crate) io: FederationOnboardingIo,
 }
 
-fn federation_onboarding_routes() -> Router<FederationListenerState> {
+pub(crate) fn federation_onboarding_routes() -> Router<FederationListenerState> {
     Router::new()
         .route(
             "/federation/v1/onboarding/identity",

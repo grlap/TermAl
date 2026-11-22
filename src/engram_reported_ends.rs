@@ -23,56 +23,63 @@
 // `note_engram_command_finished_with_capture` in engram_turn_checks.rs,
 // unchanged; the rest is new.
 
+use super::*;
+
 /// What a command's reported end says about the check it may end, read off
 /// the state lock from its output, which can be long
 /// (`engram_read_check_end`).
-struct EngramEndReading {
-    build_completion: Option<(
+pub(crate) struct EngramEndReading {
+    pub(crate) build_completion: Option<(
         EngramCommandExit,
         Vec<String>,
         Option<EngramBuildDiagnostic>,
     )>,
-    node_completion: Option<(
+    pub(crate) node_completion: Option<(
         EngramCommandExit,
         Vec<String>,
         bool,
         Option<EngramBuildDiagnostic>,
     )>,
     #[cfg(test)]
-    launcher_test_stages: Vec<String>,
+    pub(crate) launcher_test_stages: Vec<String>,
     /// A launcher test's own terminal record says its run ran no stage
     /// (`engram_launcher_output_ran_no_stage`).
-    launcher_ran_no_stage: bool,
-    parsed: Option<(EngramCheckCommand, Vec<String>, bool)>,
+    pub(crate) launcher_ran_no_stage: bool,
+    pub(crate) parsed: Option<(EngramCheckCommand, Vec<String>, bool)>,
 }
 
 /// Off-lock work still belongs to this exact grant, sequence and invocation.
-fn engram_check_start_matches(
+pub(crate) fn engram_check_start_matches(
     check: &EngramTurnCheck,
     starting_check: Option<&EngramTurnCheck>,
 ) -> bool {
     starting_check.is_some_and(|start| {
-        start.host_turn_ref == check.host_turn_ref && start.sequence == check.sequence
-            && start.command == check.command && start.target == check.target
+        start.host_turn_ref == check.host_turn_ref
+            && start.sequence == check.sequence
+            && start.command == check.command
+            && start.target == check.target
     })
 }
 
 /// The off-lock reading belongs to this exact start and names its command.
 /// Qualified foreground ends require actual reported command text.
-fn engram_check_end_matches(
+pub(crate) fn engram_check_end_matches(
     check: &EngramTurnCheck,
     reading: &EngramEndReading,
     starting_check: Option<&EngramTurnCheck>,
 ) -> bool {
-    engram_check_start_matches(check, starting_check) && reading.parsed.as_ref()
-        .is_some_and(|(finished, _, _)| finished == &check.command)
+    engram_check_start_matches(check, starting_check)
+        && reading
+            .parsed
+            .as_ref()
+            .is_some_and(|(finished, _, _)| finished == &check.command)
 }
 
 /// Reads, off the state lock, what the end of `command` with `output` and
 /// `exit` says about `starting_check`, the check its key started, if one is
 /// running: its result lines and the build or focused Node Test completion
 /// of a check of either kind. Nothing is read when no check is running.
-fn engram_read_check_end(
+pub(crate) fn engram_read_check_end(
     starting_check: Option<&EngramTurnCheck>,
     session_id: &str,
     reported_command: Option<&str>,
@@ -154,12 +161,11 @@ fn engram_read_check_end(
 /// `reading` while `starting_check` was the check its key started: its exit,
 /// result lines and diagnostics, a closing snapshot of the worktree it ran in
 /// taken now under `provenance`, and a declared check's artifact reading.
-fn engram_record_check_end(
+pub(crate) fn engram_record_check_end(
     check: &mut EngramTurnCheck,
     reading: EngramEndReading,
     starting_check: Option<&EngramTurnCheck>,
-    #[cfg(test)]
-    output: &str,
+    #[cfg(test)] output: &str,
     exit: Option<EngramCommandExit>,
     runtime_output_cut: bool,
     workers: &Arc<std::sync::atomic::AtomicUsize>,
@@ -214,11 +220,12 @@ fn engram_record_check_end(
             let observed = exit.unwrap_or(EngramCommandExit::Unknown);
             build_diagnostic = Some(match check.command.kind {
                 EngramVerificationKind::Test => EngramBuildDiagnostic::test_rejected(
-                    observed, EngramBuildRejection::Association,
+                    observed,
+                    EngramBuildRejection::Association,
                 ),
-                EngramVerificationKind::Build => EngramBuildDiagnostic::rejected(
-                    observed, EngramBuildRejection::Association,
-                ),
+                EngramVerificationKind::Build => {
+                    EngramBuildDiagnostic::rejected(observed, EngramBuildRejection::Association)
+                }
             });
         }
         EngramCommandExit::Unknown
@@ -244,7 +251,8 @@ fn engram_record_check_end(
             showed_passing_tests = false;
             if check.command.literal_pipe {
                 build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
-                    exit.unwrap_or(EngramCommandExit::Unknown), EngramBuildRejection::Argv,
+                    exit.unwrap_or(EngramCommandExit::Unknown),
+                    EngramBuildRejection::Argv,
                 ));
             }
         }
@@ -274,7 +282,8 @@ fn engram_record_check_end(
             result_lines.clear();
             showed_passing_tests = false;
             build_diagnostic = Some(EngramBuildDiagnostic::test_rejected(
-                exit.unwrap_or(EngramCommandExit::Unknown), engram_pipe_rejection(&check.command),
+                exit.unwrap_or(EngramCommandExit::Unknown),
+                engram_pipe_rejection(&check.command),
             ));
         }
         EngramCommandExit::Unknown
@@ -287,7 +296,14 @@ fn engram_record_check_end(
         EngramBasisCapture::settled(None)
     } else {
         // The worktree the check ran in, as its opening snapshot was.
-        engram_spawn_basis_capture(check.target.basis_place(), workers, provenance, lifetime, state, session)
+        engram_spawn_basis_capture(
+            check.target.basis_place(),
+            workers,
+            provenance,
+            lifetime,
+            state,
+            session,
+        )
     };
     // A declared check's declaration and artifact are read as its command
     // ends, on their own thread, like its closing snapshot.
@@ -304,11 +320,7 @@ fn engram_record_check_end(
     // Read from the lines this end keeps, so it names only what they show.
     #[cfg(test)]
     let focused_stage_line_missing = !showed_passing_tests
-        && engram_focused_stage_line_missing(
-            &check.command,
-            &result_lines,
-            &launcher_test_stages,
-        );
+        && engram_focused_stage_line_missing(&check.command, &result_lines, &launcher_test_stages);
     check.ended_at = Some(engram_interference_tick());
     check.runtime_output_cut = runtime_output_cut;
     check.end = Some(EngramTurnCheckEnd {
@@ -336,8 +348,9 @@ fn engram_record_check_end(
 /// Whether `check` was keyed by its own command line, as Codex keys a command
 /// whose item has no id: such a key names no one run, so a later end under it
 /// cannot be taken as this check's.
-fn engram_check_key_is_its_line(check: &EngramTurnCheck) -> bool {
-    check.keyed_by_line || engram_check_command_like(&check.key, &check.command).as_ref() == Some(&check.command)
+pub(crate) fn engram_check_key_is_its_line(check: &EngramTurnCheck) -> bool {
+    check.keyed_by_line
+        || engram_check_command_like(&check.key, &check.command).as_ref() == Some(&check.command)
 }
 
 /// At the close of a Codex session's turn, carries each of its checks whose
@@ -350,7 +363,10 @@ fn engram_check_key_is_its_line(check: &EngramTurnCheck) -> bool {
 /// carried, as only its ends are taken in its turn; every check left behind
 /// is closed with outcome Unknown by the caller (`engram_close_unended_checks`).
 /// No other runtime's check is carried here.
-fn engram_carry_running_codex_checks(record: &mut SessionRecord, host_turn_ref: &str) -> Vec<String> {
+pub(crate) fn engram_carry_running_codex_checks(
+    record: &mut SessionRecord,
+    host_turn_ref: &str,
+) -> Vec<String> {
     let mut lines = Vec::new();
     if record.session.agent != Agent::Codex {
         return lines;
@@ -457,7 +473,10 @@ fn engram_carried_running_line(command: &EngramCheckCommand) -> String {
 /// before it is settled: closed with outcome Unknown, as a check whose end
 /// was never reported is (`engram_close_unended_checks`). Whether its end had
 /// been reported (`ended`) decides only what the line says happened.
-fn engram_reported_end_lost_to_restart_line(command: &EngramCheckCommand, ended: bool) -> String {
+pub(crate) fn engram_reported_end_lost_to_restart_line(
+    command: &EngramCheckCommand,
+    ended: bool,
+) -> String {
     let cause = if ended {
         "its reported end was not settled before the host restarted"
     } else {
@@ -465,8 +484,10 @@ fn engram_reported_end_lost_to_restart_line(command: &EngramCheckCommand, ended:
     };
     engram_unrecorded_check_line(
         command,
-        &format!("{cause}, so it was closed with outcome Unknown and is not credited; {}",
-            engram_registered_run_advice(command).unwrap_or("run it again to record it")),
+        &format!(
+            "{cause}, so it was closed with outcome Unknown and is not credited; {}",
+            engram_registered_run_advice(command).unwrap_or("run it again to record it")
+        ),
     )
 }
 
@@ -478,7 +499,7 @@ fn engram_reported_end_lost_to_restart_line(command: &EngramCheckCommand, ended:
 /// checkpoint on its claim as before; a test carried under another runtime of
 /// the session, a newer one, is left alone, as is every launcher gate. Called
 /// under the state lock, by the exit handler.
-fn engram_close_reported_end_carries(record: &mut SessionRecord, exited: &RuntimeToken) {
+pub(crate) fn engram_close_reported_end_carries(record: &mut SessionRecord, exited: &RuntimeToken) {
     let session_id = record.session.id.clone();
     // Its tests no longer count as running: a stated limitation, since the
     // exit does not prove a child command ended (`EngramRunningCodexTest`).
@@ -512,7 +533,7 @@ fn engram_close_reported_end_carries(record: &mut SessionRecord, exited: &Runtim
 /// the session's runtime is cleared (`EngramHost::runtime_cleared`); every
 /// checkpoint applies the same rule to each carried check in turn
 /// (`engram_reported_end_stranded`, in `engram_take_settled_carried_checks`).
-fn engram_take_stranded_reported_ends(record: &mut SessionRecord) -> Vec<String> {
+pub(crate) fn engram_take_stranded_reported_ends(record: &mut SessionRecord) -> Vec<String> {
     let current = record.runtime.runtime_token();
     // A stopped or replaced runtime's tests no longer count as running for
     // this session: a stated limitation, since a shared runtime outlives the
@@ -554,7 +575,11 @@ fn engram_stranded_reported_end_line(
             command,
             "no end can reach the host since its runtime was stopped or replaced",
         ),
-        if current.is_none() { "cleared" } else { "replaced" },
+        if current.is_none() {
+            "cleared"
+        } else {
+            "replaced"
+        },
     )
 }
 
@@ -593,7 +618,7 @@ fn engram_take_unended_carries(
 /// The line closing a carried Codex test that never got its end with outcome
 /// Unknown because `why`, in the words of a check whose end was never
 /// reported (`engram_close_unended_checks`).
-fn engram_closed_unended_carry_line(command: &EngramCheckCommand, why: &str) -> String {
+pub(crate) fn engram_closed_unended_carry_line(command: &EngramCheckCommand, why: &str) -> String {
     engram_unrecorded_check_line(
         command,
         &format!(
@@ -620,10 +645,10 @@ fn engram_closed_unended_carry_line(command: &EngramCheckCommand, why: &str) -> 
 /// (`engram_with_runtime_gone_caveat`). Keeping it instead would leave no release
 /// but a host restart; ending such commands is a later change.
 #[derive(Clone, Debug)]
-struct EngramRunningCodexTest {
-    key: String,
-    runtime: RuntimeToken,
-    root_key: String,
+pub(crate) struct EngramRunningCodexTest {
+    pub(crate) key: String,
+    pub(crate) runtime: RuntimeToken,
+    pub(crate) root_key: String,
 }
 
 /// Notes `test` as still running, replacing any test under the same key.
@@ -639,8 +664,10 @@ fn engram_note_running_codex_test(engram: &mut EngramSessionState, test: EngramR
 
 /// The Codex test running under the item key `key` ended: it overlaps nothing
 /// that starts after.
-fn engram_forget_running_codex_test(engram: &mut EngramSessionState, key: &str) {
-    engram.running_codex_tests.retain(|running| running.key != key);
+pub(crate) fn engram_forget_running_codex_test(engram: &mut EngramSessionState, key: &str) {
+    engram
+        .running_codex_tests
+        .retain(|running| running.key != key);
 }
 
 /// The runtime key of a Codex test of this session still running when its
@@ -650,7 +677,7 @@ fn engram_forget_running_codex_test(engram: &mut EngramSessionState, key: &str) 
 /// by a command still running in its turn (`note_engram_command_started`),
 /// whether or not its evidence is still carried. A test whose end was
 /// reported, or whose runtime is gone, overlaps nothing that starts after.
-fn engram_carried_running_key(
+pub(crate) fn engram_carried_running_key(
     engram: &EngramSessionState,
     current: Option<&RuntimeToken>,
     root_key: &str,
@@ -701,7 +728,7 @@ impl AppState {
     /// longer counts as running; the test is then settled at a later
     /// checkpoint on its claim. Returns whether it ended one; any other late
     /// end is left as it was, dropped.
-    fn note_engram_reported_end(
+    pub(crate) fn note_engram_reported_end(
         &self,
         session_id: &str,
         key: &str,
@@ -710,13 +737,17 @@ impl AppState {
         exit: EngramCommandExit,
     ) -> bool {
         self.note_engram_reported_end_with_settlement(
-            session_id, key, command, output, exit,
+            session_id,
+            key,
+            command,
+            output,
+            exit,
             #[cfg(test)]
             || {},
         )
     }
 
-    fn note_engram_reported_end_with_settlement(
+    pub(crate) fn note_engram_reported_end_with_settlement(
         &self,
         session_id: &str,
         key: &str,
@@ -726,7 +757,10 @@ impl AppState {
         #[cfg(test)] after_observation_end: impl FnOnce(),
     ) -> bool {
         self.settle_reported_test_observation(
-            session_id, key, command, exit,
+            session_id,
+            key,
+            command,
+            exit,
             #[cfg(test)]
             after_observation_end,
         );
@@ -756,8 +790,13 @@ impl AppState {
         let Some(started) = started else {
             return false;
         };
-        let reading =
-            engram_read_check_end(Some(&started), session_id, Some(command), output, Some(exit));
+        let reading = engram_read_check_end(
+            Some(&started),
+            session_id,
+            Some(command),
+            output,
+            Some(exit),
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return false;

@@ -6,35 +6,37 @@ boot reconciliation. Generic mailbox transport remains in mailboxes.rs;
 delegation lifecycle terminalization remains in delegations.rs.
 */
 
-const DELEGATION_REVIEW_RESULT_TOPIC: &str = "delegation-review-result/v1";
-const DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN: &str = "delegation-review-*";
+use super::*;
 
-fn reserved_delegation_review_message(topic: Option<&str>, key: &str) -> bool {
+pub(crate) const DELEGATION_REVIEW_RESULT_TOPIC: &str = "delegation-review-result/v1";
+pub(crate) const DELEGATION_REVIEW_CONTROL_TOPIC_PATTERN: &str = "delegation-review-*";
+
+pub(crate) fn reserved_delegation_review_message(topic: Option<&str>, key: &str) -> bool {
     topic.is_some_and(|topic| topic.starts_with("delegation-review-"))
         || key.starts_with("delegation-review-result-v1-")
         || key.starts_with("delegation-review-terminal-")
 }
-const DELEGATION_REVIEW_RESULT_KIND: &str = "delegationReviewResult";
-const DELEGATION_REVIEW_RESULT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const DELEGATION_REVIEW_RESULT_KIND: &str = "delegationReviewResult";
+pub(crate) const DELEGATION_REVIEW_RESULT_SCHEMA_VERSION: u32 = 1;
 const MAX_DELEGATION_REVIEW_RESULT_LIST_ITEMS: usize = 200;
-const MAX_DELEGATION_REVIEW_RESULT_TEXT_CHARS: usize = 16 * 1024;
+pub(crate) const MAX_DELEGATION_REVIEW_RESULT_TEXT_CHARS: usize = 16 * 1024;
 
 #[derive(Debug)]
-struct ValidatedDelegationReviewMailboxSubmission {
-    delegation_id: String,
-    parent_session_id: String,
-    child_session_id: String,
-    submission_attempt: u32,
-    sender_name: String,
-    target_name: String,
-    envelope: DelegationReviewMailboxResult,
+pub(crate) struct ValidatedDelegationReviewMailboxSubmission {
+    pub(crate) delegation_id: String,
+    pub(crate) parent_session_id: String,
+    pub(crate) child_session_id: String,
+    pub(crate) submission_attempt: u32,
+    pub(crate) sender_name: String,
+    pub(crate) target_name: String,
+    pub(crate) envelope: DelegationReviewMailboxResult,
 }
 
 impl AppState {
     /// Accepts the one mailbox message shape available to delegation children.
     /// The route derives every identity and delivery field from the durable
     /// delegation link; the model supplies only the bounded review payload.
-    fn submit_delegation_review_result(
+    pub(crate) fn submit_delegation_review_result(
         &self,
         child_session_id: &str,
         request: SubmitDelegationReviewResultRequest,
@@ -43,7 +45,7 @@ impl AppState {
         self.persist_validated_delegation_review_submission(&submission)
     }
 
-    fn persist_validated_delegation_review_submission(
+    pub(crate) fn persist_validated_delegation_review_submission(
         &self,
         submission: &ValidatedDelegationReviewMailboxSubmission,
     ) -> std::result::Result<MailboxAppendReceipt, ApiError> {
@@ -108,7 +110,7 @@ impl AppState {
     /// Records one recovery probe only if the delegation still represents the
     /// attempt observed before coordination-store I/O. Rearm increments the
     /// attempt, so a stale miss or quarantine can never suppress the next turn.
-    fn record_delegation_review_recovery_probe(
+    pub(crate) fn record_delegation_review_recovery_probe(
         &self,
         child_session_id: &str,
         delegation_id: &str,
@@ -117,9 +119,7 @@ impl AppState {
         recovery_error: Option<String>,
     ) -> std::result::Result<(), ApiError> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(delegation_index) =
-            inner.indexed_delegation_for_child(child_session_id)
-        else {
+        let Some(delegation_index) = inner.indexed_delegation_for_child(child_session_id) else {
             return Ok(());
         };
         let delegation = &inner.delegations[delegation_index];
@@ -169,7 +169,7 @@ impl AppState {
     /// Mailbox I/O intentionally happens without the main state mutex. The
     /// final record step revalidates the live delegation link and attempt
     /// before applying the recovered envelope.
-    fn recover_durable_delegation_review_submission(
+    pub(crate) fn recover_durable_delegation_review_submission(
         &self,
         child_session_id: &str,
     ) -> std::result::Result<(), ApiError> {
@@ -182,8 +182,7 @@ impl AppState {
         }
         let recovery = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(delegation_index) =
-                inner.indexed_delegation_for_child(child_session_id)
+            let Some(delegation_index) = inner.indexed_delegation_for_child(child_session_id)
             else {
                 return Ok(());
             };
@@ -218,8 +217,7 @@ impl AppState {
             delegation_review_result_idempotency_key(&delegation_id, submission_attempt);
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            let Some(delegation_index) =
-                inner.indexed_delegation_for_child(child_session_id)
+            let Some(delegation_index) = inner.indexed_delegation_for_child(child_session_id)
             else {
                 return Ok(());
             };
@@ -305,7 +303,7 @@ impl AppState {
         Ok(())
     }
 
-    fn reconcile_durable_delegation_review_submissions_after_boot(&self) {
+    pub(crate) fn reconcile_durable_delegation_review_submissions_after_boot(&self) {
         let child_session_ids = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -335,7 +333,7 @@ impl AppState {
         }
     }
 
-    fn validate_delegation_review_submission(
+    pub(crate) fn validate_delegation_review_submission(
         &self,
         child_session_id: &str,
         request: SubmitDelegationReviewResultRequest,
@@ -446,7 +444,7 @@ impl AppState {
         })
     }
 
-    fn record_delegation_review_submission(
+    pub(crate) fn record_delegation_review_submission(
         &self,
         submission: &ValidatedDelegationReviewMailboxSubmission,
     ) -> std::result::Result<(), ApiError> {
@@ -567,7 +565,7 @@ impl AppState {
     }
 }
 
-fn delegation_review_result_idempotency_key(
+pub(crate) fn delegation_review_result_idempotency_key(
     delegation_id: &str,
     submission_attempt: u32,
 ) -> String {
@@ -576,7 +574,7 @@ fn delegation_review_result_idempotency_key(
 
 // Shared provenance validation for active recovery and immutable attempt reads.
 // Only the active recovery caller may install a result into the lifecycle.
-fn validated_review_submission_envelope(
+pub(crate) fn validated_review_submission_envelope(
     stored: &MailboxIdempotencyRecord,
     parent: &str,
     child: &str,
@@ -606,7 +604,7 @@ fn validated_review_submission_envelope(
     Ok(envelope)
 }
 
-fn delegation_result_from_review_envelope(
+pub(crate) fn delegation_result_from_review_envelope(
     envelope: &DelegationReviewMailboxResult,
 ) -> DelegationResult {
     let mut notes = envelope.notes.clone();
@@ -730,7 +728,7 @@ fn validate_delegation_review_text(
     Ok(())
 }
 
-fn post_submission_transport_error(outcome: &DelegationChildOutcome) -> Option<String> {
+pub(crate) fn post_submission_transport_error(outcome: &DelegationChildOutcome) -> Option<String> {
     match outcome {
         DelegationChildOutcome::Running | DelegationChildOutcome::Completed { .. } => None,
         DelegationChildOutcome::Failed { summary } => {
@@ -751,7 +749,7 @@ fn post_submission_transport_error(outcome: &DelegationChildOutcome) -> Option<S
     }
 }
 
-fn terminalize_submitted_review_result_locked(
+pub(crate) fn terminalize_submitted_review_result_locked(
     inner: &mut StateInner,
     delegation_index: usize,
     delegation: &DelegationRecord,

@@ -10,12 +10,14 @@
 // `AppState::new` (`app_boot.rs`) directly, which loaded, recovered and queued
 // a persist of the store before a second process failed to bind its port.
 
+use super::*;
+
 /// File in the data directory whose exclusive OS lock marks a running server.
-const SERVER_INSTANCE_LOCK_FILE_NAME: &str = "termal-server.lock";
+pub(crate) const SERVER_INSTANCE_LOCK_FILE_NAME: &str = "termal-server.lock";
 
 /// Sibling file describing the current lock holder, read only to word the
 /// refusal. The next holder overwrites a leftover one.
-const SERVER_INSTANCE_OWNER_FILE_NAME: &str = "termal-server.owner";
+pub(crate) const SERVER_INSTANCE_OWNER_FILE_NAME: &str = "termal-server.owner";
 
 /// The owner file's record of the lock holder.
 #[derive(Deserialize, Serialize)]
@@ -29,8 +31,8 @@ struct ServerInstanceOwner {
 /// Held for the life of a server process (`RUNNING_SERVER_INSTANCE_LOCK`),
 /// which releases it by ending, in any way. Dropping it, as a test's holder
 /// does, also releases it.
-struct ServerInstanceLock {
-    file: fs::File,
+pub(crate) struct ServerInstanceLock {
+    pub(crate) file: fs::File,
 }
 
 impl Drop for ServerInstanceLock {
@@ -48,7 +50,7 @@ impl Drop for ServerInstanceLock {
 impl ServerInstanceLock {
     /// Takes the data directory's exclusive instance lock, or refuses with a
     /// message naming the data directory, the lock file and the holder.
-    fn acquire(data_dir: &FsPath) -> Result<Self> {
+    pub(crate) fn acquire(data_dir: &FsPath) -> Result<Self> {
         fs::create_dir_all(data_dir).with_context(|| {
             format!(
                 "failed to create the TermAl data directory `{}`",
@@ -167,7 +169,7 @@ impl ServerInstanceLock {
 impl AppState {
     /// Server-mode boot from the default paths of `default_workdir`. The data
     /// directory stays locked until the process exits.
-    fn new_server(default_workdir: String) -> Result<Self> {
+    pub(crate) fn new_server(default_workdir: String) -> Result<Self> {
         let default_workdir = normalize_local_user_facing_path(&default_workdir);
         let persistence_path = resolve_persistence_path(&default_workdir);
         let orchestrator_templates_path = resolve_orchestrator_templates_path(&default_workdir);
@@ -182,7 +184,7 @@ impl AppState {
     /// Server-mode boot from explicit paths: takes the instance lock of the
     /// state database's directory and moves it into `lock_holder` before it
     /// boots, so the lock lives as long as the holder, not this state.
-    fn new_server_with_paths(
+    pub(crate) fn new_server_with_paths(
         default_workdir: String,
         persistence_path: PathBuf,
         orchestrator_templates_path: PathBuf,

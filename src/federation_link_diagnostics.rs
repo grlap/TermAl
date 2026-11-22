@@ -1,29 +1,31 @@
 // Bounded process-local copies of existing static link observations. Does not
 // change transport, authority, retry, or the latest attestation projection.
-const FEDERATION_LINK_HISTORY_LIMIT: usize = 64;
+
+use super::*;
+pub(crate) const FEDERATION_LINK_HISTORY_LIMIT: usize = 64;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FederationLinkDiagnosticRecord {
-    at: String,
-    kind: &'static str,
-    peer_host_id: String,
-    enrollment_generation: u64,
-    transport_generation: u64,
+pub(crate) struct FederationLinkDiagnosticRecord {
+    pub(crate) at: String,
+    pub(crate) kind: &'static str,
+    pub(crate) peer_host_id: String,
+    pub(crate) enrollment_generation: u64,
+    pub(crate) transport_generation: u64,
     generation_basis: &'static str,
-    stage: &'static str,
-    reason: &'static str,
-    owner_generation: Option<u64>,
-    incarnation: Option<String>,
-    io_kind: Option<&'static str>,
-    elapsed_ms: Option<u64>,
-    last_sequence: Option<u64>,
-    rpc_stage: Option<&'static str>,
-    status: Option<u16>,
+    pub(crate) stage: &'static str,
+    pub(crate) reason: &'static str,
+    pub(crate) owner_generation: Option<u64>,
+    pub(crate) incarnation: Option<String>,
+    pub(crate) io_kind: Option<&'static str>,
+    pub(crate) elapsed_ms: Option<u64>,
+    pub(crate) last_sequence: Option<u64>,
+    pub(crate) rpc_stage: Option<&'static str>,
+    pub(crate) status: Option<u16>,
 }
 
 impl FederationLinkDiagnosticRecord {
-    fn new(
+    pub(crate) fn new(
         kind: &'static str,
         basis: &FederationPeerSnapshot,
         stage: &'static str,
@@ -50,9 +52,9 @@ impl FederationLinkDiagnosticRecord {
 }
 
 #[derive(Default)]
-struct FederationLinkDiagnosticHistory {
-    records: VecDeque<FederationLinkDiagnosticRecord>,
-    evicted: u64,
+pub(crate) struct FederationLinkDiagnosticHistory {
+    pub(crate) records: VecDeque<FederationLinkDiagnosticRecord>,
+    pub(crate) evicted: u64,
 }
 
 impl FederationDurabilityDiagnostics {
@@ -111,7 +113,11 @@ impl FederationChannel {
         record
     }
 
-    fn retain_install_diagnostic(&self, context: &FederationSecurityContext, status: StatusCode) {
+    pub(crate) fn retain_install_diagnostic(
+        &self,
+        context: &FederationSecurityContext,
+        status: StatusCode,
+    ) {
         let mut record = self.context_link_diagnostic(
             context,
             "install_failure",
@@ -122,7 +128,7 @@ impl FederationChannel {
         self.retain_link_diagnostic(record);
     }
 
-    fn retain_terminal_diagnostic(
+    pub(crate) fn retain_terminal_diagnostic(
         &self,
         context: &FederationSecurityContext,
         stage: &'static str,

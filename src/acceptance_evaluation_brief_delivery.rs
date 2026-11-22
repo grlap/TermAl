@@ -1,7 +1,9 @@
 // Typed host-brief delivery and ordinary requester contamination share the
 // evaluation single-flight boundary. Caller text cannot select the host origin.
+
+use super::*;
 impl AppState {
-    fn recover_retained_acceptance_brief(
+    pub(crate) fn recover_retained_acceptance_brief(
         &self,
         child: &str,
         request: &SubmitAcceptanceEvaluationRequest,
@@ -74,7 +76,7 @@ impl AppState {
         Ok(Some(prompt))
     }
 
-    fn reserve_requester_acceptance_followup(
+    pub(crate) fn reserve_requester_acceptance_followup(
         &self,
         parent: &str,
         id: &str,
@@ -83,7 +85,7 @@ impl AppState {
         self.reserve_requester_acceptance_prompt(parent, id, request, false)
     }
 
-    fn reserve_direct_requester_acceptance_prompt(
+    pub(crate) fn reserve_direct_requester_acceptance_prompt(
         &self,
         child: &str,
         request: &SendMessageRequest,
@@ -197,7 +199,7 @@ impl AppState {
         Ok(Some(guard))
     }
 
-    fn offer_acceptance_evaluation_brief(
+    pub(crate) fn offer_acceptance_evaluation_brief(
         &self,
         reservation: &AcceptanceEvaluationReuseReservation,
         prompt: &str,
@@ -210,7 +212,8 @@ impl AppState {
                     ApiError::conflict("evaluator disappeared before host-brief delivery")
                 })?;
             let record = &inner.delegations[index];
-            let child = inner.find_visible_session_index(&record.child_session_id)
+            let child = inner
+                .find_visible_session_index(&record.child_session_id)
                 .map(|i| &inner.sessions[i])
                 .ok_or_else(|| ApiError::conflict("retained brief evaluator is unavailable"))?;
             if !child.is_local_session()
@@ -218,7 +221,9 @@ impl AppState {
                 || child.session.agent != record.agent
                 || record.model.as_deref() != Some(child.session.model.as_str())
             {
-                return Err(ApiError::conflict("retained host brief remains withheld: the evaluator configuration changed"));
+                return Err(ApiError::conflict(
+                    "retained host brief remains withheld: the evaluator configuration changed",
+                ));
             }
             let target = inner.delegations[index]
                 .acceptance_evaluation

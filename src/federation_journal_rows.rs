@@ -1,6 +1,8 @@
 // Metadata-only projections: SQL never selects payload, ACK text, queue IDs,
 // attempt IDs or processed evidence. Presence is computed inside SQLite.
-fn federation_journal_operation_rows(
+
+use super::*;
+pub(crate) fn federation_journal_operation_rows(
     connection: &rusqlite::Connection,
     local_host: &str,
     high: i64,
@@ -49,16 +51,16 @@ fn federation_journal_operation_rows(
         .map_err(|_| FederationJournalError::Storage)
 }
 
-struct FederationJournalWakeRow {
-    anchor: FederationJournalAnchor,
-    message: String,
-    state: String,
-    target: Option<FederationMailboxBinding>,
-    mirror: bool,
-    metadata_supported: Option<bool>,
+pub(crate) struct FederationJournalWakeRow {
+    pub(crate) anchor: FederationJournalAnchor,
+    pub(crate) message: String,
+    pub(crate) state: String,
+    pub(crate) target: Option<FederationMailboxBinding>,
+    pub(crate) mirror: bool,
+    pub(crate) metadata_supported: Option<bool>,
 }
 
-fn federation_journal_wake_rows(
+pub(crate) fn federation_journal_wake_rows(
     connection: &rusqlite::Connection,
     central_host: &str,
     high: i64,

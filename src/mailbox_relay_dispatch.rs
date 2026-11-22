@@ -1,9 +1,11 @@
 // Immutable enrollment evidence and current authority for metadata-only relay
 // wake promotion/provider admission. History access has a separate authority.
+
+use super::*;
 #[cfg(test)]
 std::thread_local! {
     static TEST_MAILBOX_RELAY_AFTER_EVALUATE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_MAILBOX_RELAY_AFTER_SEND_REVALIDATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// An expected scheduling hold, not a provider/protocol or persistence failure.
@@ -13,35 +15,57 @@ struct MailboxRelayAdmissionHeld(String);
 
 // Shared structural boundary for observing and inserting a new mailbox wake.
 // Authority is prepared off-lock separately; these helpers grant no dispatch.
-fn mailbox_fifo_protected_floor(record: &SessionRecord) -> usize {
-    usize::from(record.queued_prompts.front().is_some_and(QueuedPromptRecord::has_stored_history)
-        || queued_head_held_for_durability(record))
+pub(crate) fn mailbox_fifo_protected_floor(record: &SessionRecord) -> usize {
+    usize::from(
+        record
+            .queued_prompts
+            .front()
+            .is_some_and(QueuedPromptRecord::has_stored_history)
+            || queued_head_held_for_durability(record),
+    )
 }
 
-fn mailbox_fifo_entry_is_runnable(record: &SessionRecord, queued: &QueuedPromptRecord) -> bool {
+pub(crate) fn mailbox_fifo_entry_is_runnable(
+    record: &SessionRecord,
+    queued: &QueuedPromptRecord,
+) -> bool {
     queued.source == QueuedPromptSource::Mailbox
         && !queued.has_stored_history()
         && !queued_prompt_held_for_durability(record, queued)
         && ordinary_queue_entry_is_runnable(record, queued)
 }
 
-fn mailbox_fifo_prefix(record: &SessionRecord) -> Vec<(String, Option<(String, u64)>)> {
-    record.queued_prompts.iter().skip(mailbox_fifo_protected_floor(record))
+pub(crate) fn mailbox_fifo_prefix(record: &SessionRecord) -> Vec<(String, Option<(String, u64)>)> {
+    record
+        .queued_prompts
+        .iter()
+        .skip(mailbox_fifo_protected_floor(record))
         .take_while(|queued| mailbox_fifo_entry_is_runnable(record, queued))
-        .map(|queued| (queued.pending_prompt.id.clone(), queued.pending_prompt.source.as_ref()
-            .and_then(|source| source.mailbox.as_ref())
-            .map(|mailbox| (mailbox.mailbox_id.clone(), mailbox.sequence))))
+        .map(|queued| {
+            (
+                queued.pending_prompt.id.clone(),
+                queued
+                    .pending_prompt
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.mailbox.as_ref())
+                    .map(|mailbox| (mailbox.mailbox_id.clone(), mailbox.sequence)),
+            )
+        })
         .collect()
 }
 
-fn mailbox_fifo_authority_is_fenced(result: Result<(), ApiError>) -> bool {
+pub(crate) fn mailbox_fifo_authority_is_fenced(result: Result<(), ApiError>) -> bool {
     match result {
         Ok(()) => false,
         Err(error) if error.status.is_client_error() => true,
         Err(error) => {
             // Unknown eligibility preserves FIFO. Never silently turn a store
             // or internal failure into permission to overtake an older wake.
-            eprintln!("mailbox> FIFO authority observation unavailable: {}", mailbox_preview(&error.message));
+            eprintln!(
+                "mailbox> FIFO authority observation unavailable: {}",
+                mailbox_preview(&error.message)
+            );
             false
         }
     }
@@ -49,36 +73,64 @@ fn mailbox_fifo_authority_is_fenced(result: Result<(), ApiError>) -> bool {
 
 // Capture only an older runnable local mailbox head, and bind its ordinary
 // owner to the exact relay carrier that caused this dispatch opportunity.
-fn local_mailbox_head_for_relay(
-    record: &SessionRecord, home: &MailboxRelayHome, mailbox: &str, sequence: u64,
+pub(crate) fn local_mailbox_head_for_relay(
+    record: &SessionRecord,
+    home: &MailboxRelayHome,
+    mailbox: &str,
+    sequence: u64,
 ) -> Option<QueuedTurnOwner> {
     let carrier = record.queued_prompts.iter().find(|queued| {
-        queued.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref())
-            .is_some_and(|source| source.sequence >= sequence
-                && MailboxRelayLocator::decode(&source.mailbox_id, false).ok().flatten()
-                    .is_some_and(|locator| locator.id == mailbox && &locator.home == home))
+        queued
+            .pending_prompt
+            .source
+            .as_ref()
+            .and_then(|source| source.mailbox.as_ref())
+            .is_some_and(|source| {
+                source.sequence >= sequence
+                    && MailboxRelayLocator::decode(&source.mailbox_id, false)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|locator| locator.id == mailbox && &locator.home == home)
+            })
     })?;
-    let head = record.queued_prompts.get(ordinary_queue_position(record)?)?;
+    let head = record
+        .queued_prompts
+        .get(ordinary_queue_position(record)?)?;
     if !mailbox_fifo_entry_is_runnable(record, head)
-        || !head.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref())
-            .is_some_and(|source| matches!(MailboxRelayLocator::decode(&source.mailbox_id, false), Ok(None))) {
+        || !head
+            .pending_prompt
+            .source
+            .as_ref()
+            .and_then(|source| source.mailbox.as_ref())
+            .is_some_and(|source| {
+                matches!(
+                    MailboxRelayLocator::decode(&source.mailbox_id, false),
+                    Ok(None)
+                )
+            })
+    {
         return None;
     }
     let mut owner = QueuedTurnOwner::capture(record)?;
-    owner.required_queued_prompt = Some((carrier.pending_prompt.id.clone(), receipted_prompt_intent(carrier)));
+    owner.required_queued_prompt = Some((
+        carrier.pending_prompt.id.clone(),
+        receipted_prompt_intent(carrier),
+    ));
     Some(owner)
 }
 
 impl std::fmt::Display for MailboxRelayAdmissionHeld {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 impl std::error::Error for MailboxRelayAdmissionHeld {}
 
-fn mailbox_relay_admission_held(error: impl std::fmt::Display) -> anyhow::Error {
+pub(crate) fn mailbox_relay_admission_held(error: impl std::fmt::Display) -> anyhow::Error {
     MailboxRelayAdmissionHeld(error.to_string()).into()
 }
 
-fn consume_mailbox_relay_hold<T>(result: Result<Option<T>>) -> Result<Option<T>> {
+pub(crate) fn consume_mailbox_relay_hold<T>(result: Result<Option<T>>) -> Result<Option<T>> {
     match result {
         Err(error) if error.downcast_ref::<MailboxRelayAdmissionHeld>().is_some() => {
             eprintln!("native relay> queue remains held: {error:#}");
@@ -89,47 +141,80 @@ fn consume_mailbox_relay_hold<T>(result: Result<Option<T>>) -> Result<Option<T>>
 }
 
 #[derive(Clone)]
-struct MailboxRelayDrainOwner {
-    queue: QueuedTurnOwner,
-    mailbox: String,
-    message: String,
-    sequence: u64,
-    stop_generation: u64,
-    pause_epoch: u64,
-    signal: Arc<FederationExecutorWakeSignal>,
+pub(crate) struct MailboxRelayDrainOwner {
+    pub(crate) queue: QueuedTurnOwner,
+    pub(crate) mailbox: String,
+    pub(crate) message: String,
+    pub(crate) sequence: u64,
+    pub(crate) stop_generation: u64,
+    pub(crate) pause_epoch: u64,
+    pub(crate) signal: Arc<FederationExecutorWakeSignal>,
 }
 
 impl MailboxRelayDrainOwner {
-    fn capture(record: &SessionRecord, wake: &MailboxRelayWake, signal: Arc<FederationExecutorWakeSignal>) -> Option<Self> {
-        Self::capture_boundary(record, &wake.conversation.home, &wake.mailbox_id, wake.sequence, signal)
+    pub(crate) fn capture(
+        record: &SessionRecord,
+        wake: &MailboxRelayWake,
+        signal: Arc<FederationExecutorWakeSignal>,
+    ) -> Option<Self> {
+        Self::capture_boundary(
+            record,
+            &wake.conversation.home,
+            &wake.mailbox_id,
+            wake.sequence,
+            signal,
+        )
     }
 
-    fn capture_boundary(record: &SessionRecord, home: &MailboxRelayHome, mailbox: &str, sequence: u64,
-        signal: Arc<FederationExecutorWakeSignal>) -> Option<Self> {
+    pub(crate) fn capture_boundary(
+        record: &SessionRecord,
+        home: &MailboxRelayHome,
+        mailbox: &str,
+        sequence: u64,
+        signal: Arc<FederationExecutorWakeSignal>,
+    ) -> Option<Self> {
         let queue = QueuedTurnOwner::capture(record)?;
-        let source = record.queued_prompts.get(ordinary_queue_position(record)?)?.pending_prompt.source.as_ref()?.mailbox.as_ref()?;
+        let source = record
+            .queued_prompts
+            .get(ordinary_queue_position(record)?)?
+            .pending_prompt
+            .source
+            .as_ref()?
+            .mailbox
+            .as_ref()?;
         let locator = MailboxRelayLocator::decode(&source.mailbox_id, false).ok()??;
         if source.sequence < sequence || locator.id != mailbox || &locator.home != home {
             return None;
         }
         Some(Self {
-            queue, mailbox: source.mailbox_id.clone(), message: source.message_id.clone(),
-            sequence: source.sequence, stop_generation: record.runtime_stop_generation,
-            pause_epoch: record.auto_dispatch_pause_epoch, signal,
+            queue,
+            mailbox: source.mailbox_id.clone(),
+            message: source.message_id.clone(),
+            sequence: source.sequence,
+            stop_generation: record.runtime_stop_generation,
+            pause_epoch: record.auto_dispatch_pause_epoch,
+            signal,
         })
     }
 
-    fn matches(&self, record: &SessionRecord) -> bool {
-        !self.signal.is_stopping() && self.queue.matches(record)
+    pub(crate) fn matches(&self, record: &SessionRecord) -> bool {
+        !self.signal.is_stopping()
+            && self.queue.matches(record)
             && record.runtime_stop_generation == self.stop_generation
             && record.auto_dispatch_pause_epoch == self.pause_epoch
-            && ordinary_queue_position(record).and_then(|position| record.queued_prompts.get(position)).and_then(|queued| queued.pending_prompt.source.as_ref())
-                .and_then(|source| source.mailbox.as_ref()).is_some_and(|source|
-                    source.mailbox_id == self.mailbox && source.message_id == self.message && source.sequence == self.sequence)
+            && ordinary_queue_position(record)
+                .and_then(|position| record.queued_prompts.get(position))
+                .and_then(|queued| queued.pending_prompt.source.as_ref())
+                .and_then(|source| source.mailbox.as_ref())
+                .is_some_and(|source| {
+                    source.mailbox_id == self.mailbox
+                        && source.message_id == self.message
+                        && source.sequence == self.sequence
+                })
     }
 }
 
-fn validate_mailbox_relay_wake_peer(
+pub(crate) fn validate_mailbox_relay_wake_peer(
     wake: &MailboxRelayWake,
     peer: &FederationPeerSnapshot,
     home: bool,
@@ -166,7 +251,7 @@ fn validate_mailbox_relay_wake_peer(
 /// Whether `current`, this host's record of a relay conversation peer, still
 /// authorizes ordinary native wake admission under the unchanged enrollment.
 /// Executor placement has its own verification and activation fences.
-fn mailbox_relay_peer_current_locked(
+pub(crate) fn mailbox_relay_peer_current_locked(
     inner: &StateInner,
     current: &FederationPeerSnapshot,
     enrollment_generation: u64,
@@ -179,26 +264,38 @@ fn mailbox_relay_peer_current_locked(
     }
 }
 
-struct MailboxRelayDispatchAuthority {
-    app: AppState,
-    wake: MailboxRelayWake,
-    peer: FederationPeerSnapshot,
-    lease: Option<FederationLinkLease>,
+pub(crate) struct MailboxRelayDispatchAuthority {
+    pub(crate) app: AppState,
+    pub(crate) wake: MailboxRelayWake,
+    pub(crate) peer: FederationPeerSnapshot,
+    pub(crate) lease: Option<FederationLinkLease>,
 }
 
 impl MailboxRelayDispatchAuthority {
-    fn lock_link(&self) -> Result<Option<std::sync::MutexGuard<'_, FederationLinkState>>> {
-        self.lease.as_ref().map(|lease| {
-            let link = lease.channel.state.lock().expect("federation link mutex poisoned");
-            if link.incarnation.as_deref() != Some(&lease.incarnation)
-                || link.recorded_incarnation.as_deref() != Some(&lease.incarnation) {
-                return Err(relay_store_error("native relay wake link changed; obligation held"));
-            }
-            Ok(link)
-        }).transpose()
+    pub(crate) fn lock_link(
+        &self,
+    ) -> Result<Option<std::sync::MutexGuard<'_, FederationLinkState>>> {
+        self.lease
+            .as_ref()
+            .map(|lease| {
+                let link = lease
+                    .channel
+                    .state
+                    .lock()
+                    .expect("federation link mutex poisoned");
+                if link.incarnation.as_deref() != Some(&lease.incarnation)
+                    || link.recorded_incarnation.as_deref() != Some(&lease.incarnation)
+                {
+                    return Err(relay_store_error(
+                        "native relay wake link changed; obligation held",
+                    ));
+                }
+                Ok(link)
+            })
+            .transpose()
     }
 
-    fn validate_locked(&self, inner: &StateInner) -> Result<(), ApiError> {
+    pub(crate) fn validate_locked(&self, inner: &StateInner) -> Result<(), ApiError> {
         let current = federation_snapshot_locked(inner, &self.peer.peer.host_id)?;
         if !mailbox_relay_peer_current_locked(inner, &current, self.peer.enrollment_generation)
             || !same_mailbox_relay_enrollment(&self.peer, &current)
@@ -230,7 +327,7 @@ impl MailboxRelayDispatchAuthority {
         Ok(())
     }
 
-    fn lock(&self) -> Result<FederationMailboxAdmission<'_>> {
+    pub(crate) fn lock(&self) -> Result<FederationMailboxAdmission<'_>> {
         let link = self.lock_link()?;
         let inner = self.app.inner.lock().expect("state mutex poisoned");
         self.validate_locked(&inner)
@@ -243,7 +340,7 @@ impl MailboxRelayDispatchAuthority {
 }
 
 impl AppState {
-    fn prepare_front_mailbox_relay_authority(
+    pub(crate) fn prepare_front_mailbox_relay_authority(
         &self,
         session: &str,
     ) -> Result<Option<(String, MailboxRelayDispatchAuthority)>, ApiError> {
@@ -277,7 +374,7 @@ impl AppState {
         Ok(Some((id, authority)))
     }
 
-    fn validate_front_mailbox_relay_authority_locked(
+    pub(crate) fn validate_front_mailbox_relay_authority_locked(
         &self,
         inner: &StateInner,
         session: &str,
@@ -320,7 +417,7 @@ impl AppState {
         authority.validate_locked(inner)
     }
 
-    fn prepare_mailbox_relay_dispatch_authority(
+    pub(crate) fn prepare_mailbox_relay_dispatch_authority(
         &self,
         notification: &MailboxNotificationDelivery,
     ) -> Result<Option<MailboxRelayDispatchAuthority>, ApiError> {
@@ -344,7 +441,7 @@ impl AppState {
             .map(Some)
     }
 
-    fn mailbox_relay_dispatch_authority(
+    pub(crate) fn mailbox_relay_dispatch_authority(
         &self,
         wake: &MailboxRelayWake,
         peer: FederationPeerSnapshot,
@@ -384,7 +481,7 @@ impl AppState {
         Ok(authority)
     }
 
-    fn mailbox_relay_home_wake_peer(
+    pub(crate) fn mailbox_relay_home_wake_peer(
         &self,
         wake: &MailboxRelayWake,
     ) -> Result<FederationPeerSnapshot, ApiError> {
@@ -397,8 +494,10 @@ impl AppState {
         validate_mailbox_relay_wake_peer(wake, &peer, true).map_err(mailbox_api_error)?;
         let current = self.federation_peer_snapshot(&peer.peer.host_id)?;
         if !mailbox_relay_peer_current_locked(
-            &self.inner.lock().expect("state mutex poisoned"), &current, peer.enrollment_generation)
-            || !same_mailbox_relay_enrollment(&peer, &current)
+            &self.inner.lock().expect("state mutex poisoned"),
+            &current,
+            peer.enrollment_generation,
+        ) || !same_mailbox_relay_enrollment(&peer, &current)
         {
             return Err(ApiError::conflict(
                 "native relay home wake enrollment changed; obligation held",

@@ -43,12 +43,21 @@
 // `run_turn_blocking` / `run_codex_turn` / `run_acp_turn` dispatch and
 // shared helpers.
 
+use super::*;
+
 /// Shared recorder surface that every agent runtime parser drives.
 /// Each method persists one event into the session transcript.
-trait TurnRecorder {
+pub(crate) trait TurnRecorder {
     // Every provider tool kind participates in the native first-action rule.
-    fn native_tool_activity(&mut self, _key: Option<&str>, _is_command: bool) -> Result<()> { Ok(()) }
-    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, _frame: &Value) -> Result<()> {
+    fn native_tool_activity(&mut self, _key: Option<&str>, _is_command: bool) -> Result<()> {
+        Ok(())
+    }
+    fn native_tool_start(
+        &mut self,
+        key: Option<&str>,
+        is_command: bool,
+        _frame: &Value,
+    ) -> Result<()> {
         self.native_tool_activity(key, is_command)
     }
     /// Records the agent-native session/thread id discovered mid-turn so it can
@@ -205,7 +214,7 @@ trait TurnRecorder {
 /// structured pending payload, user-input questions, MCP elicitation
 /// requests, generic app requests) — these all register a pending interaction
 /// in state that the UI resolves by submitting an answer/decision.
-trait CodexTurnRecorder: TurnRecorder {
+pub(crate) trait CodexTurnRecorder: TurnRecorder {
     /// Records a Codex tool-call approval request and registers the pending
     /// approval payload so the resolver can route the user's decision back to
     /// the app server.
@@ -254,20 +263,20 @@ trait CodexTurnRecorder: TurnRecorder {
 /// handle (so it can be freely moved to a reader thread) and an independent
 /// `SessionRecorderState`. Used by the ACP reader thread, the Claude turn
 /// runner, and the shared Codex runtime's per-turn setup path.
-struct SessionRecorder {
+pub(crate) struct SessionRecorder {
     /// Streaming-text id + command/parallel-agent upsert keys for this turn.
-    recorder_state: SessionRecorderState,
+    pub(crate) recorder_state: SessionRecorderState,
     /// Local termal session id this recorder writes into.
-    session_id: String,
+    pub(crate) session_id: String,
     /// App state handle — cloned into each `recorder_*` call so the state
     /// mutex can be acquired fresh per event.
-    state: AppState,
+    pub(crate) state: AppState,
 }
 
 impl SessionRecorder {
     /// ACP may end a tool call with only a display title. Keep the actual
     /// command's presence separate so a title is never execution identity.
-    fn command_completed_with_reported_command(
+    pub(crate) fn command_completed_with_reported_command(
         &mut self,
         key: &str,
         command: &str,
@@ -277,12 +286,20 @@ impl SessionRecorder {
         exit: EngramCommandExit,
     ) -> Result<()> {
         recorder_command_completed_reported(
-            self, key, command, reported_command, output, status, Some(exit), false, false,
+            self,
+            key,
+            command,
+            reported_command,
+            output,
+            status,
+            Some(exit),
+            false,
+            false,
         )
     }
 
     /// Creates a new instance.
-    fn new(state: AppState, session_id: String) -> Self {
+    pub(crate) fn new(state: AppState, session_id: String) -> Self {
         Self {
             recorder_state: SessionRecorderState::default(),
             session_id,
@@ -292,7 +309,7 @@ impl SessionRecorder {
 
     /// Claude-specific approval entry point. Not on `TurnRecorder` because
     /// the Claude pending-approval payload type is distinct from Codex/ACP.
-    fn push_claude_approval(
+    pub(crate) fn push_claude_approval(
         &mut self,
         title: &str,
         command: &str,
@@ -319,7 +336,7 @@ impl SessionRecorder {
     /// the root parser's own text reconciliation still describes, even
     /// though `write` appended entries after it. Only the streaming message's
     /// identity is kept; everything `write` records stays recorded once.
-    fn keeping_streaming_text<T>(
+    pub(crate) fn keeping_streaming_text<T>(
         &mut self,
         write: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
@@ -331,13 +348,13 @@ impl SessionRecorder {
 
     /// Sets who produced what this recorder observes from now on: the
     /// Claude frame it is about to apply (`claude_outstanding_work.rs`).
-    fn set_observation_provenance(&mut self, provenance: EngramObservationProvenance) {
+    pub(crate) fn set_observation_provenance(&mut self, provenance: EngramObservationProvenance) {
         self.recorder_state.observation_provenance = provenance;
     }
 
     /// Keeps, across turn resets, the messages of the commands `keys` names
     /// (a Claude subagent's tool calls still pending), and of no others.
-    fn keep_command_messages<'a>(&mut self, keys: impl IntoIterator<Item = &'a String>) {
+    pub(crate) fn keep_command_messages<'a>(&mut self, keys: impl IntoIterator<Item = &'a String>) {
         self.recorder_state.kept_command_keys = keys.into_iter().cloned().collect();
     }
 
@@ -345,7 +362,7 @@ impl SessionRecorder {
     /// because the session runs unattended: a resolved (`Declined`,
     /// non-declinable) card carrying the parsed questions, with no pending
     /// claim — nothing is waiting for the browser.
-    fn push_claude_self_resolved_user_input(
+    pub(crate) fn push_claude_self_resolved_user_input(
         &mut self,
         title: &str,
         detail: &str,
@@ -373,7 +390,7 @@ impl SessionRecorder {
 
     /// Records a Claude AskUserQuestion permission request and retains its
     /// routing data until the browser submits every answer or skips it.
-    fn push_claude_user_input_request(
+    pub(crate) fn push_claude_user_input_request(
         &mut self,
         title: &str,
         detail: &str,
@@ -403,7 +420,10 @@ impl SessionRecorder {
 
     /// Uses the shared question card while retaining ACP's existing live
     /// request ownership, cancellation and runtime-replacement cleanup.
-    fn push_acp_user_input_request(&mut self, request: AcpPendingApproval) -> Result<()> {
+    pub(crate) fn push_acp_user_input_request(
+        &mut self,
+        request: AcpPendingApproval,
+    ) -> Result<()> {
         recorder_finish_streaming_text(self)?;
         let question = request
             .question
@@ -431,7 +451,7 @@ impl SessionRecorder {
     /// ACP-specific approval entry point. Mirrors `push_claude_approval` but
     /// registers the pending approval against the ACP runtime handle so the
     /// user's decision gets forwarded to the ACP agent's permission request.
-    fn push_acp_approval(
+    pub(crate) fn push_acp_approval(
         &mut self,
         title: &str,
         command: &str,
@@ -457,7 +477,7 @@ impl SessionRecorder {
 /// against any single-session recorder without caring whether the state
 /// handle is owned (`SessionRecorder`) or borrowed from an already-locked
 /// guard (`BorrowedSessionRecorder`). Each impl body is reused by both.
-trait SessionRecorderAccess {
+pub(crate) trait SessionRecorderAccess {
     /// Returns the `AppState` handle used to push messages + broadcast SSE.
     fn state(&self) -> &AppState;
     /// Returns the local termal session id this recorder targets.
@@ -992,7 +1012,15 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
     runtime_interrupted: bool,
 ) -> Result<()> {
     recorder_command_completed_reported(
-        recorder, key, command, Some(command), output, status, exit, runtime_output_cut, runtime_interrupted,
+        recorder,
+        key,
+        command,
+        Some(command),
+        output,
+        status,
+        exit,
+        runtime_output_cut,
+        runtime_interrupted,
     )
 }
 
@@ -1022,10 +1050,12 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     // A Running reply is not an end. A simple launcher's explicit
     // NotFinished reply may still contain its RUN locator; the observation
     // owner preserves that nonterminal exit and the original invocation.
-    if status != CommandStatus::Running
-        || EngramHost::is_nonterminal_launcher_reply(command, exit)
+    if status != CommandStatus::Running || EngramHost::is_nonterminal_launcher_reply(command, exit)
     {
-        let provenance = recorder.recorder_state_mut().native_tool_provenance.clone()
+        let provenance = recorder
+            .recorder_state_mut()
+            .native_tool_provenance
+            .clone()
             .unwrap_or_else(|| recorder.recorder_state_mut().observation_provenance.clone());
         state.end_native_declared_run(&session_id, &provenance, key, exit, runtime_interrupted);
         recorder.observe(EngramRecorderObservation::CommandFinished {
@@ -1153,18 +1183,18 @@ impl CodexTurnRecorder for SessionRecorder {
 /// shared-Codex session state stored in the app-server dispatcher). Reuses
 /// those borrows to avoid re-locking per event. Same recorder surface as
 /// `SessionRecorder`.
-struct BorrowedSessionRecorder<'a> {
+pub(crate) struct BorrowedSessionRecorder<'a> {
     /// Recorder state borrowed from the shared-Codex session map.
-    recorder_state: &'a mut SessionRecorderState,
+    pub(crate) recorder_state: &'a mut SessionRecorderState,
     /// Local termal session id this recorder targets.
-    session_id: &'a str,
+    pub(crate) session_id: &'a str,
     /// App state handle borrowed from the calling context.
-    state: &'a AppState,
+    pub(crate) state: &'a AppState,
 }
 
 impl<'a> BorrowedSessionRecorder<'a> {
     /// Creates a new instance.
-    fn new(
+    pub(crate) fn new(
         state: &'a AppState,
         session_id: &'a str,
         recorder_state: &'a mut SessionRecorderState,
@@ -1255,17 +1285,32 @@ impl CodexTurnRecorder for BorrowedSessionRecorder<'_> {
 // Wires `SessionRecorder` to the shared `TurnRecorder` surface by
 // delegating every method to the corresponding `recorder_*` free function.
 impl TurnRecorder for SessionRecorder {
-    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, frame: &Value) -> Result<()> {
+    fn native_tool_start(
+        &mut self,
+        key: Option<&str>,
+        is_command: bool,
+        frame: &Value,
+    ) -> Result<()> {
         self.native_tool_activity(key, is_command)?;
-        let provenance = self.recorder_state.native_tool_provenance.as_ref()
-            .unwrap_or(&self.recorder_state.observation_provenance).clone();
-        self.state.start_native_declared_run(&self.session_id, &provenance, key, is_command, frame);
+        let provenance = self
+            .recorder_state
+            .native_tool_provenance
+            .as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance)
+            .clone();
+        self.state
+            .start_native_declared_run(&self.session_id, &provenance, key, is_command, frame);
         Ok(())
     }
     fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
-        let provenance = self.recorder_state.native_tool_provenance.as_ref()
-            .unwrap_or(&self.recorder_state.observation_provenance).clone();
-        self.state.observe_declared_tool_activity(&self.session_id, &provenance, key, is_command);
+        let provenance = self
+            .recorder_state
+            .native_tool_provenance
+            .as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance)
+            .clone();
+        self.state
+            .observe_declared_tool_activity(&self.session_id, &provenance, key, is_command);
         Ok(())
     }
     /// Records external session.
@@ -1384,7 +1429,14 @@ impl TurnRecorder for SessionRecorder {
         runtime_interrupted: bool,
     ) -> Result<()> {
         recorder_command_completed(
-            self, key, command, output, status, Some(exit), runtime_output_cut, runtime_interrupted,
+            self,
+            key,
+            command,
+            output,
+            status,
+            Some(exit),
+            runtime_output_cut,
+            runtime_interrupted,
         )
     }
 
@@ -1414,17 +1466,32 @@ impl TurnRecorder for SessionRecorder {
 // Wires `BorrowedSessionRecorder` to the shared `TurnRecorder` surface —
 // same delegation pattern as the `SessionRecorder` impl above.
 impl TurnRecorder for BorrowedSessionRecorder<'_> {
-    fn native_tool_start(&mut self, key: Option<&str>, is_command: bool, frame: &Value) -> Result<()> {
+    fn native_tool_start(
+        &mut self,
+        key: Option<&str>,
+        is_command: bool,
+        frame: &Value,
+    ) -> Result<()> {
         self.native_tool_activity(key, is_command)?;
-        let provenance = self.recorder_state.native_tool_provenance.as_ref()
-            .unwrap_or(&self.recorder_state.observation_provenance).clone();
-        self.state.start_native_declared_run(&self.session_id, &provenance, key, is_command, frame);
+        let provenance = self
+            .recorder_state
+            .native_tool_provenance
+            .as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance)
+            .clone();
+        self.state
+            .start_native_declared_run(&self.session_id, &provenance, key, is_command, frame);
         Ok(())
     }
     fn native_tool_activity(&mut self, key: Option<&str>, is_command: bool) -> Result<()> {
-        let provenance = self.recorder_state.native_tool_provenance.as_ref()
-            .unwrap_or(&self.recorder_state.observation_provenance).clone();
-        self.state.observe_declared_tool_activity(&self.session_id, &provenance, key, is_command);
+        let provenance = self
+            .recorder_state
+            .native_tool_provenance
+            .as_ref()
+            .unwrap_or(&self.recorder_state.observation_provenance)
+            .clone();
+        self.state
+            .observe_declared_tool_activity(&self.session_id, &provenance, key, is_command);
         Ok(())
     }
     /// Records external session.
@@ -1543,7 +1610,14 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         runtime_interrupted: bool,
     ) -> Result<()> {
         recorder_command_completed(
-            self, key, command, output, status, Some(exit), runtime_output_cut, runtime_interrupted,
+            self,
+            key,
+            command,
+            output,
+            status,
+            Some(exit),
+            runtime_output_cut,
+            runtime_interrupted,
         )
     }
 
@@ -1576,7 +1650,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
 /// No SSE broadcast, no session transcript — the REPL stream is the
 /// transcript.
 #[derive(Default)]
-struct ReplPrinter {
+pub(crate) struct ReplPrinter {
     /// True while an `assistant> ` line is mid-emission; cleared by
     /// `finish_streaming_text` (which prints the trailing newline).
     assistant_stream_open: bool,

@@ -2,9 +2,11 @@
 // Owns redaction and attribution, not retry policy or authority settlement.
 // Extracted alongside the failure boundaries in engram_host_adapter.rs.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramCausalFailureClass {
+pub(crate) enum EngramCausalFailureClass {
     LocalState,
     Deadline,
     Transport,
@@ -16,7 +18,7 @@ enum EngramCausalFailureClass {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramRemoteApplication {
+pub(crate) enum EngramRemoteApplication {
     Unknown,
     NotStarted,
     /// This invocation committed no changes; earlier same-key attempts may have.
@@ -26,27 +28,27 @@ enum EngramRemoteApplication {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramCausalFailure {
+pub(crate) struct EngramCausalFailure {
     // Visibility is process-local; only the persistence clone clears this
     // before the exact message is acknowledged by the durable writer.
     #[serde(skip)]
-    publication_pending: bool,
-    operation: String,
-    failure_class: EngramCausalFailureClass,
-    original_code: Option<String>,
-    message: String,
-    boundary: String,
-    attempt_id: Option<String>,
-    remote_application: EngramRemoteApplication,
-    continuation_reason: String,
+    pub(crate) publication_pending: bool,
+    pub(crate) operation: String,
+    pub(crate) failure_class: EngramCausalFailureClass,
+    pub(crate) original_code: Option<String>,
+    pub(crate) message: String,
+    pub(crate) boundary: String,
+    pub(crate) attempt_id: Option<String>,
+    pub(crate) remote_application: EngramRemoteApplication,
+    pub(crate) continuation_reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    continuation_id: Option<String>,
+    pub(crate) continuation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    turn_generation: Option<u64>,
+    pub(crate) turn_generation: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    authority_fingerprint: Option<String>,
+    pub(crate) authority_fingerprint: Option<String>,
     #[serde(default)]
-    control_process: EngramControlProcessObservation,
+    pub(crate) control_process: EngramControlProcessObservation,
     /// The control transport proved this request never reached Engram
     /// (`EngramTransportError::request_never_sent`). It tells a request the
     /// transport could not hand over, whose possibly begun Begin keeps its
@@ -54,16 +56,16 @@ struct EngramCausalFailure {
     /// (`EngramTransportError::stopped_before_transport`). Saved with the
     /// cause, so a restored card keeps the distinction.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    transport_unsent: bool,
+    pub(crate) transport_unsent: bool,
 }
 
 /// The control sidecar a failure was observed on. Explicitly unavailable when
 /// the transport captured none, including every record saved before this.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct EngramControlProcessObservation {
-    identity: String,
-    exit_state: String,
+pub(crate) struct EngramControlProcessObservation {
+    pub(crate) identity: String,
+    pub(crate) exit_state: String,
 }
 
 impl Default for EngramControlProcessObservation {
@@ -87,7 +89,7 @@ impl From<&EngramControlProcessEvidence> for EngramControlProcessObservation {
 // Redact before persistence, not just during rendering. Known request secrets
 // are removed exactly; credential-shaped suffixes are deliberately withheld
 // rather than guessing the extent of a quoted/multiline credential value.
-fn engram_causal_text(text: &str, secrets: &[&str]) -> String {
+pub(crate) fn engram_causal_text(text: &str, secrets: &[&str]) -> String {
     let mut safe = text.to_owned();
     for secret in secrets.iter().filter(|secret| !secret.is_empty()) {
         safe = safe.replace(secret, "[redacted]");
@@ -140,7 +142,7 @@ fn engram_causal_text(text: &str, secrets: &[&str]) -> String {
 
 impl EngramCausalFailure {
     #[cfg(test)]
-    fn local(error: &EngramTransportError, operation: &str, boundary: &str) -> Self {
+    pub(crate) fn local(error: &EngramTransportError, operation: &str, boundary: &str) -> Self {
         let mut cause = Self::error(error, operation, None, &[]);
         if error.causal_failure.is_none() {
             cause.boundary = boundary.to_owned();
@@ -151,7 +153,7 @@ impl EngramCausalFailure {
         cause
     }
 
-    fn error(
+    pub(crate) fn error(
         error: &EngramTransportError,
         operation: &str,
         attempt: Option<&str>,
@@ -206,7 +208,7 @@ impl EngramCausalFailure {
         }
     }
 
-    fn request(error: &EngramTransportError, request: &EngramControlRequest) -> Self {
+    pub(crate) fn request(error: &EngramTransportError, request: &EngramControlRequest) -> Self {
         // This temporary value is never persisted. Do not attach a raw request
         // (which can contain prompts, reports or capabilities) to diagnostics.
         let Ok(wire) = serde_json::to_value(request) else {
@@ -233,10 +235,9 @@ impl EngramCausalFailure {
         }
         cause
     }
-
 }
 // Historical details that never acquired a durable publication proof stay
 // hidden. No retired admission or card-publication operation is resumed.
-fn engram_causal_unpublished(cause: &Option<EngramCausalFailure>) -> bool {
+pub(crate) fn engram_causal_unpublished(cause: &Option<EngramCausalFailure>) -> bool {
     cause.as_ref().is_none_or(|cause| cause.publication_pending)
 }

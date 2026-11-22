@@ -2,26 +2,36 @@
 // Does not own SSH/link lifetimes or replay mutations. New extensions of
 // federation_rpc.rs and federation_runtime.rs for central mailbox routing.
 
+use super::*;
+
 // A bridge recognizes this complete semicolon-delimited clause. Ordinary
 // explicit admission refusals must not acquire an unknown-outcome label.
-const FEDERATION_MAILBOX_UNKNOWN_OUTCOME: &str = "central mailbox outcome may be unknown";
+pub(crate) const FEDERATION_MAILBOX_UNKNOWN_OUTCOME: &str =
+    "central mailbox outcome may be unknown";
 
-fn federation_mailbox_unknown_outcome(status: StatusCode, detail: &str) -> ApiError {
-    let status = if status.is_server_error() { status } else { StatusCode::SERVICE_UNAVAILABLE };
-    ApiError::from_status(status, format!(
-        "{detail}; {FEDERATION_MAILBOX_UNKNOWN_OUTCOME}; retry the original request with the same idempotencyKey; no local mailbox fallback or sender queue was created"
-    ))
+pub(crate) fn federation_mailbox_unknown_outcome(status: StatusCode, detail: &str) -> ApiError {
+    let status = if status.is_server_error() {
+        status
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    ApiError::from_status(
+        status,
+        format!(
+            "{detail}; {FEDERATION_MAILBOX_UNKNOWN_OUTCOME}; retry the original request with the same idempotencyKey; no local mailbox fallback or sender queue was created"
+        ),
+    )
 }
 
 impl FederationRpcRoute {
-    fn mailbox_lease(&self) -> Option<&FederationLinkLease> {
+    pub(crate) fn mailbox_lease(&self) -> Option<&FederationLinkLease> {
         match self {
             Self::Mailbox(lease, _) => Some(lease),
             _ => None,
         }
     }
 
-    fn response_limit(&self) -> usize {
+    pub(crate) fn response_limit(&self) -> usize {
         match self {
             Self::HostUtilization(_) => host_utilization::RESPONSE_BYTES,
             Self::PromptPolicy(_, _) => REMOTE_PROMPT_STATUS_BYTES,
@@ -34,12 +44,17 @@ impl FederationRpcRoute {
 
     // Only used after starting HTTP. A central append can have committed even
     // when its reply cannot be read, decoded, allocated or accepted locally.
-    fn response_failure(&self, error: ApiError) -> ApiError {
+    pub(crate) fn response_failure(&self, error: ApiError) -> ApiError {
         if let Self::Mailbox(_, request) = self {
-            federation_mailbox_read_advice(request,
-                federation_mailbox_unknown_outcome(error.status, &error.message))
+            federation_mailbox_read_advice(
+                request,
+                federation_mailbox_unknown_outcome(error.status, &error.message),
+            )
         } else if matches!(self, Self::MailboxRelay(_, _)) {
-            federation_mailbox_unknown_outcome(error.status, "native mailbox relay transport/response unavailable")
+            federation_mailbox_unknown_outcome(
+                error.status,
+                "native mailbox relay transport/response unavailable",
+            )
         } else if matches!(self, Self::Binding(_, _)) {
             federation_binding_unknown_outcome()
         } else if matches!(self, Self::PromptPolicy(_, _)) {
@@ -50,7 +65,7 @@ impl FederationRpcRoute {
     }
 }
 
-fn federation_mailbox_rpc_error(status: StatusCode) -> ApiError {
+pub(crate) fn federation_mailbox_rpc_error(status: StatusCode) -> ApiError {
     let message = match status {
         StatusCode::BAD_REQUEST => {
             "central mailbox request refused; check protocol, participant and limits"
@@ -63,8 +78,12 @@ fn federation_mailbox_rpc_error(status: StatusCode) -> ApiError {
         StatusCode::PAYLOAD_TOO_LARGE => "central mailbox request exceeds negotiated size",
         StatusCode::LOCKED => "central mailbox persistence is settling; retry",
         StatusCode::TOO_MANY_REQUESTS => "central mailbox RPC limit reached; retry",
-        _ => return federation_mailbox_unknown_outcome(
-            StatusCode::SERVICE_UNAVAILABLE, "central mailbox response unavailable"),
+        _ => {
+            return federation_mailbox_unknown_outcome(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "central mailbox response unavailable",
+            );
+        }
     };
     ApiError::from_status(status, message)
 }

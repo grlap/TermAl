@@ -19,6 +19,8 @@
 // names in `engram_check_recognition.rs`, which held for TermAl's launcher
 // only.
 
+use super::*;
+
 /// The test stages of a request record whose stages give no `kind`: TermAl's
 /// own launcher's names for them.
 const ENGRAM_LAUNCHER_FULL_TEST_STAGES: &[&str] = &["rust-tests", "vitest"];
@@ -29,7 +31,7 @@ const ENGRAM_LAUNCHER_FULL_TEST_STAGES: &[&str] = &["rust-tests", "vitest"];
 /// that gives kinds but marks no stage `test` has none, and neither has one
 /// with no stages, so a run of either is never credited as a passed test
 /// check.
-fn engram_launcher_test_stages(request: &Value) -> Vec<String> {
+pub(crate) fn engram_launcher_test_stages(request: &Value) -> Vec<String> {
     let stages = request
         .get("stages")
         .and_then(Value::as_array)
@@ -63,7 +65,7 @@ fn engram_launcher_test_stages(request: &Value) -> Vec<String> {
 /// (`engram_launcher_focused_record_passed`), else no stage, so the summary's
 /// own text never earns credit. Reads the file system, so never under the
 /// state lock.
-fn engram_launcher_output_test_stages(output: &str) -> Vec<String> {
+pub(crate) fn engram_launcher_output_test_stages(output: &str) -> Vec<String> {
     let Some(named) = engram_launcher_output_run(output) else {
         return ENGRAM_LAUNCHER_FULL_TEST_STAGES
             .iter()
@@ -84,7 +86,9 @@ fn engram_launcher_output_test_stages(output: &str) -> Vec<String> {
         let verdict_is_this_runs_pass =
             engram_launcher_first_verdict(output) == Some(("PASS", run, "exit=0"));
         return read("results.json")
-            .filter(|results| verdict_is_this_runs_pass && engram_launcher_focused_record_passed(results))
+            .filter(|results| {
+                verdict_is_this_runs_pass && engram_launcher_focused_record_passed(results)
+            })
             .map(|_| vec![ENGRAM_LAUNCHER_FOCUSED_STAGE.to_owned()])
             .unwrap_or_default();
     }
@@ -136,7 +140,7 @@ fn engram_read_launcher_run_record(directory: &FsPath, run: &str, name: &str) ->
 /// after the summary line), prints `FAIL RUN exit=1` but tested nothing. A
 /// `results:` line of another run, printed inside a stage's diagnostics, is
 /// not this run's. Reads the file system, so never under the state lock.
-fn engram_launcher_output_ran_no_stage(output: &str) -> bool {
+pub(crate) fn engram_launcher_output_ran_no_stage(output: &str) -> bool {
     let Some(Some((directory, run))) = engram_launcher_output_run(output) else {
         return false;
     };
@@ -147,7 +151,7 @@ fn engram_launcher_output_ran_no_stage(output: &str) -> bool {
 
 /// Whether `results`, a launcher run's terminal record, says the run ran no
 /// stage: it ended failed and lists at least one stage, every one `unrun`.
-fn engram_launcher_record_ran_no_stage(results: &Value) -> bool {
+pub(crate) fn engram_launcher_record_ran_no_stage(results: &Value) -> bool {
     results.get("state").and_then(Value::as_str) == Some("failed")
         && results
             .get("stages")
@@ -163,16 +167,18 @@ fn engram_launcher_record_ran_no_stage(results: &Value) -> bool {
 /// The first verdict line of a launcher summary, `PASS|FAIL RUN exit=CODE`,
 /// as its three words: the summary prints its own verdict before any stage
 /// diagnostics.
-fn engram_launcher_first_verdict(output: &str) -> Option<(&str, &str, &str)> {
+pub(crate) fn engram_launcher_first_verdict(output: &str) -> Option<(&str, &str, &str)> {
     output.lines().find_map(engram_launcher_verdict)
 }
 
 /// `line` as a launcher verdict, `PASS|FAIL RUN exit=CODE`, in its three
 /// words. A launcher's refusal before its run starts, `FAIL launcher: …`, is
 /// none.
-fn engram_launcher_verdict(line: &str) -> Option<(&str, &str, &str)> {
+pub(crate) fn engram_launcher_verdict(line: &str) -> Option<(&str, &str, &str)> {
     let mut words = line.split_whitespace();
-    let verdict = words.next().filter(|word| matches!(*word, "PASS" | "FAIL"))?;
+    let verdict = words
+        .next()
+        .filter(|word| matches!(*word, "PASS" | "FAIL"))?;
     let run = words.next()?;
     let exit = words.next().filter(|word| word.starts_with("exit="))?;
     words.next().is_none().then_some((verdict, run, exit))
@@ -183,7 +189,7 @@ const ENGRAM_LAUNCHER_FOCUSED_STAGE: &str = "focused";
 
 /// Whether `request` is a focused run's record: not a full gate, with exactly
 /// one stage, named `focused`.
-fn engram_launcher_is_focused_request(request: &Value) -> bool {
+pub(crate) fn engram_launcher_is_focused_request(request: &Value) -> bool {
     let stages = request.get("stages").and_then(Value::as_array);
     request.get("full").and_then(Value::as_bool) == Some(false)
         && stages.is_some_and(|stages| {
@@ -201,7 +207,7 @@ fn engram_launcher_is_focused_request(request: &Value) -> bool {
 /// project's launcher), not a run that passed nothing, so its holder is told
 /// what is missing instead of that no test passed.
 #[cfg(test)]
-fn engram_focused_stage_line_missing(
+pub(crate) fn engram_focused_stage_line_missing(
     check: &EngramCheckCommand,
     result_lines: &[String],
     launcher_test_stages: &[String],

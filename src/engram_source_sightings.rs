@@ -2,14 +2,19 @@
 // requests and unknown outcomes, survives without a grant, continuation,
 // admission, replay, settlement or accounting implementation.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
-struct EngramSourceSightingOwner(Value);
+pub(crate) struct EngramSourceSightingOwner(pub(crate) Value);
 
 impl EngramSourceSightingOwner {
     // Exact history readback only; this does not release a provider or turn.
-    fn matches_metadata(&self, metadata: &PersistedState) -> bool {
-        metadata.engram_source_sightings.iter().any(|stored| stored == self)
+    pub(crate) fn matches_metadata(&self, metadata: &PersistedState) -> bool {
+        metadata
+            .engram_source_sightings
+            .iter()
+            .any(|stored| stored == self)
     }
 }
 

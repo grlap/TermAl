@@ -1,18 +1,20 @@
-const TERMAL_DELEGATION_MCP_SERVER_NAME: &str = "termal-delegation";
-const TERMAL_SESSION_ID_ENV: &str = "TERMAL_SESSION_ID";
-const TERMAL_BASE_URL_ENV: &str = "TERMAL_BASE_URL";
-const TERMAL_CLI_ENV: &str = "TERMAL_CLI";
-const TERMAL_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
+use super::*;
+
+pub(crate) const TERMAL_DELEGATION_MCP_SERVER_NAME: &str = "termal-delegation";
+pub(crate) const TERMAL_SESSION_ID_ENV: &str = "TERMAL_SESSION_ID";
+pub(crate) const TERMAL_BASE_URL_ENV: &str = "TERMAL_BASE_URL";
+pub(crate) const TERMAL_CLI_ENV: &str = "TERMAL_CLI";
+pub(crate) const TERMAL_AGENT_PROCESS_ENV_NAMES: [&str; 3] =
     [TERMAL_SESSION_ID_ENV, TERMAL_BASE_URL_ENV, TERMAL_CLI_ENV];
-const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME: &str = "termal_submit_review_result";
-const TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME: &str =
+pub(crate) const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME: &str = "termal_submit_review_result";
+pub(crate) const TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_submit_review_result";
-const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_DESCRIPTION: &str = "Submit the current delegated review result through TermAl's strict, durable mailbox protocol. TermAl derives identity, parent routing, topic, and idempotency. The backend accepts only current reviewer children and validates the complete payload before storing it.";
+pub(crate) const TERMAL_SUBMIT_REVIEW_RESULT_TOOL_DESCRIPTION: &str = "Submit the current delegated review result through TermAl's strict, durable mailbox protocol. TermAl derives identity, parent routing, topic, and idempotency. The backend accepts only current reviewer children and validates the complete payload before storing it.";
 const TERMAL_DELEGATION_MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_INTERVAL_MS: u64 = 1000;
-const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_TIMEOUT_MS: u64 = 300_000;
+pub(crate) const TERMAL_DELEGATION_MCP_DEFAULT_WAIT_TIMEOUT_MS: u64 = 300_000;
 const TERMAL_DELEGATION_MCP_MAX_WAIT_TIMEOUT_MS: u64 = 1_800_000;
-const TERMAL_DELEGATION_MCP_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const TERMAL_DELEGATION_MCP_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Clause shape of the typed storage-busy rejection the backend emits before
 /// a write transaction begins or after a failed SQLite commit that remains
 /// rollback-safe. A message carries the structural no-commit guarantee only
@@ -62,7 +64,7 @@ const TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET: Duration = Duration::from
 /// parent/child link; classifying one here never grants arbitrary mailbox or
 /// MCP access.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DelegationControlPlaneCapability {
+pub(crate) enum DelegationControlPlaneCapability {
     SubmitReviewResult,
     ReviewFreeze,
     ReviewIdentity,
@@ -70,7 +72,7 @@ enum DelegationControlPlaneCapability {
     ReadAcceptanceEvidence,
 }
 
-fn delegation_control_plane_capability_for_claude_tool_name(
+pub(crate) fn delegation_control_plane_capability_for_claude_tool_name(
     tool_name: &str,
 ) -> Option<DelegationControlPlaneCapability> {
     // A bare MCP tool name does not identify its server. Claude may have other
@@ -100,7 +102,7 @@ fn delegation_control_plane_capability_for_claude_tool_name(
     }
 }
 
-fn delegation_control_plane_capability_for_codex_elicitation(
+pub(crate) fn delegation_control_plane_capability_for_codex_elicitation(
     request: &McpElicitationRequestPayload,
 ) -> Option<DelegationControlPlaneCapability> {
     if request.server_name != TERMAL_DELEGATION_MCP_SERVER_NAME {
@@ -147,9 +149,10 @@ fn delegation_control_plane_capability_for_codex_elicitation(
     if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
         && metadata.get("tool_description").and_then(Value::as_str)
             == Some(TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION)
-        && metadata.get("tool_params").is_some_and(|value|
+        && metadata.get("tool_params").is_some_and(|value| {
             serde_json::from_value::<ReadAcceptanceEvidenceRequest>(value.clone())
-                .is_ok_and(|request| request.validate().is_ok()))
+                .is_ok_and(|request| request.validate().is_ok())
+        })
     {
         return Some(DelegationControlPlaneCapability::ReadAcceptanceEvidence);
     }
@@ -164,7 +167,7 @@ fn delegation_control_plane_capability_for_codex_elicitation(
     .then_some(DelegationControlPlaneCapability::SubmitReviewResult)
 }
 
-fn parse_delegation_mcp_mode_args(args: impl Iterator<Item = String>) -> Result<Mode> {
+pub(crate) fn parse_delegation_mcp_mode_args(args: impl Iterator<Item = String>) -> Result<Mode> {
     let mut parent_session_id: Option<String> = None;
     let mut base_url: Option<String> = None;
     let mut args = args.peekable();
@@ -201,7 +204,7 @@ fn parse_delegation_mcp_mode_args(args: impl Iterator<Item = String>) -> Result<
     })
 }
 
-fn default_termal_http_base_url() -> String {
+pub(crate) fn default_termal_http_base_url() -> String {
     if let Ok(value) = std::env::var(TERMAL_BASE_URL_ENV) {
         let value = value.trim();
         if !value.is_empty() {
@@ -215,7 +218,7 @@ fn default_termal_http_base_url() -> String {
     format!("http://127.0.0.1:{port}")
 }
 
-fn normalize_termal_http_base_url(base_url: impl AsRef<str>) -> String {
+pub(crate) fn normalize_termal_http_base_url(base_url: impl AsRef<str>) -> String {
     let base_url = base_url.as_ref().trim().trim_end_matches('/');
     if base_url.is_empty() {
         default_termal_http_base_url()
@@ -235,10 +238,10 @@ fn termal_delegation_mcp_args(parent_session_id: &str, base_url: &str) -> Vec<St
 }
 
 #[derive(Clone, Debug, Serialize)]
-struct TermalDelegationMcpStdioConfig {
-    command: String,
-    args: Vec<String>,
-    env: BTreeMap<String, String>,
+pub(crate) struct TermalDelegationMcpStdioConfig {
+    pub(crate) command: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -267,7 +270,7 @@ fn termal_delegation_mcp_stdio_config_with_command(
     }
 }
 
-fn termal_delegation_mcp_current_exe() -> Result<String> {
+pub(crate) fn termal_delegation_mcp_current_exe() -> Result<String> {
     let executable = std::env::current_exe()
         .context("failed to resolve TermAl executable for delegation MCP")?;
     // Preserve the ordinary path for clients that can outlive a host restart.
@@ -280,7 +283,7 @@ fn termal_delegation_mcp_current_exe() -> Result<String> {
     Ok(executable.to_string_lossy().into_owned())
 }
 
-fn termal_agent_process_env_with_command(
+pub(crate) fn termal_agent_process_env_with_command(
     command: &str,
     session_id: &str,
     base_url: &str,
@@ -295,14 +298,17 @@ fn termal_agent_process_env_with_command(
     ])
 }
 
-fn termal_agent_process_env(session_id: &str, base_url: &str) -> Result<BTreeMap<String, String>> {
+pub(crate) fn termal_agent_process_env(
+    session_id: &str,
+    base_url: &str,
+) -> Result<BTreeMap<String, String>> {
     let command = termal_delegation_mcp_current_exe()?;
     Ok(termal_agent_process_env_with_command(
         &command, session_id, base_url,
     ))
 }
 
-fn termal_delegation_mcp_claude_config_json_with_command(
+pub(crate) fn termal_delegation_mcp_claude_config_json_with_command(
     command: &str,
     parent_session_id: &str,
     base_url: &str,
@@ -319,7 +325,7 @@ fn termal_delegation_mcp_claude_config_json_with_command(
     .to_string()
 }
 
-fn termal_delegation_mcp_acp_servers_with_command(
+pub(crate) fn termal_delegation_mcp_acp_servers_with_command(
     command: &str,
     parent_session_id: &str,
     base_url: &str,
@@ -354,7 +360,7 @@ fn mcp_acp_server_from_stdio_config<'a>(
     }
 }
 
-fn termal_delegation_mcp_codex_config_with_command(
+pub(crate) fn termal_delegation_mcp_codex_config_with_command(
     command: &str,
     parent_session_id: &str,
     base_url: &str,
@@ -423,7 +429,7 @@ fn load_seeded_shared_codex_thread_config(codex_home: &FsPath) -> Result<SeededC
 }
 
 impl AppState {
-    fn set_local_http_base_url(&self, base_url: String) {
+    pub(crate) fn set_local_http_base_url(&self, base_url: String) {
         *self
             .local_http_base_url
             .lock()
@@ -431,7 +437,7 @@ impl AppState {
             Some(normalize_termal_http_base_url(base_url));
     }
 
-    fn local_http_base_url(&self) -> String {
+    pub(crate) fn local_http_base_url(&self) -> String {
         self.local_http_base_url
             .lock()
             .expect("local HTTP base URL mutex poisoned")
@@ -440,7 +446,10 @@ impl AppState {
     }
 
     #[allow(dead_code)]
-    fn termal_delegation_mcp_claude_config_json(&self, parent_session_id: &str) -> Result<String> {
+    pub(crate) fn termal_delegation_mcp_claude_config_json(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<String> {
         let engram = self.engram_mcp_stdio_config_for_session(parent_session_id);
         self.termal_delegation_mcp_claude_config_json_with_engram(
             parent_session_id,
@@ -451,7 +460,7 @@ impl AppState {
     /// Composes Claude's MCP configuration from a caller-owned Engram
     /// descriptor. Runtime startup invokes this while it already owns the
     /// global state mutex, so this helper must not look up session state.
-    fn termal_delegation_mcp_claude_config_json_with_engram(
+    pub(crate) fn termal_delegation_mcp_claude_config_json_with_engram(
         &self,
         parent_session_id: &str,
         engram: Option<&TermalDelegationMcpStdioConfig>,
@@ -480,7 +489,10 @@ impl AppState {
     }
 
     #[allow(dead_code)]
-    fn termal_delegation_mcp_acp_servers(&self, parent_session_id: &str) -> Result<Value> {
+    pub(crate) fn termal_delegation_mcp_acp_servers(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Value> {
         self.termal_delegation_mcp_acp_servers_with_engram(
             parent_session_id,
             self.engram_mcp_stdio_config_for_session(parent_session_id),
@@ -488,7 +500,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn termal_delegation_mcp_acp_servers_for_runtime(
+    pub(crate) fn termal_delegation_mcp_acp_servers_for_runtime(
         &self,
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
@@ -501,7 +513,7 @@ impl AppState {
         )
     }
 
-    fn termal_delegation_mcp_acp_servers_for_runtime_snapshot(
+    pub(crate) fn termal_delegation_mcp_acp_servers_for_runtime_snapshot(
         &self,
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
@@ -538,7 +550,10 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn termal_delegation_mcp_codex_config(&self, parent_session_id: &str) -> Result<Value> {
+    pub(crate) fn termal_delegation_mcp_codex_config(
+        &self,
+        parent_session_id: &str,
+    ) -> Result<Value> {
         self.termal_delegation_mcp_codex_config_with_engram(
             parent_session_id,
             self.engram_mcp_stdio_config_for_session(parent_session_id),
@@ -547,7 +562,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn termal_delegation_mcp_codex_config_for_runtime(
+    pub(crate) fn termal_delegation_mcp_codex_config_for_runtime(
         &self,
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
@@ -559,7 +574,7 @@ impl AppState {
         )
     }
 
-    fn termal_delegation_mcp_codex_config_for_shared_runtime(
+    pub(crate) fn termal_delegation_mcp_codex_config_for_shared_runtime(
         &self,
         parent_session_id: &str,
         runtime_token: &RuntimeToken,
@@ -642,7 +657,7 @@ impl AppState {
         session_is_acceptance_evaluator_child_locked(&inner, session_id)
     }
 
-    fn termal_delegation_mcp_codex_config_with_engram(
+    pub(crate) fn termal_delegation_mcp_codex_config_with_engram(
         &self,
         parent_session_id: &str,
         engram: Option<TermalDelegationMcpStdioConfig>,
@@ -758,7 +773,7 @@ impl AppState {
 /// server. A thread-scoped shell policy gives each start/resume request the
 /// required TermAl identity and any present Engram identity while retaining
 /// unrelated policy entries a future config composer may add.
-fn merge_owned_agent_shell_env_into_codex_config(
+pub(crate) fn merge_owned_agent_shell_env_into_codex_config(
     config: &mut Value,
     source_env: &BTreeMap<String, String>,
     owned_names: &[&str],
@@ -810,7 +825,7 @@ fn merge_owned_agent_shell_env_into_codex_config(
     Ok(())
 }
 
-fn remove_owned_agent_shell_env_collisions(
+pub(crate) fn remove_owned_agent_shell_env_collisions(
     explicit: &mut serde_json::Map<String, Value>,
     owned_names: &[&str],
     case_insensitive: bool,
@@ -826,11 +841,11 @@ fn remove_owned_agent_shell_env_collisions(
     });
 }
 
-struct TermalDelegationMcpBridge {
-    serving_session_id: String,
-    base_url: String,
-    client: reqwest::blocking::Client,
-    request_timeout: Duration,
+pub(crate) struct TermalDelegationMcpBridge {
+    pub(crate) serving_session_id: String,
+    pub(crate) base_url: String,
+    pub(crate) client: reqwest::blocking::Client,
+    pub(crate) request_timeout: Duration,
     // A caller classified as a root by both `is_root_peer_session` link
     // sources cannot become a delegation child under the same session id.
     // Repair may restore a missing parent marker only for a session already
@@ -839,12 +854,12 @@ struct TermalDelegationMcpBridge {
     // `delegation_mcp_indexed_child_with_null_marker_is_not_a_root_peer`.
     // Revisit this lifetime cache before introducing root-to-child adoption,
     // conversion, or id reuse.
-    caller_is_delegation_child: OnceLock<bool>,
+    pub(crate) caller_is_delegation_child: OnceLock<bool>,
     /// Derived from the same state snapshot as caller kind so explorer and
     /// worker children never receive the reviewer-only submission tool.
     caller_requires_structured_review_result: OnceLock<bool>,
     caller_allows_review_freeze: OnceLock<bool>,
-    caller_allows_review_identity: OnceLock<bool>,
+    pub(crate) caller_allows_review_identity: OnceLock<bool>,
     /// Same snapshot again: only an evaluator child sees the submission tool.
     caller_allows_acceptance_evaluation: OnceLock<bool>,
     // Sleep hook for explicit safe-replay retries. Production uses
@@ -855,20 +870,20 @@ struct TermalDelegationMcpBridge {
     /// What a call that delivers a turn inline may spend beyond an ordinary
     /// request (`termal_delegation_turn_delivery_budget`); tests may inject
     /// a smaller one so a withheld response does not hold them for it.
-    turn_delivery_budget: Duration,
+    pub(crate) turn_delivery_budget: Duration,
 }
 
 /// Root-versus-child classification of the session a bridge serves. The
 /// reviewer-only capability derived alongside it stays in the bridge cache;
 /// callers outside the MCP gate only need the root/child answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CallerClassification {
-    is_delegation_child: bool,
+pub(crate) struct CallerClassification {
+    pub(crate) is_delegation_child: bool,
 }
 
 /// Why a caller could not be classified. Neither variant is cached.
 #[derive(Debug, PartialEq, Eq)]
-enum CallerClassificationFailure {
+pub(crate) enum CallerClassificationFailure {
     /// `/api/state` could not be fetched or decoded (detail is the transport
     /// or response error text).
     BackendUnavailable(String),
@@ -876,7 +891,7 @@ enum CallerClassificationFailure {
     SessionNotVisible,
 }
 
-fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
+pub(crate) fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
     state
         .get("delegations")
         .and_then(Value::as_array)
@@ -887,7 +902,7 @@ fn delegation_child_session_ids(state: &Value) -> HashSet<&str> {
         .collect()
 }
 
-fn delegation_child_requires_structured_review_result(
+pub(crate) fn delegation_child_requires_structured_review_result(
     state: &Value,
     child_session_id: &str,
 ) -> bool {
@@ -906,7 +921,7 @@ fn delegation_child_requires_structured_review_result(
         })
 }
 
-fn is_root_peer_session(session: &Value, delegation_child_ids: &HashSet<&str>) -> bool {
+pub(crate) fn is_root_peer_session(session: &Value, delegation_child_ids: &HashSet<&str>) -> bool {
     session
         .get("parentDelegationId")
         .map_or(true, Value::is_null)
@@ -919,7 +934,7 @@ fn is_root_peer_session(session: &Value, delegation_child_ids: &HashSet<&str>) -
 }
 
 impl TermalDelegationMcpBridge {
-    fn new(serving_session_id: String, base_url: String) -> Result<Self> {
+    pub(crate) fn new(serving_session_id: String, base_url: String) -> Result<Self> {
         Self::new_with_timeout(
             serving_session_id,
             base_url,
@@ -927,7 +942,7 @@ impl TermalDelegationMcpBridge {
         )
     }
 
-    fn new_with_timeout(
+    pub(crate) fn new_with_timeout(
         serving_session_id: String,
         base_url: String,
         request_timeout: Duration,
@@ -963,7 +978,7 @@ impl TermalDelegationMcpBridge {
         self
     }
 
-    fn handle_message(&self, message: Value) -> Result<Option<Value>> {
+    pub(crate) fn handle_message(&self, message: Value) -> Result<Option<Value>> {
         if let Some(batch) = message.as_array() {
             let mut responses = Vec::new();
             for item in batch {
@@ -1018,7 +1033,10 @@ impl TermalDelegationMcpBridge {
                 )
             }
             Err(err) => {
-                if let Some(failure) = err.downcast_ref::<TermalDelegationApiError>().and_then(|error| error.output_limit) {
+                if let Some(failure) = err
+                    .downcast_ref::<TermalDelegationApiError>()
+                    .and_then(|error| error.output_limit)
+                {
                     let envelope = failure.envelope();
                     let mut result = mcp_tool_text_result(&envelope, true);
                     result["structuredContent"] = envelope;
@@ -1030,7 +1048,7 @@ impl TermalDelegationMcpBridge {
         }))
     }
 
-    fn handle_tool_call(&self, params: Value) -> Result<Value> {
+    pub(crate) fn handle_tool_call(&self, params: Value) -> Result<Value> {
         let name = required_string(params.get("name"), "tool name")?;
         let arguments = params
             .get("arguments")
@@ -1061,8 +1079,11 @@ impl TermalDelegationMcpBridge {
         if name == TERMAL_REVIEW_FREEZE_TOOL_NAME && !self.caller_allows_review_freeze() {
             bail!("`{name}` is available only to a read-only reviewer child");
         }
-        if matches!(name.as_str(), TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME | TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME)
-            && !self.caller_allows_acceptance_evaluation()
+        if matches!(
+            name.as_str(),
+            TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
+                | TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME
+        ) && !self.caller_allows_acceptance_evaluation()
         {
             bail!("`{name}` is available only to an acceptance evaluator child");
         }
@@ -1105,7 +1126,7 @@ impl TermalDelegationMcpBridge {
         Ok(delegation_mcp_tool_result(&name, &result))
     }
 
-    fn tool_spawn_session(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_spawn_session(&self, arguments: Value) -> Result<Value> {
         let include_session = match arguments.get("includeSession") {
             None => false,
             Some(Value::Bool(value)) => *value,
@@ -1172,7 +1193,7 @@ impl TermalDelegationMcpBridge {
         ))
     }
 
-    fn tool_evaluate_acceptance(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_evaluate_acceptance(&self, arguments: Value) -> Result<Value> {
         let mut body = serde_json::Map::new();
         body.insert(
             "workRef".to_owned(),
@@ -1216,13 +1237,16 @@ impl TermalDelegationMcpBridge {
     }
 
     fn tool_read_acceptance_evidence(&self, arguments: Value) -> Result<Value> {
-        let path = format!("/api/sessions/{}/acceptance-evidence", self.serving_session_id);
+        let path = format!(
+            "/api/sessions/{}/acceptance-evidence",
+            self.serving_session_id
+        );
         // The host's logical read key coalesces retries; this bridge never
         // substitutes another key or restarts the evidence scan.
         self.post_long_call(DelegationLongCall::EvidenceRead, &path, &arguments)
     }
 
-    fn tool_submit_acceptance_evaluation(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_submit_acceptance_evaluation(&self, arguments: Value) -> Result<Value> {
         let path = format!(
             "/api/sessions/{}/acceptance-evaluation",
             self.serving_session_id
@@ -1452,7 +1476,11 @@ impl TermalDelegationMcpBridge {
         )
     }
 
-    fn followup_request(&self, path: &str, body: &Value) -> reqwest::blocking::RequestBuilder {
+    pub(crate) fn followup_request(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> reqwest::blocking::RequestBuilder {
         // Single attempt: this operation re-arms a delegation and is NOT safe
         // to replay blindly. Allow all serial recovery waits before the normal
         // HTTP allowance for admission/persistence. Contended recovery fails
@@ -1473,7 +1501,7 @@ impl TermalDelegationMcpBridge {
         )
     }
 
-    fn tool_send_to_session(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_send_to_session(&self, arguments: Value) -> Result<Value> {
         // Keep both id and name forms within the same conservative identifier grammar.
         // A session NAME containing `/`, `\`, `?`, `#` or `%` is rejected here rather than
         // resolved; callers target such a session by its id (termal_list_sessions shows it).
@@ -1549,7 +1577,7 @@ impl TermalDelegationMcpBridge {
         Ok(response)
     }
 
-    fn tool_list_mailboxes(&self, _arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_list_mailboxes(&self, _arguments: Value) -> Result<Value> {
         let mailboxes = self.get_json_with_safe_replay(&format!(
             "/api/sessions/{}/mailboxes?includeRelayAvailability=true",
             self.serving_session_id
@@ -1665,7 +1693,7 @@ impl TermalDelegationMcpBridge {
         serde_json::to_value(&receipt).context("failed to re-encode coordination board receipt")
     }
 
-    fn tool_read_mailbox(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_read_mailbox(&self, arguments: Value) -> Result<Value> {
         let mailbox_id = required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
         let after_sequence = arguments
             .get("afterSequence")
@@ -1717,7 +1745,7 @@ impl TermalDelegationMcpBridge {
         Ok(result)
     }
 
-    fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_read_mailbox_message(&self, arguments: Value) -> Result<Value> {
         let message_id = required_path_identifier(arguments.get("messageId"), "messageId")?;
         self.get_json_with_safe_replay(&format!(
             "/api/sessions/{}/mailbox-messages/{}",
@@ -1725,7 +1753,7 @@ impl TermalDelegationMcpBridge {
         ))
     }
 
-    fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_acknowledge_mailbox(&self, arguments: Value) -> Result<Value> {
         let mailbox_id = required_path_identifier(arguments.get("mailboxId"), "mailboxId")?;
         let no_continuation = arguments
             .get("noContinuation")
@@ -1798,7 +1826,7 @@ impl TermalDelegationMcpBridge {
     /// host/native locator through authenticated relay; hidden/child/missing targets are refused.
     /// Names still require
     /// the live root-session inventory for case-insensitive and ambiguity-aware resolution.
-    fn resolve_session_reference(&self, reference: &str) -> Result<String> {
+    pub(crate) fn resolve_session_reference(&self, reference: &str) -> Result<String> {
         if let Some(handle) = mailbox_reference_handle(reference)? {
             let value = self.get_json(&format!(
                 "/api/sessions/{}/mailbox-references/{handle}/resolve",
@@ -1871,9 +1899,13 @@ impl TermalDelegationMcpBridge {
                         Ok(FederationMailboxAlias::HostNative { .. })
                     )
                 {
-                    bail!("display-name send refused before saving; use exact native target `{native}`, or the exact domain principal id for intentional domain delivery");
+                    bail!(
+                        "display-name send refused before saving; use exact native target `{native}`, or the exact domain principal id for intentional domain delivery"
+                    );
                 }
-                bail!("display-name send refused before saving; no native route is listed for this peer from this host. For intentional domain delivery use exact principal `{target}`; domain delivery does not guarantee a native wake");
+                bail!(
+                    "display-name send refused before saving; no native route is listed for this peer from this host. For intentional domain delivery use exact principal `{target}`; domain delivery does not guarantee a native wake"
+                );
             }
             return Ok(target);
         }
@@ -1933,7 +1965,7 @@ impl TermalDelegationMcpBridge {
         }
     }
 
-    fn tool_list_sessions(&self, _arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_list_sessions(&self, _arguments: Value) -> Result<Value> {
         // Peer discovery: resolve a session by name to its id for termal_send_to_session.
         // /api/state is metadata-only (no transcripts), so this is a cheap summary read.
         let state = self.get_json("/api/state")?;
@@ -2097,7 +2129,7 @@ impl TermalDelegationMcpBridge {
     /// already classified that session as a child; a root grant cannot precede that repair.
     /// Fail SAFE: if the backend can't be reached or the caller can't be found, treat it as
     /// a child (deny peer tools).
-    fn caller_is_delegation_child(&self) -> bool {
+    pub(crate) fn caller_is_delegation_child(&self) -> bool {
         self.caller_classification()
             .map_or(true, |classification| classification.is_delegation_child)
     }
@@ -2108,7 +2140,7 @@ impl TermalDelegationMcpBridge {
     /// yet show the caller can be retried on a later call. The MCP gate maps
     /// every failure to "child" (fail closed); the coordination CLI reports the
     /// exact reason instead.
-    fn caller_classification(
+    pub(crate) fn caller_classification(
         &self,
     ) -> std::result::Result<CallerClassification, CallerClassificationFailure> {
         if let Some(is_child) = self.caller_is_delegation_child.get() {
@@ -2201,7 +2233,7 @@ impl TermalDelegationMcpBridge {
             .copied()
             .unwrap_or(false)
     }
-    fn caller_allows_review_identity(&self) -> bool {
+    pub(crate) fn caller_allows_review_identity(&self) -> bool {
         let _ = self.caller_is_delegation_child();
         self.caller_allows_review_identity
             .get()
@@ -2252,7 +2284,11 @@ impl TermalDelegationMcpBridge {
                 if name == TERMAL_REVIEW_IDENTITY_TOOL_NAME {
                     return !caller_is_child || self.caller_allows_review_identity();
                 }
-                if matches!(name, TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME | TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME) {
+                if matches!(
+                    name,
+                    TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
+                        | TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME
+                ) {
                     return caller_is_child && self.caller_allows_acceptance_evaluation();
                 }
                 if caller_is_child {
@@ -2267,7 +2303,7 @@ impl TermalDelegationMcpBridge {
         result
     }
 
-    fn get_json(&self, path: &str) -> Result<Value> {
+    pub(crate) fn get_json(&self, path: &str) -> Result<Value> {
         self.decode_response(
             "GET",
             path,
@@ -2295,7 +2331,7 @@ impl TermalDelegationMcpBridge {
     /// idempotency-keyed mailbox appends. Generic bridge GET/POST helpers are
     /// deliberately single-attempt so future endpoints cannot inherit replay
     /// merely by returning matching prose.
-    fn get_json_with_safe_replay(&self, path: &str) -> Result<Value> {
+    pub(crate) fn get_json_with_safe_replay(&self, path: &str) -> Result<Value> {
         self.request_json_with_safe_replay_retry("GET", path, self.request_timeout, |remaining| {
             self.client.get(self.url(path)).timeout(remaining).send()
         })
@@ -2318,7 +2354,7 @@ impl TermalDelegationMcpBridge {
     /// without a recognized write or read safety clause there is no
     /// structural guarantee that replay is safe, and blind replay would be
     /// wrong.
-    fn request_json_with_safe_replay_retry(
+    pub(crate) fn request_json_with_safe_replay_retry(
         &self,
         method: &'static str,
         path: &str,
@@ -2359,7 +2395,7 @@ impl TermalDelegationMcpBridge {
         }
     }
 
-    fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 
@@ -2373,7 +2409,7 @@ impl TermalDelegationMcpBridge {
     }
 }
 
-fn mailbox_send_bridge_error(err: anyhow::Error) -> anyhow::Error {
+pub(crate) fn mailbox_send_bridge_error(err: anyhow::Error) -> anyhow::Error {
     if termal_delegation_outcome_is_unknown(&err) {
         let message = format!(
             "mailbox send receipt was not received; the append outcome is unknown. Retry with the \
@@ -2491,10 +2527,10 @@ fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
 }
 
 #[derive(Debug)]
-struct TermalDelegationResponseError {
-    method: &'static str,
-    path: String,
-    message: String,
+pub(crate) struct TermalDelegationResponseError {
+    pub(crate) method: &'static str,
+    pub(crate) path: String,
+    pub(crate) message: String,
 }
 
 impl std::fmt::Display for TermalDelegationResponseError {
@@ -2510,12 +2546,12 @@ impl std::fmt::Display for TermalDelegationResponseError {
 impl std::error::Error for TermalDelegationResponseError {}
 
 #[derive(Debug)]
-struct TermalDelegationTransportError {
-    method: &'static str,
-    path: String,
-    phase: &'static str,
-    timeout: Duration,
-    source: reqwest::Error,
+pub(crate) struct TermalDelegationTransportError {
+    pub(crate) method: &'static str,
+    pub(crate) path: String,
+    pub(crate) phase: &'static str,
+    pub(crate) timeout: Duration,
+    pub(crate) source: reqwest::Error,
 }
 
 impl std::fmt::Display for TermalDelegationTransportError {
@@ -2542,10 +2578,10 @@ impl std::error::Error for TermalDelegationTransportError {
 }
 
 #[derive(Debug)]
-struct TermalDelegationApiError {
-    status: StatusCode,
-    message: String,
-    output_limit: Option<OutputLimitResponse>,
+pub(crate) struct TermalDelegationApiError {
+    pub(crate) status: StatusCode,
+    pub(crate) message: String,
+    pub(crate) output_limit: Option<OutputLimitResponse>,
 }
 
 impl TermalDelegationApiError {
@@ -2558,7 +2594,7 @@ impl TermalDelegationApiError {
 /// read/durable-append clause or a structural no-commit write clause. This
 /// classifier is consulted only by explicit safe-replay call sites; generic
 /// bridge requests remain single-attempt regardless of response prose.
-fn error_is_safe_replay_service_unavailable(error: &anyhow::Error) -> bool {
+pub(crate) fn error_is_safe_replay_service_unavailable(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<TermalDelegationApiError>()
         .is_some_and(|api_error| {
@@ -2567,7 +2603,7 @@ fn error_is_safe_replay_service_unavailable(error: &anyhow::Error) -> bool {
         })
 }
 
-fn message_carries_safe_replay_clause(message: &str) -> bool {
+pub(crate) fn message_carries_safe_replay_clause(message: &str) -> bool {
     message.split(';').any(|clause| {
         let clause = clause.trim();
         clause == TERMAL_DELEGATION_SAFE_READ_RETRY_CLAUSE
@@ -2611,7 +2647,10 @@ impl std::fmt::Display for TermalDelegationApiError {
 
 impl std::error::Error for TermalDelegationApiError {}
 
-fn run_delegation_mcp_bridge(serving_session_id: String, base_url: String) -> Result<()> {
+pub(crate) fn run_delegation_mcp_bridge(
+    serving_session_id: String,
+    base_url: String,
+) -> Result<()> {
     let bridge = TermalDelegationMcpBridge::new(serving_session_id, base_url)?;
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -2748,7 +2787,7 @@ fn delegation_write_policy_input_schema() -> Value {
     })
 }
 
-fn mcp_tools_list_result() -> Value {
+pub(crate) fn mcp_tools_list_result() -> Value {
     let write_policy_input_schema = delegation_write_policy_input_schema();
     let mut result = json!({
         "tools": [
@@ -3186,7 +3225,7 @@ fn insert_mcp_tool_after(result: &mut Value, after_name: &str, tool: Value) {
     tools.insert(index + 1, tool);
 }
 
-fn mcp_json_rpc_result(id: Value, result: Value) -> Value {
+pub(crate) fn mcp_json_rpc_result(id: Value, result: Value) -> Value {
     json!({
         "jsonrpc": "2.0",
         "id": id,
@@ -3215,7 +3254,7 @@ fn mcp_json_rpc_tool_error(id: Value, message: String) -> Value {
     )
 }
 
-fn delegation_mcp_tool_result(name: &str, result: &Value) -> Value {
+pub(crate) fn delegation_mcp_tool_result(name: &str, result: &Value) -> Value {
     let is_error = (name == TERMAL_REVIEW_FREEZE_TOOL_NAME
         && result.get("verified").and_then(Value::as_bool) != Some(true))
         || (name == TERMAL_REVIEW_IDENTITY_TOOL_NAME
@@ -3223,7 +3262,7 @@ fn delegation_mcp_tool_result(name: &str, result: &Value) -> Value {
     mcp_tool_text_result(result, is_error)
 }
 
-fn mcp_tool_text_result(value: &Value, is_error: bool) -> Value {
+pub(crate) fn mcp_tool_text_result(value: &Value, is_error: bool) -> Value {
     let text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
     json!({
         "content": [{ "type": "text", "text": text }],
@@ -3259,7 +3298,7 @@ fn optional_nonempty_string(value: Option<&Value>, label: &str) -> Result<Option
     Ok(Some(value.to_owned()))
 }
 
-fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String> {
+pub(crate) fn required_path_identifier(value: Option<&Value>, label: &str) -> Result<String> {
     let value = required_string(value, label)?;
     if value
         .chars()
@@ -3287,7 +3326,7 @@ fn required_agent_command_name(value: Option<&Value>) -> Result<String> {
     Ok(value)
 }
 
-fn optional_string(value: Option<&Value>) -> Option<String> {
+pub(crate) fn optional_string(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
         .map(str::trim)
@@ -3436,7 +3475,7 @@ fn is_terminal_delegation_status(status: &str) -> bool {
 
 #[cfg(test)]
 #[path = "delegation_mcp_tests.rs"]
-mod delegation_mcp_tests;
+pub(crate) mod delegation_mcp_tests;
 
 include!("delegation_mcp_projection.rs");
 include!("delegation_mcp_federation.rs");

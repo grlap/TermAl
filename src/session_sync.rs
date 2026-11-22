@@ -18,6 +18,8 @@
 // and must not land on a session whose Codex runtime has since been
 // replaced.
 
+use super::*;
+
 fn ensure_opencode_sync_deadline(execution_deadline: Option<std::time::Instant>) -> Result<()> {
     if execution_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
         bail!("OpenCode config request deadline expired before committing session state");
@@ -30,7 +32,7 @@ impl AppState {
     /// reports changed config options. The ACP reader cannot write protocol
     /// requests itself, so it snapshots the user's selections here and queues
     /// reconciliation back to the writer thread.
-    fn opencode_config_command(&self, session_id: &str) -> Result<AcpPromptCommand> {
+    pub(crate) fn opencode_config_command(&self, session_id: &str) -> Result<AcpPromptCommand> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let record = inner
             .sessions
@@ -59,7 +61,10 @@ impl AppState {
     /// the serialized ACP writer applies a user setting. Reader notifications
     /// and user requests share that writer, so this snapshot cannot be stale
     /// relative to an earlier queued config reconciliation.
-    fn opencode_config_snapshot(&self, session_id: &str) -> Result<OpenCodeConfigSnapshot> {
+    pub(crate) fn opencode_config_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<OpenCodeConfigSnapshot> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let record = inner
             .sessions
@@ -98,7 +103,7 @@ impl AppState {
     /// owning API request expires. Explicit choices become both selected and
     /// effective; `auto` changes only the selected authority and preserves the
     /// agent-reported effective value.
-    fn sync_session_opencode_selection_before_deadline(
+    pub(crate) fn sync_session_opencode_selection_before_deadline(
         &self,
         session_id: &str,
         option_id: &str,
@@ -163,7 +168,7 @@ impl AppState {
     /// (including Auto), not a runtime report: delayed refresh/notification
     /// results must never overwrite a newer settings PATCH. Only its catalog
     /// is adopted here; prompt admission checks the request against that runtime.
-    fn sync_session_model_options(
+    pub(crate) fn sync_session_model_options(
         &self,
         session_id: &str,
         current_model: Option<String>,
@@ -225,7 +230,7 @@ impl AppState {
     /// TermAl authority boundary (`auto` delegates to the agent; an explicit
     /// live value is TermAl-authoritative), while the effective fields mirror
     /// what OpenCode is actually running.
-    fn sync_session_opencode_config(
+    pub(crate) fn sync_session_opencode_config(
         &self,
         session_id: &str,
         update: OpenCodeConfigUpdate,
@@ -233,7 +238,7 @@ impl AppState {
         self.sync_session_opencode_config_with_deadline(session_id, update, None)
     }
 
-    fn sync_session_opencode_config_before_deadline(
+    pub(crate) fn sync_session_opencode_config_before_deadline(
         &self,
         session_id: &str,
         update: OpenCodeConfigUpdate,
@@ -347,7 +352,7 @@ impl AppState {
     /// commands, custom commands, etc.) onto the `SessionRecord`. The
     /// UI's command popover renders directly from this cached list so
     /// every user keystroke doesn't round-trip to the runtime.
-    fn sync_session_agent_commands(
+    pub(crate) fn sync_session_agent_commands(
         &self,
         session_id: &str,
         agent_commands: Vec<AgentCommand>,
@@ -398,7 +403,7 @@ impl AppState {
     /// Mirrors the runtime's reported cursor mode (Cursor agent
     /// specifically) onto the session so the UI's mode indicator
     /// reflects what the runtime is actually running under.
-    fn sync_session_cursor_mode(
+    pub(crate) fn sync_session_cursor_mode(
         &self,
         session_id: &str,
         cursor_mode: Option<CursorMode>,
@@ -441,7 +446,7 @@ impl AppState {
     /// Caches the most recent rate-limit snapshot reported by the
     /// shared Codex runtime so the UI can render "N requests remaining"
     /// / "resets at T" without polling the upstream API itself.
-    fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
+    pub(crate) fn note_codex_rate_limits(&self, rate_limits: CodexRateLimits) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, codex) = {
             if inner.codex.rate_limits.as_ref() == Some(&rate_limits) {
@@ -459,7 +464,7 @@ impl AppState {
     /// Stores a pushed `CodexNotice` from the shared runtime (version
     /// update hints, login reminders, etc.) on `AppState` so the UI
     /// can render it as a banner on the next state broadcast.
-    fn note_codex_notice(&self, notice: CodexNotice) -> Result<()> {
+    pub(crate) fn note_codex_notice(&self, notice: CodexNotice) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let (revision, codex) = {
             if inner
@@ -490,7 +495,7 @@ impl AppState {
     }
 
     /// Records Codex runtime config when the expected runtime still owns the session.
-    fn record_codex_runtime_config_if_runtime_matches(
+    pub(crate) fn record_codex_runtime_config_if_runtime_matches(
         &self,
         session_id: &str,
         token: &RuntimeToken,

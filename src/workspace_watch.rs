@@ -14,58 +14,91 @@
 // Extracted from state.rs into its own `include!()` fragment so state.rs
 // stays focused on the core state model.
 
+use super::*;
+
 include!("workspace_watch_observation.rs");
 include!("workspace_watch_pending.rs");
 include!("workspace_watch_ignore.rs");
 
 // Display/transport limits are independent of the pending generation's
 // storage budget. Authority observers receive the original facts first.
-const WORKSPACE_PUBLICATION_ENTRIES: usize = 32;
+pub(crate) const WORKSPACE_PUBLICATION_ENTRIES: usize = 32;
 const WORKSPACE_PUBLICATION_SAMPLE: usize = 16;
-const WORKSPACE_PUBLICATION_PATH_BYTES: usize = 8 * 1024;
+pub(crate) const WORKSPACE_PUBLICATION_PATH_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkspacePublicationSummary {
-    observed_changes: usize,
+pub(crate) struct WorkspacePublicationSummary {
+    pub(crate) observed_changes: usize,
     sampled_paths: usize,
 }
 
-fn bound_workspace_publication(
+pub(crate) fn bound_workspace_publication(
     changes: Vec<WorkspaceFileChangeEvent>,
-) -> (Vec<WorkspaceFileChangeEvent>, Option<WorkspacePublicationSummary>) {
-    let path_bytes = changes.iter().map(|change| change.path.len()
-        + change.root_path.as_ref().map_or(0, String::len)
-        + change.session_id.as_ref().map_or(0, String::len)).sum::<usize>();
-    if changes.len() <= WORKSPACE_PUBLICATION_ENTRIES && path_bytes <= WORKSPACE_PUBLICATION_PATH_BYTES {
+) -> (
+    Vec<WorkspaceFileChangeEvent>,
+    Option<WorkspacePublicationSummary>,
+) {
+    let path_bytes = changes
+        .iter()
+        .map(|change| {
+            change.path.len()
+                + change.root_path.as_ref().map_or(0, String::len)
+                + change.session_id.as_ref().map_or(0, String::len)
+        })
+        .sum::<usize>();
+    if changes.len() <= WORKSPACE_PUBLICATION_ENTRIES
+        && path_bytes <= WORKSPACE_PUBLICATION_PATH_BYTES
+    {
         return (changes, None);
     }
     let observed_changes = changes.len();
-    let mut covering = changes.first().and_then(|change| FsPath::new(&change.path).parent())
-        .map(FsPath::to_path_buf).unwrap_or_default();
+    let mut covering = changes
+        .first()
+        .and_then(|change| FsPath::new(&change.path).parent())
+        .map(FsPath::to_path_buf)
+        .unwrap_or_default();
     for change in &changes {
-        while !covering.as_os_str().is_empty() && !FsPath::new(&change.path).starts_with(&covering) {
-            if !covering.pop() { covering.clear(); }
+        while !covering.as_os_str().is_empty() && !FsPath::new(&change.path).starts_with(&covering)
+        {
+            if !covering.pop() {
+                covering.clear();
+            }
         }
     }
     // Very long prefixes and disjoint roots use the existing global marker.
-    if covering.as_os_str().len() > 1024 { covering.clear(); }
+    if covering.as_os_str().len() > 1024 {
+        covering.clear();
+    }
     let mut bytes = covering.as_os_str().len();
     let mut sample = Vec::new();
     for change in changes {
-        let cost = change.path.len() + change.root_path.as_ref().map_or(0, String::len)
+        let cost = change.path.len()
+            + change.root_path.as_ref().map_or(0, String::len)
             + change.session_id.as_ref().map_or(0, String::len);
-        if sample.len() < WORKSPACE_PUBLICATION_SAMPLE && bytes + cost <= WORKSPACE_PUBLICATION_PATH_BYTES {
+        if sample.len() < WORKSPACE_PUBLICATION_SAMPLE
+            && bytes + cost <= WORKSPACE_PUBLICATION_PATH_BYTES
+        {
             bytes += cost;
             sample.push(change);
         }
     }
     let sampled_paths = sample.len();
     sample.push(WorkspaceFileChangeEvent {
-        path: covering.to_string_lossy().into_owned(), kind: WorkspaceFileChangeKind::Subtree,
-        root_path: None, session_id: None, mtime_ms: None, size_bytes: None,
+        path: covering.to_string_lossy().into_owned(),
+        kind: WorkspaceFileChangeKind::Subtree,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
     });
-    (sample, Some(WorkspacePublicationSummary { observed_changes, sampled_paths }))
+    (
+        sample,
+        Some(WorkspacePublicationSummary {
+            observed_changes,
+            sampled_paths,
+        }),
+    )
 }
 
 #[cfg(not(test))]
@@ -74,13 +107,13 @@ const WORKSPACE_FILE_WATCH_ROOT_REFRESH_MS: Duration = Duration::from_secs(2);
 const WORKSPACE_FILE_WATCH_RECV_TIMEOUT_MS: Duration = Duration::from_millis(100);
 
 #[derive(Clone)]
-struct WorkspaceFileWatchScope {
-    root_path: PathBuf,
-    session_id: Option<String>,
+pub(crate) struct WorkspaceFileWatchScope {
+    pub(crate) root_path: PathBuf,
+    pub(crate) session_id: Option<String>,
 }
 
 #[cfg(not(test))]
-fn run_workspace_file_watcher(state: AppState) {
+pub(crate) fn run_workspace_file_watcher(state: AppState) {
     // Each event carries when its notification reached the host, before it
     // waits behind earlier events: the Engram fence judges a change by it.
     // The diagnostic observation is captured beside it and authorizes nothing.
@@ -99,7 +132,9 @@ fn run_workspace_file_watcher(state: AppState) {
             pending.ingest(result, arrival, now);
             drop(pending);
             if log_error {
-                eprintln!("file watch> workspace watcher error; invalidating all roots (rate limited to once per 30s)");
+                eprintln!(
+                    "file watch> workspace watcher error; invalidating all roots (rate limited to once per 30s)"
+                );
             }
             let _ = event_tx.try_send(());
         },
@@ -156,9 +191,15 @@ fn reconcile_workspace_file_watch_roots(
     pending: &Mutex<WorkspacePendingChanges>,
 ) {
     let next_scopes = collect_workspace_file_watch_scopes(state);
-    pending.lock().expect("workspace pending mutex poisoned").watch_roots = next_scopes
-        .iter().map(|scope| scope.root_path.clone()).collect::<BTreeSet<_>>()
-        .into_iter().collect();
+    pending
+        .lock()
+        .expect("workspace pending mutex poisoned")
+        .watch_roots = next_scopes
+        .iter()
+        .map(|scope| scope.root_path.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let next_roots = prune_nested_workspace_file_watch_roots(
         next_scopes
             .iter()
@@ -195,7 +236,9 @@ fn reconcile_workspace_file_watch_roots(
     *watch_scopes = next_scopes;
 }
 
-fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWatchScope> {
+pub(crate) fn collect_workspace_file_watch_scopes(
+    state: &AppState,
+) -> Vec<WorkspaceFileWatchScope> {
     let roots = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         let local_project_ids = inner
@@ -254,7 +297,7 @@ fn collect_workspace_file_watch_scopes(state: &AppState) -> Vec<WorkspaceFileWat
     scopes
 }
 
-fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
+pub(crate) fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
     let trimmed = root.trim();
     if trimmed.is_empty() {
         return None;
@@ -266,7 +309,7 @@ fn canonical_workspace_file_watch_root(root: &str) -> Option<PathBuf> {
         .then(|| normalize_user_facing_path(&canonical))
 }
 
-fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
+pub(crate) fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathBuf> {
     roots.sort_by_key(|root| root.components().count());
     let mut pruned = Vec::<PathBuf>::new();
     for root in roots {
@@ -279,14 +322,17 @@ fn prune_nested_workspace_file_watch_roots(mut roots: Vec<PathBuf>) -> Vec<PathB
 }
 
 #[cfg(test)]
-fn workspace_file_changes_from_notify_event(
+pub(crate) fn workspace_file_changes_from_notify_event(
     event: &NotifyEvent,
     watch_scopes: &[WorkspaceFileWatchScope],
 ) -> Vec<WorkspaceFileChangeEvent> {
     let Some(kind) = workspace_file_change_kind(&event.kind) else {
         return Vec::new();
     };
-    let roots = watch_scopes.iter().map(|scope| scope.root_path.clone()).collect::<Vec<_>>();
+    let roots = watch_scopes
+        .iter()
+        .map(|scope| scope.root_path.clone())
+        .collect::<Vec<_>>();
 
     event
         .paths
@@ -347,7 +393,7 @@ fn workspace_file_change_kind(kind: &NotifyEventKind) -> Option<WorkspaceFileCha
     }
 }
 
-fn merge_workspace_file_change_kind(
+pub(crate) fn merge_workspace_file_change_kind(
     current: WorkspaceFileChangeKind,
     next: WorkspaceFileChangeKind,
 ) -> WorkspaceFileChangeKind {
@@ -372,7 +418,7 @@ fn merge_workspace_file_change_kind(
     }
 }
 
-fn workspace_file_changes_from_path(
+pub(crate) fn workspace_file_changes_from_path(
     path: &FsPath,
     kind: WorkspaceFileChangeKind,
     watch_scopes: &[WorkspaceFileWatchScope],
@@ -429,7 +475,7 @@ fn workspace_file_changes_from_path(
 
 #[cfg(test)]
 #[allow(dead_code)]
-fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String {
+pub(crate) fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String {
     format!(
         "{}\0{}\0{}",
         change.root_path.as_deref().unwrap_or(""),
@@ -438,7 +484,7 @@ fn workspace_file_change_event_key(change: &WorkspaceFileChangeEvent) -> String 
     )
 }
 
-fn is_ignored_workspace_file_event_path(path: &FsPath, root: &FsPath) -> bool {
+pub(crate) fn is_ignored_workspace_file_event_path(path: &FsPath, root: &FsPath) -> bool {
     const IGNORED_COMPONENTS: &[&str] = &[
         ".beads",
         ".collab",
@@ -454,7 +500,9 @@ fn is_ignored_workspace_file_event_path(path: &FsPath, root: &FsPath) -> bool {
         "target",
     ];
 
-    let Ok(relative) = path.strip_prefix(root) else { return false; };
+    let Ok(relative) = path.strip_prefix(root) else {
+        return false;
+    };
     relative.components().any(|component| {
         let value = component.as_os_str().to_string_lossy();
         IGNORED_COMPONENTS
@@ -467,10 +515,14 @@ fn workspace_file_event_is_ignored(path: &FsPath, roots: &[PathBuf]) -> bool {
     let path = normalize_user_facing_path(path);
     // A covering notification can include a separately watched repository
     // below a parent's build directory. Keep that root's coverage intact.
-    if roots.iter().any(|root| root.starts_with(&path)) { return false; }
+    if roots.iter().any(|root| root.starts_with(&path)) {
+        return false;
+    }
     // Paths outside all known roots remain observable. The drain rechecks
     // against current state before notifying any consumer.
-    roots.iter().filter(|root| path.starts_with(root))
+    roots
+        .iter()
+        .filter(|root| path.starts_with(root))
         .max_by_key(|root| root.components().count())
         .is_some_and(|root| is_ignored_workspace_file_event_path(&path, root))
 }

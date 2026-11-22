@@ -31,16 +31,18 @@
 // `codex_text_stream.rs`. This file is just the dispatcher + the
 // per-kind describers.
 
-struct DescribedCodexApprovalRequest {
-    title: &'static str,
-    command: String,
-    detail: String,
-    pending: CodexPendingApproval,
+use super::*;
+
+pub(crate) struct DescribedCodexApprovalRequest {
+    pub(crate) title: &'static str,
+    pub(crate) command: String,
+    pub(crate) detail: String,
+    pub(crate) pending: CodexPendingApproval,
 }
 
 /// Codex marks its own tool-call permission prompts explicitly. An empty
 /// server form alone is not permission to answer a genuine elicitation.
-fn codex_mcp_request_is_tool_approval(request: &McpElicitationRequestPayload) -> bool {
+pub(crate) fn codex_mcp_request_is_tool_approval(request: &McpElicitationRequestPayload) -> bool {
     let McpElicitationRequestMode::Form {
         meta: Some(meta),
         requested_schema,
@@ -68,7 +70,7 @@ fn codex_mcp_request_is_tool_approval(request: &McpElicitationRequestPayload) ->
         && validate_codex_mcp_elicitation_form_content(request, json!({})).is_ok()
 }
 
-fn parse_codex_mcp_tool_approval(
+pub(crate) fn parse_codex_mcp_tool_approval(
     method: &str,
     message: &Value,
 ) -> Option<(Value, McpElicitationRequestPayload)> {
@@ -84,7 +86,7 @@ fn parse_codex_mcp_tool_approval(
     Some((message.get("id")?.clone(), request))
 }
 
-fn codex_mcp_tool_approval_result(action: McpElicitationAction) -> Value {
+pub(crate) fn codex_mcp_tool_approval_result(action: McpElicitationAction) -> Value {
     // No persist/session/always selection: host policy applies to one call.
     json!({ "action": action, "content": if action == McpElicitationAction::Accept {
         Some(json!({}))
@@ -94,7 +96,7 @@ fn codex_mcp_tool_approval_result(action: McpElicitationAction) -> Value {
 /// Parses the three Codex approval request shapes shared by the interactive
 /// recorder path and TermAl's AutoApprove response path. Non-approval methods
 /// return `None` without inspecting their payload.
-fn parse_codex_approval_request(
+pub(crate) fn parse_codex_approval_request(
     method: &str,
     message: &Value,
 ) -> Result<Option<DescribedCodexApprovalRequest>> {
@@ -215,7 +217,7 @@ fn parse_codex_approval_request(
 /// a `Message` through the recorder describing the request for the
 /// UI sidebar; the request id is retained so the later approval/response
 /// plumbing can match the reply back to Codex.
-fn handle_codex_app_server_request(
+pub(crate) fn handle_codex_app_server_request(
     method: &str,
     message: &Value,
     recorder: &mut impl CodexTurnRecorder,
@@ -294,7 +296,7 @@ fn handle_codex_app_server_request(
 /// `item/tool/call` gets a dedicated copy mentioning the tool and
 /// server names; everything else gets a generic "needs a JSON result"
 /// placeholder.
-fn describe_codex_app_server_request(method: &str, params: &Value) -> (String, String) {
+pub(crate) fn describe_codex_app_server_request(method: &str, params: &Value) -> (String, String) {
     if method == "item/tool/call" {
         let tool = params
             .get("tool")
@@ -332,14 +334,17 @@ fn describe_codex_app_server_request(method: &str, params: &Value) -> (String, S
 /// any in-flight streaming text; command executions and web searches
 /// register a running entry in the recorder so the UI can show a
 /// spinner until `item/completed` arrives.
-fn handle_codex_app_server_item_started(
+pub(crate) fn handle_codex_app_server_item_started(
     item: &Value,
     recorder: &mut impl TurnRecorder,
 ) -> Result<()> {
     match item.get("type").and_then(Value::as_str) {
         Some("agentMessage" | "userMessage" | "reasoning" | "plan") => {}
         kind => recorder.native_tool_start(
-            item.get("id").and_then(Value::as_str), kind == Some("commandExecution"), item)?,
+            item.get("id").and_then(Value::as_str),
+            kind == Some("commandExecution"),
+            item,
+        )?,
     }
     match item.get("type").and_then(Value::as_str) {
         Some("agentMessage") => {
@@ -371,7 +376,7 @@ fn handle_codex_app_server_item_started(
 /// requesting (file-system read/write paths, network, macOS
 /// accessibility/calendar/preferences/automations) for display in the
 /// approval prompt sidebar.
-fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
+pub(crate) fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
     let mut parts = Vec::new();
 
     if let Some(read_paths) = permissions
@@ -459,7 +464,7 @@ fn describe_codex_permission_request(permissions: &Value) -> Option<String> {
 /// Formats the sidebar detail for a user-input request: names the
 /// single question's header when there is only one, otherwise reports
 /// the count.
-fn describe_codex_user_input_request(questions: &[UserInputQuestion]) -> String {
+pub(crate) fn describe_codex_user_input_request(questions: &[UserInputQuestion]) -> String {
     match questions.len() {
         0 => "Codex requested additional input.".to_owned(),
         1 => {
@@ -477,7 +482,9 @@ fn describe_codex_user_input_request(questions: &[UserInputQuestion]) -> String 
 /// structured-form flow shows the server-provided message; the URL
 /// flow instructs the user to continue in a browser and includes the
 /// URL.
-fn describe_codex_mcp_elicitation_request(request: &McpElicitationRequestPayload) -> String {
+pub(crate) fn describe_codex_mcp_elicitation_request(
+    request: &McpElicitationRequestPayload,
+) -> String {
     match &request.mode {
         McpElicitationRequestMode::Form { message, .. } => {
             let trimmed = message.trim();
@@ -516,7 +523,7 @@ fn describe_codex_mcp_elicitation_request(request: &McpElicitationRequestPayload
 /// status; file changes are pushed as diff messages annotated with
 /// create/edit change type. Other item types are intentionally
 /// ignored.
-fn handle_codex_app_server_item_completed(
+pub(crate) fn handle_codex_app_server_item_completed(
     item: &Value,
     state: &AppState,
     session_id: &str,

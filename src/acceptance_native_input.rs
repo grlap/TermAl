@@ -3,17 +3,18 @@
 // source_id results as launcher commit results. This consumer keeps acceptance's
 // clean-source policy; the producer may still record unchanged local changes.
 
-fn acceptance_native_local_changes(
+use super::*;
+
+pub(crate) fn acceptance_native_local_changes(
     registration: &TestRunRegistration,
 ) -> Option<AcceptanceCommittedInputRefusal> {
     let source = &registration.declared_native.as_ref()?.source.source_id;
-    (!source.is_clean())
-    .then(|| AcceptanceCommittedInputRefusal::NativeLocalChanges {
+    (!source.is_clean()).then(|| AcceptanceCommittedInputRefusal::NativeLocalChanges {
         run_id: registration.run_id.clone(),
     })
 }
 
-fn acceptance_registered_input_start(
+pub(crate) fn acceptance_registered_input_start(
     registration: &TestRunRegistration,
 ) -> AcceptanceCommittedInputRunStart {
     use AcceptanceCommittedInputRunStart as Start;
@@ -44,7 +45,7 @@ fn acceptance_registered_input_start(
     }
 }
 
-fn acceptance_registered_input_outcome(
+pub(crate) fn acceptance_registered_input_outcome(
     registration: &TestRunRegistration,
     current: &EngramSourceId,
 ) -> Result<Option<bool>, AcceptanceCommittedInputRefusal> {

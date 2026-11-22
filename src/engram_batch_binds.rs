@@ -1,6 +1,8 @@
 // Captured members of an ordinary carried launch. Historical owed-bind
 // records remain raw session history; no retry or send owner is restored.
 
+use super::*;
+
 /// The members of a full gate launched in `root` by the session at `index`,
 /// attributed to its claim: the other items it named on the same worktree
 /// (`engram_bind_targets_at_launch`), each with the fence its claim has in
@@ -51,7 +53,7 @@ fn engram_launch_bind_targets(
 /// Whether the command whose check `check` ends with `exit` launches a gate
 /// that is carried and has batch members, so the session's held claims are
 /// read at the launch (`engram_launch_batch_members`).
-fn engram_launch_needs_held_read(
+pub(crate) fn engram_launch_needs_held_read(
     inner: &StateInner,
     index: usize,
     session_id: &str,
@@ -74,7 +76,7 @@ fn engram_launch_needs_held_read(
 /// Engram cut short (`omitted`), which may still be held. A member missing
 /// from a complete list keeps its root entry's fence as captured provenance;
 /// this snapshot creates no binding operation.
-fn engram_launch_batch_members(
+pub(crate) fn engram_launch_batch_members(
     inner: &StateInner,
     index: usize,
     session_id: &str,
@@ -89,7 +91,10 @@ fn engram_launch_batch_members(
         )
     };
     let Some(Ok(held)) = launch_held else {
-        let lines = members.iter().map(|target| unknown(target, "could not be read")).collect();
+        let lines = members
+            .iter()
+            .map(|target| unknown(target, "could not be read"))
+            .collect();
         return (Vec::new(), lines);
     };
     let mut targets = Vec::new();
@@ -119,7 +124,7 @@ fn engram_launch_batch_members(
 
 /// A carried launch's captured member lost its artifact observation across
 /// restart. This diagnostic creates no bind or retry duty.
-fn engram_batch_member_lost_line(short_ref: &str, when: &str) -> String {
+pub(crate) fn engram_batch_member_lost_line(short_ref: &str, when: &str) -> String {
     engram_batch_not_recorded_line(
         short_ref,
         &format!(

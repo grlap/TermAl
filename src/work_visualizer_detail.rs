@@ -2,94 +2,96 @@
 // show surface; does not execute navigation suggestions or fetch full bodies
 // implicitly. Continuation headers deliberately do not replace item detail.
 
+use super::*;
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkDetailQuery {
-    reader_id: String,
-    after: Option<String>,
+pub(crate) struct WorkDetailQuery {
+    pub(crate) reader_id: String,
+    pub(crate) after: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkDetailFields {
+pub(crate) struct WorkDetailFields {
     #[serde(alias = "short_ref")]
-    short_ref: String,
-    title: String,
-    outcome: String,
-    acceptance: Vec<String>,
+    pub(crate) short_ref: String,
+    pub(crate) title: String,
+    pub(crate) outcome: String,
+    pub(crate) acceptance: Vec<String>,
     #[serde(alias = "acceptance_omitted")]
-    acceptance_omitted: Option<usize>,
-    lifecycle: String,
-    kind: String,
-    priority: u8,
+    pub(crate) acceptance_omitted: Option<usize>,
+    pub(crate) lifecycle: String,
+    pub(crate) kind: String,
+    pub(crate) priority: u8,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct WorkDetailStatus {
-    work: WorkDetailFields,
-    availability: String,
+pub(crate) struct WorkDetailStatus {
+    pub(crate) work: WorkDetailFields,
+    pub(crate) availability: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkNoteView {
-    locator: String,
-    kind: String,
-    family: String,
+pub(crate) struct WorkNoteView {
+    pub(crate) locator: String,
+    pub(crate) kind: String,
+    pub(crate) family: String,
     #[serde(alias = "status_owner")]
-    status_owner: Option<bool>,
+    pub(crate) status_owner: Option<bool>,
     #[serde(alias = "non_holder")]
-    non_holder: Option<bool>,
+    pub(crate) non_holder: Option<bool>,
     // Omitted bodies may also omit refs. None is not an empty reference list.
-    refs: Option<Vec<String>>,
-    summary: Option<String>,
-    by: Option<String>,
+    pub(crate) refs: Option<Vec<String>>,
+    pub(crate) summary: Option<String>,
+    pub(crate) by: Option<String>,
     #[serde(alias = "created_at")]
-    created_at: String,
+    pub(crate) created_at: String,
     #[serde(default, alias = "body_omitted")]
-    body_omitted: bool,
+    pub(crate) body_omitted: bool,
     #[serde(default, alias = "summary_truncated")]
-    summary_truncated: bool,
+    pub(crate) summary_truncated: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkNotesWindow {
-    total: usize,
-    shown: usize,
-    newer: usize,
-    older: usize,
-    after: Option<String>,
+pub(crate) struct WorkNotesWindow {
+    pub(crate) total: usize,
+    pub(crate) shown: usize,
+    pub(crate) newer: usize,
+    pub(crate) older: usize,
+    pub(crate) after: Option<String>,
     #[serde(alias = "read_cut")]
-    read_cut: WorkNotesCut,
+    pub(crate) read_cut: WorkNotesCut,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct WorkNotesCut {
+pub(crate) struct WorkNotesCut {
     #[serde(alias = "project_position")]
-    project_position: u64,
+    pub(crate) project_position: u64,
     #[serde(alias = "observed_at")]
-    observed_at: String,
+    pub(crate) observed_at: String,
     #[serde(alias = "valid_until_ms")]
-    valid_until_ms: Option<i64>,
+    pub(crate) valid_until_ms: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct WorkDetailResponse {
-    status: Option<WorkDetailStatus>,
-    holder: Option<String>,
+pub(crate) struct WorkDetailResponse {
+    pub(crate) status: Option<WorkDetailStatus>,
+    pub(crate) holder: Option<String>,
     #[serde(alias = "held_until")]
-    held_until: Option<String>,
-    notes: Vec<WorkNoteView>,
+    pub(crate) held_until: Option<String>,
+    pub(crate) notes: Vec<WorkNoteView>,
     #[serde(alias = "notes_window")]
-    notes_window: WorkNotesWindow,
+    pub(crate) notes_window: WorkNotesWindow,
 }
 
 impl AppState {
     #[cfg(test)]
-    fn read_project_work_detail(
+    pub(crate) fn read_project_work_detail(
         &self,
         project_id: &str,
         work_ref: &str,
@@ -98,7 +100,7 @@ impl AppState {
         self.read_project_work_detail_with_admission(project_id, work_ref, query, || Ok(()))
     }
 
-    fn read_project_work_detail_with_admission<P>(
+    pub(crate) fn read_project_work_detail_with_admission<P>(
         &self,
         project_id: &str,
         work_ref: &str,
@@ -147,7 +149,7 @@ impl AppState {
     }
 }
 
-fn normalize_engram_work_detail(
+pub(crate) fn normalize_engram_work_detail(
     value: Value,
     continuation: bool,
 ) -> Result<WorkDetailResponse, ApiError> {
@@ -170,7 +172,7 @@ fn normalize_engram_work_detail(
     Ok(detail)
 }
 
-async fn get_project_work_detail(
+pub(crate) async fn get_project_work_detail(
     State(state): State<AppState>,
     AxumPath((project_id, work_ref)): AxumPath<(String, String)>,
     limiter: Option<axum::Extension<WorkReadLimiter>>,

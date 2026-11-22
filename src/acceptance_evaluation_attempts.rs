@@ -1,62 +1,82 @@
 // Durable evaluator-attempt ownership. Reuses the existing request preparation
 // and submission fences; it does not infer tracker standing from host bindings.
-const MAX_ACCEPTANCE_EVALUATOR_ATTEMPTS: u8 = 3;
-const ACCEPTANCE_LOCAL_RETIREMENT_CODE: &str = "legacy_source_input_retired";
-const ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE: &str = "An earlier locally retired write outcome remains unknown: the tracker may hold its verdict; read the task before relying on this evaluation alone.";
 
-fn acceptance_evaluation_current_write_retired(target: &DelegationAcceptanceEvaluation) -> bool {
-    target.attempt_history.as_ref().and_then(|history| history.refusal.as_ref())
+use super::*;
+pub(crate) const MAX_ACCEPTANCE_EVALUATOR_ATTEMPTS: u8 = 3;
+pub(crate) const ACCEPTANCE_LOCAL_RETIREMENT_CODE: &str = "legacy_source_input_retired";
+pub(crate) const ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE: &str = "An earlier locally retired write outcome remains unknown: the tracker may hold its verdict; read the task before relying on this evaluation alone.";
+
+pub(crate) fn acceptance_evaluation_current_write_retired(
+    target: &DelegationAcceptanceEvaluation,
+) -> bool {
+    target
+        .attempt_history
+        .as_ref()
+        .and_then(|history| history.refusal.as_ref())
         .is_some_and(|refusal| refusal.code == ACCEPTANCE_LOCAL_RETIREMENT_CODE)
 }
 
 /// Retiring a replay ends local retry ownership, never uncertainty about the
 /// original tracker write. A later attempt/receipt cannot settle that write.
-fn acceptance_evaluation_has_retired_write(target: &DelegationAcceptanceEvaluation) -> bool {
+pub(crate) fn acceptance_evaluation_has_retired_write(
+    target: &DelegationAcceptanceEvaluation,
+) -> bool {
     target.attempt_history.as_ref().is_some_and(|history| {
-        history.refusal.iter()
-            .chain(history.previous.iter().filter_map(|attempt| attempt.refusal.as_ref()))
+        history
+            .refusal
+            .iter()
+            .chain(
+                history
+                    .previous
+                    .iter()
+                    .filter_map(|attempt| attempt.refusal.as_ref()),
+            )
             .any(|refusal| refusal.code == ACCEPTANCE_LOCAL_RETIREMENT_CODE)
     })
 }
 
-fn acceptance_evaluation_has_unknown_write(target: &DelegationAcceptanceEvaluation) -> bool {
-    matches!(target.submission, AcceptanceEvaluationSubmission::Pending { .. }
-        | AcceptanceEvaluationSubmission::Unconfirmed { .. })
-        || acceptance_evaluation_has_retired_write(target)
+pub(crate) fn acceptance_evaluation_has_unknown_write(
+    target: &DelegationAcceptanceEvaluation,
+) -> bool {
+    matches!(
+        target.submission,
+        AcceptanceEvaluationSubmission::Pending { .. }
+            | AcceptanceEvaluationSubmission::Unconfirmed { .. }
+    ) || acceptance_evaluation_has_retired_write(target)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceEvaluationAttemptHistory {
-    schema_version: u32,
-    parent_session_id: String,
-    child_session_id: String,
-    cwd: String,
-    identity: AcceptanceEvidenceIdentity,
-    ordinal: u8,
+pub(crate) struct AcceptanceEvaluationAttemptHistory {
+    pub(crate) schema_version: u32,
+    pub(crate) parent_session_id: String,
+    pub(crate) child_session_id: String,
+    pub(crate) cwd: String,
+    pub(crate) identity: AcceptanceEvidenceIdentity,
+    pub(crate) ordinal: u8,
     /// Host order across delegation reuse; zero denotes a pre-sequence attempt.
     #[serde(default)]
-    attempt_sequence: u64,
+    pub(crate) attempt_sequence: u64,
     /// Captured for this key, so a restart cannot turn absence into a new quota.
     #[serde(default, skip_serializing_if = "is_false")]
-    evidence_recovery_enabled: bool,
+    pub(crate) evidence_recovery_enabled: bool,
     /// A host read failure ends this attempt without a submitted judgment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    unfinished_evidence: Option<AcceptanceUnfinishedEvidenceRead>,
+    pub(crate) unfinished_evidence: Option<AcceptanceUnfinishedEvidenceRead>,
     #[serde(default)]
-    requester_text_tainted: bool,
+    pub(crate) requester_text_tainted: bool,
     #[serde(default)]
-    identity_refused: bool,
+    pub(crate) identity_refused: bool,
     #[serde(default)]
-    previous: Vec<AcceptanceEvaluationPreviousAttempt>,
+    pub(crate) previous: Vec<AcceptanceEvaluationPreviousAttempt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
+    pub(crate) refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    prepared_brief: Option<AcceptanceEvaluationPreparedBrief>,
+    pub(crate) prepared_brief: Option<AcceptanceEvaluationPreparedBrief>,
     /// A refusal of this attempt that allowed its one re-submission
     /// (acceptance_evaluation_citation_retry.rs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    citation_retry: Option<AcceptanceEvaluationCitationRetry>,
+    pub(crate) citation_retry: Option<AcceptanceEvaluationCitationRetry>,
     /// Presentation only: confirmed no-record judgments, including the refusal
     /// that allowed a citation retry. Kept across later host-authored keys.
     #[serde(
@@ -64,21 +84,24 @@ struct AcceptanceEvaluationAttemptHistory {
         skip_serializing_if = "Vec::is_empty",
         deserialize_with = "deserialize_acceptance_refused_submissions"
     )]
-    refused_submissions: Vec<AcceptanceEvaluationRefusedSubmission>,
+    pub(crate) refused_submissions: Vec<AcceptanceEvaluationRefusedSubmission>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase", try_from = "PersistedAcceptanceEvaluationPreviousAttempt")]
-struct AcceptanceEvaluationPreviousAttempt {
-    ordinal: u8,
-    key: String,
-    acceptance_basis: i64,
-    evidence_basis: i64,
-    source_fingerprint: Option<String>,
+#[serde(
+    rename_all = "camelCase",
+    try_from = "PersistedAcceptanceEvaluationPreviousAttempt"
+)]
+pub(crate) struct AcceptanceEvaluationPreviousAttempt {
+    pub(crate) ordinal: u8,
+    pub(crate) key: String,
+    pub(crate) acceptance_basis: i64,
+    pub(crate) evidence_basis: i64,
+    pub(crate) source_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_id: Option<EngramSourceId>,
-    submission: AcceptanceEvaluationSubmission,
-    refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
+    pub(crate) source_id: Option<EngramSourceId>,
+    pub(crate) submission: AcceptanceEvaluationSubmission,
+    pub(crate) refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
 }
 
 #[derive(Deserialize)]
@@ -89,7 +112,10 @@ struct PersistedAcceptanceEvaluationPreviousAttempt {
     acceptance_basis: i64,
     evidence_basis: i64,
     source_fingerprint: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_acceptance_optional_source_id")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_acceptance_optional_source_id"
+    )]
     source_id: Option<EngramSourceId>,
     submission: AcceptanceEvaluationSubmission,
     refusal: Option<AcceptanceEvaluationDefinitiveRefusal>,
@@ -97,13 +123,24 @@ struct PersistedAcceptanceEvaluationPreviousAttempt {
 
 impl TryFrom<PersistedAcceptanceEvaluationPreviousAttempt> for AcceptanceEvaluationPreviousAttempt {
     type Error = &'static str;
-    fn try_from(value: PersistedAcceptanceEvaluationPreviousAttempt) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: PersistedAcceptanceEvaluationPreviousAttempt,
+    ) -> std::result::Result<Self, Self::Error> {
         if value.source_id.is_some() && value.source_fingerprint.is_some() {
-            return Err("a previous evaluation attempt cannot mix legacy and shared source identities");
+            return Err(
+                "a previous evaluation attempt cannot mix legacy and shared source identities",
+            );
         }
-        Ok(Self { ordinal: value.ordinal, key: value.key, acceptance_basis: value.acceptance_basis,
-            evidence_basis: value.evidence_basis, source_fingerprint: value.source_fingerprint,
-            source_id: value.source_id, submission: value.submission, refusal: value.refusal })
+        Ok(Self {
+            ordinal: value.ordinal,
+            key: value.key,
+            acceptance_basis: value.acceptance_basis,
+            evidence_basis: value.evidence_basis,
+            source_fingerprint: value.source_fingerprint,
+            source_id: value.source_id,
+            submission: value.submission,
+            refusal: value.refusal,
+        })
     }
 }
 
@@ -111,29 +148,29 @@ impl TryFrom<PersistedAcceptanceEvaluationPreviousAttempt> for AcceptanceEvaluat
 // original write here; its code/message do not claim a producer refusal.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceEvaluationDefinitiveRefusal {
-    code: String,
-    message: String,
-    original: AcceptanceEvaluationOpenWrite,
+pub(crate) struct AcceptanceEvaluationDefinitiveRefusal {
+    pub(crate) code: String,
+    pub(crate) message: String,
+    pub(crate) original: AcceptanceEvaluationOpenWrite,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceEvaluationPreparedBrief {
-    attempt_key: String,
-    prompt: String,
-    digest: String,
+pub(crate) struct AcceptanceEvaluationPreparedBrief {
+    pub(crate) attempt_key: String,
+    pub(crate) prompt: String,
+    pub(crate) digest: String,
     /// A retained brief is not permission to mint another key. Only an echoed
     /// key or the exact prompt's admitted follow-up proves its consumption.
     #[serde(default)]
-    offered: bool,
+    pub(crate) offered: bool,
 }
 
-fn acceptance_evaluation_ordinal_key(delegation_id: &str, ordinal: u8) -> String {
+pub(crate) fn acceptance_evaluation_ordinal_key(delegation_id: &str, ordinal: u8) -> String {
     format!("{delegation_id}:attempt:{ordinal}")
 }
 
-fn acceptance_evaluation_attempt_prompt(
+pub(crate) fn acceptance_evaluation_attempt_prompt(
     prompt: &str,
     key: &str,
     ordinal: u8,
@@ -151,7 +188,9 @@ fn acceptance_evaluation_attempt_prompt(
             acceptance_attempt_source_label(previous.source_id.as_ref(), previous.source_fingerprint.as_deref()),
             acceptance_attempt_source_label(seed.source_id.as_ref(), seed.source_fingerprint.as_deref())
         ));
-        if previous.source_id != seed.source_id || previous.source_fingerprint != seed.source_fingerprint {
+        if previous.source_id != seed.source_id
+            || previous.source_fingerprint != seed.source_fingerprint
+        {
             header.push_str("Source changed. Inspect the whole new revision and judge every criterion afresh; bound criteria need checks passed on that revision.\n");
         }
         if let Some(refusal) = previous
@@ -177,8 +216,14 @@ fn acceptance_evaluation_attempt_prompt(
     format!("{header}\n{prompt}")
 }
 
-fn next_acceptance_attempt_sequence(inner: &StateInner) -> u64 {
-    inner.delegations.iter().filter_map(|d| d.acceptance_evaluation.as_ref())
-        .filter_map(|t| t.attempt_history.as_ref()).map(|h| h.attempt_sequence)
-        .max().unwrap_or(0).saturating_add(1)
+pub(crate) fn next_acceptance_attempt_sequence(inner: &StateInner) -> u64 {
+    inner
+        .delegations
+        .iter()
+        .filter_map(|d| d.acceptance_evaluation.as_ref())
+        .filter_map(|t| t.attempt_history.as_ref())
+        .map(|h| h.attempt_sequence)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
 }

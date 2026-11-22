@@ -1,39 +1,42 @@
 // Capacity recovery owns a bounded Resume budget, never a replayable prompt.
 // Driven after delegation inventory publication by the ordinary runtime tick.
-const PROVIDER_CAPACITY_DELAYS_SECONDS: [u64; 8] = [120, 300, 600, 600, 600, 600, 600, 600];
+
+use super::*;
+pub(crate) const PROVIDER_CAPACITY_DELAYS_SECONDS: [u64; 8] =
+    [120, 300, 600, 600, 600, 600, 600, 600];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct ProviderCapacityRetry {
-    nonce: String,
-    server_instance: String,
-    runtime_id: String,
-    generation: u64,
-    stop_generation: u64,
-    pause_epoch: u64,
-    settings: String,
-    attempts: usize,
-    due_at: Option<String>,
-    recovering: bool,
-    dispatched: bool,
-    original_preview: String,
+pub(crate) struct ProviderCapacityRetry {
+    pub(crate) nonce: String,
+    pub(crate) server_instance: String,
+    pub(crate) runtime_id: String,
+    pub(crate) generation: u64,
+    pub(crate) stop_generation: u64,
+    pub(crate) pause_epoch: u64,
+    pub(crate) settings: String,
+    pub(crate) attempts: usize,
+    pub(crate) due_at: Option<String>,
+    pub(crate) recovering: bool,
+    pub(crate) dispatched: bool,
+    pub(crate) original_preview: String,
     #[serde(skip)]
-    saved: bool,
+    pub(crate) saved: bool,
     #[serde(skip)]
-    fence: Option<ProviderCapacityAckWaiter>,
+    pub(crate) fence: Option<ProviderCapacityAckWaiter>,
 }
 
-fn provider_capacity_delay(session_id: &str, attempt: usize) -> chrono::Duration {
+pub(crate) fn provider_capacity_delay(session_id: &str, attempt: usize) -> chrono::Duration {
     let base = PROVIDER_CAPACITY_DELAYS_SECONDS[attempt.min(7)] * 1000;
     let digest = sha256_hex(format!("capacity:{session_id}:{attempt}").as_bytes());
     let spread = u64::from_str_radix(&digest[..8], 16).unwrap_or(0) % 41;
     chrono::Duration::milliseconds((base * (80 + spread) / 100) as i64)
 }
 
-fn is_typed_provider_capacity(error: &Value) -> bool {
+pub(crate) fn is_typed_provider_capacity(error: &Value) -> bool {
     error.get("codexErrorInfo").and_then(Value::as_str) == Some("serverOverloaded")
 }
 
-fn provider_capacity_settings(record: &SessionRecord) -> String {
+pub(crate) fn provider_capacity_settings(record: &SessionRecord) -> String {
     sha256_hex(
         json!({
             "agent": record.session.agent,
@@ -58,7 +61,7 @@ fn provider_capacity_manual_hold(record: &SessionRecord) -> bool {
         })
 }
 
-fn provider_capacity_resume_owned(record: &SessionRecord, nonce: &str) -> bool {
+pub(crate) fn provider_capacity_resume_owned(record: &SessionRecord, nonce: &str) -> bool {
     record
         .provider_capacity_retry
         .as_ref()
@@ -78,7 +81,7 @@ fn provider_capacity_resume_owned(record: &SessionRecord, nonce: &str) -> bool {
         })
 }
 
-fn clear_provider_capacity_retry(record: &mut SessionRecord) -> bool {
+pub(crate) fn clear_provider_capacity_retry(record: &mut SessionRecord) -> bool {
     record.session.provider_capacity_waiting = false;
     let Some(retry) = record.provider_capacity_retry.take() else {
         return false;
@@ -99,7 +102,7 @@ fn clear_provider_capacity_retry(record: &mut SessionRecord) -> bool {
 }
 
 impl AppState {
-    fn provider_capacity_failure_already_scheduled(
+    pub(crate) fn provider_capacity_failure_already_scheduled(
         &self,
         session_id: &str,
         runtime: &RuntimeToken,
@@ -124,7 +127,7 @@ impl AppState {
         })
     }
 
-    fn provider_capacity_event_is_current(
+    pub(crate) fn provider_capacity_event_is_current(
         &self,
         session_id: &str,
         generation: Option<u64>,
@@ -136,7 +139,7 @@ impl AppState {
                 .is_some_and(|index| inner.sessions[index].active_turn_generation == generation)
         })
     }
-    fn cancel_provider_capacity_retry(&self, session_id: &str) {
+    pub(crate) fn cancel_provider_capacity_retry(&self, session_id: &str) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_session_index(session_id)
             && clear_provider_capacity_retry(&mut inner.sessions[index])
@@ -148,7 +151,7 @@ impl AppState {
         }
     }
 
-    fn cancel_provider_capacity_retry_if_runtime_and_generation_match(
+    pub(crate) fn cancel_provider_capacity_retry_if_runtime_and_generation_match(
         &self,
         session_id: &str,
         runtime: &RuntimeToken,
@@ -174,7 +177,7 @@ impl AppState {
 
     // Arm before generic terminal handling so its queue drain cannot start a
     // successor. Finalize only if that exact owner survived terminal handling.
-    fn prepare_provider_capacity_failure(
+    pub(crate) fn prepare_provider_capacity_failure(
         &self,
         session_id: &str,
         runtime: &RuntimeToken,
@@ -246,7 +249,11 @@ impl AppState {
         Some(nonce)
     }
 
-    fn finish_provider_capacity_failure(&self, session_id: &str, nonce: &str) -> Result<()> {
+    pub(crate) fn finish_provider_capacity_failure(
+        &self,
+        session_id: &str,
+        nonce: &str,
+    ) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(());
@@ -293,7 +300,11 @@ impl AppState {
         Ok(())
     }
 
-    fn request_provider_capacity_ack_locked(&self, inner: &mut StateInner, index: usize) {
+    pub(crate) fn request_provider_capacity_ack_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+    ) {
         let Some(retry) = inner.sessions[index].provider_capacity_retry.as_ref() else {
             return;
         };
@@ -318,7 +329,10 @@ impl AppState {
                 .as_mut()
                 .unwrap()
                 .fence = Some(ProviderCapacityAckWaiter(Arc::new(waiter)));
-        } else if self.persist_session_internal_locked(inner, &inner.sessions[index].session.id).is_ok() {
+        } else if self
+            .persist_session_internal_locked(inner, &inner.sessions[index].session.id)
+            .is_ok()
+        {
             inner.sessions[index]
                 .provider_capacity_retry
                 .as_mut()
@@ -327,7 +341,7 @@ impl AppState {
         }
     }
 
-    fn provider_capacity_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
+    pub(crate) fn provider_capacity_retry_tick(&self, now: chrono::DateTime<chrono::Utc>) {
         let ids = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             inner
@@ -346,7 +360,9 @@ impl AppState {
                 let Some(index) = inner.find_session_index(&session_id) else {
                     continue;
                 };
-                if session_resource_reset_in_progress(&inner, &inner.sessions[index]) { continue; }
+                if session_resource_reset_in_progress(&inner, &inner.sessions[index]) {
+                    continue;
+                }
                 let record = &mut inner.sessions[index];
                 let Some(retry) = record.provider_capacity_retry.as_ref() else {
                     continue;
@@ -464,7 +480,7 @@ impl AppState {
 const PROVIDER_CAPACITY_ACK_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
 #[derive(Clone)]
-struct ProviderCapacityAckWaiter(Arc<PersistFenceWaiter>);
+pub(crate) struct ProviderCapacityAckWaiter(pub(crate) Arc<PersistFenceWaiter>);
 impl std::fmt::Debug for ProviderCapacityAckWaiter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("ProviderCapacityAckWaiter")
@@ -472,17 +488,20 @@ impl std::fmt::Debug for ProviderCapacityAckWaiter {
 }
 
 #[derive(Clone, Default)]
-struct RuntimeRetrySlots {
-    in_flight: Arc<std::sync::atomic::AtomicUsize>,
+pub(crate) struct RuntimeRetrySlots {
+    pub(crate) in_flight: Arc<std::sync::atomic::AtomicUsize>,
 }
-struct RuntimeRetrySlot(Arc<std::sync::atomic::AtomicUsize>);
+pub(crate) struct RuntimeRetrySlot(pub(crate) Arc<std::sync::atomic::AtomicUsize>);
 impl RuntimeRetrySlots {
-    fn try_acquire(&self) -> Option<RuntimeRetrySlot> {
-        self.in_flight.try_update(
-            std::sync::atomic::Ordering::SeqCst,
-            std::sync::atomic::Ordering::SeqCst,
-            |count| (count < 4).then_some(count + 1),
-        ).ok().map(|_| RuntimeRetrySlot(self.in_flight.clone()))
+    pub(crate) fn try_acquire(&self) -> Option<RuntimeRetrySlot> {
+        self.in_flight
+            .try_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |count| (count < 4).then_some(count + 1),
+            )
+            .ok()
+            .map(|_| RuntimeRetrySlot(self.in_flight.clone()))
     }
 }
 impl Drop for RuntimeRetrySlot {
@@ -495,7 +514,7 @@ fn runtime_retry_due_passed(due: &str, now: chrono::DateTime<chrono::Utc>) -> bo
 }
 impl AppState {
     #[cfg(not(test))]
-    fn spawn_runtime_retry_tick(&self) {
+    pub(crate) fn spawn_runtime_retry_tick(&self) {
         let state = self.clone();
         let shutdown = self.subscribe_shutdown_signal();
         if let Err(error) = std::thread::Builder::new()
@@ -505,7 +524,8 @@ impl AppState {
                     state.provider_capacity_retry_tick(chrono::Utc::now());
                     std::thread::sleep(std::time::Duration::from_secs(2));
                 }
-            }) {
+            })
+        {
             eprintln!("runtime retry> failed to start: {error}");
         }
     }

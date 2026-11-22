@@ -1,19 +1,21 @@
 // Durable metadata-only native notifications and the joined relay wake worker.
 // Home messages/cursors stay at home; local ACK/handoff flags govern wakes only.
 
+use super::*;
+
 #[cfg(test)]
 std::thread_local! {
-    static TEST_MAILBOX_RELAY_BEFORE_REDRIVE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_MAILBOX_RELAY_AFTER_FIRST_ADMISSION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_MAILBOX_RELAY_BEFORE_REDRIVE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_MAILBOX_RELAY_AFTER_FIRST_ADMISSION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     // Ends a home wake batch after this many rows, exactly as an expired time
     // budget does, so a partial batch is reproducible without wall-clock load.
-    static TEST_MAILBOX_RELAY_HOME_BATCH_ROWS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    pub(crate) static TEST_MAILBOX_RELAY_HOME_BATCH_ROWS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     // The same limit for the next batch only. Zero spends a batch's budget
     // before its first row, as a slow start on a loaded machine can.
-    static TEST_MAILBOX_RELAY_NEXT_HOME_BATCH_ROWS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    pub(crate) static TEST_MAILBOX_RELAY_NEXT_HOME_BATCH_ROWS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     // Whether the last batch on this thread attempted its whole home page and
     // found no more, as opposed to stopping before a row.
-    static TEST_MAILBOX_RELAY_HOME_SCAN_COMPLETE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static TEST_MAILBOX_RELAY_HOME_SCAN_COMPLETE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// A test's row budget for the batch starting now (never in production): a
@@ -31,33 +33,64 @@ fn mailbox_relay_test_batch_rows() -> Option<usize> {
     }
 }
 
-struct MailboxRelayNotification {
-    wake: MailboxRelayWake,
-    peer: FederationPeerSnapshot,
-    acknowledged: bool,
-    handed_off: bool,
-    queued: bool,
+pub(crate) struct MailboxRelayNotification {
+    pub(crate) wake: MailboxRelayWake,
+    pub(crate) peer: FederationPeerSnapshot,
+    pub(crate) acknowledged: bool,
+    pub(crate) handed_off: bool,
+    pub(crate) queued: bool,
 }
 
 impl MailboxStore {
-    fn note_live_mailbox_relay_queued(&self, actor: &MailboxRelayPrincipal, mailbox: &str, through: u64) {
-        let mut queued = self.relay_live_queued.lock().expect("relay live admission mutex poisoned");
-        let sequence = queued.entry((actor.participant_key(), mailbox.to_owned())).or_default();
+    pub(crate) fn note_live_mailbox_relay_queued(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        mailbox: &str,
+        through: u64,
+    ) {
+        let mut queued = self
+            .relay_live_queued
+            .lock()
+            .expect("relay live admission mutex poisoned");
+        let sequence = queued
+            .entry((actor.participant_key(), mailbox.to_owned()))
+            .or_default();
         *sequence = (*sequence).max(through);
     }
 
-    fn live_mailbox_relay_queued(&self, actor: &MailboxRelayPrincipal, mailbox: &str, through: u64) -> bool {
-        self.relay_live_queued.lock().expect("relay live admission mutex poisoned")
-            .get(&(actor.participant_key(), mailbox.to_owned())).is_some_and(|sequence| *sequence >= through)
+    fn live_mailbox_relay_queued(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        mailbox: &str,
+        through: u64,
+    ) -> bool {
+        self.relay_live_queued
+            .lock()
+            .expect("relay live admission mutex poisoned")
+            .get(&(actor.participant_key(), mailbox.to_owned()))
+            .is_some_and(|sequence| *sequence >= through)
     }
 
-    fn reopen_live_mailbox_relay_queued(&self, actor: &MailboxRelayPrincipal, mailbox: &str, through: u64) {
-        let mut queued = self.relay_live_queued.lock().expect("relay live admission mutex poisoned");
+    fn reopen_live_mailbox_relay_queued(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        mailbox: &str,
+        through: u64,
+    ) {
+        let mut queued = self
+            .relay_live_queued
+            .lock()
+            .expect("relay live admission mutex poisoned");
         let key = (actor.participant_key(), mailbox.to_owned());
-        if queued.get(&key).is_some_and(|sequence| *sequence <= through) { queued.remove(&key); }
+        if queued
+            .get(&key)
+            .is_some_and(|sequence| *sequence <= through)
+        {
+            queued.remove(&key);
+        }
     }
 
-    fn receive_mailbox_relay_notification<G>(
+    pub(crate) fn receive_mailbox_relay_notification<G>(
         &self,
         wake: &MailboxRelayWake,
         peer: &FederationPeerSnapshot,
@@ -131,11 +164,12 @@ impl MailboxStore {
             peer: peer.clone(),
             acknowledged,
             handed_off,
-            queued: queued || self.live_mailbox_relay_queued(&wake.target, &wake.mailbox_id, wake.sequence),
+            queued: queued
+                || self.live_mailbox_relay_queued(&wake.target, &wake.mailbox_id, wake.sequence),
         })
     }
 
-    fn mailbox_relay_notification(
+    pub(crate) fn mailbox_relay_notification(
         &self,
         actor: &MailboxRelayPrincipal,
         mailbox: &str,
@@ -168,7 +202,7 @@ impl MailboxStore {
         .transpose()
     }
 
-    fn mark_mailbox_relay_notification<G>(
+    pub(crate) fn mark_mailbox_relay_notification<G>(
         &self,
         actor: &MailboxRelayPrincipal,
         mailbox: &str,
@@ -221,7 +255,7 @@ impl MailboxStore {
     }
 }
 
-fn mailbox_relay_unread_wake(
+pub(crate) fn mailbox_relay_unread_wake(
     notification: &MailboxRelayNotification,
 ) -> Result<MailboxUnreadWakeup, ApiError> {
     let wake = &notification.wake;
@@ -241,7 +275,7 @@ fn mailbox_relay_unread_wake(
 }
 
 impl AppState {
-    fn queue_native_mailbox_relay_wake(
+    pub(crate) fn queue_native_mailbox_relay_wake(
         &self,
         wake: &MailboxRelayWake,
         lease: Option<&FederationLinkLease>,
@@ -273,26 +307,50 @@ impl AppState {
             // carrier removed by Cancel.
             let (owner, local_owner) = {
                 let inner = self.inner.lock().expect("state mutex poisoned");
-                inner.find_session_index(&wake.target.native_session_id)
+                inner
+                    .find_session_index(&wake.target.native_session_id)
                     .map_or((None, None), |index| {
                         let record = &inner.sessions[index];
                         let relay = MailboxRelayDrainOwner::capture(
-                            record, wake, self.federation_executor_wake_signal.clone());
-                        let local = relay.is_none().then(|| local_mailbox_head_for_relay(
-                            record, &wake.conversation.home, &wake.mailbox_id, wake.sequence)).flatten();
+                            record,
+                            wake,
+                            self.federation_executor_wake_signal.clone(),
+                        );
+                        let local = relay
+                            .is_none()
+                            .then(|| {
+                                local_mailbox_head_for_relay(
+                                    record,
+                                    &wake.conversation.home,
+                                    &wake.mailbox_id,
+                                    wake.sequence,
+                                )
+                            })
+                            .flatten();
                         (relay, local)
                     })
             };
-            if !self.federation_executor_wake_signal.is_stopping() && (owner.is_some() || local_owner.is_some()) {
+            if !self.federation_executor_wake_signal.is_stopping()
+                && (owner.is_some() || local_owner.is_some())
+            {
                 #[cfg(test)]
-                if let Some(hook) = TEST_MAILBOX_RELAY_BEFORE_REDRIVE.with(|hook| hook.borrow_mut().take()) { hook(); }
+                if let Some(hook) =
+                    TEST_MAILBOX_RELAY_BEFORE_REDRIVE.with(|hook| hook.borrow_mut().take())
+                {
+                    hook();
+                }
                 let dispatch = match (owner, local_owner) {
                     (Some(owner), _) => self.dispatch_next_queued_turn_for_mailbox_relay(
-                        &wake.target.native_session_id, owner),
+                        &wake.target.native_session_id,
+                        owner,
+                    ),
                     (None, Some(owner)) => self.dispatch_next_queued_turn_for_activation(
-                        &wake.target.native_session_id, owner),
+                        &wake.target.native_session_id,
+                        owner,
+                    ),
                     (None, None) => Ok(None),
-                }.map_err(mailbox_api_error)?;
+                }
+                .map_err(mailbox_api_error)?;
                 if let Some(dispatch) = dispatch {
                     let _ = deliver_turn_dispatch(self, dispatch);
                 }
@@ -314,10 +372,17 @@ impl AppState {
             self.mark_native_mailbox_relay_queued(&wake.target, &wake.mailbox_id, wake.sequence)
                 .map_err(mailbox_api_error)?;
             #[cfg(test)]
-            if let Some(hook) = TEST_MAILBOX_RELAY_AFTER_FIRST_ADMISSION.with(|hook| hook.borrow_mut().take()) { hook(); }
+            if let Some(hook) =
+                TEST_MAILBOX_RELAY_AFTER_FIRST_ADMISSION.with(|hook| hook.borrow_mut().take())
+            {
+                hook();
+            }
             if let Some(owner) = outcome.relay_owner {
                 if let Some(dispatch) = self
-                    .dispatch_next_queued_turn_for_mailbox_relay(&wake.target.native_session_id, owner)
+                    .dispatch_next_queued_turn_for_mailbox_relay(
+                        &wake.target.native_session_id,
+                        owner,
+                    )
                     .map_err(mailbox_api_error)?
                 {
                     let _ = deliver_turn_dispatch(self, dispatch);
@@ -361,7 +426,7 @@ impl AppState {
         Ok(())
     }
 
-    fn read_native_mailbox_relay_revalidation(
+    pub(crate) fn read_native_mailbox_relay_revalidation(
         &self,
         session: &str,
         head: FrontMailboxHead,
@@ -415,7 +480,7 @@ impl AppState {
         }))
     }
 
-    fn requeue_native_mailbox_relay_notification(
+    pub(crate) fn requeue_native_mailbox_relay_notification(
         &self,
         notification: &MailboxNotificationDelivery,
         known_rejected: bool,
@@ -472,7 +537,11 @@ impl AppState {
         transaction.execute("UPDATE mailbox_relay_notifications SET handed_off=0,queued=0 WHERE mailbox_id=?1 AND target_key=?2 AND through_sequence<=?3 AND (acknowledged=0 OR (?4=1 AND handed_off=0))",
             rusqlite::params![locator.id,actor.participant_key(),notification.through_sequence,known_rejected])?;
         transaction.commit()?;
-        self.mailbox_store.reopen_live_mailbox_relay_queued(&actor, &locator.id, notification.through_sequence);
+        self.mailbox_store.reopen_live_mailbox_relay_queued(
+            &actor,
+            &locator.id,
+            notification.through_sequence,
+        );
         drop(inner);
         drop(connection);
         drop(_writer);
@@ -508,7 +577,7 @@ impl AppState {
         Ok(outcome.changed)
     }
 
-    fn mark_native_mailbox_relay_handoff(
+    pub(crate) fn mark_native_mailbox_relay_handoff(
         &self,
         notification: &MailboxNotificationDelivery,
     ) -> Result<()> {
@@ -530,7 +599,7 @@ impl AppState {
         )
     }
 
-    fn refresh_native_mailbox_relay_acknowledgement(
+    pub(crate) fn refresh_native_mailbox_relay_acknowledgement(
         &self,
         session: &str,
         locator: &MailboxRelayLocator,
@@ -626,31 +695,32 @@ impl AppState {
 }
 
 #[derive(Default)]
-struct MailboxRelayBootRecovery {
-    after: i64,
-    through: Option<i64>,
-    scan_complete: bool,
-    retry: VecDeque<i64>,
+pub(crate) struct MailboxRelayBootRecovery {
+    pub(crate) after: i64,
+    pub(crate) through: Option<i64>,
+    pub(crate) scan_complete: bool,
+    pub(crate) retry: VecDeque<i64>,
 }
 
 impl MailboxRelayBootRecovery {
-    fn complete(&self) -> bool {
+    pub(crate) fn complete(&self) -> bool {
         self.scan_complete && self.retry.is_empty()
     }
 }
 
 #[derive(Default)]
-struct MailboxRelayWakeWorker {
-    task: Option<tokio::task::JoinHandle<()>>,
-    pending: Option<tokio::sync::oneshot::Receiver<(i64, i64, MailboxRelayBootRecovery, bool)>>,
-    observed_kick: u64,
-    home_after: i64,
-    native_after: i64,
-    boot: MailboxRelayBootRecovery,
+pub(crate) struct MailboxRelayWakeWorker {
+    pub(crate) task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) pending:
+        Option<tokio::sync::oneshot::Receiver<(i64, i64, MailboxRelayBootRecovery, bool)>>,
+    pub(crate) observed_kick: u64,
+    pub(crate) home_after: i64,
+    pub(crate) native_after: i64,
+    pub(crate) boot: MailboxRelayBootRecovery,
 }
 
 impl MailboxRelayWakeWorker {
-    async fn tick(&mut self, app: &AppState, fallback: bool) {
+    pub(crate) async fn tick(&mut self, app: &AppState, fallback: bool) {
         let mut more = false;
         if let Some(pending) = &mut self.pending {
             match pending.try_recv() {
@@ -726,7 +796,7 @@ impl MailboxRelayWakeWorker {
         self.pending = Some(receive);
     }
 
-    async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         if let Some(task) = self.task {
             let _ = task.await;
         }
@@ -734,7 +804,7 @@ impl MailboxRelayWakeWorker {
 }
 
 impl AppState {
-    fn retire_removed_mailbox_relay_notification(
+    pub(crate) fn retire_removed_mailbox_relay_notification(
         &self,
         wake: &MailboxRelayWake,
     ) -> Result<bool, ApiError> {
@@ -807,7 +877,7 @@ impl AppState {
         Ok(true)
     }
 
-    async fn reconcile_mailbox_relay_notifications_after_boot(
+    pub(crate) async fn reconcile_mailbox_relay_notifications_after_boot(
         &self,
         recovery: &mut MailboxRelayBootRecovery,
     ) -> Result<(), ApiError> {
@@ -891,7 +961,8 @@ impl AppState {
     ) -> Result<(), ApiError> {
         let app = self.clone();
         let observed = wake.clone();
-        if run_blocking_api(move || app.retire_removed_mailbox_relay_notification(&observed)).await?
+        if run_blocking_api(move || app.retire_removed_mailbox_relay_notification(&observed))
+            .await?
         {
             return Ok(());
         }
@@ -950,7 +1021,11 @@ impl AppState {
         Ok(())
     }
 
-    async fn run_mailbox_relay_wake_batch(&self, home_after: i64, native_after: i64) -> (i64, i64) {
+    pub(crate) async fn run_mailbox_relay_wake_batch(
+        &self,
+        home_after: i64,
+        native_after: i64,
+    ) -> (i64, i64) {
         let started = Instant::now();
         let test_rows = mailbox_relay_test_batch_rows();
         let worker = self.clone();
@@ -1031,18 +1106,26 @@ impl AppState {
                             Err(error) => Err(error),
                         }
                     } else {
-                        Err(ApiError::conflict("native relay target host has no connected peer"))
+                        Err(ApiError::conflict(
+                            "native relay target host has no connected peer",
+                        ))
                     }
                 }
                 Err(error) => Err(error),
             };
             let queued = match outcome {
                 Ok(true) => {
-                    self.mailbox_store.relay_home_wake_refusals.clear(&wake.message_id);
+                    self.mailbox_store
+                        .relay_home_wake_refusals
+                        .clear(&wake.message_id);
                     true
                 }
                 Ok(false) => {
-                    self.note_mailbox_relay_home_wake_refusal(&wake, StatusCode::CONFLICT, "wake not admitted by its target");
+                    self.note_mailbox_relay_home_wake_refusal(
+                        &wake,
+                        StatusCode::CONFLICT,
+                        "wake not admitted by its target",
+                    );
                     false
                 }
                 Err(error) => {
@@ -1122,37 +1205,40 @@ impl AppState {
 // worker pass. These process-local, metadata-only records make the refusal
 // visible without reading message bodies or the receiver's store.
 const MAILBOX_RELAY_HOME_WAKE_REFUSALS: usize = 256;
-const MAILBOX_RELAY_HOME_WAKE_REASON_BYTES: usize = 200;
+pub(crate) const MAILBOX_RELAY_HOME_WAKE_REASON_BYTES: usize = 200;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct MailboxRelayHomeWakeRefusal {
-    message_id: String,
-    mailbox_id: String,
-    target_host_id: String,
-    target_session_id: String,
-    attempts: u64,
-    status: u16,
-    reason: String,
+pub(crate) struct MailboxRelayHomeWakeRefusal {
+    pub(crate) message_id: String,
+    pub(crate) mailbox_id: String,
+    pub(crate) target_host_id: String,
+    pub(crate) target_session_id: String,
+    pub(crate) attempts: u64,
+    pub(crate) status: u16,
+    pub(crate) reason: String,
     first_refused_at: String,
     last_refused_at: String,
 }
 
 #[derive(Default)]
-struct MailboxRelayHomeWakeRefusals {
-    refused: Mutex<BTreeMap<String, MailboxRelayHomeWakeRefusal>>,
+pub(crate) struct MailboxRelayHomeWakeRefusals {
+    pub(crate) refused: Mutex<BTreeMap<String, MailboxRelayHomeWakeRefusal>>,
     /// Refused attempts not kept because the bound was full. It counts
     /// attempts, not distinct wakes.
-    untracked: AtomicU64,
+    pub(crate) untracked: AtomicU64,
 }
 
 impl MailboxRelayHomeWakeRefusals {
     /// Records one refused attempt. True when the refusal is new or its
     /// reason changed, so a caller logs once per change, not once per pass.
-    fn note(&self, wake: &MailboxRelayWake, status: StatusCode, reason: &str) -> bool {
+    pub(crate) fn note(&self, wake: &MailboxRelayWake, status: StatusCode, reason: &str) -> bool {
         let reason = mailbox_relay_bounded_reason(reason);
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let mut refused = self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut refused = self
+            .refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(existing) = refused.get_mut(&wake.message_id) {
             let changed = existing.status != status.as_u16() || existing.reason != reason;
             existing.attempts = existing.attempts.saturating_add(1);
@@ -1165,33 +1251,54 @@ impl MailboxRelayHomeWakeRefusals {
             self.untracked.fetch_add(1, Ordering::Relaxed);
             return false;
         }
-        refused.insert(wake.message_id.clone(), MailboxRelayHomeWakeRefusal {
-            message_id: wake.message_id.clone(),
-            mailbox_id: wake.mailbox_id.clone(),
-            target_host_id: wake.target.host.host_id.clone(),
-            target_session_id: wake.target.native_session_id.clone(),
-            attempts: 1,
-            status: status.as_u16(),
-            reason,
-            first_refused_at: now.clone(),
-            last_refused_at: now,
-        });
+        refused.insert(
+            wake.message_id.clone(),
+            MailboxRelayHomeWakeRefusal {
+                message_id: wake.message_id.clone(),
+                mailbox_id: wake.mailbox_id.clone(),
+                target_host_id: wake.target.host.host_id.clone(),
+                target_session_id: wake.target.native_session_id.clone(),
+                attempts: 1,
+                status: status.as_u16(),
+                reason,
+                first_refused_at: now.clone(),
+                last_refused_at: now,
+            },
+        );
         true
     }
 
-    fn clear(&self, message_id: &str) {
-        self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(message_id);
+    pub(crate) fn clear(&self, message_id: &str) {
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(message_id);
     }
 
-    fn snapshot(&self) -> (Vec<MailboxRelayHomeWakeRefusal>, u64) {
-        let refused = self.refused.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        (refused.values().cloned().collect(), self.untracked.load(Ordering::Relaxed))
+    pub(crate) fn snapshot(&self) -> (Vec<MailboxRelayHomeWakeRefusal>, u64) {
+        let refused = self
+            .refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (
+            refused.values().cloned().collect(),
+            self.untracked.load(Ordering::Relaxed),
+        )
     }
 }
 
 impl AppState {
-    fn note_mailbox_relay_home_wake_refusal(&self, wake: &MailboxRelayWake, status: StatusCode, reason: &str) {
-        if self.mailbox_store.relay_home_wake_refusals.note(wake, status, reason) {
+    fn note_mailbox_relay_home_wake_refusal(
+        &self,
+        wake: &MailboxRelayWake,
+        status: StatusCode,
+        reason: &str,
+    ) {
+        if self
+            .mailbox_store
+            .relay_home_wake_refusals
+            .note(wake, status, reason)
+        {
             // Metadata only: no body, locator or credential.
             eprintln!(
                 "native relay home wake held for {}/{} ({}): {}",
@@ -1206,33 +1313,48 @@ impl AppState {
 
 /// A peer's refusal text, cut at a character boundary within the bound, with
 /// control characters replaced, so it cannot split or style a log line.
-fn mailbox_relay_bounded_reason(reason: &str) -> String {
+pub(crate) fn mailbox_relay_bounded_reason(reason: &str) -> String {
     let mut end = reason.len().min(MAILBOX_RELAY_HOME_WAKE_REASON_BYTES);
     while !reason.is_char_boundary(end) {
         end -= 1;
     }
-    reason[..end].chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+    reason[..end]
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// Undelivered home wake obligations and this process's recorded refusals.
 /// Reads one count from the coordination store; never waits for the state lock.
 /// A busy state makes only the durability section unavailable.
-async fn get_mailbox_relay_wake_diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+pub(crate) async fn get_mailbox_relay_wake_diagnostics(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiError> {
     let store = state.mailbox_store.clone();
     let pending = run_blocking_api(move || {
-        store.connection().map_err(mailbox_api_error)?
-            .query_row("SELECT count(*) FROM mailbox_relay_wakes WHERE delivered=0", [], |row| row.get::<_, u64>(0))
+        store
+            .connection()
+            .map_err(mailbox_api_error)?
+            .query_row(
+                "SELECT count(*) FROM mailbox_relay_wakes WHERE delivered=0",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
             .map_err(|error| mailbox_api_error(error.into()))
     })
     .await?;
     let (refused, untracked) = state.mailbox_store.relay_home_wake_refusals.snapshot();
     let (rpc_failures, rpc_evicted) = state.mailbox_store.relay_home_rpc_failures.snapshot();
     let store = state.mailbox_store.clone();
-    let causal_pending = run_blocking_api(move || store.causal_pending_diagnostics().map_err(mailbox_api_error)).await?;
+    let causal_pending = run_blocking_api(move || {
+        store
+            .causal_pending_diagnostics()
+            .map_err(mailbox_api_error)
+    })
+    .await?;
     let durability = match state.inner.try_lock_now() {
         Some(inner) => inner.federation_durability_diagnostics.snapshot(),
-        None =>
-            json!({ "available": false, "reason": "state_lock_busy" }),
+        None => json!({ "available": false, "reason": "state_lock_busy" }),
     };
     let native_route_misses = state
         .mailbox_store

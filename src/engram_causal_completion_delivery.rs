@@ -2,6 +2,8 @@
 // connection. Original mailbox send rows own all durable request/receipt state;
 // the joined federation supervisor owns only this disposable scheduling worker.
 
+use super::*;
+
 impl AppState {
     fn causal_test_admission_target(
         &self,
@@ -35,7 +37,10 @@ impl AppState {
         Some(target)
     }
 
-    fn settle_causal_test_completion(&self, delivery: &CausalTestCompletionDelivery) -> Result<()> {
+    pub(crate) fn settle_causal_test_completion(
+        &self,
+        delivery: &CausalTestCompletionDelivery,
+    ) -> Result<()> {
         let store = &self.mailbox_store;
         let selector = &delivery.selector;
         let scope = delivery.scope.as_ref();
@@ -228,14 +233,14 @@ fn request_qualification_status(value: &Value) -> Option<&'static str> {
 }
 
 #[derive(Default)]
-struct CausalTestCompletionRecovery {
-    task: Option<tokio::task::JoinHandle<()>>,
-    observed_kick: u64,
+pub(crate) struct CausalTestCompletionRecovery {
+    pub(crate) task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) observed_kick: u64,
     fallback_owed: bool,
 }
 
 impl CausalTestCompletionRecovery {
-    async fn tick(&mut self, app: &AppState, fallback: bool) {
+    pub(crate) async fn tick(&mut self, app: &AppState, fallback: bool) {
         // A periodic tick remains owed while the joined worker is busy.
         self.fallback_owed |= fallback;
         if self.task.as_ref().is_some_and(|task| !task.is_finished()) {
@@ -317,7 +322,7 @@ impl CausalTestCompletionRecovery {
         }));
     }
 
-    async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         if let Some(task) = self.task {
             let _ = task.await;
         }

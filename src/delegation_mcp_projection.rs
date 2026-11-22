@@ -15,7 +15,7 @@ fn mcp_selected_fields(value: &Value, fields: &[&str]) -> Value {
     )
 }
 
-fn compact_mcp_spawn_result(response: Value) -> Value {
+pub(crate) fn compact_mcp_spawn_result(response: Value) -> Value {
     let mut result = mcp_selected_fields(&response, &["revision", "serverInstanceId"]);
     let delegation = &response["delegation"];
     result["delegation"] = mcp_selected_fields(

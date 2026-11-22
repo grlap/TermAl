@@ -6,7 +6,7 @@
 // do not maintain a second speculative definition here.
 // Recovered from the retained direct-prompt storage component.
 
-fn remote_prompt_storage_schema_sql() -> String {
+pub(crate) fn remote_prompt_storage_schema_sql() -> String {
     let mut sql = String::new();
     for table in ["remote_prompt_intents", "remote_prompt_receives"] {
         sql.push_str(&format!(

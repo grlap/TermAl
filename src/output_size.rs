@@ -3,11 +3,13 @@
 // Producers only update fixed atomic slots; the existing lifecycle thread
 // drains them into its bounded journal, so delivery never waits for logging.
 
+use super::*;
+
 const OUTPUT_SIZE_BANDS: [u64; 3] = [16 * 1024 * 1024, 64 * 1024 * 1024, 1024 * 1024 * 1024];
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum OutputProducer {
+pub(crate) enum OutputProducer {
     State,
     History,
     Session,
@@ -20,7 +22,7 @@ enum OutputProducer {
 }
 
 impl OutputProducer {
-    const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::State,
         Self::History,
         Self::Session,
@@ -51,14 +53,14 @@ impl OutputProducer {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum OutputSizeStage {
+pub(crate) enum OutputSizeStage {
     HttpBodyBeforeCompression,
     SseFrameBeforeCompression,
     NativePreWrite,
 }
 
 impl OutputSizeStage {
-    const ALL: [Self; 3] = [
+    pub(crate) const ALL: [Self; 3] = [
         Self::HttpBodyBeforeCompression,
         Self::SseFrameBeforeCompression,
         Self::NativePreWrite,
@@ -66,13 +68,13 @@ impl OutputSizeStage {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct OutputByteCount {
-    bytes: u64,
-    saturated: bool,
+pub(crate) struct OutputByteCount {
+    pub(crate) bytes: u64,
+    pub(crate) saturated: bool,
 }
 
 impl OutputByteCount {
-    fn add(&mut self, bytes: u64) {
+    pub(crate) fn add(&mut self, bytes: u64) {
         let (sum, overflow) = self.bytes.overflowing_add(bytes);
         self.bytes = if overflow { u64::MAX } else { sum };
         self.saturated |= overflow;
@@ -165,7 +167,7 @@ fn output_size_slot(
 
 /// Reusable by the native pre-write seam. Sizes are observations, never limits.
 /// No formatted keys, payloads, identifiers, allocation, I/O or locks here.
-fn observe_output_size(
+pub(crate) fn observe_output_size(
     producer: OutputProducer,
     stage: OutputSizeStage,
     bytes: u64,
@@ -184,10 +186,10 @@ fn observe_output_size(
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct OutputSizeReport {
-    producer: OutputProducer,
-    stage: OutputSizeStage,
-    complete: bool,
+pub(crate) struct OutputSizeReport {
+    pub(crate) producer: OutputProducer,
+    pub(crate) stage: OutputSizeStage,
+    pub(crate) complete: bool,
     band_bytes: u64,
     observations_since_drain: u64,
     // Lifetime maxima for this fixed slot, not falsely correlated with a
@@ -197,7 +199,7 @@ struct OutputSizeReport {
     counter_saturated: bool,
 }
 
-fn drain_output_size_reports(mut report: impl FnMut(OutputSizeReport)) {
+pub(crate) fn drain_output_size_reports(mut report: impl FnMut(OutputSizeReport)) {
     for producer in OutputProducer::ALL {
         for stage in OutputSizeStage::ALL {
             for complete in [false, true] {
@@ -214,13 +216,13 @@ fn drain_output_size_reports(mut report: impl FnMut(OutputSizeReport)) {
 }
 
 #[derive(Clone, Copy)]
-struct OutputSizeObserved {
-    producer: OutputProducer,
-    revision: Option<u64>,
+pub(crate) struct OutputSizeObserved {
+    pub(crate) producer: OutputProducer,
+    pub(crate) revision: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
-struct OutputSizeRevision(u64);
+pub(crate) struct OutputSizeRevision(pub(crate) u64);
 
 struct OutputSizeBody {
     inner: axum::body::Body,
@@ -343,7 +345,7 @@ fn observe_http_response(mut response: Response, producer: OutputProducer) -> Re
     )
 }
 
-async fn output_size_http_observer(
+pub(crate) async fn output_size_http_observer(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {

@@ -1,9 +1,11 @@
 // Host-owned no-follow untracked discovery. Git classifies ignore rules only;
 // it never enumerates directories. No project helper or policy code executes.
-struct ReviewIdentityDirectory {
-    relative: String,
-    metadata: fs::Metadata,
-    key: String,
+
+use super::*;
+pub(crate) struct ReviewIdentityDirectory {
+    pub(crate) relative: String,
+    pub(crate) metadata: fs::Metadata,
+    pub(crate) key: String,
 }
 struct ReviewIdentityCandidate {
     relative: Vec<u8>,
@@ -11,7 +13,10 @@ struct ReviewIdentityCandidate {
     metadata: fs::Metadata,
 }
 
-fn identity_ignore_matches(requests: &[Vec<u8>], output: &[u8]) -> Result<HashSet<Vec<u8>>> {
+pub(crate) fn identity_ignore_matches(
+    requests: &[Vec<u8>],
+    output: &[u8],
+) -> Result<HashSet<Vec<u8>>> {
     if requests.is_empty() {
         if output.is_empty() {
             return Ok(HashSet::new());
@@ -56,7 +61,7 @@ fn identity_ignore_matches(requests: &[Vec<u8>], output: &[u8]) -> Result<HashSe
     Ok(ignored)
 }
 
-fn identity_ignored_candidates(
+pub(crate) fn identity_ignored_candidates(
     git: &ReviewIdentityGit,
     paths: &[Vec<u8>],
 ) -> Result<HashSet<Vec<u8>>> {
@@ -116,7 +121,7 @@ fn identity_discovery_metadata(path: &FsPath) -> Result<fs::Metadata> {
     })
 }
 
-fn identity_discovery_directory(
+pub(crate) fn identity_discovery_directory(
     git: &ReviewIdentityGit,
     directory: &ReviewIdentityDirectory,
 ) -> Result<PathBuf> {
@@ -173,7 +178,7 @@ fn identity_discovery_policy(
     Ok(())
 }
 
-fn identity_discover_untracked(
+pub(crate) fn identity_discover_untracked(
     git: &ReviewIdentityGit,
     prefix: &str,
     tracked: &HashMap<String, bool>,

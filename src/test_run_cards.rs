@@ -16,6 +16,8 @@
 //
 // New module, not split from another file.
 
+use super::*;
+
 /// The card message's `schemaVersion`.
 const TEST_RUN_CARD_SCHEMA_VERSION: u32 = 1;
 /// The serialized core of a snapshot is never cut; a run whose core exceeds
@@ -24,14 +26,14 @@ const TEST_RUN_CARD_CORE_MAX_BYTES: usize = 10 * 1024;
 /// The optional part is filled in a fixed order within this budget.
 const TEST_RUN_CARD_OPTIONAL_MAX_BYTES: usize = 8 * 1024;
 /// A failure excerpt is cut to this many bytes at a character boundary.
-const TEST_RUN_CARD_EXCERPT_MAX_BYTES: usize = 4 * 1024;
+pub(crate) const TEST_RUN_CARD_EXCERPT_MAX_BYTES: usize = 4 * 1024;
 /// A run already terminal at first sight still gets a card when it started at
 /// most this long before: a short focused run that ended between two rescans.
 const TEST_RUN_CARD_LATE_SIGHT_WINDOW: chrono::TimeDelta = chrono::TimeDelta::minutes(10);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunCardUnknownReason {
+pub(crate) enum TestRunCardUnknownReason {
     ProcessGone,
     ResultsUnreadable,
     NoPid,
@@ -53,20 +55,20 @@ impl From<TestRunUnknownReason> for TestRunCardUnknownReason {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum TestRunCardFailurePhase {
+pub(crate) enum TestRunCardFailurePhase {
     Stage,
     Preflight,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCardFailure {
-    phase: TestRunCardFailurePhase,
+pub(crate) struct TestRunCardFailure {
+    pub(crate) phase: TestRunCardFailurePhase,
     /// The first failing stage or preflight check.
-    name: String,
+    pub(crate) name: String,
     /// Its diagnostics text, at most 4 KiB.
-    excerpt: String,
-    truncated: bool,
+    pub(crate) excerpt: String,
+    pub(crate) truncated: bool,
 }
 
 /// What a card shows, read only from here by the renderer. It has no volatile
@@ -74,33 +76,33 @@ struct TestRunCardFailure {
 /// rewrites it.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCardSnapshot {
+pub(crate) struct TestRunCardSnapshot {
     // Core: never cut.
-    run_id: String,
-    worktree: String,
-    run_dir: String,
-    preset: TestRunPreset,
-    detached: Option<bool>,
-    state: TestRunState,
+    pub(crate) run_id: String,
+    pub(crate) worktree: String,
+    pub(crate) run_dir: String,
+    pub(crate) preset: TestRunPreset,
+    pub(crate) detached: Option<bool>,
+    pub(crate) state: TestRunState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    unknown_reason: Option<TestRunCardUnknownReason>,
-    interrupted: bool,
-    current_stage: Option<String>,
-    started_at: Option<String>,
-    ended_at: Option<String>,
-    exit_code: Option<i64>,
+    pub(crate) unknown_reason: Option<TestRunCardUnknownReason>,
+    pub(crate) interrupted: bool,
+    pub(crate) current_stage: Option<String>,
+    pub(crate) started_at: Option<String>,
+    pub(crate) ended_at: Option<String>,
+    pub(crate) exit_code: Option<i64>,
     // Optional part: filled in priority order within its budget.
-    stages: Vec<TestRunStageSummary>,
-    stages_omitted: usize,
-    error: Option<String>,
-    error_truncated: bool,
-    failure: Option<TestRunCardFailure>,
-    command: Option<Vec<String>>,
-    command_truncated: bool,
+    pub(crate) stages: Vec<TestRunStageSummary>,
+    pub(crate) stages_omitted: usize,
+    pub(crate) error: Option<String>,
+    pub(crate) error_truncated: bool,
+    pub(crate) failure: Option<TestRunCardFailure>,
+    pub(crate) command: Option<Vec<String>>,
+    pub(crate) command_truncated: bool,
 }
 
 impl TestRunCardSnapshot {
-    fn is_terminal(&self) -> bool {
+    pub(crate) fn is_terminal(&self) -> bool {
         matches!(self.state, TestRunState::Passed | TestRunState::Failed)
     }
 }
@@ -109,22 +111,22 @@ impl TestRunCardSnapshot {
 /// The transcript stays the render source; boot never scans transcripts.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TestRunCardRef {
-    session_id: String,
-    message_id: String,
+pub(crate) struct TestRunCardRef {
+    pub(crate) session_id: String,
+    pub(crate) message_id: String,
     /// Whether the stored snapshot is terminal. A card that is not is
     /// checked after every scan and keeps its run in the index.
     #[serde(default)]
-    terminal: bool,
+    pub(crate) terminal: bool,
     /// The `detailVersion` the stored failure excerpt was read from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    failure_detail_version: Option<String>,
+    pub(crate) failure_detail_version: Option<String>,
 }
 
 /// When this host process first saw a run.
 #[derive(Clone, Copy, Debug)]
-struct TestRunFirstSight {
-    at: chrono::DateTime<chrono::Utc>,
+pub(crate) struct TestRunFirstSight {
+    pub(crate) at: chrono::DateTime<chrono::Utc>,
     non_terminal: bool,
 }
 
@@ -132,7 +134,7 @@ fn test_run_card_json_len<T: Serialize>(value: &T) -> usize {
     serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len())
 }
 
-fn test_run_card_cut(text: &str, max: usize) -> (String, bool) {
+pub(crate) fn test_run_card_cut(text: &str, max: usize) -> (String, bool) {
     if text.len() <= max {
         return (text.to_owned(), false);
     }
@@ -144,7 +146,7 @@ fn test_run_card_cut(text: &str, max: usize) -> (String, bool) {
 /// contract's fixed order, so the same run always gives the same snapshot:
 /// the failed and the running stage, `error`, `failure` (its excerpt cut to
 /// fit), `command` whole or not at all, then the other stages in plan order.
-fn test_run_card_snapshot(
+pub(crate) fn test_run_card_snapshot(
     entry: &TestRunEntry,
     failure: Option<TestRunCardFailure>,
 ) -> Option<TestRunCardSnapshot> {
@@ -273,7 +275,7 @@ fn test_run_card_snapshot(
 
 /// One read of a failed run's first failure.
 #[derive(Clone, Debug)]
-enum TestRunCardFailureRead {
+pub(crate) enum TestRunCardFailureRead {
     /// results.json was read: the digest of the bytes read (the version the
     /// excerpt belongs to) and the failure found in them, if any.
     Read {
@@ -289,7 +291,7 @@ enum TestRunCardFailureRead {
 /// The first failure of a terminal failed run, read from its results.json
 /// with the detail route's 1 MiB guard: the first failing stage, else the
 /// first failing preflight check. Its diagnostics text is cut to 4 KiB.
-fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
+pub(crate) fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
     let failure = test_run_failure_read(run_dir, TEST_RUN_CARD_EXCERPT_MAX_BYTES);
     #[cfg(test)]
     TEST_HISTORY_EXCERPT.with(|slot| {
@@ -302,7 +304,10 @@ fn test_run_card_failure(run_dir: &FsPath) -> TestRunCardFailureRead {
 
 /// `test_run_card_failure` with the diagnostics cut to `max_excerpt` bytes:
 /// a run wait's resume prompt allows more than a card (test_run_waits.rs).
-fn test_run_failure_read(run_dir: &FsPath, max_excerpt: usize) -> TestRunCardFailureRead {
+pub(crate) fn test_run_failure_read(
+    run_dir: &FsPath,
+    max_excerpt: usize,
+) -> TestRunCardFailureRead {
     let TestRunJson::Parsed(results, digest, _) = test_run_read_json(&run_dir.join("results.json"))
     else {
         return TestRunCardFailureRead::Unavailable;
@@ -345,7 +350,7 @@ fn test_run_failure_read(run_dir: &FsPath, max_excerpt: usize) -> TestRunCardFai
 }
 
 /// A one-line preview for the session list and sidebar.
-fn test_run_card_preview_text(run: &TestRunCardSnapshot) -> String {
+pub(crate) fn test_run_card_preview_text(run: &TestRunCardSnapshot) -> String {
     let preset = match run.preset {
         TestRunPreset::Full => "full",
         TestRunPreset::Focused => "focused",
@@ -386,7 +391,7 @@ fn test_run_card_eligible(
 }
 
 /// A card delta to publish once its revision is allocated.
-enum TestRunCardDelta {
+pub(crate) enum TestRunCardDelta {
     Created {
         session_id: String,
         message_id: String,
@@ -411,7 +416,7 @@ enum TestRunCardDelta {
 }
 
 impl TestRunCardDelta {
-    fn into_event(self, revision: u64, local_instance_id: &str) -> DeltaEvent {
+    pub(crate) fn into_event(self, revision: u64, local_instance_id: &str) -> DeltaEvent {
         match self {
             Self::Created {
                 session_id,
@@ -465,7 +470,7 @@ impl TestRunCardDelta {
 /// Appends a new card to its owner's transcript and records it in the map.
 /// `None` when the owner cannot hold one: gone, internal, or a remote proxy,
 /// whose transcript the remote owns.
-fn create_test_run_card_locked(
+pub(crate) fn create_test_run_card_locked(
     inner: &mut StateInner,
     owner_session_id: &str,
     snapshot: TestRunCardSnapshot,
@@ -543,7 +548,7 @@ fn test_run_card_lookup(inner: &mut StateInner, card: &TestRunCardRef) -> TestRu
 
 /// Replaces a resident card's snapshot when it differs, and updates the map.
 /// `None` when nothing changed.
-fn update_test_run_card_locked(
+pub(crate) fn update_test_run_card_locked(
     inner: &mut StateInner,
     run_id: &str,
     snapshot: TestRunCardSnapshot,
@@ -597,7 +602,7 @@ fn update_test_run_card_locked(
 
 /// Whether a card's message is in its session's in-memory window, without
 /// repairing the position cache.
-fn test_run_card_is_resident(inner: &StateInner, card: &TestRunCardRef) -> bool {
+pub(crate) fn test_run_card_is_resident(inner: &StateInner, card: &TestRunCardRef) -> bool {
     inner
         .find_session_index(&card.session_id)
         .is_some_and(|index| {
@@ -686,7 +691,10 @@ impl AppState {
     /// publishing runs and create no card, so a slow or failing persist can
     /// never starve the index. A fence that failed or expired starts a new
     /// attempt with the same epoch.
-    fn step_test_run_cards_epoch(&self, pending: &mut Option<PersistFenceWaiter>) -> bool {
+    pub(crate) fn step_test_run_cards_epoch(
+        &self,
+        pending: &mut Option<PersistFenceWaiter>,
+    ) -> bool {
         if let Some(waiter) = pending.take() {
             match waiter.wait_until(std::time::Instant::now()) {
                 None => {
@@ -717,7 +725,7 @@ impl AppState {
     /// `step_test_run_cards_epoch` until it settles, for tests that need
     /// cards enabled. Production never blocks on the epoch.
     #[cfg(test)]
-    fn ensure_test_run_cards_epoch(&self) -> bool {
+    pub(crate) fn ensure_test_run_cards_epoch(&self) -> bool {
         match self.begin_test_run_cards_epoch() {
             TestRunCardsEpochProgress::Durable => true,
             TestRunCardsEpochProgress::Pending(waiter) => {
@@ -735,7 +743,7 @@ impl AppState {
 
     /// Creates and updates cards under the lock that committed the run deltas.
     /// Failure excerpts are read before taking that lock.
-    fn sync_test_run_cards_traced_locked(
+    pub(crate) fn sync_test_run_cards_traced_locked(
         &self,
         inner: &mut StateInner,
         entries: &[TestRunEntry],

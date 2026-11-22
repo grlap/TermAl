@@ -3,18 +3,20 @@
 // spans; does not execute tests,
 // mint verification credit, settle tracker work, or authorize a restart.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
     // Deterministic connected-worker witness, after enqueue and before wait.
-    static TEST_TEST_RUN_REGISTRATION_FENCE_SENT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_TEST_RUN_REGISTRATION_FENCE_SENT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     // Post-publication contention schedule; neither hook supplies durability.
-    static TEST_TEST_RUN_REGISTRATION_PUBLISHED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_TEST_RUN_REGISTRATION_NEXT_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_TEST_RUN_REGISTRATION_PUBLISHED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_TEST_RUN_REGISTRATION_NEXT_LOCK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     // Schedule a scanner after durable identity readback, before the ACK CAS.
-    static TEST_TEST_RUN_REGISTRATION_RECHECKED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_TEST_RUN_REGISTRATION_RECHECKED: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
-fn test_run_timestamp() -> String {
+pub(crate) fn test_run_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
@@ -23,78 +25,78 @@ fn test_run_timestamp() -> String {
 /// a destination binding, remote completion or verification qualification.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TestRunNativeOrigin {
+pub(crate) struct TestRunNativeOrigin {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    causal_request: Option<TestRunCausalRequest>,
-    host: FederationHostIdentity,
-    native_session_id: String,
-    native_creation_id: String,
-    project_id: String,
+    pub(crate) causal_request: Option<TestRunCausalRequest>,
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) native_session_id: String,
+    pub(crate) native_creation_id: String,
+    pub(crate) project_id: String,
     /// Logical project identity already validated by the existing Engram
     /// connection owner. Never send its host-private database path.
-    project_scope: Option<String>,
+    pub(crate) project_scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunRegistration {
-    run_id: String,
+pub(crate) struct TestRunRegistration {
+    pub(crate) run_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    native_origin: Option<TestRunNativeOrigin>,
+    pub(crate) native_origin: Option<TestRunNativeOrigin>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    native_completion: Option<TestRunNativeCompletion>,
+    pub(crate) native_completion: Option<TestRunNativeCompletion>,
     // Latest failed native-retention prerequisite, never an identity or proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
+    pub(crate) native_completion_refusal: Option<TestRunNativeCompletionRefusal>,
     // Host-verified executable provenance, immutable with the request. Legacy
     // registrations do not acquire a pin from a later project configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    source_owner: Option<EngramSourceOwnerPin>,
+    pub(crate) source_owner: Option<EngramSourceOwnerPin>,
     #[serde(default)]
-    project_id: Option<String>,
-    run_directory: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) run_directory: String,
     // Host-captured canonical native bytes, independent of wire path spelling.
     #[serde(default)]
-    locator_identity: Option<String>,
-    worktree: String,
-    request_identity: String,
-    initiating_session_id: String,
-    owning_session_id: String,
-    creator_pid: Option<u32>,
-    registered_at: String,
-    started_at: Option<String>,
-    preset: TestRunPreset,
-    detached: Option<bool>,
-    stage_names: Vec<String>,
+    pub(crate) locator_identity: Option<String>,
+    pub(crate) worktree: String,
+    pub(crate) request_identity: String,
+    pub(crate) initiating_session_id: String,
+    pub(crate) owning_session_id: String,
+    pub(crate) creator_pid: Option<u32>,
+    pub(crate) registered_at: String,
+    pub(crate) started_at: Option<String>,
+    pub(crate) preset: TestRunPreset,
+    pub(crate) detached: Option<bool>,
+    pub(crate) stage_names: Vec<String>,
     // Captured before execution by the host, never trusted from request.json.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    declared: Option<EngramDeclaredBinding>,
+    pub(crate) declared: Option<EngramDeclaredBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    declared_native: Option<DeclaredRunReservation>,
+    pub(crate) declared_native: Option<DeclaredRunReservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    declared_terminal: Option<DeclaredRunTerminal>,
+    pub(crate) declared_terminal: Option<DeclaredRunTerminal>,
     // Captured by the host, never accepted from the launcher's payload. For
     // an ordinary committed-input run: the claim of the one root the
     // launching session currently holds for this worktree, including a
     // retained name from its prior holder (src/test_run_named_root.rs),
     // never the session's current binding; for any other run: the session's
     // binding at registration, as before.
-    work_binding: Option<EngramControlWorkBinding>,
+    pub(crate) work_binding: Option<EngramControlWorkBinding>,
     // The named root `work_binding` came from; none when unbound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    named_root: Option<TestRunNamedRoot>,
+    pub(crate) named_root: Option<TestRunNamedRoot>,
     #[serde(default)]
-    authority_store: Option<EngramAuthorityStoreKey>,
-    validated_unbound: bool,
+    pub(crate) authority_store: Option<EngramAuthorityStoreKey>,
+    pub(crate) validated_unbound: bool,
     #[serde(default)]
-    monitoring_interrupted_at: Option<String>,
+    pub(crate) monitoring_interrupted_at: Option<String>,
     // What the host itself observed of the run's Engram verification record
     // (src/engram_verification_record.rs): the receipt it received and
     // checked, its settlement once durable, or a refusal. Written only by the
     // host under the state lock; the state file beside the run is an
     // informational mirror and never stands in for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    verification_record: Option<TestRunVerificationAck>,
+    pub(crate) verification_record: Option<TestRunVerificationAck>,
 }
 
 impl TestRunRegistration {
@@ -103,7 +105,7 @@ impl TestRunRegistration {
     // acknowledged registration. Diagnostics may also change, but every identity
     // field and any completion already present must still match. Full equality remains required
     // for publishing a durable completion and retiring its compaction custody.
-    fn matches_registration_snapshot(&self, expected: &Self) -> bool {
+    pub(crate) fn matches_registration_snapshot(&self, expected: &Self) -> bool {
         if expected.native_completion.is_some() {
             return self == expected;
         }
@@ -121,73 +123,73 @@ impl TestRunRegistration {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct TestRunRegistrationView {
+pub(crate) struct TestRunRegistrationView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    request_message_id: Option<String>,
+    pub(crate) request_message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    history_compacted: Option<bool>,
+    pub(crate) history_compacted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    artifact_unavailable: Option<bool>,
+    pub(crate) artifact_unavailable: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    compaction_reason: Option<String>,
+    pub(crate) compaction_reason: Option<String>,
     #[serde(default)]
-    registration_state: Option<String>,
+    pub(crate) registration_state: Option<String>,
     #[serde(default)]
-    tracking_durability: Option<String>,
+    pub(crate) tracking_durability: Option<String>,
     #[serde(default)]
-    initiating_session_id: Option<String>,
+    pub(crate) initiating_session_id: Option<String>,
     #[serde(default)]
-    bound_work_ids: Vec<String>,
+    pub(crate) bound_work_ids: Vec<String>,
     #[serde(default)]
-    creator_pid: Option<u32>,
+    pub(crate) creator_pid: Option<u32>,
     #[serde(default)]
-    runner_pid: Option<u32>,
+    pub(crate) runner_pid: Option<u32>,
     #[serde(default)]
-    monitoring_interrupted_at: Option<String>,
+    pub(crate) monitoring_interrupted_at: Option<String>,
     // Null must be emitted: an absent/unknown correlation is never safe.
     #[serde(default)]
-    restart_would_void_evidence: Option<bool>,
+    pub(crate) restart_would_void_evidence: Option<bool>,
     #[serde(default)]
-    restart_evidence_reason: String,
+    pub(crate) restart_evidence_reason: String,
     #[serde(default)]
-    observed_at: Option<String>,
+    pub(crate) observed_at: Option<String>,
     #[serde(default)]
-    verification_record_ids: Vec<String>,
+    pub(crate) verification_record_ids: Vec<String>,
     #[serde(default)]
-    source_fingerprints: Vec<String>,
+    pub(crate) source_fingerprints: Vec<String>,
     #[serde(default)]
-    artifact_locations: Vec<String>,
+    pub(crate) artifact_locations: Vec<String>,
     #[serde(default)]
-    tracking_provenances: Vec<String>,
+    pub(crate) tracking_provenances: Vec<String>,
     // An exact artifact correlation replaces these provider-only identities
     // atomically in the client's projection; it never deletes durable evidence.
     #[serde(default)]
-    superseded_run_ids: Vec<String>,
+    pub(crate) superseded_run_ids: Vec<String>,
     // Merged observations whose own save failed. `tracking_durability` keeps
     // describing the registration, so without this list a card would show a
     // durable registration and hide that a merged observation was not saved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    failed_observation_ids: Vec<String>,
+    pub(crate) failed_observation_ids: Vec<String>,
     #[serde(default)]
-    start_time_origin: Option<String>,
+    pub(crate) start_time_origin: Option<String>,
     #[serde(default)]
-    planned_stage_names: Vec<String>,
+    pub(crate) planned_stage_names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RegisterTestRunRequest {
-    run_id: String,
-    run_directory: String,
+pub(crate) struct RegisterTestRunRequest {
+    pub(crate) run_id: String,
+    pub(crate) run_directory: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RegisterTestRunApiRequest {
-    run_id: String,
-    run_directory: String,
+pub(crate) struct RegisterTestRunApiRequest {
+    pub(crate) run_id: String,
+    pub(crate) run_directory: String,
     #[serde(default, deserialize_with = "deserialize_test_request_message_id")]
-    request_message_id: Option<String>,
+    pub(crate) request_message_id: Option<String>,
 }
 
 fn deserialize_test_request_message_id<'de, D: serde::Deserializer<'de>>(
@@ -204,11 +206,11 @@ fn deserialize_test_request_message_id<'de, D: serde::Deserializer<'de>>(
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RegisterTestRunResponse {
-    contract: &'static str,
-    version: u32,
-    run_id: String,
-    registered: bool,
+pub(crate) struct RegisterTestRunResponse {
+    pub(crate) contract: &'static str,
+    pub(crate) version: u32,
+    pub(crate) run_id: String,
+    pub(crate) registered: bool,
 }
 
 // Diagnostics never decide durability or admission. Keep the existing error
@@ -216,7 +218,7 @@ struct RegisterTestRunResponse {
 // Per operation: at most 16 completed phases and 8 lock observations; response
 // detail is capped at 2048 bytes. These are transient observations, not the
 // parent's retained diagnostic history or a durability/settlement authority.
-fn test_run_diagnostic_id(value: &str) -> String {
+pub(crate) fn test_run_diagnostic_id(value: &str) -> String {
     value
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric() || matches!(*ch, '-' | '_'))
@@ -225,12 +227,12 @@ fn test_run_diagnostic_id(value: &str) -> String {
 }
 
 // Claim/durability allowance, not a source-capture budget.
-const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
+pub(crate) const TEST_RUN_REGISTRATION_DURABILITY_BUDGET: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 
 /// The shared claim-read and durability deadline. On real time it is measured
 /// from `requested`, before either authority lock; a scripted fixture clock measures from its own
 /// current reading, which only the fixture advances.
-fn test_run_registration_deadline(
+pub(crate) fn test_run_registration_deadline(
     clock: &EngramBudgetClock,
     requested: std::time::Instant,
 ) -> std::time::Instant {
@@ -241,7 +243,7 @@ fn test_run_registration_deadline(
     }
 }
 
-fn test_run_registration_remaining(
+pub(crate) fn test_run_registration_remaining(
     clock: &EngramBudgetClock,
     deadline: std::time::Instant,
     diagnostics: &mut TestRunRegistrationDiagnostics,
@@ -258,35 +260,35 @@ fn test_run_registration_remaining(
     }
 }
 
-struct TestRunRegistrationDiagnostics {
-    started: std::time::Instant,
-    phase_started: std::time::Instant,
-    phase: &'static str,
-    category: Option<&'static str>,
-    cause: Option<String>,
-    fence_error: Option<String>,
+pub(crate) struct TestRunRegistrationDiagnostics {
+    pub(crate) started: std::time::Instant,
+    pub(crate) phase_started: std::time::Instant,
+    pub(crate) phase: &'static str,
+    pub(crate) category: Option<&'static str>,
+    pub(crate) cause: Option<String>,
+    pub(crate) fence_error: Option<String>,
     writer_progress: Option<String>,
-    attempt_id: String,
-    operation_id: String,
+    pub(crate) attempt_id: String,
+    pub(crate) operation_id: String,
     attempt_ordinal: String,
-    server_instance: String,
-    method: &'static str,
-    enabled: bool,
-    request_digest: Option<String>,
-    lock_timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
-    lock_observation_loss: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) server_instance: String,
+    pub(crate) method: &'static str,
+    pub(crate) enabled: bool,
+    pub(crate) request_digest: Option<String>,
+    pub(crate) lock_timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
+    pub(crate) lock_observation_loss: Arc<std::sync::atomic::AtomicU64>,
     spans: Vec<(&'static str, Duration, Duration)>,
-    fence_deadline: Option<std::time::Instant>,
+    pub(crate) fence_deadline: Option<std::time::Instant>,
     // The clock the fence deadline is measured on.
     fence_clock: EngramBudgetClock,
     durability_confirmed: bool,
-    published: bool,
-    failure_phase: Option<(&'static str, Duration)>,
-    trace: Option<TestRunPhaseTrace>,
+    pub(crate) published: bool,
+    pub(crate) failure_phase: Option<(&'static str, Duration)>,
+    pub(crate) trace: Option<TestRunPhaseTrace>,
 }
 
 impl TestRunRegistrationDiagnostics {
-    fn new(server_instance: &str) -> Self {
+    pub(crate) fn new(server_instance: &str) -> Self {
         let started = std::time::Instant::now();
         Self {
             started,
@@ -315,7 +317,7 @@ impl TestRunRegistrationDiagnostics {
         }
     }
 
-    fn enter(&mut self, phase: &'static str) {
+    pub(crate) fn enter(&mut self, phase: &'static str) {
         if let Some(trace) = &self.trace {
             trace.mark(phase);
         }
@@ -330,7 +332,7 @@ impl TestRunRegistrationDiagnostics {
         self.phase_started = std::time::Instant::now();
     }
 
-    fn correlate(&mut self, headers: &axum::http::HeaderMap) {
+    pub(crate) fn correlate(&mut self, headers: &axum::http::HeaderMap) {
         self.operation_id = headers
             .get("x-termal-registration-operation")
             .and_then(|value| value.to_str().ok())
@@ -352,7 +354,10 @@ impl TestRunRegistrationDiagnostics {
     }
 
     #[track_caller]
-    fn lock<'a>(&self, state: &'a StateMutex<StateInner>) -> TestRunRegistrationGuard<'a> {
+    pub(crate) fn lock<'a>(
+        &self,
+        state: &'a StateMutex<StateInner>,
+    ) -> TestRunRegistrationGuard<'a> {
         #[cfg(test)]
         {
             let step = TEST_TEST_RUN_REGISTRATION_NEXT_LOCK.with(|slot| slot.borrow_mut().take());
@@ -368,7 +373,7 @@ impl TestRunRegistrationDiagnostics {
         }
     }
 
-    fn fields(&self, run_id: &str, category: &str, status: u16) -> String {
+    pub(crate) fn fields(&self, run_id: &str, category: &str, status: u16) -> String {
         let lock_timings = match self.lock_timings.try_lock() {
             Ok(timings) => timings,
             Err(_) => {
@@ -442,7 +447,7 @@ impl TestRunRegistrationDiagnostics {
         test_run_truncate(&fields, 1600)
     }
 
-    fn report(&self, run_id: &str, error: &mut ApiError) {
+    pub(crate) fn report(&self, run_id: &str, error: &mut ApiError) {
         let registration_pending = error.durability_deadline.as_ref().is_some_and(|deadline| {
             matches!(
                 deadline.operation,
@@ -491,7 +496,7 @@ impl TestRunRegistrationDiagnostics {
         );
     }
 
-    fn state_lock_block(&self) -> StateLockBlock {
+    pub(crate) fn state_lock_block(&self) -> StateLockBlock {
         let loss = self
             .lock_observation_loss
             .load(std::sync::atomic::Ordering::Relaxed);
@@ -516,20 +521,20 @@ impl TestRunRegistrationDiagnostics {
 // Reuse the existing StateMutex acquisition measurements. Only accumulate
 // durations while held; formatting and reporting happen after guard release.
 #[derive(Default)]
-struct TestRunRegistrationLockTimings {
-    waited: Duration,
-    held: Duration,
-    observations: [Option<(&'static str, Duration, Duration)>; 8],
-    observer: Option<Arc<StateLockObserver>>,
+pub(crate) struct TestRunRegistrationLockTimings {
+    pub(crate) waited: Duration,
+    pub(crate) held: Duration,
+    pub(crate) observations: [Option<(&'static str, Duration, Duration)>; 8],
+    pub(crate) observer: Option<Arc<StateLockObserver>>,
     wait_spans: [Option<StateLockSpan>; 8],
     span_count: usize,
 }
 
-struct TestRunRegistrationGuard<'a> {
-    guard: StateMutexGuard<'a, StateInner>,
-    timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
-    loss: Arc<std::sync::atomic::AtomicU64>,
-    phase: &'static str,
+pub(crate) struct TestRunRegistrationGuard<'a> {
+    pub(crate) guard: StateMutexGuard<'a, StateInner>,
+    pub(crate) timings: Arc<Mutex<TestRunRegistrationLockTimings>>,
+    pub(crate) loss: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) phase: &'static str,
 }
 
 impl std::ops::Deref for TestRunRegistrationGuard<'_> {
@@ -567,7 +572,7 @@ impl Drop for TestRunRegistrationGuard<'_> {
     }
 }
 
-fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
+pub(crate) fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
     let fields = [
         "runId",
         "root",
@@ -618,7 +623,7 @@ fn test_run_registration_identity(request: &Value) -> Result<String, ApiError> {
 
 impl AppState {
     #[cfg(test)]
-    fn register_test_run(
+    pub(crate) fn register_test_run(
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
@@ -640,7 +645,7 @@ impl AppState {
         self.register_test_run_reserved(session_id, request, diagnostics, None)
     }
 
-    fn register_test_run_reserved(
+    pub(crate) fn register_test_run_reserved(
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
@@ -756,7 +761,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn register_test_run_inner_with_source_owner(
+    pub(crate) fn register_test_run_inner_with_source_owner(
         &self,
         session_id: &str,
         request: RegisterTestRunRequest,
@@ -1330,11 +1335,11 @@ impl AppState {
 
 // The disk index versions file bytes as `sha256:<hash>`, while carried checks
 // retain the raw SHA-256. Compare both exact identities in the raw form here.
-fn test_run_terminal_digest_matches(version: Option<&str>, raw_digest: &str) -> bool {
+pub(crate) fn test_run_terminal_digest_matches(version: Option<&str>, raw_digest: &str) -> bool {
     version.and_then(|version| version.strip_prefix("sha256:")) == Some(raw_digest)
 }
 
-fn test_run_registration_final_observation<'a>(
+pub(crate) fn test_run_registration_final_observation<'a>(
     registration: &TestRunRegistration,
     observations: &'a BTreeMap<String, TestRunCommandObservation>,
     durable: Option<&HashSet<String>>,
@@ -1384,13 +1389,16 @@ fn test_run_registration_final_observation_from_candidates<'a>(
         .flatten()
 }
 
-fn test_run_registration_view(inner: &StateInner, disk: &TestRunDisk) -> TestRunRegistrationView {
+pub(crate) fn test_run_registration_view(
+    inner: &StateInner,
+    disk: &TestRunDisk,
+) -> TestRunRegistrationView {
     test_run_registration_view_from_observations(inner, disk, inner.test_run_observations.values())
 }
 
 // Shared exact locator/content match. Project attribution needs this match
 // and the durable registration marker, not the unrelated restart-risk scan.
-fn test_run_matching_registration<'a>(
+pub(crate) fn test_run_matching_registration<'a>(
     inner: &'a impl TestRunProjectionSource,
     disk: &TestRunDisk,
 ) -> Option<&'a TestRunRegistration> {
@@ -1407,7 +1415,7 @@ fn test_run_matching_registration<'a>(
         })
 }
 
-fn test_run_registration_view_from_observations<'a>(
+pub(crate) fn test_run_registration_view_from_observations<'a>(
     inner: &impl TestRunProjectionSource,
     disk: &TestRunDisk,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
@@ -1521,11 +1529,14 @@ fn test_run_registration_view_from_observations<'a>(
     view
 }
 
-fn test_run_registered_fallback(inner: &StateInner, row: &TestRunRegistration) -> TestRunSummary {
+pub(crate) fn test_run_registered_fallback(
+    inner: &StateInner,
+    row: &TestRunRegistration,
+) -> TestRunSummary {
     test_run_registered_fallback_from_observations(inner, row, inner.test_run_observations.values())
 }
 
-fn test_run_registered_fallback_from_observations<'a>(
+pub(crate) fn test_run_registered_fallback_from_observations<'a>(
     inner: &impl TestRunProjectionSource,
     row: &TestRunRegistration,
     observations: impl IntoIterator<Item = &'a TestRunCommandObservation>,
@@ -1571,7 +1582,7 @@ fn test_run_registered_fallback_from_observations<'a>(
     }
 }
 
-async fn register_session_test_run(
+pub(crate) async fn register_session_test_run(
     AxumPath(session_id): AxumPath<String>,
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

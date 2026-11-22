@@ -7,6 +7,8 @@
 // marking and the recorder hooks (`engram_turn_checks.rs`), or the toolchain
 // label (`engram_check_toolchain.rs`). Split out of `engram_turn_checks.rs`.
 
+use super::*;
+
 /// `path` as paths of one file system compare in: forward slashes, no
 /// Windows verbatim prefix, no trailing separator, and case-folded where the
 /// platform's usual file system ignores case (Windows and macOS), which errs
@@ -15,7 +17,7 @@
 /// measured in a named root, where it can only count a change, never miss
 /// one; what a check is credited to is judged on `engram_exact_path_key`
 /// instead.
-fn engram_path_key(path: &FsPath) -> String {
+pub(crate) fn engram_path_key(path: &FsPath) -> String {
     let text = engram_exact_path_key(path);
     if cfg!(any(windows, target_os = "macos")) {
         text.to_lowercase()
@@ -28,7 +30,7 @@ fn engram_path_key(path: &FsPath) -> String {
 /// (which macOS and Windows allow) two worktrees may differ only in case,
 /// and crediting one with the other's test would be wrong. Resolved paths
 /// carry the case the file system stores, so the same place compares equal.
-fn engram_exact_path_key(path: &FsPath) -> String {
+pub(crate) fn engram_exact_path_key(path: &FsPath) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
     let text = match text.strip_prefix("//?/UNC/") {
         Some(share) => format!("//{share}"),
@@ -44,7 +46,7 @@ fn engram_exact_path_key(path: &FsPath) -> String {
 
 /// The key (`engram_path_key`) of `path` with every link on its existing part
 /// resolved (`engram_canonical_path`).
-fn engram_canonical_path_key(path: &FsPath) -> String {
+pub(crate) fn engram_canonical_path_key(path: &FsPath) -> String {
     engram_path_key(&engram_canonical_path(path))
 }
 
@@ -54,7 +56,7 @@ fn engram_canonical_path_key(path: &FsPath) -> String {
 /// or a glob under a link (`linked/test_x.py::test`, `linked/test_*.py`)
 /// resolves through the link, and a directory spelled through an alias
 /// (`/var` for `/private/var`, a Windows short name) is its resolved form.
-fn engram_canonical_path(path: &FsPath) -> PathBuf {
+pub(crate) fn engram_canonical_path(path: &FsPath) -> PathBuf {
     let components = path.components().collect::<Vec<_>>();
     let append = |mut resolved: PathBuf, rest: &[std::path::Component]| {
         for component in rest {
@@ -80,7 +82,7 @@ fn engram_canonical_path(path: &FsPath) -> PathBuf {
 }
 
 /// Whether the path with key `path` is `root` or lies beneath it.
-fn engram_path_within(path: &str, root: &str) -> bool {
+pub(crate) fn engram_path_within(path: &str, root: &str) -> bool {
     path.strip_prefix(root)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || root.ends_with('/'))
 }
@@ -90,7 +92,7 @@ fn engram_path_within(path: &str, root: &str) -> bool {
 /// worktree. Sessions in one worktree share its content whichever
 /// subdirectory each works in, however their paths are spelled, and even
 /// when a workdir does not exist (yet): the root is resolved on its own.
-fn engram_worktree_root_path(workdir: &FsPath) -> PathBuf {
+pub(crate) fn engram_worktree_root_path(workdir: &FsPath) -> PathBuf {
     let path = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
     let root = path
         .ancestors()
@@ -105,7 +107,8 @@ const ENGRAM_WORKTREE_KEY_CACHE_LIMIT: usize = 256;
 
 /// Worktree keys (`engram_worktree_root`) by workdir, with when each was
 /// resolved.
-fn engram_worktree_keys() -> &'static Mutex<HashMap<PathBuf, (String, std::time::Instant)>> {
+pub(crate) fn engram_worktree_keys()
+-> &'static Mutex<HashMap<PathBuf, (String, std::time::Instant)>> {
     static KEYS: std::sync::OnceLock<Mutex<HashMap<PathBuf, (String, std::time::Instant)>>> =
         std::sync::OnceLock::new();
     KEYS.get_or_init(Default::default)
@@ -122,7 +125,7 @@ fn engram_worktree_keys() -> &'static Mutex<HashMap<PathBuf, (String, std::time:
 /// (`engram_network_path`) is keyed as written, unresolved: resolving it can
 /// block for a network timeout on the runtime's event reader, and no check
 /// runs there (`engram_check_worktree` takes such a path to lead out).
-fn engram_worktree_root(workdir: &FsPath) -> String {
+pub(crate) fn engram_worktree_root(workdir: &FsPath) -> String {
     let keys = engram_worktree_keys();
     let now = std::time::Instant::now();
     if let Some((key, remembered_at)) = keys
@@ -155,23 +158,23 @@ fn engram_worktree_root(workdir: &FsPath) -> String {
 
 /// At most this many places a lost shell is kept among
 /// (`EngramShellDirectory::lost_among`); past it, the shell may be anywhere.
-const ENGRAM_LOST_PLACES_LIMIT: usize = 32;
+pub(crate) const ENGRAM_LOST_PLACES_LIMIT: usize = 32;
 
 /// Where the shell of one runtime is presumed to be, if it keeps a `cd`
 /// between commands (`engram_shell_move`). A runtime other than `runtime`
 /// starts its shell afresh in the workdir.
 #[derive(Clone, Debug)]
-struct EngramShellDirectory {
-    runtime: Option<RuntimeToken>,
+pub(crate) struct EngramShellDirectory {
+    pub(crate) runtime: Option<RuntimeToken>,
     /// The presumed directory, or `None` once a command moved the shell
     /// where TermAl cannot follow.
-    directory: Option<String>,
+    pub(crate) directory: Option<String>,
     /// A move a running command makes, by its key: where its `cd` leads, or
     /// `None` when that cannot be resolved. It settles when the command ends
     /// (`engram_settle_shell_move`): a denied command never ran, and one
     /// that failed may have stopped before or after its `cd`. At most one is
     /// pending; a second loses the shell.
-    pending: Option<(String, Option<String>)>,
+    pub(crate) pending: Option<(String, Option<String>)>,
     /// While TermAl cannot follow the shell (`directory` is `None`), every
     /// place it may be in: where it was when TermAl lost it, where a move
     /// then pending led, and each absolute literal target of the directory
@@ -179,17 +182,17 @@ struct EngramShellDirectory {
     /// shell is followed; at most `ENGRAM_LOST_PLACES_LIMIT`. It bounds where
     /// a command of the lost shell may write (`engram_command_write_places`),
     /// never where a test is credited.
-    lost_among: Vec<String>,
+    pub(crate) lost_among: Vec<String>,
     /// Whether a change since TermAl lost the shell named a target it cannot
     /// place exactly (`engram_line_changes`, `engram_resolve_lost_move`:
     /// `cd $X`, `popd`, a relative target, a loop), or the places grew past
     /// their limit, so the shell may be anywhere.
-    lost_unbounded: bool,
+    pub(crate) lost_unbounded: bool,
 }
 
 impl EngramShellDirectory {
     /// A shell of `runtime` in `directory`, followed.
-    fn at(runtime: Option<RuntimeToken>, directory: String) -> Self {
+    pub(crate) fn at(runtime: Option<RuntimeToken>, directory: String) -> Self {
         Self {
             runtime,
             directory: Some(directory),
@@ -201,7 +204,7 @@ impl EngramShellDirectory {
 
     /// The record of `record`'s current runtime, which starts in the workdir
     /// when the runtime has none yet.
-    fn current(record: &mut SessionRecord) -> &mut Self {
+    pub(crate) fn current(record: &mut SessionRecord) -> &mut Self {
         let runtime = record.runtime.runtime_token();
         let workdir = record.session.workdir.clone();
         let shell = record
@@ -223,7 +226,7 @@ impl EngramShellDirectory {
     /// which keeps a long-lost shell from being judged against ever more
     /// places. A shell that may be anywhere keeps no places: none can narrow
     /// it until TermAl follows it again (`anchor`).
-    fn lose(&mut self, targets: Vec<String>, computed: bool) {
+    pub(crate) fn lose(&mut self, targets: Vec<String>, computed: bool) {
         let mut among = std::mem::take(&mut self.lost_among);
         among.extend(self.directory.take());
         if let Some((_, target)) = self.pending.take() {
@@ -243,7 +246,7 @@ impl EngramShellDirectory {
     }
 
     /// TermAl follows the shell again, in `directory`.
-    fn anchor(&mut self, directory: String) {
+    pub(crate) fn anchor(&mut self, directory: String) {
         self.directory = Some(directory);
         self.lost_among.clear();
         self.lost_unbounded = false;
@@ -253,7 +256,7 @@ impl EngramShellDirectory {
 /// What a command line does to the directory of the shell running it, as far
 /// as TermAl can follow (`engram_shell_move`).
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EngramShellMove {
+pub(crate) enum EngramShellMove {
     /// No command of the line changes directory.
     Stays,
     /// The line starts by changing to this literal directory, and changes it
@@ -288,7 +291,7 @@ const ENGRAM_DIRECTORY_CHANGES: [&str; 8] = [
 /// stack (`popd`), one after another command, one in a group, subshell,
 /// pipeline or background job (which may or may not persist), and `eval`. A
 /// change made by a script the line runs or sources is not seen.
-fn engram_shell_move(line: &str) -> EngramShellMove {
+pub(crate) fn engram_shell_move(line: &str) -> EngramShellMove {
     let Some(EngramShellCommands {
         written: commands,
         bash: bash_commands,
@@ -334,7 +337,7 @@ fn engram_shell_move(line: &str) -> EngramShellMove {
 
 /// Whether `word` names a command that changes the directory of the shell
 /// running it (`ENGRAM_DIRECTORY_CHANGES`), or `eval`, which may.
-fn engram_changes_directory(word: &str) -> bool {
+pub(crate) fn engram_changes_directory(word: &str) -> bool {
     let program = engram_program_name(word);
     program == "eval" || ENGRAM_DIRECTORY_CHANGES.contains(&program.as_str())
 }
@@ -345,7 +348,7 @@ fn engram_changes_directory(word: &str) -> bool {
 /// a shortcut (`engram_directory_shortcut`) in command position
 /// (`engram_command_position`), the only place a shell runs one: as an
 /// argument (`git add cd/deploy.yml`) it is a path.
-fn engram_word_changes_directory(words: &[String], index: usize) -> bool {
+pub(crate) fn engram_word_changes_directory(words: &[String], index: usize) -> bool {
     engram_changes_directory(&words[index])
         || (engram_directory_shortcut(&words[index])
             && engram_command_position(words) == Some(index))
@@ -359,7 +362,7 @@ fn engram_word_changes_directory(words: &[String], index: usize) -> bool {
 /// not one, though it starts alike (`cd.log`, a script under a `cd`
 /// directory such as `cd/deploy.sh`): of the forms with a forward slash only
 /// cmd's `cd/d` counts.
-fn engram_directory_shortcut(word: &str) -> bool {
+pub(crate) fn engram_directory_shortcut(word: &str) -> bool {
     let word = word.to_ascii_lowercase();
     matches!(word.as_bytes(), [drive, b':'] if drive.is_ascii_alphabetic())
         || ["cd", "chdir"].iter().any(|change| {
@@ -376,7 +379,7 @@ fn engram_directory_shortcut(word: &str) -> bool {
 /// where the word after it names: not back through a stack (`popd`), not
 /// `eval`, and not a shortcut that names its own place
 /// (`engram_directory_shortcut`).
-fn engram_change_names_target(word: &str) -> bool {
+pub(crate) fn engram_change_names_target(word: &str) -> bool {
     !engram_directory_shortcut(word)
         && !matches!(
             engram_program_name(word).as_str(),
@@ -385,23 +388,23 @@ fn engram_change_names_target(word: &str) -> bool {
 }
 
 /// The commands of a line as its shell runs them (`engram_shell_commands`).
-struct EngramShellCommands {
+pub(crate) struct EngramShellCommands {
     /// Each command's words as written, `builtin` and `command` taken away.
-    written: Vec<Vec<String>>,
+    pub(crate) written: Vec<Vec<String>>,
     /// The same commands as bash reads them, backslash escapes taken away: a
     /// target bash reads otherwise than it is written (an unquoted
     /// backslash) names a directory TermAl cannot be sure of, and an escaped
     /// name (`c\d`) is a directory change all the same.
-    bash: Vec<Vec<String>>,
+    pub(crate) bash: Vec<Vec<String>>,
     /// Whether a group, subshell, pipeline or background job (which may or
     /// may not persist a change of directory) split the line.
-    grouped: bool,
+    pub(crate) grouped: bool,
 }
 
 /// The commands of `line`, split at `;`, `&&`, `||` and line breaks, and at a
 /// group, subshell, pipeline or background job; `None` for a line with an
 /// unclosed quote.
-fn engram_shell_commands(line: &str) -> Option<EngramShellCommands> {
+pub(crate) fn engram_shell_commands(line: &str) -> Option<EngramShellCommands> {
     let mut segments = vec![String::new()];
     let mut grouped = false;
     let mut quote = None;
@@ -467,7 +470,7 @@ fn engram_shell_commands(line: &str) -> Option<EngramShellCommands> {
 /// Whether a `cd` argument names one directory as written: not a flag, a
 /// home `~`, a variable or a glob, which the shell would expand, and not a
 /// network path, which TermAl does not resolve (`engram_network_path`).
-fn engram_literal_directory(directory: &str) -> bool {
+pub(crate) fn engram_literal_directory(directory: &str) -> bool {
     !directory.is_empty()
         && !directory.starts_with(['-', '~'])
         && !directory.contains(['$', '%', '!', '`', '*', '?', '['])
@@ -487,7 +490,7 @@ fn engram_literal_directory(directory: &str) -> bool {
 /// Not caught: a drive letter mapped to a share (`Z:\`) looks local here and
 /// is resolved, which can block as a network path would, since TermAl does
 /// not ask the system which drives are remote.
-fn engram_network_path(path: &str) -> bool {
+pub(crate) fn engram_network_path(path: &str) -> bool {
     let path = path.replace('\\', "/");
     match path.strip_prefix("//?/") {
         Some(verbatim) => {
@@ -501,7 +504,7 @@ fn engram_network_path(path: &str) -> bool {
 /// Whether `path` is Git Bash's MSYS spelling of a Windows drive (`/c`, or
 /// `/c/github/x` for `C:/github/x`): only on Windows, where Git Bash spells a
 /// drive so; on another system `/c/…` is a path of its own.
-fn engram_is_msys_drive_path(path: &str) -> bool {
+pub(crate) fn engram_is_msys_drive_path(path: &str) -> bool {
     let bytes = path.as_bytes();
     cfg!(windows)
         && bytes.len() >= 2
@@ -513,7 +516,7 @@ fn engram_is_msys_drive_path(path: &str) -> bool {
 /// `path` as Windows names it when Git Bash spells a drive the MSYS way
 /// (`engram_is_msys_drive_path`), as Claude's shell on Windows does;
 /// unchanged on other systems and for any other path.
-fn engram_msys_drive_path(path: &str) -> std::borrow::Cow<'_, str> {
+pub(crate) fn engram_msys_drive_path(path: &str) -> std::borrow::Cow<'_, str> {
     if engram_is_msys_drive_path(path) {
         let drive = char::from(path.as_bytes()[1]).to_ascii_uppercase();
         let rest = &path[2..];
@@ -535,7 +538,7 @@ fn engram_msys_drive_path(path: &str) -> std::borrow::Cow<'_, str> {
 /// following a link (`/other/link/..` is `/other` to bash, but the link
 /// target's parent on disk): where the two disagree, TermAl cannot say which
 /// the shell did, so `None`.
-fn engram_resolve_shell_move(from: Option<&str>, to: &str) -> Option<String> {
+pub(crate) fn engram_resolve_shell_move(from: Option<&str>, to: &str) -> Option<String> {
     let to = engram_msys_drive_path(to);
     let to = FsPath::new(to.as_ref());
     let target = if to.is_absolute() {
@@ -561,7 +564,7 @@ fn engram_resolve_shell_move(from: Option<&str>, to: &str) -> Option<String> {
 
 /// `path` with its `.` and `..` steps taken by name, as a shell's logical
 /// `cd` takes them, without following any link.
-fn engram_lexical_path(path: &FsPath) -> PathBuf {
+pub(crate) fn engram_lexical_path(path: &FsPath) -> PathBuf {
     let mut lexical = PathBuf::new();
     for component in path.components() {
         match component {
@@ -582,7 +585,7 @@ fn engram_lexical_path(path: &FsPath) -> PathBuf {
 /// TermAl cannot tell whether that shell keeps a `cd` (Claude's does, unless
 /// set to return to its project; an ACP runtime's may not). `None` when a
 /// command moved that shell where TermAl cannot follow, or is moving it now.
-fn engram_command_directories(
+pub(crate) fn engram_command_directories(
     record: &SessionRecord,
     key: &str,
     cwd: Option<&str>,
@@ -616,7 +619,7 @@ fn engram_command_directories(
 /// relative `cd` of the command `key` from: `None` when TermAl lost it or
 /// another command's move is pending. A repeated report of the command whose
 /// move is pending resolves from where that move starts.
-fn engram_shell_position(record: &SessionRecord, key: &str) -> Option<String> {
+pub(crate) fn engram_shell_position(record: &SessionRecord, key: &str) -> Option<String> {
     match &record.engram.shell_directory {
         Some(shell) if shell.runtime == record.runtime.runtime_token() => {
             if shell
@@ -649,7 +652,7 @@ fn engram_shell_position(record: &SessionRecord, key: &str) -> Option<String> {
 /// command's move became pending, or TermAl lost the shell, in between) is
 /// taken as unresolved, since it may start anywhere the shell now may be.
 /// Nothing when the runtime changed since `runtime` was read.
-fn engram_note_shell_move(
+pub(crate) fn engram_note_shell_move(
     record: &mut SessionRecord,
     key: &str,
     runtime: &Option<RuntimeToken>,
@@ -703,7 +706,7 @@ fn engram_note_shell_move(
 /// do not apply to subsequent commands"): its `cd` moves nothing, and the
 /// session's shell stays where it was, still followed. Another runtime's
 /// unfinished command says no such thing, so it loses the shell as before.
-fn engram_settle_shell_move(
+pub(crate) fn engram_settle_shell_move(
     record: &mut SessionRecord,
     key: &str,
     exit: Option<EngramCommandExit>,
@@ -751,7 +754,7 @@ fn engram_settle_shell_move(
 /// the session's) and none names a place outside it. A one-call line
 /// (`pushd "DIR" && TEST`, `EngramCheckCommand::directory`) runs its test in
 /// DIR wherever its shell was, so that directory alone is judged.
-fn engram_check_worktree_from(
+pub(crate) fn engram_check_worktree_from(
     check: &EngramCheckCommand,
     workdir: &FsPath,
     directories: Option<&[Option<String>]>,
@@ -778,7 +781,7 @@ fn engram_check_worktree_from(
 /// PowerShell's `(…)`), an escape (`` ` ``, cmd's `^`), or a PowerShell splat
 /// or array (`@` starting a word). TermAl cannot read such an argument the
 /// way the shell will.
-fn engram_has_unquoted_expression(line: &str) -> bool {
+pub(crate) fn engram_has_unquoted_expression(line: &str) -> bool {
     let mut quote = None;
     let mut word_start = true;
     for character in line.chars() {
@@ -800,15 +803,15 @@ fn engram_has_unquoted_expression(line: &str) -> bool {
 /// the root is the turn's named source root (`engram_source_roots.rs`), whose
 /// snapshots are taken on exactly that path and never on an ancestor's.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramCheckTarget {
-    root: PathBuf,
-    directory: PathBuf,
-    common_dir_key: Option<String>,
+pub(crate) struct EngramCheckTarget {
+    pub(crate) root: PathBuf,
+    pub(crate) directory: PathBuf,
+    pub(crate) common_dir_key: Option<String>,
 }
 
 impl EngramCheckTarget {
     /// Where the check's snapshots are taken.
-    fn basis_place(&self) -> EngramBasisPlace {
+    pub(crate) fn basis_place(&self) -> EngramBasisPlace {
         let root = self.root.to_string_lossy().into_owned();
         match &self.common_dir_key {
             Some(common_dir_key) => EngramBasisPlace::Named {
@@ -844,7 +847,7 @@ impl EngramCheckTarget {
 /// uses, not what it tests, so its value may lie anywhere. This touches the
 /// file system, so it runs off the state lock.
 #[cfg(test)]
-fn engram_check_worktree(
+pub(crate) fn engram_check_worktree(
     check: &EngramCheckCommand,
     workdir: &FsPath,
     cwd: Option<&str>,
@@ -857,7 +860,7 @@ fn engram_check_worktree(
 /// root (`engram_source_roots.rs`): the command is still read from the
 /// session's `workdir`, where its runtime runs it, but it counts only when it
 /// ran in that root. `None` credits the session's own worktree.
-fn engram_check_worktree_in(
+pub(crate) fn engram_check_worktree_in(
     check: &EngramCheckCommand,
     workdir: &FsPath,
     cwd: Option<&str>,
@@ -901,10 +904,9 @@ fn engram_check_worktree_in(
             EngramShellDialect::PowerShell | EngramShellDialect::Cmd => {
                 vec![check.argv.clone()]
             }
-            EngramShellDialect::Unknown => vec![
-                check.argv.clone(),
-                engram_shell_words_as(line, true)?,
-            ],
+            EngramShellDialect::Unknown => {
+                vec![check.argv.clone(), engram_shell_words_as(line, true)?]
+            }
         }
     };
     let leads_out = |value: &str| {

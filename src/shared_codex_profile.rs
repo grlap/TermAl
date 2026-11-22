@@ -17,9 +17,11 @@
 // spawning the process (codex.rs), or the sandbox mode a delegation child
 // is given (delegations.rs). New file.
 
+use super::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-enum SharedCodexProfile {
+pub(crate) enum SharedCodexProfile {
     /// The app-server every session uses unless it needs another.
     Default,
     /// Windows only: an app-server for read-only-sandbox sessions, started
@@ -31,16 +33,18 @@ enum SharedCodexProfile {
 }
 
 impl SharedCodexProfile {
-    const ALL: [Self; 3] = [
-        Self::Default, Self::ReadOnlySandbox, Self::WorkspaceWriteSandbox,
+    pub(crate) const ALL: [Self; 3] = [
+        Self::Default,
+        Self::ReadOnlySandbox,
+        Self::WorkspaceWriteSandbox,
     ];
 
-    fn needs_filtered_shell(self) -> bool {
+    pub(crate) fn needs_filtered_shell(self) -> bool {
         matches!(self, Self::ReadOnlySandbox | Self::WorkspaceWriteSandbox)
     }
 
     /// The profile a session with this sandbox mode runs under.
-    fn for_sandbox_mode(sandbox_mode: CodexSandboxMode) -> Self {
+    pub(crate) fn for_sandbox_mode(sandbox_mode: CodexSandboxMode) -> Self {
         if cfg!(windows) && sandbox_mode == CodexSandboxMode::ReadOnly {
             Self::ReadOnlySandbox
         } else {
@@ -51,7 +55,7 @@ impl SharedCodexProfile {
     /// The TermAl Codex home scope. Each profile keeps its threads apart, and
     /// startup discovery does not import threads from the dedicated homes
     /// (`codex_home_scope_is_importable`).
-    fn codex_home_scope(self) -> &'static str {
+    pub(crate) fn codex_home_scope(self) -> &'static str {
         match self {
             Self::Default => "shared-app-server",
             Self::ReadOnlySandbox => "shared-app-server-read-only",
@@ -77,7 +81,7 @@ impl SessionRecord {
     /// home holds that thread, whatever its sandbox mode is now; a thread
     /// created before profiles existed lives in the default home. A session
     /// without a thread uses the profile its sandbox mode needs.
-    fn shared_codex_profile(&self) -> SharedCodexProfile {
+    pub(crate) fn shared_codex_profile(&self) -> SharedCodexProfile {
         if self.external_session_id.is_some() {
             return self
                 .codex_thread_profile
@@ -89,7 +93,7 @@ impl SessionRecord {
     /// Records that this session attaches to the app-server of `profile`. A
     /// session without a thread will create it there, so the profile is fixed
     /// for the thread; a session with a thread keeps the profile it has.
-    fn attach_to_shared_codex_profile(&mut self, profile: SharedCodexProfile) {
+    pub(crate) fn attach_to_shared_codex_profile(&mut self, profile: SharedCodexProfile) {
         if self.external_session_id.is_none() {
             self.codex_thread_profile = Some(profile);
         }
@@ -102,7 +106,10 @@ impl SessionRecord {
     /// a sandbox requiring the filtered process PATH. A session
     /// without a thread may change profile only while no turn runs: a running
     /// turn may be creating its first thread on the current app-server.
-    fn codex_sandbox_change_refusal(&self, sandbox_mode: CodexSandboxMode) -> Option<&'static str> {
+    pub(crate) fn codex_sandbox_change_refusal(
+        &self,
+        sandbox_mode: CodexSandboxMode,
+    ) -> Option<&'static str> {
         if sandbox_mode == self.codex_sandbox_mode {
             return None;
         }
@@ -130,7 +137,7 @@ impl SessionRecord {
 
 /// `path` with every directory that holds a PowerShell 7 executable left
 /// out. `holds_pwsh` is asked about each directory.
-fn path_without_pwsh(
+pub(crate) fn path_without_pwsh(
     path: &std::ffi::OsStr,
     holds_pwsh: impl Fn(&FsPath) -> bool,
 ) -> Option<std::ffi::OsString> {
@@ -144,7 +151,7 @@ fn path_without_pwsh(
 /// `pwsh.bat` shim). An app execution alias (the Store's
 /// `WindowsApps` entries) is a reparse point that ordinary metadata cannot
 /// follow, so the entry is checked without following it.
-fn directory_holds_pwsh(dir: &FsPath) -> bool {
+pub(crate) fn directory_holds_pwsh(dir: &FsPath) -> bool {
     ["pwsh.exe", "pwsh.cmd", "pwsh.bat"]
         .into_iter()
         .any(|name| fs::symlink_metadata(dir.join(name)).is_ok())
@@ -152,7 +159,7 @@ fn directory_holds_pwsh(dir: &FsPath) -> bool {
 
 /// The PATH a read-only-sandbox app-server is started with, or `None` when
 /// the host's PATH is unset or cannot be rebuilt.
-fn shared_codex_read_only_sandbox_path() -> Option<std::ffi::OsString> {
+pub(crate) fn shared_codex_read_only_sandbox_path() -> Option<std::ffi::OsString> {
     let path = std::env::var_os("PATH")?;
     path_without_pwsh(&path, directory_holds_pwsh)
 }

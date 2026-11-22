@@ -2,15 +2,17 @@
 // Adopted days describe turn adoption, not terminal-failure or retry timestamps.
 // One pass borrows jobs under StateInner; no store access or job cloning occurs.
 
+use super::*;
+
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ClosingJobStates {
-    terminal: u64,
-    retrying: u64,
+pub(crate) struct ClosingJobStates {
+    pub(crate) terminal: u64,
+    pub(crate) retrying: u64,
 }
 
 impl ClosingJobStates {
-    fn count(&mut self, terminal: bool) {
+    pub(crate) fn count(&mut self, terminal: bool) {
         if terminal {
             self.terminal += 1;
         } else {
@@ -50,16 +52,16 @@ impl ClosingJobReasons {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ClosingJobCounts {
-    server_instance_id: String,
-    revision: u64,
-    total: ClosingJobStates,
+pub(crate) struct ClosingJobCounts {
+    pub(crate) server_instance_id: String,
+    pub(crate) revision: u64,
+    pub(crate) total: ClosingJobStates,
     // Only terminal jobs have a terminal-path reason; retry errors are excluded.
     by_reason: ClosingJobReasons,
     adopted_day: BTreeMap<String, ClosingJobStates>,
 }
 
-async fn get_closing_job_counts(
+pub(crate) async fn get_closing_job_counts(
     State(state): State<AppState>,
 ) -> Result<Json<ClosingJobCounts>, ApiError> {
     run_blocking_api(move || {

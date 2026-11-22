@@ -2,28 +2,30 @@
 // This projection grants no authority, persists nothing and does not replace
 // current participant/placement checks at append time. Standalone names differ.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationMailboxAliasBasis {
-    complete: bool,
-    hosts: Vec<FederationMailboxAliasHost>,
+pub(crate) struct FederationMailboxAliasBasis {
+    pub(crate) complete: bool,
+    pub(crate) hosts: Vec<FederationMailboxAliasHost>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationMailboxAliasHost {
-    id: String,
-    name: String,
+pub(crate) struct FederationMailboxAliasHost {
+    pub(crate) id: String,
+    pub(crate) name: String,
 }
 
-enum FederationMailboxAlias<'a> {
+pub(crate) enum FederationMailboxAlias<'a> {
     Name(&'a str),
     Host(&'a str, &'a str),
     HostNative { host: Uuid, session_id: &'a str },
     Legacy(&'a str),
 }
 
-fn federation_mailbox_alias_error(reference: &str) -> String {
+pub(crate) fn federation_mailbox_alias_error(reference: &str) -> String {
     let reference: String = reference
         .chars()
         .take(480)
@@ -36,11 +38,18 @@ fn federation_mailbox_alias_error(reference: &str) -> String {
         })
         .collect();
     if let Some(qualified) = reference.strip_prefix("host:") {
-        let name = qualified.split_once("::").map(|(_, name)| name).unwrap_or("<exact local name>");
-        return format!("mailbox host alias is invalid or ambiguous; use host:<host UUID>::{name} or the exact directory sessionId");
+        let name = qualified
+            .split_once("::")
+            .map(|(_, name)| name)
+            .unwrap_or("<exact local name>");
+        return format!(
+            "mailbox host alias is invalid or ambiguous; use host:<host UUID>::{name} or the exact directory sessionId"
+        );
     }
     if let Some(name) = reference.strip_prefix("name:") {
-        return format!("mailbox literal alias is missing or ambiguous; use host:<host UUID>::{name} or the exact directory sessionId");
+        return format!(
+            "mailbox literal alias is missing or ambiguous; use host:<host UUID>::{name} or the exact directory sessionId"
+        );
     }
     format!(
         "mailbox alias is ambiguous or its directory is incomplete; use name:{reference} for a literal name, host:{reference} for Host::Name, or the exact directory sessionId"
@@ -49,12 +58,19 @@ fn federation_mailbox_alias_error(reference: &str) -> String {
 
 fn federation_mailbox_host_prefix(reference: &str, host: &str) -> bool {
     !host.is_empty()
-        && reference.get(..host.len()).is_some_and(|prefix| prefix.eq_ignore_ascii_case(host))
-        && reference.get(host.len()..).is_some_and(|tail| tail.starts_with("::"))
+        && reference
+            .get(..host.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(host))
+        && reference
+            .get(host.len()..)
+            .is_some_and(|tail| tail.starts_with("::"))
 }
 
 impl<'a> FederationMailboxAlias<'a> {
-    fn parse(reference: &'a str, basis: Option<&FederationMailboxAliasBasis>) -> Result<Self> {
+    pub(crate) fn parse(
+        reference: &'a str,
+        basis: Option<&FederationMailboxAliasBasis>,
+    ) -> Result<Self> {
         let alias = if let Some(name) = reference.strip_prefix("name:") {
             Self::Name(name)
         } else if let Some(qualified) = reference.strip_prefix("host:") {
@@ -73,11 +89,17 @@ impl<'a> FederationMailboxAlias<'a> {
                 if suffix.is_empty() || !federation_native_session_id_valid(name) {
                     bail!("invalid exact native mailbox target");
                 }
-                required_path_identifier(Some(&Value::String(name.to_owned())), "native session id")?;
+                required_path_identifier(
+                    Some(&Value::String(name.to_owned())),
+                    "native session id",
+                )?;
                 if !matches!(mailbox_reference_handle(name), Ok(None)) {
                     bail!("reserved mailbox reference spelling; resolve its canonical handle");
                 }
-                return Ok(Self::HostNative { host, session_id: name });
+                return Ok(Self::HostNative {
+                    host,
+                    session_id: name,
+                });
             }
             Self::Host(host, name)
         } else if reference.contains("::") {
@@ -91,7 +113,9 @@ impl<'a> FederationMailboxAlias<'a> {
             Self::HostNative { session_id, .. } => *session_id,
         };
         if value.is_empty() {
-            bail!("mailbox alias name is empty; use an exact directory sessionId or a nonempty name:/host: alias");
+            bail!(
+                "mailbox alias name is empty; use an exact directory sessionId or a nonempty name:/host: alias"
+            );
         }
         if value.starts_with("session-")
             || value.starts_with("domain-session-")
@@ -116,7 +140,13 @@ impl<'a> FederationMailboxAlias<'a> {
         Ok(alias)
     }
 
-    fn matches(&self, host_name: &str, host_id: &str, name: &str, native_session_id: &str) -> bool {
+    pub(crate) fn matches(
+        &self,
+        host_name: &str,
+        host_id: &str,
+        name: &str,
+        native_session_id: &str,
+    ) -> bool {
         match self {
             Self::Name(literal) | Self::Legacy(literal) => name.eq_ignore_ascii_case(literal),
             Self::Host(host, literal) => {
@@ -133,15 +163,17 @@ impl<'a> FederationMailboxAlias<'a> {
 
 // One discovery selector for all three adapters. Currency, transport and append
 // authority remain with their existing owners before/after this pure selection.
-struct FederationMailboxAliasRow<'a> {
-    id: &'a str,
-    host_name: &'a str,
-    host_id: &'a str,
-    name: &'a str,
-    native_session_id: &'a str,
+pub(crate) struct FederationMailboxAliasRow<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) host_name: &'a str,
+    pub(crate) host_id: &'a str,
+    pub(crate) name: &'a str,
+    pub(crate) native_session_id: &'a str,
 }
 
-fn federation_mailbox_alias_row(row: &FederationMailboxParticipant) -> FederationMailboxAliasRow<'_> {
+pub(crate) fn federation_mailbox_alias_row(
+    row: &FederationMailboxParticipant,
+) -> FederationMailboxAliasRow<'_> {
     FederationMailboxAliasRow {
         id: &row.session_id,
         host_name: &row.host_name,
@@ -151,14 +183,16 @@ fn federation_mailbox_alias_row(row: &FederationMailboxParticipant) -> Federatio
     }
 }
 
-fn select_federation_mailbox_alias<'a, T>(
+pub(crate) fn select_federation_mailbox_alias<'a, T>(
     rows: &'a [T],
     reference: &str,
     basis: Option<&FederationMailboxAliasBasis>,
     project: impl for<'r> Fn(&'r T) -> FederationMailboxAliasRow<'r>,
 ) -> Result<&'a T, ApiError> {
     if !matches!(mailbox_reference_handle(reference), Ok(None)) {
-        return Err(ApiError::not_found("mailbox reference requires explicit resolution"));
+        return Err(ApiError::not_found(
+            "mailbox reference requires explicit resolution",
+        ));
     }
     if !reference.is_empty() {
         if let Some(exact) = rows.iter().find(|row| project(row).id == reference) {
@@ -176,28 +210,39 @@ fn select_federation_mailbox_alias<'a, T>(
     // Directory row labels may outlive a registry label change. They are also
     // selectors accepted by explicit host: matching, so they must fence legacy
     // literals even when the registry projection came from an older host.
-    if legacy && rows.iter().any(|row| {
-        let row = project(row);
-        federation_mailbox_host_prefix(reference, row.host_name)
-            || federation_mailbox_host_prefix(reference, row.host_id)
-    }) {
-        return Err(ApiError::bad_request(federation_mailbox_alias_error(reference)));
+    if legacy
+        && rows.iter().any(|row| {
+            let row = project(row);
+            federation_mailbox_host_prefix(reference, row.host_name)
+                || federation_mailbox_host_prefix(reference, row.host_id)
+        })
+    {
+        return Err(ApiError::bad_request(federation_mailbox_alias_error(
+            reference,
+        )));
     }
     let mut matches = rows.iter().filter(|row| {
         let row = project(row);
         alias.matches(row.host_name, row.host_id, row.name, row.native_session_id)
     });
     let first = matches.next().ok_or_else(|| {
-        if legacy { ApiError::bad_request(federation_mailbox_alias_error(reference)) }
-        else { ApiError::not_found("qualified mailbox participant not found") }
+        if legacy {
+            ApiError::bad_request(federation_mailbox_alias_error(reference))
+        } else {
+            ApiError::not_found("qualified mailbox participant not found")
+        }
     })?;
     if matches.next().is_some() {
-        return Err(ApiError::bad_request(federation_mailbox_alias_error(reference)));
+        return Err(ApiError::bad_request(federation_mailbox_alias_error(
+            reference,
+        )));
     }
     Ok(first)
 }
 
-fn federation_mailbox_alias_basis_locked(inner: &StateInner) -> FederationMailboxAliasBasis {
+pub(crate) fn federation_mailbox_alias_basis_locked(
+    inner: &StateInner,
+) -> FederationMailboxAliasBasis {
     let mut hosts = Vec::new();
     if let Some(local) = &inner.federation.local {
         hosts.push(FederationMailboxAliasHost {
@@ -233,7 +278,7 @@ fn federation_mailbox_alias_basis_locked(inner: &StateInner) -> FederationMailbo
 }
 
 impl AppState {
-    async fn federation_mailbox_alias_directory(
+    pub(crate) async fn federation_mailbox_alias_directory(
         &self,
         session: &str,
     ) -> Result<FederationMailboxDirectorySnapshot, ApiError> {

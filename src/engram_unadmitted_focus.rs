@@ -43,7 +43,7 @@ fn runtime_observation_forward_revision(
 }
 
 impl AppState {
-    fn refresh_runtime_observation_focus(
+    pub(crate) fn refresh_runtime_observation_focus(
         &self,
         session: &str,
         job: &EngramRuntimeClosingJob,
@@ -299,7 +299,7 @@ impl AppState {
         Ok(())
     }
 
-    fn notice_runtime_observation_focus_refusal(
+    pub(crate) fn notice_runtime_observation_focus_refusal(
         &self,
         session: &str,
         job: &EngramRuntimeClosingJob,
@@ -360,7 +360,7 @@ impl AppState {
     }
 }
 
-fn runtime_observation_focus_notice(
+pub(crate) fn runtime_observation_focus_notice(
     turn: &str,
     named_work: Option<&str>,
     refreshed: bool,

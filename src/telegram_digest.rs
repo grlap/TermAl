@@ -6,10 +6,12 @@ This include! fragment owns the presentation layer for compact project digests
 and slash-command responses.
 */
 
+use super::*;
+
 const TELEGRAM_DIGEST_FIELD_MAX_CHARS: usize = 120;
 
 /// Handles send fresh Telegram digest.
-fn send_fresh_telegram_digest(
+pub(crate) fn send_fresh_telegram_digest(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -22,7 +24,7 @@ fn send_fresh_telegram_digest(
     Ok(dirty)
 }
 
-fn send_telegram_projects(
+pub(crate) fn send_telegram_projects(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -38,7 +40,7 @@ fn send_telegram_projects(
     Ok(dirty)
 }
 
-fn send_telegram_project_sessions(
+pub(crate) fn send_telegram_project_sessions(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -54,7 +56,7 @@ fn send_telegram_project_sessions(
     Ok(dirty)
 }
 
-fn select_telegram_project(
+pub(crate) fn select_telegram_project(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -148,7 +150,7 @@ fn select_telegram_project(
     Ok(dirty)
 }
 
-fn select_telegram_project_session(
+pub(crate) fn select_telegram_project_session(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -221,7 +223,7 @@ fn select_telegram_project_session(
     Ok(dirty)
 }
 
-fn find_telegram_project_session<'a>(
+pub(crate) fn find_telegram_project_session<'a>(
     state: &'a TelegramStateSessionsResponse,
     project_id: &str,
     session_ref: &str,
@@ -242,7 +244,7 @@ fn find_telegram_project_session<'a>(
         })
 }
 
-fn find_telegram_project_prompt_session<'a>(
+pub(crate) fn find_telegram_project_prompt_session<'a>(
     state: &'a TelegramStateSessionsResponse,
     project_id: &str,
     session_ref: &str,
@@ -251,7 +253,7 @@ fn find_telegram_project_prompt_session<'a>(
         .filter(|session| telegram_session_is_prompt_target(session))
 }
 
-fn find_latest_telegram_project_prompt_session<'a>(
+pub(crate) fn find_latest_telegram_project_prompt_session<'a>(
     state: &'a TelegramStateSessionsResponse,
     project_id: &str,
 ) -> Option<&'a TelegramStateSession> {
@@ -264,7 +266,7 @@ fn find_latest_telegram_project_prompt_session<'a>(
 }
 
 /// Handles send fresh Telegram digest from response.
-fn send_fresh_telegram_digest_from_response(
+pub(crate) fn send_fresh_telegram_digest_from_response(
     telegram: &impl TelegramMessageSender,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
@@ -283,7 +285,7 @@ fn send_fresh_telegram_digest_from_response(
 }
 
 /// Handles send or edit Telegram digest from response.
-fn send_or_edit_telegram_digest_from_response(
+pub(crate) fn send_or_edit_telegram_digest_from_response(
     telegram: &impl TelegramDigestMessageSender,
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
@@ -302,7 +304,7 @@ fn send_or_edit_telegram_digest_from_response(
 }
 
 /// Handles edit or send Telegram digest.
-fn edit_or_send_telegram_digest(
+pub(crate) fn edit_or_send_telegram_digest(
     telegram: &impl TelegramDigestMessageSender,
     config: &TelegramBotConfig,
     chat_id: i64,
@@ -330,7 +332,7 @@ fn edit_or_send_telegram_digest(
     Ok(sent.message_id)
 }
 
-fn edit_telegram_digest_message(
+pub(crate) fn edit_telegram_digest_message(
     telegram: &impl TelegramDigestMessageSender,
     config: &TelegramBotConfig,
     chat_id: i64,
@@ -348,7 +350,7 @@ fn edit_telegram_digest_message(
 }
 
 /// Remembers Telegram digest.
-fn remember_telegram_digest(
+pub(crate) fn remember_telegram_digest(
     state: &mut TelegramBotState,
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
@@ -363,7 +365,7 @@ fn remember_telegram_digest(
 }
 
 /// Handles Telegram digest hash.
-fn telegram_digest_hash(
+pub(crate) fn telegram_digest_hash(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
 ) -> Result<String> {
@@ -387,7 +389,7 @@ fn telegram_digest_hash(
 }
 
 /// Builds Telegram digest keyboard.
-fn build_telegram_digest_keyboard(
+pub(crate) fn build_telegram_digest_keyboard(
     digest: &ProjectDigestResponse,
 ) -> Result<Option<TelegramInlineKeyboardMarkup>> {
     if digest.proposed_actions.is_empty() {
@@ -415,7 +417,7 @@ fn build_telegram_digest_keyboard(
     }))
 }
 
-fn telegram_digest_callback_data(project_id: &str, action_id: &str) -> Result<String> {
+pub(crate) fn telegram_digest_callback_data(project_id: &str, action_id: &str) -> Result<String> {
     let callback_data = format!(
         "p:{}:{action_id}",
         telegram_digest_project_token(project_id)
@@ -428,7 +430,7 @@ fn telegram_digest_callback_data(project_id: &str, action_id: &str) -> Result<St
     Ok(callback_data)
 }
 
-fn parse_telegram_digest_callback_data(value: &str) -> Option<(String, String)> {
+pub(crate) fn parse_telegram_digest_callback_data(value: &str) -> Option<(String, String)> {
     let payload = value.strip_prefix("p:")?;
     let (project_token, action_id) = payload.split_once(':')?;
     if project_token.len() != 16
@@ -444,7 +446,7 @@ fn telegram_digest_project_token(project_id: &str) -> String {
     stable_text_hash(project_id)
 }
 
-fn resolve_telegram_digest_callback_project(
+pub(crate) fn resolve_telegram_digest_callback_project(
     config: &TelegramBotConfig,
     project_token: &str,
 ) -> Option<String> {
@@ -476,7 +478,7 @@ fn resolve_telegram_digest_callback_project(
     matched_project_id
 }
 
-fn render_telegram_digest_message(
+pub(crate) fn render_telegram_digest_message(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
 ) -> (String, TelegramTextFormat) {
@@ -500,7 +502,7 @@ fn telegram_html_escape(value: &str) -> String {
     escaped
 }
 
-fn render_telegram_digest_html(
+pub(crate) fn render_telegram_digest_html(
     digest: &ProjectDigestResponse,
     public_base_url: Option<&str>,
 ) -> String {
@@ -607,7 +609,7 @@ fn telegram_deep_link_url(
     Some(format!("{base}{deep_link}"))
 }
 
-fn render_telegram_projects(
+pub(crate) fn render_telegram_projects(
     config: &TelegramBotConfig,
     bot_state: &TelegramBotState,
     state: &TelegramStateSessionsResponse,
@@ -694,7 +696,7 @@ fn telegram_session_status_sort_rank(status: &TelegramSessionStatus) -> u8 {
     }
 }
 
-fn render_telegram_project_sessions(
+pub(crate) fn render_telegram_project_sessions(
     project_id: &str,
     state: &TelegramStateSessionsResponse,
 ) -> String {
@@ -749,7 +751,7 @@ fn render_telegram_project_sessions(
     lines.join("\n")
 }
 
-fn telegram_state_session_status_label(status: &TelegramSessionStatus) -> &'static str {
+pub(crate) fn telegram_state_session_status_label(status: &TelegramSessionStatus) -> &'static str {
     match status {
         TelegramSessionStatus::Active => "active",
         TelegramSessionStatus::Idle => "idle",
@@ -761,7 +763,7 @@ fn telegram_state_session_status_label(status: &TelegramSessionStatus) -> &'stat
 }
 
 /// Handles Telegram help text.
-fn telegram_help_text(config: &TelegramBotConfig, state: &TelegramBotState) -> String {
+pub(crate) fn telegram_help_text(config: &TelegramBotConfig, state: &TelegramBotState) -> String {
     let active_project_id = telegram_active_project_id(config, state);
     [
         format!("TermAl Telegram relay for project `{active_project_id}`."),
@@ -776,7 +778,10 @@ fn telegram_help_text(config: &TelegramBotConfig, state: &TelegramBotState) -> S
 /// Formats a slash-command action failure sent as a normal chat message.
 /// The message is multi-line and includes a `/status` hint because the user
 /// can recover by refreshing the current action list.
-fn telegram_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -> String {
+pub(crate) fn telegram_action_error_text(
+    action_id: ProjectActionId,
+    err: &anyhow::Error,
+) -> String {
     format!(
         "Could not run {}.\n{}\nSend /status to see the actions available right now.",
         action_id.label(),
@@ -787,7 +792,10 @@ fn telegram_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -
 /// Formats an inline-button callback failure. Keep this one-line because
 /// Telegram displays it near the tapped digest action and the digest already
 /// carries the broader recovery context.
-fn telegram_callback_action_error_text(action_id: ProjectActionId, err: &anyhow::Error) -> String {
+pub(crate) fn telegram_callback_action_error_text(
+    action_id: ProjectActionId,
+    err: &anyhow::Error,
+) -> String {
     format!(
         "{} failed: {}",
         action_id.label(),
@@ -798,7 +806,7 @@ fn telegram_callback_action_error_text(action_id: ProjectActionId, err: &anyhow:
 /// Formats a free-text prompt forwarding failure. This is multi-line but has
 /// no `/status` hint because the user's next useful action is usually to edit
 /// and resend the prompt or select a different session.
-fn telegram_prompt_error_text(err: &anyhow::Error) -> String {
+pub(crate) fn telegram_prompt_error_text(err: &anyhow::Error) -> String {
     format!(
         "Could not forward that message.\n{}",
         telegram_user_error_detail(err, TELEGRAM_USER_ERROR_MAX_CHARS)
@@ -809,7 +817,7 @@ fn telegram_user_error_detail(_err: &anyhow::Error, max_chars: usize) -> String 
     truncate_telegram_user_error_detail(TELEGRAM_SAFE_USER_ERROR_DETAIL, max_chars)
 }
 
-fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String {
     let trimmed = detail.trim();
     if trimmed.chars().count() <= max_chars {
         return trimmed.to_owned();
@@ -829,14 +837,14 @@ fn truncate_telegram_user_error_detail(detail: &str, max_chars: usize) -> String
 
 /// Represents a Telegram parsed command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TelegramParsedCommand<'a> {
-    args: &'a str,
-    command: TelegramIncomingCommand,
+pub(crate) struct TelegramParsedCommand<'a> {
+    pub(crate) args: &'a str,
+    pub(crate) command: TelegramIncomingCommand,
 }
 
 /// Represents a Telegram incoming command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TelegramIncomingCommand {
+pub(crate) enum TelegramIncomingCommand {
     Start,
     Help,
     Status,
@@ -849,11 +857,11 @@ enum TelegramIncomingCommand {
 
 /// Parses Telegram command.
 #[cfg(test)]
-fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
+pub(crate) fn parse_telegram_command(text: &str) -> Option<TelegramParsedCommand<'_>> {
     parse_telegram_command_for_bot(text, None)
 }
 
-fn parse_telegram_command_for_bot<'a>(
+pub(crate) fn parse_telegram_command_for_bot<'a>(
     text: &'a str,
     bot_username: Option<&str>,
 ) -> Option<TelegramParsedCommand<'a>> {
@@ -897,7 +905,7 @@ fn parse_telegram_command_for_bot<'a>(
     Some(TelegramParsedCommand { args, command })
 }
 
-fn telegram_command_mentions_other_bot(text: &str, bot_username: Option<&str>) -> bool {
+pub(crate) fn telegram_command_mentions_other_bot(text: &str, bot_username: Option<&str>) -> bool {
     let Some(expected) = bot_username
         .map(str::trim)
         .filter(|value| !value.is_empty())

@@ -2,9 +2,12 @@
 // runs off the state lock and cannot authorize delivery or create a control obligation.
 
 #[cfg(test)]
-type EngramSourceCapture =
+use super::*;
+
+#[cfg(test)]
+pub(crate) type EngramSourceCapture =
     std::result::Result<Option<EngramExecutionSourceBasis>, SourceBasisRefusal>;
 
 /// At most this many threads of one host take turn source bases at once,
 /// healthy and abandoned alike. A capture past it counts as not taken.
-const ENGRAM_TURN_BASIS_CAPTURE_LIMIT: usize = 32;
+pub(crate) const ENGRAM_TURN_BASIS_CAPTURE_LIMIT: usize = 32;

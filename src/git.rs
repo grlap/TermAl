@@ -9,15 +9,17 @@
 // Extracted from api.rs into its own `include!()` fragment so HTTP handler
 // code and git-command plumbing live in separate files.
 
+use super::*;
+
 /// Loads Git diff for request.
-fn load_git_diff_for_request(
+pub(crate) fn load_git_diff_for_request(
     workdir: &FsPath,
     request: &GitDiffRequest,
 ) -> Result<GitDiffResponse, ApiError> {
     load_git_diff_for_request_with_document_loader(workdir, request, load_git_diff_document_content)
 }
 
-fn load_git_diff_for_request_with_document_loader<F>(
+pub(crate) fn load_git_diff_for_request_with_document_loader<F>(
     workdir: &FsPath,
     request: &GitDiffRequest,
     load_document_content: F,
@@ -153,7 +155,7 @@ where
 include!("git_status.rs");
 
 /// Normalizes Git working directory path.
-fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
+pub(crate) fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
     if path.is_dir() {
         return Ok(path.to_path_buf());
     }
@@ -164,7 +166,7 @@ fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {
 }
 
 /// Normalizes Git repo relative path.
-fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
+pub(crate) fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err(ApiError::bad_request("git file path cannot be empty"));
@@ -203,7 +205,10 @@ fn normalize_git_repo_relative_path(path: &str) -> Result<String, ApiError> {
 }
 
 /// Collects Git pathspecs.
-fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec<String> {
+pub(crate) fn collect_git_pathspecs(
+    current_path: &str,
+    original_path: Option<&str>,
+) -> Vec<String> {
     let mut pathspecs = Vec::new();
     if let Some(original_path) = original_path.filter(|original| *original != current_path) {
         pathspecs.push(original_path.to_owned());
@@ -213,7 +218,7 @@ fn collect_git_pathspecs(current_path: &str, original_path: Option<&str>) -> Vec
 }
 
 /// Collects pathspecs for staging a Git file action.
-fn collect_git_stage_pathspecs(
+pub(crate) fn collect_git_stage_pathspecs(
     current_path: &str,
     original_path: Option<&str>,
     status_code: Option<&str>,
@@ -291,7 +296,7 @@ fn explain_empty_git_diff(
     )
 }
 
-fn finalize_empty_git_diff_explanation(
+pub(crate) fn finalize_empty_git_diff_explanation(
     current_path: &str,
     section_id: GitDiffSection,
     inspection: Result<String, ApiError>,
@@ -361,7 +366,7 @@ fn inspect_empty_git_diff(
     ))
 }
 
-fn empty_git_diff_reason(
+pub(crate) fn empty_git_diff_reason(
     current_path: &str,
     section_id: GitDiffSection,
     status_is_clean: bool,
@@ -493,7 +498,7 @@ fn git_diff_path_is_submodule(
         .any(git_raw_diff_line_is_submodule))
 }
 
-fn git_diff_request_requires_submodule_probe(
+pub(crate) fn git_diff_request_requires_submodule_probe(
     section_id: GitDiffSection,
     status_code: Option<&str>,
 ) -> bool {
@@ -512,7 +517,10 @@ fn git_mode_is_submodule(mode: &str) -> bool {
 }
 
 /// Builds untracked Git diff.
-fn build_untracked_git_diff(repo_root: &FsPath, current_path: &str) -> Result<String, ApiError> {
+pub(crate) fn build_untracked_git_diff(
+    repo_root: &FsPath,
+    current_path: &str,
+) -> Result<String, ApiError> {
     // Untracked diffs share the document read cap. This keeps a new large file
     // from turning the diff endpoint into an unbounded in-memory patch builder.
     let content = read_git_worktree_bytes(repo_root, current_path)?;
@@ -688,7 +696,7 @@ fn read_git_diff_document_side(
 }
 
 /// Reads a UTF-8 Git object as text.
-fn read_git_object_text(
+pub(crate) fn read_git_object_text(
     repo_root: &FsPath,
     revision: &str,
     path: &str,
@@ -699,7 +707,7 @@ fn read_git_object_text(
 }
 
 /// Reads a UTF-8 Git index blob as text.
-fn read_git_index_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
+pub(crate) fn read_git_index_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
     let object_path = normalize_git_object_path(path);
     let spec = format!(":{object_path}");
     read_git_spec_text(repo_root, &spec, "git index object")
@@ -804,7 +812,7 @@ fn read_git_spec_text(repo_root: &FsPath, spec: &str, label: &str) -> Result<Str
 }
 
 /// Reads a worktree file as text.
-fn read_git_worktree_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
+pub(crate) fn read_git_worktree_text(repo_root: &FsPath, path: &str) -> Result<String, ApiError> {
     let content = read_git_worktree_bytes(repo_root, path)?;
     decode_git_document_text(&content, "git worktree file")
 }
@@ -931,13 +939,14 @@ fn canonicalize_worktree_path(
 /// [`git_diff_document_enrichment_note`] consult this list, so adding a new
 /// degraded status updates both sites in lockstep. Server errors (`5xx`)
 /// are handled separately by `StatusCode::is_server_error`.
-const DEGRADED_UNTAGGED_STATUSES: &[StatusCode] = &[StatusCode::BAD_REQUEST, StatusCode::NOT_FOUND];
+pub(crate) const DEGRADED_UNTAGGED_STATUSES: &[StatusCode] =
+    &[StatusCode::BAD_REQUEST, StatusCode::NOT_FOUND];
 
 fn is_untagged_degradable_status(status: StatusCode) -> bool {
     DEGRADED_UNTAGGED_STATUSES.contains(&status)
 }
 
-fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
+pub(crate) fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
     match error.kind {
         Some(ApiErrorKind::GitDocumentTooLarge) => Some(
             "Rendered Markdown is unavailable because the document exceeds the 10 MB read limit."
@@ -994,7 +1003,7 @@ fn git_diff_document_enrichment_note(error: &ApiError) -> Option<String> {
     }
 }
 
-fn should_degrade_git_diff_document_enrichment_error(error: &ApiError) -> bool {
+pub(crate) fn should_degrade_git_diff_document_enrichment_error(error: &ApiError) -> bool {
     is_untagged_degradable_status(error.status) || error.status.is_server_error()
 }
 
@@ -1113,7 +1122,7 @@ fn is_missing_git_object_error(stderr: &str) -> bool {
 }
 
 /// Builds a Git command with stable stderr wording for parsed error paths.
-fn git_command() -> Command {
+pub(crate) fn git_command() -> Command {
     let mut command = Command::new("git");
     command.env("LC_ALL", "C").env("LANG", "C");
     // Disposable fixtures can live inside this checkout's ignored .tmp tree.
@@ -1136,7 +1145,7 @@ fn normalize_git_object_path(path: &str) -> String {
 }
 
 /// Reverts Git file action.
-fn revert_git_file_action(
+pub(crate) fn revert_git_file_action(
     repo_root: &FsPath,
     current_path: &str,
     original_path: Option<&str>,
@@ -1171,7 +1180,7 @@ fn revert_git_file_action(
 }
 
 /// Runs Git pathspec command.
-fn run_git_pathspec_command(
+pub(crate) fn run_git_pathspec_command(
     repo_root: &FsPath,
     args: &[&str],
     pathspecs: &[String],
@@ -1200,12 +1209,12 @@ fn run_git_pathspec_command(
 }
 
 /// Returns whether staged Git changes.
-fn has_staged_git_changes(status: &GitStatusResponse) -> bool {
+pub(crate) fn has_staged_git_changes(status: &GitStatusResponse) -> bool {
     status.files.iter().any(|file| file.index_status.is_some())
 }
 
 /// Extracts Git command error.
-fn extract_git_command_error(output: &std::process::Output) -> String {
+pub(crate) fn extract_git_command_error(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     if !stderr.is_empty() {
         return stderr;
@@ -1215,7 +1224,7 @@ fn extract_git_command_error(output: &std::process::Output) -> String {
 }
 
 /// Builds Git commit summary.
-fn build_git_commit_summary(message: &str) -> String {
+pub(crate) fn build_git_commit_summary(message: &str) -> String {
     let headline = message.lines().next().unwrap_or("").trim();
     if headline.is_empty() {
         "Created commit.".to_owned()
@@ -1225,7 +1234,7 @@ fn build_git_commit_summary(message: &str) -> String {
 }
 
 /// Pushes Git repo.
-fn push_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
+pub(crate) fn push_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
     let workdir = normalize_git_workdir_path(workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -1241,7 +1250,7 @@ fn push_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
 }
 
 /// Syncs Git repo.
-fn sync_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
+pub(crate) fn sync_git_repo(workdir: &FsPath) -> Result<GitRepoActionResponse, ApiError> {
     let workdir = normalize_git_workdir_path(workdir)?;
     let Some(repo_root) = resolve_git_repo_root(&workdir)? else {
         return Err(ApiError::bad_request("no git repository found"));
@@ -1338,7 +1347,7 @@ fn build_git_repo_action_summary(
 }
 
 /// Resolves Git repo root.
-fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
+pub(crate) fn resolve_git_repo_root(workdir: &FsPath) -> Result<Option<PathBuf>, ApiError> {
     let output = git_command()
         .arg("-C")
         .arg(workdir)

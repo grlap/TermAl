@@ -1,7 +1,7 @@
 // Classifies supplied notification paths only. Git owns ignore semantics;
 // this module does not walk repositories or alter check-credit observations.
 // Queries are batched per workdir, off the watcher callback and StateInner.
-fn query_workspace_ignored_changes(
+pub(crate) fn query_workspace_ignored_changes(
     root: &str, changes: &[WorkspaceFileChangeEvent], project_roots: &[PathBuf], deadline: std::time::Instant,
 ) -> Result<HashSet<String>> {
     if deadline <= std::time::Instant::now() { anyhow::bail!("ignore query deadline exceeded before launch"); }
@@ -41,7 +41,7 @@ fn query_workspace_ignored_changes(
     Ok(ignored.into_iter().filter_map(|key| requests.remove(&key)).collect())
 }
 
-fn workspace_ignored_changes(root: &str, changes: &[WorkspaceFileChangeEvent], project_roots: &[PathBuf]) -> HashSet<String> {
+pub(crate) fn workspace_ignored_changes(root: &str, changes: &[WorkspaceFileChangeEvent], project_roots: &[PathBuf]) -> HashSet<String> {
     let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
     #[cfg(test)]
     let deadline = WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE.with(|value| value.get()).unwrap_or(deadline);
@@ -52,7 +52,7 @@ fn workspace_ignored_changes(root: &str, changes: &[WorkspaceFileChangeEvent], p
 
 #[cfg(test)]
 thread_local! {
-    static WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    pub(crate) static WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
 
 impl AppState {

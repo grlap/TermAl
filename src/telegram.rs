@@ -10,11 +10,13 @@ The relay runs inside the main backend process from Settings -> Telegram. It
 does not currently expose project digests or digest actions.
 */
 
+use super::*;
+
 /// Handles Telegram update.
 #[derive(Clone, Copy, Debug, Default)]
-struct TelegramUpdateHandlingOutcome {
-    dirty: bool,
-    final_sync_satisfied: bool,
+pub(crate) struct TelegramUpdateHandlingOutcome {
+    pub(crate) dirty: bool,
+    pub(crate) final_sync_satisfied: bool,
 }
 
 impl TelegramUpdateHandlingOutcome {
@@ -27,25 +29,28 @@ impl TelegramUpdateHandlingOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct TelegramPromptForwardOutcome {
-    dirty: bool,
-    final_sync_satisfied: bool,
+pub(crate) struct TelegramPromptForwardOutcome {
+    pub(crate) dirty: bool,
+    pub(crate) final_sync_satisfied: bool,
 }
 
-const TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
-const TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX: usize = 20;
-const TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT: &str =
+pub(crate) const TELEGRAM_CHAT_WORK_RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+pub(crate) const TELEGRAM_CHAT_WORK_RATE_LIMIT_MAX: usize = 20;
+pub(crate) const TELEGRAM_CHAT_WORK_RATE_LIMIT_TEXT: &str =
     "Telegram actions are rate-limited. Try again in a moment.";
 
-fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
+pub(crate) fn telegram_prompt_exceeds_byte_limit(text: &str) -> bool {
     text.len() > MAX_DELEGATION_PROMPT_BYTES
 }
 
-fn telegram_chat_work_is_rate_limited(state: &mut TelegramBotState, chat_id: i64) -> bool {
+pub(crate) fn telegram_chat_work_is_rate_limited(
+    state: &mut TelegramBotState,
+    chat_id: i64,
+) -> bool {
     telegram_chat_work_is_rate_limited_at(state, chat_id, std::time::Instant::now())
 }
 
-fn telegram_chat_work_is_rate_limited_at(
+pub(crate) fn telegram_chat_work_is_rate_limited_at(
     state: &mut TelegramBotState,
     chat_id: i64,
     now: std::time::Instant,
@@ -76,7 +81,7 @@ fn prune_expired_telegram_chat_work_rate_limits(
     });
 }
 
-fn handle_telegram_update(
+pub(crate) fn handle_telegram_update(
     telegram: &impl TelegramCallbackResponder,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
@@ -95,7 +100,7 @@ fn handle_telegram_update(
 
 /// Handles Telegram message.
 #[cfg(test)]
-fn handle_telegram_message(
+pub(crate) fn handle_telegram_message(
     telegram: &impl TelegramMessageSender,
     termal: &(impl TelegramPromptClient + TelegramActionClient),
     config: &TelegramBotConfig,
@@ -265,7 +270,7 @@ fn handle_telegram_message_for_relay(
 }
 
 /// Handles Telegram callback query.
-fn handle_telegram_callback_query(
+pub(crate) fn handle_telegram_callback_query(
     telegram: &impl TelegramCallbackResponder,
     termal: &impl TelegramActionClient,
     config: &TelegramBotConfig,
@@ -362,7 +367,7 @@ fn handle_telegram_callback_query(
 
 /// Handles forward Telegram text to project.
 #[cfg(test)]
-fn forward_telegram_text_to_project(
+pub(crate) fn forward_telegram_text_to_project(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,
@@ -376,7 +381,7 @@ fn forward_telegram_text_to_project(
     )
 }
 
-fn forward_telegram_text_to_project_for_relay(
+pub(crate) fn forward_telegram_text_to_project_for_relay(
     telegram: &impl TelegramMessageSender,
     termal: &impl TelegramPromptClient,
     config: &TelegramBotConfig,

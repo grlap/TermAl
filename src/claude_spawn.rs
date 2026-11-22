@@ -28,7 +28,9 @@
 // Protocol-level parsing of the messages coming *back* from Claude
 // lives in `claude.rs` (`handle_claude_message` and friends).
 
-const CLAUDE_TRANSIENT_API_RETRY_ATTEMPTS: u32 = 5;
+use super::*;
+
+pub(crate) const CLAUDE_TRANSIENT_API_RETRY_ATTEMPTS: u32 = 5;
 const CLAUDE_TRANSIENT_API_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
 const CLAUDE_RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 
@@ -36,11 +38,11 @@ const CLAUDE_RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 // shims are not native executables and this runtime does not launch a shell.
 // Unlike find_command_on_path (Codex's shim-capable adapter), this deliberately
 // requires native/executable files and canonicalizes before changing cwd.
-fn resolve_claude_executable() -> Option<PathBuf> {
+pub(crate) fn resolve_claude_executable() -> Option<PathBuf> {
     resolve_claude_executable_on_path(&std::env::var_os("PATH")?)
 }
 
-fn resolve_claude_executable_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> {
+pub(crate) fn resolve_claude_executable_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> {
     let name = if cfg!(windows) {
         "claude.exe"
     } else {
@@ -69,7 +71,7 @@ fn resolve_claude_executable_on_path(path: &std::ffi::OsStr) -> Option<PathBuf> 
 /// Claude Code 2.1.220 exposes these in terminal stream-json result objects as
 /// `api_error_status`. Missing or malformed numeric status stays terminal;
 /// result prose is never a substitute for this current wire field.
-fn claude_transient_api_status(message: &Value) -> Option<u16> {
+pub(crate) fn claude_transient_api_status(message: &Value) -> Option<u16> {
     if message.get("type").and_then(Value::as_str) != Some("result")
         || message.get("is_error").and_then(Value::as_bool) != Some(true)
     {
@@ -83,7 +85,7 @@ fn claude_transient_api_status(message: &Value) -> Option<u16> {
         .filter(|status| matches!(status, 429 | 503 | 529))
 }
 
-fn claude_transient_api_retry_delay(
+pub(crate) fn claude_transient_api_retry_delay(
     session_id: &str,
     completed_attempts: u32,
     status: u16,
@@ -100,7 +102,7 @@ fn claude_transient_api_retry_delay(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum ClaudeTransientApiResult {
+pub(crate) enum ClaudeTransientApiResult {
     Retry {
         completed_attempts: u32,
         delay: Duration,
@@ -112,7 +114,7 @@ enum ClaudeTransientApiResult {
     },
 }
 
-fn classify_claude_transient_api_result(
+pub(crate) fn classify_claude_transient_api_result(
     message: &Value,
     session_id: &str,
     prior_completed_attempts: u32,
@@ -137,9 +139,9 @@ fn classify_claude_transient_api_result(
     }
 }
 
-type ClaudeReplayPrompt = Arc<Mutex<Option<ClaudePromptCommand>>>;
+pub(crate) type ClaudeReplayPrompt = Arc<Mutex<Option<ClaudePromptCommand>>>;
 
-fn claude_replay_generation(replay_prompt: &ClaudeReplayPrompt) -> Option<String> {
+pub(crate) fn claude_replay_generation(replay_prompt: &ClaudeReplayPrompt) -> Option<String> {
     replay_prompt
         .lock()
         .expect("Claude replay prompt mutex poisoned")
@@ -147,7 +149,7 @@ fn claude_replay_generation(replay_prompt: &ClaudeReplayPrompt) -> Option<String
         .map(|prompt| prompt.replay_generation.clone())
 }
 
-fn clear_claude_replay_prompt_if_matches(
+pub(crate) fn clear_claude_replay_prompt_if_matches(
     replay_prompt: &ClaudeReplayPrompt,
     replay_generation: &str,
 ) -> bool {
@@ -170,7 +172,7 @@ fn clear_claude_replay_prompt_if_matches(
 /// `ownership` before its bytes are written, so the reader can name the turn
 /// the prompt opens however the write and the runtime's frames interleave, and
 /// it is released when the write fails.
-fn write_claude_runtime_command(
+pub(crate) fn write_claude_runtime_command(
     writer: &mut impl Write,
     replay_prompt: &ClaudeReplayPrompt,
     ownership: &ClaudeTurnOwnership,
@@ -235,7 +237,7 @@ fn write_claude_runtime_command(
 /// theirs) or the runtime can no longer be written to. Commands still queued
 /// when the last sender goes are written first. `context` carries no sender,
 /// so the loop never keeps its own channel open.
-fn run_claude_writer(
+pub(crate) fn run_claude_writer(
     context: &ClaudeRuntimeContext,
     writer: &mut impl Write,
     input_rx: mpsc::Receiver<ClaudeRuntimeCommand>,
@@ -252,7 +254,7 @@ fn run_claude_writer(
 /// attempt of the live turn on this runtime, and it is taken here, so it is
 /// written at most once; every other command is written as given. Returns
 /// `false` once the runtime cannot be written to.
-fn apply_claude_writer_command(
+pub(crate) fn apply_claude_writer_command(
     context: &ClaudeRuntimeContext,
     writer: &mut impl Write,
     command: ClaudeRuntimeCommand,
@@ -279,12 +281,14 @@ fn apply_claude_writer_command(
             );
             return true;
         }
-        match context.state.note_turn_retry_if_runtime_and_generation_match(
-            &context.session_id,
-            &context.token,
-            ticket.turn_generation,
-            retry_detail,
-        ) {
+        match context
+            .state
+            .note_turn_retry_if_runtime_and_generation_match(
+                &context.session_id,
+                &context.token,
+                ticket.turn_generation,
+                retry_detail,
+            ) {
             Ok(true) => {}
             Ok(false) => {
                 clear_claude_replay_prompt_if_matches(&context.replay_prompt, replay_generation);
@@ -300,11 +304,14 @@ fn apply_claude_writer_command(
                 return true;
             }
         }
-        if !context.state.turn_retry_allowed_if_runtime_and_generation_match(
-            &context.session_id,
-            &context.token,
-            ticket.turn_generation,
-        ) {
+        if !context
+            .state
+            .turn_retry_allowed_if_runtime_and_generation_match(
+                &context.session_id,
+                &context.token,
+                ticket.turn_generation,
+            )
+        {
             clear_claude_replay_prompt_if_matches(&context.replay_prompt, replay_generation);
             return true;
         }
@@ -317,7 +324,10 @@ fn apply_claude_writer_command(
             // Claude interprets native commands only when the original user
             // text starts with '/'. Defer guidance until an ordinary prompt.
             if !prompt.text.trim_start().starts_with('/')
-                && let Some(notice) = context.state.project_environment_notice(&context.session_id) {
+                && let Some(notice) = context
+                    .state
+                    .project_environment_notice(&context.session_id)
+            {
                 prompt.text = format!("{notice}\n\n{}", prompt.text);
             }
             ClaudeRuntimeCommand::Prompt(prompt)
@@ -405,7 +415,7 @@ fn release_claude_replay_prompt_of_refused_retry(
     }
 }
 
-fn dispatch_claude_retry_if_current(
+pub(crate) fn dispatch_claude_retry_if_current(
     state: &AppState,
     session_id: &str,
     runtime_token: &RuntimeToken,
@@ -459,7 +469,7 @@ const CLAUDE_MCP_CONFIG_FILE_SUFFIX: &str = ".json";
 // the `~/.termal` tree next to `termal.sqlite`, and tests stay inside their
 // explicit temporary persistence root instead of touching the operator's
 // real data directory.
-fn claude_mcp_config_dir(persistence_path: &FsPath) -> PathBuf {
+pub(crate) fn claude_mcp_config_dir(persistence_path: &FsPath) -> PathBuf {
     persistence_path
         .parent()
         .map(FsPath::to_path_buf)
@@ -469,8 +479,8 @@ fn claude_mcp_config_dir(persistence_path: &FsPath) -> PathBuf {
 }
 
 /// Owns one private Claude MCP configuration file; dropping the guard removes it.
-struct ClaudeMcpConfigFile {
-    path: PathBuf,
+pub(crate) struct ClaudeMcpConfigFile {
+    pub(crate) path: PathBuf,
 }
 
 impl Drop for ClaudeMcpConfigFile {
@@ -484,7 +494,7 @@ impl Drop for ClaudeMcpConfigFile {
 /// complete, so the file must not stay readable for the rest of the session
 /// (an agent tool could otherwise follow its own `--mcp-config` argv path to
 /// the secret). Idempotent; the guard's drop remains the fallback.
-fn release_private_claude_mcp_config(slot: &mut Option<ClaudeMcpConfigFile>) {
+pub(crate) fn release_private_claude_mcp_config(slot: &mut Option<ClaudeMcpConfigFile>) {
     slot.take();
 }
 
@@ -492,7 +502,7 @@ fn release_private_claude_mcp_config(slot: &mut Option<ClaudeMcpConfigFile>) {
 /// the actionable reason for the waiter that owns token-guarded runtime
 /// cleanup. On a kill failure the override is removed so the caller can
 /// record the teardown failure directly without the waiter duplicating it.
-fn terminate_claude_runtime_after_control_failure(
+pub(crate) fn terminate_claude_runtime_after_control_failure(
     process: &Arc<SharedChild>,
     #[cfg(windows)] process_tree: Option<&RuntimeProcessTree>,
     runtime_exit_error_override: &Arc<Mutex<Option<String>>>,
@@ -523,7 +533,7 @@ fn terminate_claude_runtime_after_control_failure(
 /// process can exit while its final control message is still being handled;
 /// joining here prevents that last diagnostic from losing a race with
 /// `SharedChild::wait`.
-fn take_claude_runtime_exit_error_after_reader(
+pub(crate) fn take_claude_runtime_exit_error_after_reader(
     reader_thread: std::thread::JoinHandle<()>,
     runtime_exit_error_override: &Arc<Mutex<Option<String>>>,
 ) -> Option<String> {
@@ -541,7 +551,7 @@ fn claude_mcp_config_file_name(runtime_id: &str) -> String {
     format!("{CLAUDE_MCP_CONFIG_FILE_PREFIX}{runtime_id}{CLAUDE_MCP_CONFIG_FILE_SUFFIX}")
 }
 
-fn write_private_claude_mcp_config(
+pub(crate) fn write_private_claude_mcp_config(
     dir: &FsPath,
     runtime_id: &str,
     contents: &str,
@@ -583,7 +593,7 @@ const CLAUDE_CODE_GIT_BASH_PATH_ENV: &str = "CLAUDE_CODE_GIT_BASH_PATH";
 /// What will run the Bash tool of the Claude process `command` starts, from
 /// the environment it hands that process: its own settings and removals,
 /// over the environment it inherits.
-fn claude_bash_tool_shell(command: &Command) -> ClaudeBashToolShell {
+pub(crate) fn claude_bash_tool_shell(command: &Command) -> ClaudeBashToolShell {
     claude_bash_tool_shell_from_env(command.get_envs(), std::env::vars_os().map(|(key, _)| key))
 }
 
@@ -593,7 +603,7 @@ fn claude_bash_tool_shell(command: &Command) -> ClaudeBashToolShell {
 /// or not Unicode too), leaves the shell unproven, so the read-only checker
 /// stays strict. An inherited one counts unless the launch removes that exact
 /// name.
-fn claude_bash_tool_shell_from_env<'a>(
+pub(crate) fn claude_bash_tool_shell_from_env<'a>(
     explicit: impl IntoIterator<Item = (&'a std::ffi::OsStr, Option<&'a std::ffi::OsStr>)>,
     inherited: impl IntoIterator<Item = std::ffi::OsString>,
 ) -> ClaudeBashToolShell {
@@ -622,7 +632,7 @@ fn claude_bash_tool_shell_from_env<'a>(
 }
 
 /// Spawns Claude runtime.
-fn spawn_claude_runtime_with_environment(
+pub(crate) fn spawn_claude_runtime_with_environment(
     state: AppState,
     session_id: String,
     cwd: String,
@@ -655,21 +665,21 @@ fn spawn_claude_runtime_with_environment(
         &delegation_mcp_config,
     )?;
     let mut command = dedicated_provider_command(|| {
-    let executable = resolve_claude_executable()
-        .ok_or_else(|| anyhow!("a launchable Claude CLI was not found on PATH"))?;
-    let mut command = Command::new(executable);
-    command.current_dir(&cwd);
-    command.args(claude_cli_persistent_args(
-        &model,
-        approval_mode,
-        effort,
-        resume_session_id.as_deref(),
-    ));
-    command.args(claude_cli_mcp_config_args(
-        &mcp_config_file.path,
-        host_mcp_servers_only,
-    ));
-    Ok(command)
+        let executable = resolve_claude_executable()
+            .ok_or_else(|| anyhow!("a launchable Claude CLI was not found on PATH"))?;
+        let mut command = Command::new(executable);
+        command.current_dir(&cwd);
+        command.args(claude_cli_persistent_args(
+            &model,
+            approval_mode,
+            effort,
+            resume_session_id.as_deref(),
+        ));
+        command.args(claude_cli_mcp_config_args(
+            &mcp_config_file.path,
+            host_mcp_servers_only,
+        ));
+        Ok(command)
     })?;
     command.env("CLAUDE_CODE_ENTRYPOINT", "termal");
     let termal_env = termal_agent_process_env(&session_id, &state.local_http_base_url())?;
@@ -835,9 +845,12 @@ fn spawn_claude_runtime_with_environment(
                 // Every effect of the frame is applied by the one shared
                 // function (`claude_frame_application.rs`); only stopping the
                 // process, on its explicit outcome, happens here.
-                let applied = apply_claude_frame(&context, &mut frames, &mut recorder, &message).next;
+                let applied =
+                    apply_claude_frame(&context, &mut frames, &mut recorder, &message).next;
                 #[cfg(all(test, windows))]
-                if let Some(sender) = &frame_completion { let _ = sender.send(()); }
+                if let Some(sender) = &frame_completion {
+                    let _ = sender.send(());
+                }
                 match applied {
                     ClaudeFrameApplied::Continue => {}
                     ClaudeFrameApplied::Stop => break,
@@ -904,7 +917,10 @@ fn spawn_claude_runtime_with_environment(
                 // The runtime handle retains the lease for Stop/Delete retry.
                 eprintln!("Claude tree cleanup failed: {error:#}");
                 let _ = wait_state.handle_runtime_root_exit_if_matches(
-                    &wait_session_id, &wait_runtime_token, root_exit_provider_error(&wait_result, "Claude").as_deref());
+                    &wait_session_id,
+                    &wait_runtime_token,
+                    root_exit_provider_error(&wait_result, "Claude").as_deref(),
+                );
                 return;
             }
             let error_override = take_claude_runtime_exit_error_after_reader(
@@ -955,14 +971,14 @@ fn spawn_claude_runtime_with_environment(
 /// Claude's native stream-json compact boundary means the next prompt needs a
 /// fresh base-tier Engram work context. Hook names are not part of this stream
 /// contract, so a similarly named field must not arm a refresh by accident.
-fn claude_event_marks_engram_context_nudge(message: &Value) -> bool {
+pub(crate) fn claude_event_marks_engram_context_nudge(message: &Value) -> bool {
     message.get("type").and_then(Value::as_str) == Some("system")
         && message.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
 }
 
 /// Claude Code 2.1.288 reports `status: compacting` when a compaction starts,
 /// before its SessionStart compact hook and its compact_boundary.
-fn claude_event_starts_compaction(message: &Value) -> bool {
+pub(crate) fn claude_event_starts_compaction(message: &Value) -> bool {
     message.get("type").and_then(Value::as_str) == Some("system")
         && message.get("subtype").and_then(Value::as_str) == Some("status")
         && message.get("status").and_then(Value::as_str) == Some("compacting")
@@ -970,7 +986,7 @@ fn claude_event_starts_compaction(message: &Value) -> bool {
 
 /// Writes Claude initialize, with the runtime's SessionStart compact hook
 /// when it registers one.
-fn write_claude_initialize(
+pub(crate) fn write_claude_initialize(
     writer: &mut impl Write,
     state: &AppState,
     session_id: &str,

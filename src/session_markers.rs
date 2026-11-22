@@ -5,11 +5,13 @@
 // stable anchors plus index hints so clients can render quickly and recover
 // after compaction or reload.
 
+use super::*;
+
 const CONVERSATION_MARKER_NAME_MAX_CHARS: usize = 120;
 const CONVERSATION_MARKER_BODY_MAX_CHARS: usize = 4_000;
 
 impl AppState {
-    fn list_conversation_markers(
+    pub(crate) fn list_conversation_markers(
         &self,
         session_id: &str,
     ) -> Result<ConversationMarkersResponse, ApiError> {
@@ -29,7 +31,7 @@ impl AppState {
         })
     }
 
-    fn create_conversation_marker(
+    pub(crate) fn create_conversation_marker(
         &self,
         session_id: &str,
         request: CreateConversationMarkerRequest,
@@ -87,7 +89,7 @@ impl AppState {
         })
     }
 
-    fn update_conversation_marker(
+    pub(crate) fn update_conversation_marker(
         &self,
         session_id: &str,
         marker_id: &str,
@@ -301,7 +303,7 @@ impl AppState {
         Ok(marker)
     }
 
-    fn delete_conversation_marker(
+    pub(crate) fn delete_conversation_marker(
         &self,
         session_id: &str,
         marker_id: &str,
@@ -458,7 +460,7 @@ impl AppState {
         self.apply_remote_marker_delete_response(target, remote_response, &response_lease)
     }
 
-    fn apply_remote_marker_response(
+    pub(crate) fn apply_remote_marker_response(
         &self,
         target: RemoteSessionTarget,
         remote_response: ConversationMarkerResponse,
@@ -617,7 +619,7 @@ fn marker_message_index_on_record(record: &SessionRecord, message_id: &str) -> O
         .map(|local_index| global_message_index(record, local_index))
 }
 
-fn update_conversation_marker_request_has_changes(
+pub(crate) fn update_conversation_marker_request_has_changes(
     request: &UpdateConversationMarkerRequest,
 ) -> bool {
     request.kind.is_some()

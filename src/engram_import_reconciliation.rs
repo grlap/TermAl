@@ -5,29 +5,31 @@
 // challenge or Ready path. Every record holds references and fingerprints
 // only, never routing tokens, credentials or raw request bodies.
 
+use super::*;
+
 #[cfg_attr(not(test), allow(dead_code))]
-const ENGRAM_IMPORT_RECONCILIATION_RECORD_VERSION: u32 = 1;
+pub(crate) const ENGRAM_IMPORT_RECONCILIATION_RECORD_VERSION: u32 = 1;
 #[cfg_attr(not(test), allow(dead_code))]
 /// Local journal limits, declared before any enrollment and stricter than
 /// the wire's page and manifest totals.
-const ENGRAM_IMPORT_RECONCILIATION_MAX_RECORDS: usize = 4096;
+pub(crate) const ENGRAM_IMPORT_RECONCILIATION_MAX_RECORDS: usize = 4096;
 #[cfg_attr(not(test), allow(dead_code))]
-const ENGRAM_IMPORT_RECONCILIATION_MAX_RECORD_BYTES: usize = 64 * 1024;
+pub(crate) const ENGRAM_IMPORT_RECONCILIATION_MAX_RECORD_BYTES: usize = 64 * 1024;
 #[cfg_attr(not(test), allow(dead_code))]
-const ENGRAM_IMPORT_RECONCILIATION_MAX_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const ENGRAM_IMPORT_RECONCILIATION_MAX_BYTES: usize = 16 * 1024 * 1024;
 #[cfg_attr(not(test), allow(dead_code))]
-const ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS: usize = 256;
+pub(crate) const ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS: usize = 256;
 
 #[cfg_attr(not(test), allow(dead_code))]
 /// The exact authority scope a record belongs to.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramImportReconciliationScope {
-    store_association: String,
-    project_id: String,
-    association_id: String,
+pub(crate) struct EngramImportReconciliationScope {
+    pub(crate) store_association: String,
+    pub(crate) project_id: String,
+    pub(crate) association_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    owner_id: Option<String>,
+    pub(crate) owner_id: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -35,7 +37,7 @@ struct EngramImportReconciliationScope {
 /// unknown or legacy. Never a guessed or current-focus binding.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "binding", rename_all = "snake_case")]
-enum EngramImportOriginalBinding {
+pub(crate) enum EngramImportOriginalBinding {
     Exact(EngramImportExactBinding),
     Unknown,
     Legacy,
@@ -44,14 +46,14 @@ enum EngramImportOriginalBinding {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramImportExactBinding {
-    work_id: String,
+pub(crate) struct EngramImportExactBinding {
+    pub(crate) work_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    root_execution_id: Option<String>,
-    run_id: String,
-    run_generation: i64,
-    claim_id: String,
-    claim_fence: u64,
+    pub(crate) root_execution_id: Option<String>,
+    pub(crate) run_id: String,
+    pub(crate) run_generation: i64,
+    pub(crate) claim_id: String,
+    pub(crate) claim_fence: u64,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -59,7 +61,7 @@ struct EngramImportExactBinding {
 /// can carry complete coverage.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramImportAssociationState {
+pub(crate) enum EngramImportAssociationState {
     Admitted,
     Pending,
     Legacy,
@@ -69,7 +71,7 @@ enum EngramImportAssociationState {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramImportCoverage {
+pub(crate) enum EngramImportCoverage {
     Unknown,
     Complete,
 }
@@ -77,30 +79,30 @@ enum EngramImportCoverage {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramImportResponsibilityOwner {
-    schema_version: u32,
-    record_id: String,
-    scope: EngramImportReconciliationScope,
-    association: EngramImportAssociationState,
+pub(crate) struct EngramImportResponsibilityOwner {
+    pub(crate) schema_version: u32,
+    pub(crate) record_id: String,
+    pub(crate) scope: EngramImportReconciliationScope,
+    pub(crate) association: EngramImportAssociationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    enrollment_receipt_ref: Option<String>,
-    owner_id: String,
+    pub(crate) enrollment_receipt_ref: Option<String>,
+    pub(crate) owner_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    predecessor_association_ref: Option<String>,
+    pub(crate) predecessor_association_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    successor_association_ref: Option<String>,
-    original_binding: EngramImportOriginalBinding,
-    boot_incarnation: String,
-    enrollment_revision: u64,
-    coverage_version: u32,
-    coverage: EngramImportCoverage,
-    settlement_refs: Vec<String>,
+    pub(crate) successor_association_ref: Option<String>,
+    pub(crate) original_binding: EngramImportOriginalBinding,
+    pub(crate) boot_incarnation: String,
+    pub(crate) enrollment_revision: u64,
+    pub(crate) coverage_version: u32,
+    pub(crate) coverage: EngramImportCoverage,
+    pub(crate) settlement_refs: Vec<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramImportFencePhase {
+pub(crate) enum EngramImportFencePhase {
     Installing,
     Settling,
     Prepared,
@@ -111,32 +113,32 @@ enum EngramImportFencePhase {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramImportLocalFence {
-    schema_version: u32,
-    record_id: String,
-    scope: EngramImportReconciliationScope,
-    hold_id: String,
-    candidate_id: String,
-    candidate_revision: u64,
-    scope_revision: u64,
-    hold_revision: u64,
-    affected_scope_ref: String,
-    host_incarnation: String,
-    fence_generation: u64,
-    phase: EngramImportFencePhase,
+pub(crate) struct EngramImportLocalFence {
+    pub(crate) schema_version: u32,
+    pub(crate) record_id: String,
+    pub(crate) scope: EngramImportReconciliationScope,
+    pub(crate) hold_id: String,
+    pub(crate) candidate_id: String,
+    pub(crate) candidate_revision: u64,
+    pub(crate) scope_revision: u64,
+    pub(crate) hold_revision: u64,
+    pub(crate) affected_scope_ref: String,
+    pub(crate) host_incarnation: String,
+    pub(crate) fence_generation: u64,
+    pub(crate) phase: EngramImportFencePhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    prepared_manifest_ref: Option<String>,
+    pub(crate) prepared_manifest_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    attestation_ref: Option<String>,
+    pub(crate) attestation_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    terminal_decision_ref: Option<String>,
+    pub(crate) terminal_decision_ref: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 /// The known classes of host responsibility a journal entry can name.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramImportResponsibilityClass {
+pub(crate) enum EngramImportResponsibilityClass {
     Checkpoint,
     ControlOperation,
     RetainedHead,
@@ -151,7 +153,7 @@ enum EngramImportResponsibilityClass {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramImportEntryState {
+pub(crate) enum EngramImportEntryState {
     Outstanding,
     Unknown,
     Terminal,
@@ -160,24 +162,24 @@ enum EngramImportEntryState {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramImportResponsibilityEntry {
-    schema_version: u32,
-    record_id: String,
-    scope: EngramImportReconciliationScope,
-    owner_id: String,
-    class: EngramImportResponsibilityClass,
-    original_binding: EngramImportOriginalBinding,
-    existing_ref: String,
-    revision: u64,
-    state: EngramImportEntryState,
+pub(crate) struct EngramImportResponsibilityEntry {
+    pub(crate) schema_version: u32,
+    pub(crate) record_id: String,
+    pub(crate) scope: EngramImportReconciliationScope,
+    pub(crate) owner_id: String,
+    pub(crate) class: EngramImportResponsibilityClass,
+    pub(crate) original_binding: EngramImportOriginalBinding,
+    pub(crate) existing_ref: String,
+    pub(crate) revision: u64,
+    pub(crate) state: EngramImportEntryState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    terminal_evidence_ref: Option<String>,
+    pub(crate) terminal_evidence_ref: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum EngramImportReadiness {
+pub(crate) enum EngramImportReadiness {
     Pending,
     Ready,
 }
@@ -185,31 +187,31 @@ enum EngramImportReadiness {
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EngramImportResponsibilitySnapshot {
-    schema_version: u32,
-    record_id: String,
-    scope: EngramImportReconciliationScope,
-    owner_set_revision: u64,
-    scope_revision: u64,
-    enrollment_revision: u64,
-    host_incarnation: String,
-    fence_generation: u64,
+pub(crate) struct EngramImportResponsibilitySnapshot {
+    pub(crate) schema_version: u32,
+    pub(crate) record_id: String,
+    pub(crate) scope: EngramImportReconciliationScope,
+    pub(crate) owner_set_revision: u64,
+    pub(crate) scope_revision: u64,
+    pub(crate) enrollment_revision: u64,
+    pub(crate) host_incarnation: String,
+    pub(crate) fence_generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    challenge_id: Option<String>,
-    inventory_version: u64,
-    entry_refs: Vec<String>,
-    entry_count: u64,
-    entry_digest: String,
-    coverage_gaps: Vec<String>,
-    disposition: EngramImportReadiness,
+    pub(crate) challenge_id: Option<String>,
+    pub(crate) inventory_version: u64,
+    pub(crate) entry_refs: Vec<String>,
+    pub(crate) entry_count: u64,
+    pub(crate) entry_digest: String,
+    pub(crate) coverage_gaps: Vec<String>,
+    pub(crate) disposition: EngramImportReadiness,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    persisted_content_ref: Option<String>,
+    pub(crate) persisted_content_ref: Option<String>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "variant", rename_all = "snake_case")]
-enum EngramImportReconciliationRecord {
+pub(crate) enum EngramImportReconciliationRecord {
     EnrolledResponsibilityOwner(EngramImportResponsibilityOwner),
     LocalImportFence(EngramImportLocalFence),
     ResponsibilityEntry(EngramImportResponsibilityEntry),
@@ -218,7 +220,7 @@ enum EngramImportReconciliationRecord {
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl EngramImportReconciliationRecord {
-    fn tag(&self) -> &'static str {
+    pub(crate) fn tag(&self) -> &'static str {
         match self {
             Self::EnrolledResponsibilityOwner(_) => "enrolled_responsibility_owner",
             Self::LocalImportFence(_) => "local_import_fence",
@@ -227,7 +229,7 @@ impl EngramImportReconciliationRecord {
         }
     }
 
-    fn record_id(&self) -> &str {
+    pub(crate) fn record_id(&self) -> &str {
         match self {
             Self::EnrolledResponsibilityOwner(record) => &record.record_id,
             Self::LocalImportFence(record) => &record.record_id,
@@ -237,7 +239,7 @@ impl EngramImportReconciliationRecord {
     }
 
     /// The stable journal key: `<variant-tag>/<record_id>`.
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         format!("{}/{}", self.tag(), self.record_id())
     }
 }
@@ -245,7 +247,7 @@ impl EngramImportReconciliationRecord {
 #[cfg_attr(not(test), allow(dead_code))]
 /// What recording a record did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EngramImportRecordOutcome {
+pub(crate) enum EngramImportRecordOutcome {
     Recorded,
     Unchanged,
 }
@@ -255,11 +257,11 @@ enum EngramImportRecordOutcome {
 /// no `Default`: an empty journal exists only once activated, and absence
 /// never stands in for it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramImportReconciliationJournal {
-    records: BTreeMap<String, EngramImportReconciliationRecord>,
+pub(crate) struct EngramImportReconciliationJournal {
+    pub(crate) records: BTreeMap<String, EngramImportReconciliationRecord>,
     /// The sum of the records' serialized sizes, which the total limit
     /// bounds; kept so that recording one record serializes only that one.
-    bytes: usize,
+    pub(crate) bytes: usize,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -268,7 +270,7 @@ struct EngramImportReconciliationJournal {
 /// An activated journal is shared, so a state snapshot taken under the state
 /// lock costs a reference count, never a copy of the journal.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-enum EngramImportReconciliationState {
+pub(crate) enum EngramImportReconciliationState {
     #[default]
     NotActivated,
     Activated(Arc<EngramImportReconciliationJournal>),
@@ -277,15 +279,18 @@ enum EngramImportReconciliationState {
 #[cfg_attr(not(test), allow(dead_code))]
 impl EngramImportReconciliationJournal {
     /// The journal a first activation starts from.
-    fn activated_empty() -> Self {
-        Self { records: BTreeMap::new(), bytes: 0 }
+    pub(crate) fn activated_empty() -> Self {
+        Self {
+            records: BTreeMap::new(),
+            bytes: 0,
+        }
     }
 
     /// Decode a persisted journal, refusing anything it does not exactly
     /// understand: an unknown variant, field or version, a missing field, a
     /// key that is not its record's identity, a broken relation between
     /// records, or more than the declared limits. Nothing is defaulted.
-    fn decode(value: &Value) -> Result<Self> {
+    pub(crate) fn decode(value: &Value) -> Result<Self> {
         let Value::Object(encoded) = value else {
             bail!("the import-reconciliation journal must be an object");
         };
@@ -309,20 +314,24 @@ impl EngramImportReconciliationJournal {
         Ok(journal)
     }
 
-    fn to_value(&self) -> Result<Value> {
+    pub(crate) fn to_value(&self) -> Result<Value> {
         Ok(serde_json::to_value(&self.records)?)
     }
 
     /// Every record with its stable key, in key order, for read-only
     /// consumers such as an admission decision. Records change only through
     /// `record`.
-    fn records(&self) -> impl Iterator<Item = (&str, &EngramImportReconciliationRecord)> {
-        self.records.iter().map(|(key, record)| (key.as_str(), record))
+    pub(crate) fn records(
+        &self,
+    ) -> impl Iterator<Item = (&str, &EngramImportReconciliationRecord)> {
+        self.records
+            .iter()
+            .map(|(key, record)| (key.as_str(), record))
     }
 
     /// Each record's own rules and its key, summing the records' serialized
     /// sizes against the total limit.
-    fn measure(&self) -> Result<usize> {
+    pub(crate) fn measure(&self) -> Result<usize> {
         let mut bytes = 0usize;
         for (key, record) in &self.records {
             if record.key() != *key {
@@ -331,14 +340,16 @@ impl EngramImportReconciliationJournal {
             bytes = bytes
                 .checked_add(engram_import_validate_record(record)?)
                 .filter(|total| *total <= ENGRAM_IMPORT_RECONCILIATION_MAX_BYTES)
-                .ok_or_else(|| anyhow!("the import-reconciliation journal exceeds its byte limit"))?;
+                .ok_or_else(|| {
+                    anyhow!("the import-reconciliation journal exceeds its byte limit")
+                })?;
         }
         Ok(bytes)
     }
 
     /// Full validation, as a decoder applies it: the limits, every record's
     /// own rules and key, and the relations between records.
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.records.len() > ENGRAM_IMPORT_RECONCILIATION_MAX_RECORDS {
             bail!("the import-reconciliation journal exceeds its record limit");
         }
@@ -355,7 +366,10 @@ impl EngramImportReconciliationJournal {
         for record in self.records.values() {
             match record {
                 EngramImportReconciliationRecord::LocalImportFence(fence) => {
-                    if !generations.insert((engram_import_scope_identity(&fence.scope), fence.fence_generation)) {
+                    if !generations.insert((
+                        engram_import_scope_identity(&fence.scope),
+                        fence.fence_generation,
+                    )) {
                         bail!("two import fences of one scope share a fence generation");
                     }
                 }
@@ -371,7 +385,10 @@ impl EngramImportReconciliationJournal {
     /// A ready snapshot needs positively complete coverage: every entry it
     /// names present, of its own scope and terminal, and every owner of its
     /// scope complete.
-    fn validate_snapshot_coverage(&self, snapshot: &EngramImportResponsibilitySnapshot) -> Result<()> {
+    fn validate_snapshot_coverage(
+        &self,
+        snapshot: &EngramImportResponsibilitySnapshot,
+    ) -> Result<()> {
         if snapshot.disposition != EngramImportReadiness::Ready {
             return Ok(());
         }
@@ -391,11 +408,12 @@ impl EngramImportReconciliationJournal {
                 _ => bail!("a ready snapshot names a responsibility the journal does not hold"),
             }
         }
-        if self.records.values().any(|record| matches!(record,
+        if self.records.values().any(|record| {
+            matches!(record,
             EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner)
                 if engram_import_scope_identity(&owner.scope) == scope
-                    && owner.coverage != EngramImportCoverage::Complete))
-        {
+                    && owner.coverage != EngramImportCoverage::Complete)
+        }) {
             bail!("a ready snapshot's scope has an owner whose coverage is not complete");
         }
         Ok(())
@@ -420,7 +438,10 @@ impl EngramImportReconciliationJournal {
     /// Record `record` under its stable key. The same identity with the same
     /// body is unchanged; a different body under that identity conflicts. A
     /// refusal of any kind leaves the journal exactly as it was.
-    fn record(&mut self, record: EngramImportReconciliationRecord) -> Result<EngramImportRecordOutcome> {
+    pub(crate) fn record(
+        &mut self,
+        record: EngramImportReconciliationRecord,
+    ) -> Result<EngramImportRecordOutcome> {
         let size = engram_import_validate_record(&record)?;
         let key = record.key();
         if let Some(existing) = self.records.get(&key) {
@@ -439,16 +460,18 @@ impl EngramImportReconciliationJournal {
             .ok_or_else(|| anyhow!("the import-reconciliation journal is at its byte limit"))?;
         if let EngramImportReconciliationRecord::LocalImportFence(fence) = &record {
             let scope = engram_import_scope_identity(&fence.scope);
-            if self.records.values().any(|existing| matches!(existing,
+            if self.records.values().any(|existing| {
+                matches!(existing,
                 EngramImportReconciliationRecord::LocalImportFence(held)
                     if engram_import_scope_identity(&held.scope) == scope
-                        && held.fence_generation >= fence.fence_generation))
-            {
+                        && held.fence_generation >= fence.fence_generation)
+            }) {
                 bail!("an import fence's generation must exceed every earlier fence of its scope");
             }
         }
         let scope = {
-            let (store, project, association) = engram_import_scope_identity(engram_import_record_scope(&record));
+            let (store, project, association) =
+                engram_import_scope_identity(engram_import_record_scope(&record));
             (store.to_owned(), project.to_owned(), association.to_owned())
         };
         // Any record can bear on the ready snapshots of its scope: a ready
@@ -457,7 +480,11 @@ impl EngramImportReconciliationJournal {
         // them all with the record in place, and take it out again on refusal,
         // so recording never yields a journal the decoder would refuse.
         self.records.insert(key.clone(), record);
-        if let Err(error) = self.validate_ready_snapshots_of_scope((scope.0.as_str(), scope.1.as_str(), scope.2.as_str())) {
+        if let Err(error) = self.validate_ready_snapshots_of_scope((
+            scope.0.as_str(),
+            scope.1.as_str(),
+            scope.2.as_str(),
+        )) {
             self.records.remove(&key);
             return Err(error);
         }
@@ -468,7 +495,9 @@ impl EngramImportReconciliationJournal {
 
 #[cfg_attr(not(test), allow(dead_code))]
 /// The scope a record belongs to.
-fn engram_import_record_scope(record: &EngramImportReconciliationRecord) -> &EngramImportReconciliationScope {
+fn engram_import_record_scope(
+    record: &EngramImportReconciliationRecord,
+) -> &EngramImportReconciliationScope {
     match record {
         EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner) => &owner.scope,
         EngramImportReconciliationRecord::LocalImportFence(fence) => &fence.scope,
@@ -481,7 +510,11 @@ fn engram_import_record_scope(record: &EngramImportReconciliationRecord) -> &Eng
 /// The store, project and association a record's scope names: the part that
 /// decides which fences and owners belong together.
 fn engram_import_scope_identity(scope: &EngramImportReconciliationScope) -> (&str, &str, &str) {
-    (&scope.store_association, &scope.project_id, &scope.association_id)
+    (
+        &scope.store_association,
+        &scope.project_id,
+        &scope.association_id,
+    )
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -489,10 +522,14 @@ fn engram_import_scope_identity(scope: &EngramImportReconciliationScope) -> (&st
 /// journal. Returns its serialized size.
 fn engram_import_validate_record(record: &EngramImportReconciliationRecord) -> Result<usize> {
     let schema_version = match record {
-        EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner) => owner.schema_version,
+        EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner) => {
+            owner.schema_version
+        }
         EngramImportReconciliationRecord::LocalImportFence(fence) => fence.schema_version,
         EngramImportReconciliationRecord::ResponsibilityEntry(entry) => entry.schema_version,
-        EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot) => snapshot.schema_version,
+        EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot) => {
+            snapshot.schema_version
+        }
     };
     if schema_version != ENGRAM_IMPORT_RECONCILIATION_RECORD_VERSION {
         bail!("unsupported import-reconciliation record version {schema_version}");
@@ -502,8 +539,10 @@ fn engram_import_validate_record(record: &EngramImportReconciliationRecord) -> R
         || id.chars().count() > ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS
         || id.chars().any(char::is_control)
     {
-        bail!("an import-reconciliation record identity must be 1 to {} printable characters",
-            ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS);
+        bail!(
+            "an import-reconciliation record identity must be 1 to {} printable characters",
+            ENGRAM_IMPORT_RECONCILIATION_MAX_ID_CHARS
+        );
     }
     match record {
         EngramImportReconciliationRecord::EnrolledResponsibilityOwner(owner) => {
@@ -517,21 +556,34 @@ fn engram_import_validate_record(record: &EngramImportReconciliationRecord) -> R
             // stay coverage unknown.
             if owner.coverage == EngramImportCoverage::Complete
                 && (owner.association != EngramImportAssociationState::Admitted
-                    || !matches!(owner.original_binding, EngramImportOriginalBinding::Exact(_)))
+                    || !matches!(
+                        owner.original_binding,
+                        EngramImportOriginalBinding::Exact(_)
+                    ))
             {
-                bail!("an owner's coverage can be complete only for an admitted, exactly bound owner");
+                bail!(
+                    "an owner's coverage can be complete only for an admitted, exactly bound owner"
+                );
             }
         }
         EngramImportReconciliationRecord::ResponsibilityEntry(entry) => {
-            if (entry.state == EngramImportEntryState::Terminal) != entry.terminal_evidence_ref.is_some() {
-                bail!("a responsibility entry carries terminal evidence exactly when it is terminal");
+            if (entry.state == EngramImportEntryState::Terminal)
+                != entry.terminal_evidence_ref.is_some()
+            {
+                bail!(
+                    "a responsibility entry carries terminal evidence exactly when it is terminal"
+                );
             }
         }
         EngramImportReconciliationRecord::ResponsibilitySnapshot(snapshot) => {
             if snapshot.entry_count != snapshot.entry_refs.len() as u64 {
-                bail!("a responsibility snapshot's entry count does not match its entry references");
+                bail!(
+                    "a responsibility snapshot's entry count does not match its entry references"
+                );
             }
-            if snapshot.disposition == EngramImportReadiness::Ready && !snapshot.coverage_gaps.is_empty() {
+            if snapshot.disposition == EngramImportReadiness::Ready
+                && !snapshot.coverage_gaps.is_empty()
+            {
                 bail!("a ready responsibility snapshot cannot have coverage gaps");
             }
         }
@@ -546,7 +598,7 @@ fn engram_import_validate_record(record: &EngramImportReconciliationRecord) -> R
 
 #[cfg_attr(not(test), allow(dead_code))]
 /// The next fence generation of a scope. Exhaustion refuses; it never wraps.
-fn engram_import_next_fence_generation(current: u64) -> Result<u64> {
+pub(crate) fn engram_import_next_fence_generation(current: u64) -> Result<u64> {
     current
         .checked_add(1)
         .ok_or_else(|| anyhow!("the import fence generation is exhausted"))

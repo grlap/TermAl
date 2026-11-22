@@ -2,26 +2,28 @@
 // The choice preserves original provenance and is not historical delivery
 // evidence. Only prompt_delivery.rs can establish and fence an unsent attempt.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
-    static TEST_ORDINARY_SELECTED_BEFORE_RESUME: std::cell::RefCell<Option<Box<dyn FnOnce()>>>
+    pub(crate) static TEST_ORDINARY_SELECTED_BEFORE_RESUME: std::cell::RefCell<Option<Box<dyn FnOnce()>>>
         = const { std::cell::RefCell::new(None) };
-    static TEST_CURRENT_HUMAN_SELECTED_BEFORE_RESUME: std::cell::RefCell<Option<Box<dyn FnOnce()>>>
+    pub(crate) static TEST_CURRENT_HUMAN_SELECTED_BEFORE_RESUME: std::cell::RefCell<Option<Box<dyn FnOnce()>>>
         = const { std::cell::RefCell::new(None) };
 }
 
-struct HumanResumeOwner {
-    queue: QueuedTurnOwner,
-    selection: HumanPromptSelection,
-    intent: String,
-    stop_generation: u64,
-    pause_epoch: u64,
-    source: QueuedPromptSource,
-    write_ahead: Option<String>,
+pub(crate) struct HumanResumeOwner {
+    pub(crate) queue: QueuedTurnOwner,
+    pub(crate) selection: HumanPromptSelection,
+    pub(crate) intent: String,
+    pub(crate) stop_generation: u64,
+    pub(crate) pause_epoch: u64,
+    pub(crate) source: QueuedPromptSource,
+    pub(crate) write_ahead: Option<String>,
 }
 
 impl HumanResumeOwner {
-    fn capture(record: &SessionRecord, queue: QueuedTurnOwner) -> Option<Self> {
+    pub(crate) fn capture(record: &SessionRecord, queue: QueuedTurnOwner) -> Option<Self> {
         if !queue.matches(record) {
             return None;
         }
@@ -30,7 +32,9 @@ impl HumanResumeOwner {
         Some(Self {
             queue,
             selection: HumanPromptSelection {
-                prompt: projected_pending_prompts(record).into_iter().nth(position)?,
+                prompt: projected_pending_prompts(record)
+                    .into_iter()
+                    .nth(position)?,
                 session_mutation_stamp: record.mutation_stamp,
             },
             intent: receipted_prompt_intent(head),
@@ -44,22 +48,24 @@ impl HumanResumeOwner {
         })
     }
 
-    fn matches_with_stop(&self, record: &SessionRecord, stop_generation: u64) -> bool {
+    pub(crate) fn matches_with_stop(&self, record: &SessionRecord, stop_generation: u64) -> bool {
         let mut queue = self.queue.clone();
         queue.stop_generation = stop_generation;
         let position = ordinary_queue_position(record);
         queue.matches(record)
             && record.runtime_stop_generation == stop_generation
             && record.auto_dispatch_pause_epoch == self.pause_epoch
-            && position.and_then(|position| record.queued_prompts.get(position)).is_some_and(|head| {
-                head.source == self.source
-                    && receipted_prompt_intent(head) == self.intent
-                    && record
-                        .prompt_deliveries
-                        .get(&head.pending_prompt.id)
-                        .map(|receipt| &receipt.write_ahead)
-                        == self.write_ahead.as_ref()
-            })
+            && position
+                .and_then(|position| record.queued_prompts.get(position))
+                .is_some_and(|head| {
+                    head.source == self.source
+                        && receipted_prompt_intent(head) == self.intent
+                        && record
+                            .prompt_deliveries
+                            .get(&head.pending_prompt.id)
+                            .map(|receipt| &receipt.write_ahead)
+                            == self.write_ahead.as_ref()
+                })
             && projected_pending_prompts(record)
                 .get(position.unwrap_or(usize::MAX))
                 .is_some_and(|head| {
@@ -68,28 +74,35 @@ impl HumanResumeOwner {
                 })
     }
 
-    fn matches(&self, record: &SessionRecord) -> bool {
+    pub(crate) fn matches(&self, record: &SessionRecord) -> bool {
         self.matches_with_stop(record, self.stop_generation)
     }
 }
 
 #[cfg(test)]
-fn ordinary_known_unpromoted_head(record: &SessionRecord, head: &QueuedPromptRecord) -> bool {
+pub(crate) fn ordinary_known_unpromoted_head(
+    record: &SessionRecord,
+    head: &QueuedPromptRecord,
+) -> bool {
     head.source == QueuedPromptSource::User
         && head.pending_prompt.source.is_none()
         && ordinary_queue_entry_is_runnable(record, head)
-        && !record.prompt_deliveries.contains_key(&head.pending_prompt.id)
+        && !record
+            .prompt_deliveries
+            .contains_key(&head.pending_prompt.id)
 }
 
-fn selected_ordinary_resume_matches(
+pub(crate) fn selected_ordinary_resume_matches(
     _inner: &StateInner,
     record: &SessionRecord,
     selection: &HumanPromptSelection,
 ) -> bool {
     ordinary_queue_position(record) == Some(0)
-        && projected_pending_prompts(record).first().is_some_and(|head| {
-            serde_json::to_value(head).ok() == serde_json::to_value(&selection.prompt).ok()
-        })
+        && projected_pending_prompts(record)
+            .first()
+            .is_some_and(|head| {
+                serde_json::to_value(head).ok() == serde_json::to_value(&selection.prompt).ok()
+            })
 }
 
 impl AppState {
@@ -148,7 +161,7 @@ impl AppState {
         }
     }
 
-    fn resume_selected_human_prompt(
+    pub(crate) fn resume_selected_human_prompt(
         &self,
         session_id: &str,
         selection: HumanPromptSelection,
@@ -162,39 +175,50 @@ impl AppState {
                 }),
             );
         }
-        let (owner, human) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_visible_session_index(session_id)
-                .ok_or_else(|| ApiError::not_found("session not found"))?;
-            let record = &inner.sessions[index];
-            if record.mutation_stamp != selection.session_mutation_stamp
-                || !selected_ordinary_resume_matches(&inner, record, &selection)
+        let (owner, human) =
             {
-                return Err(ApiError::conflict(
-                    "the selected queued prompt changed; refresh before resuming",
-                ));
-            }
-            let owner = QueuedTurnOwner::capture(record).ok_or_else(|| ApiError::conflict(
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                let index = inner
+                    .find_visible_session_index(session_id)
+                    .ok_or_else(|| ApiError::not_found("session not found"))?;
+                let record = &inner.sessions[index];
+                if record.mutation_stamp != selection.session_mutation_stamp
+                    || !selected_ordinary_resume_matches(&inner, record, &selection)
+                {
+                    return Err(ApiError::conflict(
+                        "the selected queued prompt changed; refresh before resuming",
+                    ));
+                }
+                let owner = QueuedTurnOwner::capture(record).ok_or_else(|| ApiError::conflict(
                 "the selected prompt has no proven unsent delivery; no replacement was resumed",
             ))?;
-            let human = record.queued_prompts.front()
-                .filter(|head| head.source == QueuedPromptSource::Human)
-                .and_then(|_| HumanResumeOwner::capture(record, owner.clone()));
-            (owner, human)
-        };
+                let human = record
+                    .queued_prompts
+                    .front()
+                    .filter(|head| head.source == QueuedPromptSource::Human)
+                    .and_then(|_| HumanResumeOwner::capture(record, owner.clone()));
+                (owner, human)
+            };
         if let Some(human) = human {
             #[cfg(test)]
-            if let Some(hook) = TEST_CURRENT_HUMAN_SELECTED_BEFORE_RESUME.with(|slot| slot.borrow_mut().take()) {
+            if let Some(hook) =
+                TEST_CURRENT_HUMAN_SELECTED_BEFORE_RESUME.with(|slot| slot.borrow_mut().take())
+            {
                 hook();
             }
             return self.resume_current_selected_human_prompt(session_id, human);
         }
         #[cfg(test)]
-        if let Some(hook) = TEST_ORDINARY_SELECTED_BEFORE_RESUME.with(|slot| slot.borrow_mut().take()) {
+        if let Some(hook) =
+            TEST_ORDINARY_SELECTED_BEFORE_RESUME.with(|slot| slot.borrow_mut().take())
+        {
             hook();
         }
         if let Some(outcome) = self.resume_local_session_queue_inner_with_selection(
-            session_id, Some(owner), None, Some(&selection),
+            session_id,
+            Some(owner),
+            None,
+            Some(&selection),
         )? {
             outcome.into_public_result()?;
         }

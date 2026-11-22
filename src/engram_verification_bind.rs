@@ -13,15 +13,17 @@
 //
 // Included from main.rs beside the ordinary carried-check owner.
 
+use super::*;
+
 /// One other held item of a batch, as the gate's launch saw it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramBindTarget {
-    work_id: String,
-    short_ref: String,
-    claim_id: String,
-    claim_fence: i64,
+pub(crate) struct EngramBindTarget {
+    pub(crate) work_id: String,
+    pub(crate) short_ref: String,
+    pub(crate) claim_id: String,
+    pub(crate) claim_fence: i64,
     /// The named-root generation captured at launch, retained as provenance.
-    root_generation: u64,
+    pub(crate) root_generation: u64,
 }
 
 /// The other named items captured for a gate launched in `launch`'s root: every
@@ -33,7 +35,7 @@ struct EngramBindTarget {
 /// the launch is judged by its fence then. A member not held at launch keeps
 /// its entry's fence as captured provenance. Every matching member is kept;
 /// this helper neither binds a member nor sends a request.
-fn engram_bind_targets_at_launch(
+pub(crate) fn engram_bind_targets_at_launch(
     roots: &[EngramWorkSourceRoot],
     launch: &EngramWorkSourceRoot,
     session_id: &str,
@@ -72,34 +74,34 @@ fn engram_bind_targets_at_launch(
 
 /// A member's newest sighting, as `verification_bind` names it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramBindSighting {
-    observation: String,
-    source_revision: String,
+pub(crate) struct EngramBindSighting {
+    pub(crate) observation: String,
+    pub(crate) source_revision: String,
 }
 
 /// The host's measurement of the gate's root, as `verification_bind` takes
 /// it: the gate's settled source basis and when it was taken.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramBindMeasurement {
-    workspace_id: String,
-    source_revision: String,
-    measured_at: String,
+pub(crate) struct EngramBindMeasurement {
+    pub(crate) workspace_id: String,
+    pub(crate) source_revision: String,
+    pub(crate) measured_at: String,
 }
 
 /// One member of a `verification_bind` request.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct EngramVerificationBindTarget {
-    binding: EngramControlWorkBinding,
-    sighting: EngramBindSighting,
+pub(crate) struct EngramVerificationBindTarget {
+    pub(crate) binding: EngramControlWorkBinding,
+    pub(crate) sighting: EngramBindSighting,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    criteria: Vec<u32>,
+    pub(crate) criteria: Vec<u32>,
 }
 
 /// The line telling a batch gate's member `short_ref`'s holder that the
 /// gate's record is not bound to it, and `why`. Every member line is a line
 /// about checks' credit (`ENGRAM_CHECK_CREDIT_LINE_PREFIX`), so a batch's
 /// lines merge into one and never push a bind or name line out.
-fn engram_batch_not_recorded_line(short_ref: &str, why: &str) -> String {
+pub(crate) fn engram_batch_not_recorded_line(short_ref: &str, why: &str) -> String {
     format!(
         "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} the full gate is not recorded for {short_ref}: {why}."
     )

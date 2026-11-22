@@ -1,29 +1,31 @@
 // Authenticated read-only proof of an already installed native binding.
 // Never installs a binding, creates a runtime, or registers a participant.
 
+use super::*;
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationNativeBindingRequest {
-    protocol_version: u16,
-    request_id: String,
-    binding: FederationMailboxBinding,
+pub(crate) struct FederationNativeBindingRequest {
+    pub(crate) protocol_version: u16,
+    pub(crate) request_id: String,
+    pub(crate) binding: FederationMailboxBinding,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationNativeBindingProof {
-    protocol_version: u16,
-    request_id: String,
-    central: FederationHostIdentity,
-    host: FederationHostIdentity,
-    native_session_id: String,
-    native_creation_id: String,
-    binding: FederationMailboxBinding,
-    link_incarnation: String,
-    authority: FederationPeerSnapshot,
+pub(crate) struct FederationNativeBindingProof {
+    pub(crate) protocol_version: u16,
+    pub(crate) request_id: String,
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) native_session_id: String,
+    pub(crate) native_creation_id: String,
+    pub(crate) binding: FederationMailboxBinding,
+    pub(crate) link_incarnation: String,
+    pub(crate) authority: FederationPeerSnapshot,
 }
 
-async fn serve_federation_native_binding(
+pub(crate) async fn serve_federation_native_binding(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
     Json(request): Json<FederationNativeBindingRequest>,
 ) -> Result<Json<FederationNativeBindingProof>, ApiError> {
@@ -31,10 +33,16 @@ async fn serve_federation_native_binding(
     if request.protocol_version != FEDERATION_PROTOCOL_VERSION
         || Uuid::parse_str(&request.request_id).is_err()
     {
-        return Err(ApiError::bad_request("invalid native binding proof request"));
+        return Err(ApiError::bad_request(
+            "invalid native binding proof request",
+        ));
     }
     let lease = peer.lease.ok_or_else(federation_stale_link)?;
-    let app = lease.channel.app.clone().ok_or_else(federation_transport_unavailable)?;
+    let app = lease
+        .channel
+        .app
+        .clone()
+        .ok_or_else(federation_transport_unavailable)?;
     // One coherent current, durable state observation under link -> state.
     let proof = lease.with_current(&app, |inner, authority| {
         if authority.local_role != FederationRole::Satellite

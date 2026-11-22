@@ -2,11 +2,18 @@
 // execution of receipt suggestions, no tracker mutations or store discovery.
 // Uses existing process-tree ownership, a process deadline and bounded EOF grace.
 
-fn validate_work_read_binary(connection: &EngramConnectionConfig) -> Result<(), ApiError> {
+use super::*;
+
+pub(crate) fn validate_work_read_binary(
+    connection: &EngramConnectionConfig,
+) -> Result<(), ApiError> {
     validate_work_read_program(&connection.binary_path, cfg!(test))
 }
 
-fn validate_work_read_program(binary: &FsPath, allow_powershell_fixture: bool) -> Result<(), ApiError> {
+pub(crate) fn validate_work_read_program(
+    binary: &FsPath,
+    allow_powershell_fixture: bool,
+) -> Result<(), ApiError> {
     // A configured batch script would reinterpret untrusted filters as shell
     // syntax. Reject Windows shell shims; test-only PowerShell fixtures use
     // the existing -File launcher and never a command string.
@@ -24,7 +31,7 @@ fn validate_work_read_program(binary: &FsPath, allow_powershell_fixture: bool) -
     Ok(())
 }
 
-fn run_work_read_command(
+pub(crate) fn run_work_read_command(
     connection: &EngramConnectionConfig,
     args: &[String],
     host_workdir: &FsPath,
@@ -89,7 +96,7 @@ fn run_work_read_command(
         .map_err(|e| ApiError::bad_gateway(format!("{operation}: invalid JSON: {e}")))
 }
 
-fn work_read_launch_command(
+pub(crate) fn work_read_launch_command(
     connection: &EngramConnectionConfig,
     host_workdir: &FsPath,
 ) -> Result<BoundedReadCommand, ApiError> {
@@ -111,8 +118,11 @@ fn work_read_launch_command(
             .map_err(|error| ApiError::bad_gateway(error.message))?;
         // Only an explicitly configured PowerShell test fixture has that
         // exemption. A native-spelled alias cannot acquire it after resolution.
-        let allow_powershell_fixture = cfg!(test) && connection.binary_path.extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("ps1"));
+        let allow_powershell_fixture = cfg!(test)
+            && connection
+                .binary_path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("ps1"));
         validate_work_read_program(&binary, allow_powershell_fixture)?;
         if binary
             .extension()

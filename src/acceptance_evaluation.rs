@@ -5,11 +5,13 @@
 // authority, persistence, process transport or HTTP; those live in
 // acceptance_evaluation_api.rs.
 
-const ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION: u32 = 1;
-const MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS: usize = 128;
-const MAX_ACCEPTANCE_EVALUATION_VERDICTS: usize = 256;
-const MAX_ACCEPTANCE_EVALUATION_RATIONALE_CHARS: usize = 2_000;
-const MAX_ACCEPTANCE_EVALUATION_EVIDENCE_PER_CRITERION: usize = 8;
+use super::*;
+
+pub(crate) const ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION: u32 = 1;
+pub(crate) const MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS: usize = 128;
+pub(crate) const MAX_ACCEPTANCE_EVALUATION_VERDICTS: usize = 256;
+pub(crate) const MAX_ACCEPTANCE_EVALUATION_RATIONALE_CHARS: usize = 2_000;
+pub(crate) const MAX_ACCEPTANCE_EVALUATION_EVIDENCE_PER_CRITERION: usize = 8;
 const MAX_ACCEPTANCE_EVALUATION_MODEL_SEGMENT_BYTES: usize = 128;
 // The brief is model input built from tracker text other sessions wrote, so
 // every interpolated field is one line. Criteria are the contract the verdicts
@@ -17,30 +19,30 @@ const MAX_ACCEPTANCE_EVALUATION_MODEL_SEGMENT_BYTES: usize = 128;
 // One byte bound for both briefs: the evaluator's prompt must fit a delegation
 // prompt, and the same-session brief is held to the same so that a contract is
 // refused or briefed alike whichever mode is selected.
-const MAX_ACCEPTANCE_BRIEF_BYTES: usize = MAX_DELEGATION_PROMPT_BYTES;
+pub(crate) const MAX_ACCEPTANCE_BRIEF_BYTES: usize = MAX_DELEGATION_PROMPT_BYTES;
 const MAX_ACCEPTANCE_BRIEF_TITLE_CHARS: usize = 300;
-const MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES: usize = 16_000;
+pub(crate) const MAX_ACCEPTANCE_BRIEF_OUTCOME_BYTES: usize = 16_000;
 const ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER: &str = "[outcome truncated by the host]";
 // An evidence entry is listed whole. Only when the brief does not fit is an
 // entry clipped, oldest first, to this many characters with a marker that
 // says so; the same bound holds the host's own one-line reasons.
-const MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS: usize = 600;
+pub(crate) const MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS: usize = 600;
 // How many locators one group of a cut names, in the brief's line about the
 // entries left out and in the requester's notice; older ones are counted. It
 // is above the entry cap, so that in an ordinary read every entry the host
 // clipped or left out is named, and it bounds what a store of many small
 // records can add to the brief's floor and to the response.
-const MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS: usize = 64;
+pub(crate) const MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS: usize = 64;
 // Bounds of the stored receipt extract.
 const MAX_ACCEPTANCE_RECEIPT_ID_CHARS: usize = 128;
 const MAX_ACCEPTANCE_RECEIPT_WORD_CHARS: usize = 64;
 // The evaluator is handed the raw receipt once, cut to this.
 const MAX_ACCEPTANCE_SUBMIT_RESPONSE_RECEIPT_BYTES: usize = 16 * 1024;
-const MAX_ACCEPTANCE_BRIEF_LABEL_CHARS: usize = 120;
-const MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES: usize = 40;
+pub(crate) const MAX_ACCEPTANCE_BRIEF_LABEL_CHARS: usize = 120;
+pub(crate) const MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES: usize = 40;
 
 impl AcceptanceEvaluationMode {
-    fn word(self) -> &'static str {
+    pub(crate) fn word(self) -> &'static str {
         match self {
             Self::SameSession => "same_session",
             Self::SubAgent => "sub_agent",
@@ -49,7 +51,7 @@ impl AcceptanceEvaluationMode {
     }
 
     /// Engram prints underscores and accepts hyphens; accept both.
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
             "same_session" => Some(Self::SameSession),
             "sub_agent" => Some(Self::SubAgent),
@@ -63,7 +65,7 @@ impl AcceptanceEvaluationMode {
 /// the policy admits it. `admitted` is the policy's set: `None` means the
 /// host could not learn it, and the tracker, which enforces the policy when
 /// the evaluation is recorded, stays the judge.
-fn select_acceptance_evaluation_mode(
+pub(crate) fn select_acceptance_evaluation_mode(
     pin: Option<&str>,
     admitted: Option<&[String]>,
 ) -> std::result::Result<AcceptanceEvaluationMode, String> {
@@ -123,7 +125,7 @@ fn select_acceptance_evaluation_mode(
 /// under `control`, but audits the whole store first (over a minute on a large
 /// one), so it is never the per-request read. A receipt without the key yields
 /// `None`: unknown, never "none".
-fn acceptance_evaluation_admitted_modes(policy: &Value) -> Option<Vec<String>> {
+pub(crate) fn acceptance_evaluation_admitted_modes(policy: &Value) -> Option<Vec<String>> {
     policy
         .pointer("/acceptance_evaluation/allowed_modes")
         .or_else(|| policy.pointer("/control/acceptance_evaluation/allowed_modes"))
@@ -139,37 +141,41 @@ fn acceptance_evaluation_admitted_modes(policy: &Value) -> Option<Vec<String>> {
 
 /// What the request path read, before a delegation id exists to key it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceEvaluationTargetSeed {
-    evidence_recovery: Option<AcceptanceEvidenceRecoveryManifest>,
-    work_ref: String,
-    mode: AcceptanceEvaluationMode,
-    acceptance_basis: i64,
-    evidence_basis: i64,
-    criteria_count: usize,
+pub(crate) struct AcceptanceEvaluationTargetSeed {
+    pub(crate) evidence_recovery: Option<AcceptanceEvidenceRecoveryManifest>,
+    pub(crate) work_ref: String,
+    pub(crate) mode: AcceptanceEvaluationMode,
+    pub(crate) acceptance_basis: i64,
+    pub(crate) evidence_basis: i64,
+    pub(crate) criteria_count: usize,
     /// The criteria bound to a typed host check, which the submission checks.
-    bindings: Vec<AcceptanceCriterionBinding>,
+    pub(crate) bindings: Vec<AcceptanceCriterionBinding>,
     /// The carried failing evaluation the submission names as `--supersedes`.
-    supersedes: Option<String>,
+    pub(crate) supersedes: Option<String>,
     /// The store the reads above ran against.
-    store: EngramAuthorityStoreKey,
+    pub(crate) store: EngramAuthorityStoreKey,
     /// The content revision of the evaluator's worktree, taken after the
     /// reads above; `None` when it could not be taken.
-    source_fingerprint: Option<String>,
-    source_id: Option<EngramSourceId>,
+    pub(crate) source_fingerprint: Option<String>,
+    pub(crate) source_id: Option<EngramSourceId>,
     /// The work's named source root it was taken on, if any.
-    source_root: Option<AcceptanceEvaluationSourceRoot>,
+    pub(crate) source_root: Option<AcceptanceEvaluationSourceRoot>,
     /// With no root named, the requested work's live claim held by the requester.
-    source_claim: Option<AcceptanceEvaluationSourceClaim>,
+    pub(crate) source_claim: Option<AcceptanceEvaluationSourceClaim>,
     /// The work's id when the tracker's receipt carried it, with which the
     /// root is looked up again as the evaluator is created.
-    work_id: Option<String>,
-    naming_history: Option<EngramWorkNamingToken>,
-    reuse_identity: Option<AcceptanceEvidenceIdentity>,
-    selected_evidence: Vec<AcceptanceSelectedEvidence>,
+    pub(crate) work_id: Option<String>,
+    pub(crate) naming_history: Option<EngramWorkNamingToken>,
+    pub(crate) reuse_identity: Option<AcceptanceEvidenceIdentity>,
+    pub(crate) selected_evidence: Vec<AcceptanceSelectedEvidence>,
 }
 
 impl AcceptanceEvaluationTargetSeed {
-    fn into_target(self, attempt_key: String, parent_session: &str) -> DelegationAcceptanceEvaluation {
+    pub(crate) fn into_target(
+        self,
+        attempt_key: String,
+        parent_session: &str,
+    ) -> DelegationAcceptanceEvaluation {
         let sub_agent = self.mode == AcceptanceEvaluationMode::SubAgent;
         DelegationAcceptanceEvaluation {
             work_ref: self.work_ref,
@@ -198,7 +204,7 @@ impl AcceptanceEvaluationTargetSeed {
 /// A positional CLI argument: it must never read as a flag. The one rule for
 /// the caller's ref and for the ref the tracker answers with, which is the one
 /// that is persisted and later passed to `evaluate`.
-fn is_acceptance_evaluation_work_ref(work_ref: &str) -> bool {
+pub(crate) fn is_acceptance_evaluation_work_ref(work_ref: &str) -> bool {
     !work_ref.is_empty()
         && work_ref.chars().count() <= MAX_ACCEPTANCE_EVALUATION_WORK_REF_CHARS
         && !work_ref.starts_with('-')
@@ -207,7 +213,9 @@ fn is_acceptance_evaluation_work_ref(work_ref: &str) -> bool {
             .any(|c| c.is_control() || c.is_whitespace())
 }
 
-fn validate_acceptance_evaluation_work_ref(work_ref: &str) -> std::result::Result<(), ApiError> {
+pub(crate) fn validate_acceptance_evaluation_work_ref(
+    work_ref: &str,
+) -> std::result::Result<(), ApiError> {
     if !is_acceptance_evaluation_work_ref(work_ref) {
         return Err(ApiError::bad_request("invalid workRef"));
     }
@@ -285,7 +293,9 @@ struct EngramShowEvaluationForEvaluation {
 /// not validity, selects the field: a malformed preferred value never falls
 /// back. This is separate from decoding older persisted host snapshots.
 fn acceptance_evaluation_id_value(evaluation: &Value) -> Option<&Value> {
-    evaluation.get("evaluation").or_else(|| evaluation.get("hash"))
+    evaluation
+        .get("evaluation")
+        .or_else(|| evaluation.get("hash"))
 }
 
 impl TryFrom<Value> for EngramShowEvaluationForEvaluation {
@@ -363,37 +373,37 @@ struct EngramCarriedFailureVerdictForEvaluation {
 /// A failing evaluation the next one acknowledges, as the briefs show it and
 /// the submission names it. Tracker text in it is bounded where it is shown.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceCarriedFailure {
+pub(crate) struct AcceptanceCarriedFailure {
     /// The failing evaluation's full record id, passed as `--supersedes`.
-    evaluation: String,
+    pub(crate) evaluation: String,
     /// `executor` or `planner`.
-    revised_by: String,
-    judged_revision: i64,
+    pub(crate) revised_by: String,
+    pub(crate) judged_revision: i64,
     /// After the executor's revision the next evaluation must name it, from
     /// an evaluator that never held the run.
-    supersedes_required: bool,
-    judged_criteria: Vec<String>,
+    pub(crate) supersedes_required: bool,
+    pub(crate) judged_criteria: Vec<String>,
     /// (criterion, verdict word, rationale) of each verdict that did not pass.
-    blocking: Vec<(usize, String, String)>,
+    pub(crate) blocking: Vec<(usize, String, String)>,
     /// The bindings of the criteria it judged.
-    judged_bindings: Vec<AcceptanceCriterionBinding>,
+    pub(crate) judged_bindings: Vec<AcceptanceCriterionBinding>,
     /// A later failing evaluation that named it: the middle contract.
-    newest: Option<AcceptanceNewerFailure>,
+    pub(crate) newest: Option<AcceptanceNewerFailure>,
 }
 
 /// The newest failing evaluation when it is not the carried one itself.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceNewerFailure {
-    evaluation: String,
-    criteria: Vec<String>,
+pub(crate) struct AcceptanceNewerFailure {
+    pub(crate) evaluation: String,
+    pub(crate) criteria: Vec<String>,
     /// (criterion, verdict word, rationale) of each verdict that did not pass.
-    blocking: Vec<(usize, String, String)>,
-    bindings: Vec<AcceptanceCriterionBinding>,
+    pub(crate) blocking: Vec<(usize, String, String)>,
+    pub(crate) bindings: Vec<AcceptanceCriterionBinding>,
 }
 
 /// A record id Engram accepts: 32 lowercase hex characters as it mints them,
 /// or the 64 a record written before minting keeps (its own parser takes both).
-fn is_acceptance_record_id(value: &str) -> bool {
+pub(crate) fn is_acceptance_record_id(value: &str) -> bool {
     matches!(value.len(), 32 | 64) && is_lowercase_hex(value)
 }
 
@@ -503,10 +513,10 @@ struct EngramAcceptanceBindingForEvaluation {
 /// Engram's `VerificationRequirement` as `show --full` serializes it: the pin
 /// is `check_fingerprint`.
 #[derive(Debug, Deserialize)]
-struct EngramAcceptanceRequirementForEvaluation {
-    check_kind: String,
+pub(crate) struct EngramAcceptanceRequirementForEvaluation {
+    pub(crate) check_kind: String,
     #[serde(default)]
-    check_fingerprint: Option<String>,
+    pub(crate) check_fingerprint: Option<String>,
 }
 
 /// One criterion's binding as the briefs state it and the submission checks
@@ -514,16 +524,16 @@ struct EngramAcceptanceRequirementForEvaluation {
 /// dropped from the brief rather than echoed, and Engram still enforces it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AcceptanceCriterionBinding {
-    criterion: usize,
-    check_kind: String,
+pub(crate) struct AcceptanceCriterionBinding {
+    pub(crate) criterion: usize,
+    pub(crate) check_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    fingerprint: Option<String>,
+    pub(crate) fingerprint: Option<String>,
 }
 
 /// A short lowercase tracker word (a check kind, a result) that may go into a
 /// prompt as it is.
-fn is_acceptance_tracker_word(value: &str) -> bool {
+pub(crate) fn is_acceptance_tracker_word(value: &str) -> bool {
     (1..=32).contains(&value.len())
         && value
             .chars()
@@ -554,31 +564,31 @@ fn acceptance_criterion_bindings(
 
 /// A host-minted verification record as the tracker's window shows it.
 #[derive(Debug, Deserialize)]
-struct EngramVerificationForEvaluation {
+pub(crate) struct EngramVerificationForEvaluation {
     #[serde(default)]
-    check_kind: Option<String>,
+    pub(crate) check_kind: Option<String>,
     #[serde(default)]
-    result: Option<String>,
+    pub(crate) result: Option<String>,
     #[serde(default)]
-    source_revision: Option<String>,
+    pub(crate) source_revision: Option<String>,
     /// Window-only display facts, never a complete identity or credit input.
     #[serde(default)]
-    source_id_summary: Option<Value>,
+    pub(crate) source_id_summary: Option<Value>,
     /// The workspace the check ran in, from the record's source basis.
     #[serde(default)]
-    source_workspace: Option<String>,
+    pub(crate) source_workspace: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceEvidenceVerification {
+pub(crate) struct AcceptanceEvidenceVerification {
     /// Complete canonical private identity, never populated from a summary.
-    source_basis: Option<AcceptanceSourceBasis>,
-    applicability_tree: Option<String>,
-    check_kind: String,
-    result: String,
-    source_revision: Option<String>,
+    pub(crate) source_basis: Option<AcceptanceSourceBasis>,
+    pub(crate) applicability_tree: Option<String>,
+    pub(crate) check_kind: String,
+    pub(crate) result: String,
+    pub(crate) source_revision: Option<String>,
     /// `None` when the tracker did not say, or said it in an unusable form.
-    source_workspace: Option<String>,
+    pub(crate) source_workspace: Option<String>,
 }
 
 /// The longest workspace id kept from a record or measured for a judgment,
@@ -589,14 +599,26 @@ const MAX_ACCEPTANCE_SOURCE_WORKSPACE_BYTES: usize = 512;
 /// summary cannot reconstruct an identity or participate in evidence matching.
 fn acceptance_window_source_revision(value: &Value) -> Option<String> {
     let summary = value.as_object()?;
-    if summary.len() != if summary.contains_key("git_delta_dirty") { 6 } else { 5 } {
+    if summary.len()
+        != if summary.contains_key("git_delta_dirty") {
+            6
+        } else {
+            5
+        }
+    {
         return None;
     }
     let commit = summary.get("commit")?.as_str()?;
     let tree = summary.get("tree")?.as_str()?;
-    let valid_hash = |hash: &str| hash.len() == 40
-        && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
-    if !valid_hash(commit) || !valid_hash(tree) { return None; }
+    let valid_hash = |hash: &str| {
+        hash.len() == 40
+            && hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    };
+    if !valid_hash(commit) || !valid_hash(tree) {
+        return None;
+    }
     let submodules = summary.get("submodules")?.as_u64()?;
     let changes = summary.get("changes")?.as_u64()?;
     let child_changes = summary.get("submodule_changes")?.as_u64()?;
@@ -606,16 +628,26 @@ fn acceptance_window_source_revision(value: &Value) -> Option<String> {
             return None;
         }
         let state = if dirty { "dirty" } else { "clean" };
-        return Some(format!("source-id:{} (Git delta {state}, {submodules} selected gitlinks)", &commit[..12]));
+        return Some(format!(
+            "source-id:{} (Git delta {state}, {submodules} selected gitlinks)",
+            &commit[..12]
+        ));
     }
-    if child_changes > 0 && submodules == 0 { return None; }
-    Some(format!("source-id:{} ({} changes, {} submodules, {} child changes)",
-        &commit[..12], changes, submodules, child_changes))
+    if child_changes > 0 && submodules == 0 {
+        return None;
+    }
+    Some(format!(
+        "source-id:{} ({} changes, {} submodules, {} child changes)",
+        &commit[..12],
+        changes,
+        submodules,
+        child_changes
+    ))
 }
 
 /// A workspace id as a source basis names it: a non-empty path of bounded
 /// size without control characters, which could break the brief's lines.
-fn acceptance_source_workspace(workspace: &str) -> Option<String> {
+pub(crate) fn acceptance_source_workspace(workspace: &str) -> Option<String> {
     ((1..=MAX_ACCEPTANCE_SOURCE_WORKSPACE_BYTES).contains(&workspace.len())
         && !workspace.chars().any(char::is_control))
     .then(|| workspace.to_owned())
@@ -624,7 +656,7 @@ fn acceptance_source_workspace(workspace: &str) -> Option<String> {
 /// The typed fields of a verification record, kept only as bounded words: they
 /// are tracker text going into a prompt, and a record without a check kind and
 /// a result is listed without the marker rather than with a guessed one.
-fn acceptance_evidence_verification(
+pub(crate) fn acceptance_evidence_verification(
     verification: &EngramVerificationForEvaluation,
 ) -> Option<AcceptanceEvidenceVerification> {
     let check_kind = verification
@@ -638,14 +670,25 @@ fn acceptance_evidence_verification(
     let source_revision = if let Some(summary) = verification.source_id_summary.as_ref() {
         // Malformed or mixed metadata stays explicitly off-source, and its
         // remote contents never enter the brief or a serde error message.
-        Some(verification.source_revision.is_none()
-            .then(|| acceptance_window_source_revision(summary)).flatten()
-            .unwrap_or_else(|| "source-id:unavailable".to_owned()))
+        Some(
+            verification
+                .source_revision
+                .is_none()
+                .then(|| acceptance_window_source_revision(summary))
+                .flatten()
+                .unwrap_or_else(|| "source-id:unavailable".to_owned()),
+        )
     } else {
-        verification.source_revision.as_deref().filter(|revision| {
-            (1..=96).contains(&revision.len()) && revision.chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '.')
-        }).map(str::to_owned)
+        verification
+            .source_revision
+            .as_deref()
+            .filter(|revision| {
+                (1..=96).contains(&revision.len())
+                    && revision
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == ':' || c == '-' || c == '.')
+            })
+            .map(str::to_owned)
     };
     let source_workspace = verification
         .source_workspace
@@ -662,124 +705,124 @@ fn acceptance_evidence_verification(
 }
 
 #[derive(Debug, Deserialize)]
-struct EngramShowNoteForEvaluation {
-    locator: String,
+pub(crate) struct EngramShowNoteForEvaluation {
+    pub(crate) locator: String,
     /// `notes`, `gates` or `observations`: what the record is. `kind` is the
     /// storage kind and reads `generic` for all of them.
     #[serde(default)]
-    family: Value,
+    pub(crate) family: Value,
     #[serde(default)]
-    kind: Value,
+    pub(crate) kind: Value,
     #[serde(default)]
-    by: Option<String>,
+    pub(crate) by: Option<String>,
     #[serde(default)]
-    created_at: Option<String>,
+    pub(crate) created_at: Option<String>,
     #[serde(default)]
-    summary: Option<String>,
+    pub(crate) summary: Option<String>,
     #[serde(default)]
-    non_holder: bool,
+    pub(crate) non_holder: bool,
     /// The stored body's size, whatever the window shows of it.
     #[serde(default)]
-    body_bytes: Option<u64>,
+    pub(crate) body_bytes: Option<u64>,
     /// The window left this record's body out.
     #[serde(default)]
-    body_omitted: bool,
+    pub(crate) body_omitted: bool,
     /// The window cut this record's body.
     #[serde(default)]
-    summary_truncated: bool,
+    pub(crate) summary_truncated: bool,
     /// Present on a host-minted verification record.
     #[serde(default)]
-    verification: Option<EngramVerificationForEvaluation>,
+    pub(crate) verification: Option<EngramVerificationForEvaluation>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceEvaluationEvidence {
-    locator: String,
-    kind: String,
-    by: Option<String>,
-    created_at: Option<String>,
-    summary: Option<String>,
+pub(crate) struct AcceptanceEvaluationEvidence {
+    pub(crate) locator: String,
+    pub(crate) kind: String,
+    pub(crate) by: Option<String>,
+    pub(crate) created_at: Option<String>,
+    pub(crate) summary: Option<String>,
     /// A non-holder observation is context; the tracker refuses it as a citation.
-    non_holder: bool,
+    pub(crate) non_holder: bool,
     /// The stored body's size in bytes, when the tracker said it.
-    body_bytes: Option<u64>,
+    pub(crate) body_bytes: Option<u64>,
     /// The tracker's window left the body out or cut it: `summary` is not the
     /// whole record.
-    cut_by_tracker: bool,
+    pub(crate) cut_by_tracker: bool,
     /// A host-minted verification record: the only citation Engram admits for
     /// a pass with basis observed.
-    verification: Option<AcceptanceEvidenceVerification>,
+    pub(crate) verification: Option<AcceptanceEvidenceVerification>,
 }
 
 /// One open task as the evaluator needs it: bases, pin and evidence index from
 /// `engram work show REF --notes --gates --json`, the complete title, outcome
 /// and criteria from `engram work show REF --full --json`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceEvaluationTask {
-    evidence_recovery: Option<AcceptanceEvidenceRecoveryManifest>,
-    work_ref: String,
+pub(crate) struct AcceptanceEvaluationTask {
+    pub(crate) evidence_recovery: Option<AcceptanceEvidenceRecoveryManifest>,
+    pub(crate) work_ref: String,
     /// The work's id, when the tracker's receipt carried it.
-    work_id: Option<String>,
-    title: String,
-    outcome: String,
-    criteria: Vec<String>,
+    pub(crate) work_id: Option<String>,
+    pub(crate) title: String,
+    pub(crate) outcome: String,
+    pub(crate) criteria: Vec<String>,
     /// The criteria bound to a typed host check, by position, of the same
     /// revision as `criteria`.
-    bindings: Vec<AcceptanceCriterionBinding>,
+    pub(crate) bindings: Vec<AcceptanceCriterionBinding>,
     /// A failing evaluation whose criteria were revised since: the briefs
     /// show it and the submission acknowledges it.
-    carried_failure: Option<AcceptanceCarriedFailure>,
-    pinned_mode: Option<String>,
-    acceptance_basis: i64,
-    evidence_basis: i64,
+    pub(crate) carried_failure: Option<AcceptanceCarriedFailure>,
+    pub(crate) pinned_mode: Option<String>,
+    pub(crate) acceptance_basis: i64,
+    pub(crate) evidence_basis: i64,
     /// Oldest first, as the tracker's window orders them.
-    evidence: Vec<AcceptanceEvaluationEvidence>,
+    pub(crate) evidence: Vec<AcceptanceEvaluationEvidence>,
     /// Exact selected records and canonical projections outside the window;
     /// discovery order is not tracker chronology.
-    indexed_evidence: Vec<AcceptanceEvaluationEvidence>,
-    evidence_omitted: usize,
+    pub(crate) indexed_evidence: Vec<AcceptanceEvaluationEvidence>,
+    pub(crate) evidence_omitted: usize,
     /// The last successful read boundary and the host reason it stopped there.
-    evidence_paging: AcceptanceEvidencePaging,
-    criterion_evidence: Vec<AcceptanceCriterionEvidence>,
-    active_run_id: Option<String>,
+    pub(crate) evidence_paging: AcceptanceEvidencePaging,
+    pub(crate) criterion_evidence: Vec<AcceptanceCriterionEvidence>,
+    pub(crate) active_run_id: Option<String>,
     /// Core identity is bracketed independently of the agent's safe projection.
-    canonical_identity: Option<AcceptanceEvidenceIdentity>,
+    pub(crate) canonical_identity: Option<AcceptanceEvidenceIdentity>,
     /// The work's claim as the requester's live held-claims read showed it
     /// (`AcceptanceCurrentClaim`); `None` when the requester holds no claim
     /// on it.
-    current_claim: Option<AcceptanceCurrentClaim>,
+    pub(crate) current_claim: Option<AcceptanceCurrentClaim>,
     /// The first assessment page of each exact verification record read, by
     /// locator, until the assessments are read whole.
-    assessment_first_pages: Vec<(String, Value)>,
+    pub(crate) assessment_first_pages: Vec<(String, Value)>,
     /// The obligation assessments of the indexed verification records
     /// (`acceptance_obligation_assessment.rs`).
-    obligation_assessments: Vec<AcceptanceObligationAssessment>,
+    pub(crate) obligation_assessments: Vec<AcceptanceObligationAssessment>,
     /// The source revision this evaluation judges: the host's measured
     /// label of the task's configured owner identity. Engram refuses a citation
     /// of a verification record from any other revision for a bound
     /// criterion, so the briefs mark such records context only. `None` when
     /// the source is unmeasured.
-    judged_revision: Option<String>,
+    pub(crate) judged_revision: Option<String>,
     /// The actual private comparison input. `judged_revision` is display only.
-    judged_source_basis: Option<AcceptanceSourceBasis>,
+    pub(crate) judged_source_basis: Option<AcceptanceSourceBasis>,
     /// The workspace this evaluation judges, from the same measured source
     /// basis as `judged_revision`. Engram refuses, for a bound criterion, a
     /// verification record that ran in another workspace even at the same
     /// revision, so the briefs mark such records context only. `None` when
     /// the source is unmeasured.
-    judged_workspace: Option<String>,
+    pub(crate) judged_workspace: Option<String>,
 }
 
 /// The source an evaluation judges, as the brief markers compare a
 /// verification record against it.
 #[derive(Clone, Copy, Debug, Default)]
-struct AcceptanceJudgedSource<'a> {
-    basis: Option<&'a AcceptanceSourceBasis>,
-    revision: Option<&'a str>,
-    workspace: Option<&'a str>,
+pub(crate) struct AcceptanceJudgedSource<'a> {
+    pub(crate) basis: Option<&'a AcceptanceSourceBasis>,
+    pub(crate) revision: Option<&'a str>,
+    pub(crate) workspace: Option<&'a str>,
 }
 
-fn parse_acceptance_evaluation_task(
+pub(crate) fn parse_acceptance_evaluation_task(
     windowed: Value,
     full: Value,
 ) -> std::result::Result<AcceptanceEvaluationTask, ApiError> {
@@ -895,7 +938,7 @@ fn parse_acceptance_evaluation_task(
 }
 
 impl AcceptanceEvaluationTask {
-    fn judged_source(&self) -> AcceptanceJudgedSource<'_> {
+    pub(crate) fn judged_source(&self) -> AcceptanceJudgedSource<'_> {
         AcceptanceJudgedSource {
             basis: self.judged_source_basis.as_ref(),
             revision: self.judged_revision.as_deref(),
@@ -903,13 +946,13 @@ impl AcceptanceEvaluationTask {
         }
     }
 
-    fn canonical_work_id(&self) -> Option<&str> {
+    pub(crate) fn canonical_work_id(&self) -> Option<&str> {
         self.canonical_identity
             .as_ref()
             .map(|identity| identity.work_id.as_str())
             .or(self.work_id.as_deref())
     }
-    fn target_seed(
+    pub(crate) fn target_seed(
         &self,
         mode: AcceptanceEvaluationMode,
         store: EngramAuthorityStoreKey,
@@ -919,8 +962,11 @@ impl AcceptanceEvaluationTask {
     ) -> AcceptanceEvaluationTargetSeed {
         let mut recovery = self.evidence_recovery.clone();
         if let Some(manifest) = &mut recovery {
-            manifest.indexed.extend(self.indexed_evidence.iter()
-                .map(|record| record.locator.clone()));
+            manifest.indexed.extend(
+                self.indexed_evidence
+                    .iter()
+                    .map(|record| record.locator.clone()),
+            );
         }
         AcceptanceEvaluationTargetSeed {
             evidence_recovery: recovery,
@@ -939,21 +985,29 @@ impl AcceptanceEvaluationTask {
                 .as_ref()
                 .map(|carried| carried.evaluation.clone()),
             store,
-            source_fingerprint: if matches!(self.judged_source_basis, Some(AcceptanceSourceBasis::Shared(_))) {
+            source_fingerprint: if matches!(
+                self.judged_source_basis,
+                Some(AcceptanceSourceBasis::Shared(_))
+            ) {
                 None
-            } else { source_fingerprint },
+            } else {
+                source_fingerprint
+            },
             source_root,
             source_claim,
             work_id: self.canonical_work_id().map(str::to_owned),
             naming_history: None,
             reuse_identity: self.canonical_identity.clone(),
-            selected_evidence: self.criterion_evidence.iter()
+            selected_evidence: self
+                .criterion_evidence
+                .iter()
                 .filter(|row| row.association == "requester")
                 .map(|row| AcceptanceSelectedEvidence {
                     criterion: row.criterion,
                     criterion_text: self.criteria[row.criterion - 1].clone(),
                     locators: row.locators.clone(),
-                }).collect(),
+                })
+                .collect(),
         }
     }
 }
@@ -969,14 +1023,14 @@ fn acceptance_brief_line(value: &str) -> String {
 }
 
 /// One bounded line.
-fn acceptance_brief_text(value: &str, max_chars: usize) -> String {
+pub(crate) fn acceptance_brief_text(value: &str, max_chars: usize) -> String {
     truncate_chars(&acceptance_brief_line(value), max_chars)
 }
 
 /// The outcome is context, not the contract: bounded, and the cut is said.
 /// The bound is in UTF-8 bytes, the unit of the prompt cap it competes for:
 /// at most `max_bytes` of the text are kept, the marker comes on top.
-fn acceptance_brief_outcome(value: &str, max_bytes: usize) -> String {
+pub(crate) fn acceptance_brief_outcome(value: &str, max_bytes: usize) -> String {
     let line = acceptance_brief_line(value);
     // Never replace an outcome by a marker that is longer than the outcome.
     if line.len() <= max_bytes.max(ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER.len()) {
@@ -993,7 +1047,7 @@ fn acceptance_brief_outcome(value: &str, max_bytes: usize) -> String {
     format!("{kept} {ACCEPTANCE_BRIEF_OUTCOME_TRUNCATION_MARKER}")
 }
 
-fn is_citable_acceptance_locator(locator: &str) -> bool {
+pub(crate) fn is_citable_acceptance_locator(locator: &str) -> bool {
     (8..=64).contains(&locator.len()) && is_lowercase_hex(locator)
 }
 
@@ -1001,7 +1055,7 @@ fn is_citable_acceptance_locator(locator: &str) -> bool {
 /// requirement the evaluator never saw would be judged unread.
 /// A bound criterion carries its binding on its own line, since what Engram
 /// admits for its pass differs from an unbound one.
-fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
+pub(crate) fn acceptance_brief_criteria(task: &AcceptanceEvaluationTask) -> String {
     task.criteria
         .iter()
         .enumerate()
@@ -1054,7 +1108,7 @@ fn acceptance_brief_binding(binding: &AcceptanceCriterionBinding, judged: Option
 /// for a bound criterion, so it is context only. A revision that differs is
 /// named first, being the stronger reason. Empty for any other record, and
 /// when neither comparison can be made because a side is unknown.
-fn acceptance_brief_off_source_marker(
+pub(crate) fn acceptance_brief_off_source_marker(
     evidence: &AcceptanceEvaluationEvidence,
     judged: AcceptanceJudgedSource<'_>,
 ) -> String {
@@ -1062,18 +1116,25 @@ fn acceptance_brief_off_source_marker(
         return String::new();
     };
     if let Some(judged_basis) = judged.basis {
-        if !verification.source_basis.as_ref().is_some_and(|ran| ran.same_source(judged_basis)) {
+        if !verification
+            .source_basis
+            .as_ref()
+            .is_some_and(|ran| ran.same_source(judged_basis))
+        {
             return " [context only: its complete source identity differs or is unavailable; not citable for a bound criterion]".to_owned();
         }
         if let (AcceptanceSourceBasis::Shared(judged), Some(tree)) =
-            (judged_basis, verification.applicability_tree.as_deref()) {
+            (judged_basis, verification.applicability_tree.as_deref())
+        {
             if judged.source_id.tree != tree {
                 return " [context only: its recorded Git tree restriction differs from this source; not citable for a bound criterion]".to_owned();
             }
         }
     }
     if judged.basis.is_none()
-        && let (Some(ran_at), Some(judged)) = (verification.source_revision.as_deref(), judged.revision) {
+        && let (Some(ran_at), Some(judged)) =
+            (verification.source_revision.as_deref(), judged.revision)
+    {
         if ran_at != judged {
             return format!(
                 " [context only: it ran at {ran_at}, not at {judged}, the revision this evaluation judges; not citable for a bound criterion]"
@@ -1095,7 +1156,7 @@ fn acceptance_brief_off_source_marker(
 /// with each failing verdict's rationale, Compact only its failing criteria
 /// and verdicts, Minimal only its id and counts. Each text is one bounded
 /// line. Empty when nothing is carried.
-fn acceptance_brief_carried_failure(
+pub(crate) fn acceptance_brief_carried_failure(
     task: &AcceptanceEvaluationTask,
     detail: AcceptanceOmissionDetail,
     same_session: bool,
@@ -1250,7 +1311,7 @@ fn acceptance_brief_failed_contract(
 }
 
 /// Engram's admission rule for a pass, as both briefs state it.
-const ACCEPTANCE_BRIEF_ADMISSION_RULE: &str = "A pass with basis observed may cite only host-minted verification records that passed (each marked `verification <kind> passed` in the evidence list); a pass on a bound criterion must use basis observed and cite only records of its bound kind. A judgment pass may cite notes and gates. If the tracker refuses a citation, finish and report the refusal, unless the refusal names records the tracker admits instead: then submit once more, citing for each criterion it names only the records named for it, and report any further refusal. Otherwise a new judgment is requested explicitly with a freshly prepared host brief and key.";
+pub(crate) const ACCEPTANCE_BRIEF_ADMISSION_RULE: &str = "A pass with basis observed may cite only host-minted verification records that passed (each marked `verification <kind> passed` in the evidence list); a pass on a bound criterion must use basis observed and cite only records of its bound kind. A judgment pass may cite notes and gates. If the tracker refuses a citation, finish and report the refusal, unless the refusal names records the tracker admits instead: then submit once more, citing for each criterion it names only the records named for it, and report any further refusal. Otherwise a new judgment is requested explicitly with a freshly prepared host brief and key.";
 
 /// `body` cut to its first `MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS` characters,
 /// with the marker that says so, or `None` when that is not shorter than the
@@ -1275,7 +1336,7 @@ fn acceptance_brief_clipped_body(body: &str, locator: &str) -> Option<String> {
 /// takes a part for the whole record. A verification record that ran on
 /// another source than `judged` is marked context only
 /// (`acceptance_brief_off_source_marker`).
-fn acceptance_brief_evidence_line(
+pub(crate) fn acceptance_brief_evidence_line(
     evidence: &AcceptanceEvaluationEvidence,
     clip: bool,
     judged: AcceptanceJudgedSource<'_>,
@@ -1358,15 +1419,15 @@ fn acceptance_brief_evidence_line(
 /// Recovery information about pages the host did not read. The continuation
 /// is opaque: keep it whole or explicitly omit it, never emit a partial token.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct AcceptanceEvidencePaging {
-    continuation: Option<String>,
-    continuation_bytes: usize,
-    continuation_omitted: bool,
-    read_cut: Option<Value>,
-    reason: Option<String>,
+pub(crate) struct AcceptanceEvidencePaging {
+    pub(crate) continuation: Option<String>,
+    pub(crate) continuation_bytes: usize,
+    pub(crate) continuation_omitted: bool,
+    pub(crate) read_cut: Option<Value>,
+    pub(crate) reason: Option<String>,
 }
 
-const MAX_ACCEPTANCE_CONTINUATION_BYTES: usize = 8_192;
+pub(crate) const MAX_ACCEPTANCE_CONTINUATION_BYTES: usize = 8_192;
 
 fn acceptance_evidence_paging(page: &Value) -> AcceptanceEvidencePaging {
     let continuation = acceptance_evidence_continuation(page);
@@ -1413,7 +1474,7 @@ fn acceptance_evidence_paging(page: &Value) -> AcceptanceEvidencePaging {
 }
 
 /// The same bounded, explicit locator inventory returned in both request forms.
-fn acceptance_brief_omissions(cuts: &AcceptanceBriefCuts) -> Value {
+pub(crate) fn acceptance_brief_omissions(cuts: &AcceptanceBriefCuts) -> Value {
     let group = |locators: &[String]| {
         let unnamed = locators
             .len()
@@ -1440,7 +1501,7 @@ fn acceptance_brief_omissions(cuts: &AcceptanceBriefCuts) -> Value {
 /// Prompt-only detail levels. The captured inventory returned to the requester
 /// stays intact even when its prose gives way to the complete contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AcceptanceOmissionDetail {
+pub(crate) enum AcceptanceOmissionDetail {
     Full,
     Compact,
     Minimal,
@@ -1489,20 +1550,20 @@ fn acceptance_brief_unread_boundary_with_detail(
 /// insufficient-evidence, and the requester can record the proof where it
 /// will be read. Locators are oldest first, one line each.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct AcceptanceBriefCuts {
+pub(crate) struct AcceptanceBriefCuts {
     /// Listed, cut by the host to fit the brief.
-    clipped: Vec<String>,
+    pub(crate) clipped: Vec<String>,
     /// Read from the tracker and not listed: past the entry cap, or no room.
-    left_out: Vec<String>,
+    pub(crate) left_out: Vec<String>,
     /// Listed as the tracker's window gave them: no body, or a cut one.
-    cut_by_tracker: Vec<String>,
+    pub(crate) cut_by_tracker: Vec<String>,
     /// Older than the last page the host read: never seen by it.
-    unread: usize,
-    paging: AcceptanceEvidencePaging,
+    pub(crate) unread: usize,
+    pub(crate) paging: AcceptanceEvidencePaging,
 }
 
 impl AcceptanceBriefCuts {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.clipped.is_empty()
             && self.left_out.is_empty()
             && self.cut_by_tracker.is_empty()
@@ -1512,29 +1573,29 @@ impl AcceptanceBriefCuts {
 
 /// The evaluator's task text and what it does not carry whole.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct AcceptanceEvaluatorBrief {
-    prompt: String,
-    cuts: AcceptanceBriefCuts,
+pub(crate) struct AcceptanceEvaluatorBrief {
+    pub(crate) prompt: String,
+    pub(crate) cuts: AcceptanceBriefCuts,
     /// The settings it was rendered with, so that a caller can render it
     /// again giving way on chosen parts only
     /// (`acceptance_obligation_assessment.rs`).
-    plan: AcceptanceBriefPlan,
+    pub(crate) plan: AcceptanceBriefPlan,
 }
 
 /// The render settings of an independent evaluator's brief.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct AcceptanceBriefPlan {
+pub(crate) struct AcceptanceBriefPlan {
     /// Window entries listed, newest last, and how many of the oldest of
     /// them are clipped.
-    shown: usize,
-    clipped: usize,
-    outcome_bytes: usize,
-    detail: AcceptanceOmissionDetail,
-    carried: AcceptanceOmissionDetail,
-    index_detail: AcceptanceOmissionDetail,
+    pub(crate) shown: usize,
+    pub(crate) clipped: usize,
+    pub(crate) outcome_bytes: usize,
+    pub(crate) detail: AcceptanceOmissionDetail,
+    pub(crate) carried: AcceptanceOmissionDetail,
+    pub(crate) index_detail: AcceptanceOmissionDetail,
 }
 
-fn acceptance_entry_count(count: usize) -> String {
+pub(crate) fn acceptance_entry_count(count: usize) -> String {
     if count == 1 {
         "1 entry".to_owned()
     } else {
@@ -1544,7 +1605,7 @@ fn acceptance_entry_count(count: usize) -> String {
 
 /// The newest `MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS` of `locators`, which are
 /// oldest first, and how many older ones are only counted.
-fn acceptance_brief_locator_list(locators: &[String]) -> String {
+pub(crate) fn acceptance_brief_locator_list(locators: &[String]) -> String {
     let unnamed = locators
         .len()
         .saturating_sub(MAX_ACCEPTANCE_BRIEF_CUT_LOCATORS);
@@ -1558,7 +1619,10 @@ fn acceptance_brief_locator_list(locators: &[String]) -> String {
 
 /// One sentence for the requester about what the evaluator's brief does not
 /// carry whole, or none when it carries every record whole.
-fn acceptance_brief_cut_notice(work_ref: &str, cuts: &AcceptanceBriefCuts) -> Option<String> {
+pub(crate) fn acceptance_brief_cut_notice(
+    work_ref: &str,
+    cuts: &AcceptanceBriefCuts,
+) -> Option<String> {
     if cuts.is_empty() {
         return None;
     }
@@ -1609,7 +1673,9 @@ fn acceptance_brief_cut_notice(work_ref: &str, cuts: &AcceptanceBriefCuts) -> Op
 
 /// This session may read evidence through its existing tracker tools. Listing
 /// bodies omitted from its brief must not forbid passing on evidence it reads.
-fn acceptance_same_session_brief_cuts(task: &AcceptanceEvaluationTask) -> AcceptanceBriefCuts {
+pub(crate) fn acceptance_same_session_brief_cuts(
+    task: &AcceptanceEvaluationTask,
+) -> AcceptanceBriefCuts {
     let mut seen = BTreeSet::new();
     AcceptanceBriefCuts {
         left_out: task
@@ -1625,14 +1691,14 @@ fn acceptance_same_session_brief_cuts(task: &AcceptanceEvaluationTask) -> Accept
     }
 }
 
-fn acceptance_same_session_cut_notice(
+pub(crate) fn acceptance_same_session_cut_notice(
     work_ref: &str,
     cuts: &AcceptanceBriefCuts,
 ) -> Option<String> {
     acceptance_same_session_cut_notice_with_detail(work_ref, cuts, AcceptanceOmissionDetail::Full)
 }
 
-fn acceptance_same_session_cut_notice_with_detail(
+pub(crate) fn acceptance_same_session_cut_notice_with_detail(
     work_ref: &str,
     cuts: &AcceptanceBriefCuts,
     detail: AcceptanceOmissionDetail,
@@ -1678,7 +1744,7 @@ fn acceptance_same_session_cut_notice_with_detail(
 /// path builds its brief for the chosen evaluator agent with
 /// [`build_acceptance_evaluator_brief_for_agent`], so only tests call this.
 #[cfg(test)]
-fn build_acceptance_evaluator_brief(
+pub(crate) fn build_acceptance_evaluator_brief(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     max_bytes: usize,
@@ -1688,7 +1754,7 @@ fn build_acceptance_evaluator_brief(
 
 /// The brief for an evaluator of `agent`: the same brief, with the paragraph
 /// on how to run commands that this agent's read-only runtime needs.
-fn build_acceptance_evaluator_brief_for_agent(
+pub(crate) fn build_acceptance_evaluator_brief_for_agent(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     agent: Agent,
@@ -1710,7 +1776,7 @@ fn build_acceptance_evaluator_brief_for_agent(
 /// evaluator would otherwise reach for first. A Codex evaluator runs in its
 /// own read-only sandbox, on Windows through Windows PowerShell, where neither
 /// these rules nor the Bash fingerprint example hold, so it gets none.
-fn acceptance_evaluator_command_form(agent: Agent) -> &'static str {
+pub(crate) fn acceptance_evaluator_command_form(agent: Agent) -> &'static str {
     match agent {
         Agent::Claude => {
             "Your commands pass TermAl's read-only gate. Run each command in the\n\
@@ -1830,7 +1896,7 @@ fn build_acceptance_evaluator_brief_with_command_form(
 /// `clipped` of them cut to the entry bound, with the outcome held to
 /// `outcome_bytes`: what the tests measure a brief against.
 #[cfg(test)]
-fn render_acceptance_evaluator_brief(
+pub(crate) fn render_acceptance_evaluator_brief(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     shown: usize,
@@ -1853,7 +1919,7 @@ fn render_acceptance_evaluator_brief(
 /// them cut to the entry bound, with the outcome held to `outcome_bytes`, the
 /// omission details at `detail` and the carried-failure section at `carried`,
 /// which shrinks on its own axis ahead of the evidence and the outcome.
-fn render_acceptance_evaluator_brief_with_details(
+pub(crate) fn render_acceptance_evaluator_brief_with_details(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     command_form: &str,
@@ -1879,7 +1945,7 @@ fn render_acceptance_evaluator_brief_with_details(
 /// `command_form` is the paragraph on how to run commands that the
 /// evaluator's own runtime needs (see [`acceptance_evaluator_command_form`]),
 /// or empty when there is none.
-fn render_acceptance_evaluator_brief_with_index_detail(
+pub(crate) fn render_acceptance_evaluator_brief_with_index_detail(
     task: &AcceptanceEvaluationTask,
     cwd: &str,
     command_form: &str,
@@ -2106,7 +2172,7 @@ fn acceptance_same_session_brief_cuts_at(
 /// session to declare it, so its own turn's report of that same revision does
 /// not void the evaluation.
 #[cfg(test)]
-fn build_same_session_acceptance_brief(
+pub(crate) fn build_same_session_acceptance_brief(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     max_bytes: usize,
@@ -2116,7 +2182,7 @@ fn build_same_session_acceptance_brief(
 }
 
 #[cfg(test)]
-fn build_same_session_acceptance_brief_and_cuts(
+pub(crate) fn build_same_session_acceptance_brief_and_cuts(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     max_bytes: usize,
@@ -2127,7 +2193,7 @@ fn build_same_session_acceptance_brief_and_cuts(
 
 /// The same-session brief and its cuts, with the omission and index detail
 /// it was rendered at.
-fn build_same_session_acceptance_brief_with_plan(
+pub(crate) fn build_same_session_acceptance_brief_with_plan(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     max_bytes: usize,
@@ -2169,7 +2235,8 @@ fn build_same_session_acceptance_brief_with_plan(
             AcceptanceOmissionDetail::Minimal,
         );
         if brief.len() <= max_bytes {
-            let cuts = acceptance_same_session_brief_cuts_at(task, AcceptanceOmissionDetail::Minimal);
+            let cuts =
+                acceptance_same_session_brief_cuts_at(task, AcceptanceOmissionDetail::Minimal);
             return Ok((brief, cuts, detail, AcceptanceOmissionDetail::Minimal));
         }
         floor = floor.min(brief.len());
@@ -2178,7 +2245,7 @@ fn build_same_session_acceptance_brief_with_plan(
 }
 
 #[cfg(test)]
-fn render_same_session_acceptance_brief(
+pub(crate) fn render_same_session_acceptance_brief(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
 ) -> String {
@@ -2190,7 +2257,7 @@ fn render_same_session_acceptance_brief(
 }
 
 #[cfg(test)]
-fn render_same_session_acceptance_brief_with_detail(
+pub(crate) fn render_same_session_acceptance_brief_with_detail(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     detail: AcceptanceOmissionDetail,
@@ -2198,7 +2265,7 @@ fn render_same_session_acceptance_brief_with_detail(
     render_same_session_acceptance_brief_with_index_detail(task, source_fingerprint, detail, detail)
 }
 
-fn render_same_session_acceptance_brief_with_index_detail(
+pub(crate) fn render_same_session_acceptance_brief_with_index_detail(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
     detail: AcceptanceOmissionDetail,
@@ -2243,7 +2310,8 @@ Omitted evidence does not establish that proof is absent on the item; say 'not s
             .as_ref()
             .map(|carried| format!(", supersedes {}", carried.evaluation))
             .unwrap_or_default(),
-        criterion_evidence = render_acceptance_criterion_evidence(task, index_detail, &BTreeSet::new(), true),
+        criterion_evidence =
+            render_acceptance_criterion_evidence(task, index_detail, &BTreeSet::new(), true),
     )
 }
 
@@ -2260,7 +2328,7 @@ const MAX_ACCEPTANCE_SAME_SESSION_COMPACT_VERIFICATIONS: usize = 4;
 /// context, so it shrinks with the omission detail before the complete
 /// criteria are refused: compact keeps only a few records of a bound kind,
 /// minimal names none and says how many were read.
-fn acceptance_same_session_verifications(
+pub(crate) fn acceptance_same_session_verifications(
     task: &AcceptanceEvaluationTask,
     detail: AcceptanceOmissionDetail,
 ) -> String {
@@ -2332,28 +2400,28 @@ fn acceptance_same_session_verifications(
 /// an evaluator supplies verdicts and nothing else.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SubmitAcceptanceEvaluationRequest {
-    schema_version: u32,
+pub(crate) struct SubmitAcceptanceEvaluationRequest {
+    pub(crate) schema_version: u32,
     #[serde(default)]
-    attempt_key: Option<String>,
-    verdicts: Vec<SubmitAcceptanceEvaluationVerdict>,
+    pub(crate) attempt_key: Option<String>,
+    pub(crate) verdicts: Vec<SubmitAcceptanceEvaluationVerdict>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SubmitAcceptanceEvaluationVerdict {
-    criterion: usize,
-    verdict: String,
+pub(crate) struct SubmitAcceptanceEvaluationVerdict {
+    pub(crate) criterion: usize,
+    pub(crate) verdict: String,
     #[serde(default)]
-    basis: Option<String>,
-    rationale: String,
+    pub(crate) basis: Option<String>,
+    pub(crate) rationale: String,
     #[serde(default)]
-    evidence: Vec<String>,
+    pub(crate) evidence: Vec<String>,
 }
 
 /// The tool speaks hyphenated words; the tracker's canonical words use
 /// underscores. Either spelling is accepted from the evaluator.
-fn acceptance_verdict_word(value: &str) -> Option<&'static str> {
+pub(crate) fn acceptance_verdict_word(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
         "pass" => Some("pass"),
         "fail" => Some("fail"),
@@ -2363,7 +2431,7 @@ fn acceptance_verdict_word(value: &str) -> Option<&'static str> {
     }
 }
 
-fn acceptance_basis_word(value: &str) -> Option<&'static str> {
+pub(crate) fn acceptance_basis_word(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
         "observed" => Some("observed"),
         "asserted" => Some("asserted"),
@@ -2376,7 +2444,7 @@ fn acceptance_basis_word(value: &str) -> Option<&'static str> {
 impl SubmitAcceptanceEvaluationRequest {
     /// Everything checkable without the target: also what admits the tool call
     /// for a Codex child, so a malformed call is never auto-approved.
-    fn validate_shape(&self) -> std::result::Result<(), String> {
+    pub(crate) fn validate_shape(&self) -> std::result::Result<(), String> {
         if self.schema_version != ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION {
             return Err(format!(
                 "schemaVersion must be {ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION}"
@@ -2452,7 +2520,7 @@ impl SubmitAcceptanceEvaluationRequest {
     /// A pass on a bound criterion Engram would refuse for its basis, caught
     /// here with the rule said plainly: the tracker's own refusal names a
     /// citation as the cause, which misleads an evaluator into downgrading.
-    fn validate_bindings(
+    pub(crate) fn validate_bindings(
         &self,
         bindings: &[AcceptanceCriterionBinding],
     ) -> std::result::Result<(), String> {
@@ -2484,7 +2552,10 @@ impl SubmitAcceptanceEvaluationRequest {
     }
 
     /// Exactly one verdict for each of the task's criteria, by position.
-    fn validate_coverage(&self, criteria_count: usize) -> std::result::Result<(), String> {
+    pub(crate) fn validate_coverage(
+        &self,
+        criteria_count: usize,
+    ) -> std::result::Result<(), String> {
         let out_of_range = self
             .verdicts
             .iter()
@@ -2507,7 +2578,7 @@ impl SubmitAcceptanceEvaluationRequest {
 
 /// `anthropic/<model>` or `openai/<model>` for the tracker's `--model`, or
 /// nothing when either segment would not be a clean bounded word.
-fn acceptance_evaluator_model_flag(agent: Agent, model: &str) -> Option<String> {
+pub(crate) fn acceptance_evaluator_model_flag(agent: Agent, model: &str) -> Option<String> {
     let provider = match agent {
         Agent::Claude => "anthropic",
         Agent::Codex => "openai",
@@ -2526,7 +2597,7 @@ fn acceptance_evaluator_model_flag(agent: Agent, model: &str) -> Option<String> 
 
 /// `work … evaluate …` exactly as the evaluator's own session would run it.
 /// The request must already have passed both validations.
-fn acceptance_evaluation_cli_args(
+pub(crate) fn acceptance_evaluation_cli_args(
     connection: &EngramConnectionConfig,
     target: &DelegationAcceptanceEvaluation,
     request: &SubmitAcceptanceEvaluationRequest,
@@ -2560,37 +2631,52 @@ fn acceptance_evaluation_cli_args(
         target.evidence_basis.to_string(),
     ]);
     if target.mode == AcceptanceEvaluationMode::SubAgent {
-        let (Some(parent), Some(execution)) =
-            (&target.parent_session, &target.execution_identity)
+        let (Some(parent), Some(execution)) = (&target.parent_session, &target.execution_identity)
         else {
             return Err(ApiError::conflict(
                 "this sub_agent target has no host-attested parent and execution identity; request a new evaluation",
             ));
         };
         args.extend([
-            "--parent-session".to_owned(), parent.clone(),
-            "--execution-identity".to_owned(), execution.clone(),
+            "--parent-session".to_owned(),
+            parent.clone(),
+            "--execution-identity".to_owned(),
+            execution.clone(),
         ]);
     }
     let mut recorded_request = request.clone();
-    if let Some(history) = target.attempt_history.as_ref().filter(|h| h.schema_version == 1) {
+    if let Some(history) = target
+        .attempt_history
+        .as_ref()
+        .filter(|h| h.schema_version == 1)
+    {
         for verdict in &mut recorded_request.verdicts {
-            verdict.rationale = format!("Attempt {}; evaluator session {}. {}", history.ordinal, connection.session_id, verdict.rationale);
+            verdict.rationale = format!(
+                "Attempt {}; evaluator session {}. {}",
+                history.ordinal, connection.session_id, verdict.rationale
+            );
         }
     }
     args.extend(acceptance_evaluation_verdict_args(&recorded_request));
     // Fresh declarations use only the host-owned SourceId file. A retained
     // legacy fingerprint is historical metadata, never a new CLI argument.
     if target.source_id.is_some() && target.source_fingerprint.is_some() {
-        return Err(ApiError::conflict("evaluation target has more than one source identity"));
+        return Err(ApiError::conflict(
+            "evaluation target has more than one source identity",
+        ));
     }
     if target.source_id.is_some() {
         if target.mode == AcceptanceEvaluationMode::SameSession {
-            return Err(ApiError::conflict("shared-source same_session preparation is unsupported until it has a persisted host attempt"));
+            return Err(ApiError::conflict(
+                "shared-source same_session preparation is unsupported until it has a persisted host attempt",
+            ));
         }
         // This is a canonical argument template. The persisted source payload
         // publishes the actual immutable file only at the subprocess boundary.
-        args.extend(["--source-id-file".to_owned(), "<host-private-source-id>".to_owned()]);
+        args.extend([
+            "--source-id-file".to_owned(),
+            "<host-private-source-id>".to_owned(),
+        ]);
     }
     // The carried failure the evaluation acknowledges, read with the brief.
     // Checked again here, whatever wrote the record: a value that is not a
@@ -2618,7 +2704,9 @@ fn acceptance_evaluation_cli_args(
 /// criterion order. Everything else in the list is the host's, and the host's
 /// part can drift (a renamed developer, another model) while a write is open;
 /// "the same verdicts" is decided on this part alone.
-fn acceptance_evaluation_verdict_args(request: &SubmitAcceptanceEvaluationRequest) -> Vec<String> {
+pub(crate) fn acceptance_evaluation_verdict_args(
+    request: &SubmitAcceptanceEvaluationRequest,
+) -> Vec<String> {
     let mut args = Vec::new();
     let mut verdicts = request.verdicts.iter().collect::<Vec<_>>();
     verdicts.sort_by_key(|entry| entry.criterion);
@@ -2646,7 +2734,9 @@ fn acceptance_evaluation_verdict_args(request: &SubmitAcceptanceEvaluationReques
 /// The actor id and context a stored argument list was built under, read back
 /// from the layout `acceptance_evaluation_cli_args` writes. A resend of an open
 /// write runs that list verbatim, so its environment must name the same actor.
-fn acceptance_evaluation_args_identity(args: &[String]) -> Option<(String, Option<String>)> {
+pub(crate) fn acceptance_evaluation_args_identity(
+    args: &[String],
+) -> Option<(String, Option<String>)> {
     let word = |index: usize| args.get(index).map(String::as_str);
     if (word(0), word(1), word(3)) != (Some("work"), Some("--actor-id"), Some("--session-id")) {
         return None;
@@ -2662,7 +2752,7 @@ fn acceptance_evaluation_args_identity(args: &[String]) -> Option<(String, Optio
 /// Names one exact argument list. While a write's outcome is open, only the
 /// list with this digest may be sent again: the tracker replays it, and would
 /// refuse or double-record anything else.
-fn acceptance_evaluation_payload_digest(args: &[String]) -> String {
+pub(crate) fn acceptance_evaluation_payload_digest(args: &[String]) -> String {
     let mut digest = Sha256::new();
     for arg in args {
         digest.update(arg.as_bytes());
@@ -2673,7 +2763,7 @@ fn acceptance_evaluation_payload_digest(args: &[String]) -> String {
 
 /// What one `engram work evaluate` run told the host about its write.
 #[derive(Clone, Debug, PartialEq)]
-enum AcceptanceEvaluationRunOutcome {
+pub(crate) enum AcceptanceEvaluationRunOutcome {
     /// Exit 0 with a JSON receipt: recorded (or replayed).
     Receipt(Value),
     /// Positive evidence that this run recorded nothing, which takes the exit
@@ -2698,7 +2788,7 @@ enum AcceptanceEvaluationRunOutcome {
     Unknown(String),
 }
 
-fn classify_acceptance_evaluation_run(
+pub(crate) fn classify_acceptance_evaluation_run(
     result: std::result::Result<EngramCliOutput, EngramTransportError>,
 ) -> AcceptanceEvaluationRunOutcome {
     let output = match result {
@@ -2774,14 +2864,14 @@ fn classify_acceptance_evaluation_run(
 }
 
 /// The exit code Engram ends with when it prints its error envelope.
-const ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE: u8 = 1;
+pub(crate) const ACCEPTANCE_EVALUATION_REFUSAL_EXIT_CODE: u8 = 1;
 /// The exit code the argument parser ends with on a usage error.
 const ACCEPTANCE_EVALUATION_USAGE_EXIT_CODE: u8 = 2;
 
 /// Engram's refusal: `{"error":{"code":<word>,"message":…}}` on stderr, which
 /// it prints only when the operation's transaction did not commit, with any
 /// citable alternatives its details name.
-fn acceptance_evaluation_error_envelope(
+pub(crate) fn acceptance_evaluation_error_envelope(
     stderr: &[u8],
 ) -> Option<(String, String, Vec<AcceptanceCitableAlternatives>)> {
     let envelope = serde_json::from_slice::<Value>(stderr).ok()?;
@@ -2809,16 +2899,16 @@ fn is_acceptance_evaluation_usage_error(stderr: &[u8]) -> bool {
 /// task's evidence behind the first page (two of six entries on the first live
 /// task). `notes_window.after` continues it; each page holds older entries,
 /// oldest first.
-const MAX_ACCEPTANCE_EVIDENCE_PAGES: usize = 8;
+pub(crate) const MAX_ACCEPTANCE_EVIDENCE_PAGES: usize = 8;
 
-fn acceptance_evidence_continuation(page: &Value) -> Option<String> {
+pub(crate) fn acceptance_evidence_continuation(page: &Value) -> Option<String> {
     page.pointer("/notes_window/after")
         .and_then(Value::as_str)
         .filter(|token| !token.is_empty())
         .map(str::to_owned)
 }
 
-fn acceptance_evidence_page_len(page: &Value) -> usize {
+pub(crate) fn acceptance_evidence_page_len(page: &Value) -> usize {
     page.get("notes")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
@@ -2827,7 +2917,7 @@ fn acceptance_evidence_page_len(page: &Value) -> usize {
 /// Folds continuation pages into the first receipt: `notes` becomes every
 /// collected entry oldest first, and `notes_omitted` what is still older than
 /// the last page read.
-fn merge_acceptance_evidence_pages(first: &mut Value, older_pages: Vec<Value>) {
+pub(crate) fn merge_acceptance_evidence_pages(first: &mut Value, older_pages: Vec<Value>) {
     let Some(last) = older_pages.last() else {
         return;
     };
@@ -2857,7 +2947,7 @@ fn merge_acceptance_evidence_pages(first: &mut Value, older_pages: Vec<Value>) {
 /// session and the brief several times over, which an agent has no use for
 /// and would pay for in context on every request. A same-session answer has
 /// no delegation and is returned whole: its brief is the payload.
-fn compact_acceptance_evaluation_request_result(response: &Value) -> Value {
+pub(crate) fn compact_acceptance_evaluation_request_result(response: &Value) -> Value {
     let Some(delegation) = response.get("delegation") else {
         return response.clone();
     };
@@ -2884,30 +2974,53 @@ const ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT: &str = "the write outcome is u
 /// One line for the parent's fan-in: what the tracker accepted, which the
 /// child's prose cannot stand in for. An open write is never reported as
 /// "nothing": the tracker may hold it.
-fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluation) -> String {
+pub(crate) fn acceptance_evaluation_outcome_line(
+    evaluation: &DelegationAcceptanceEvaluation,
+) -> String {
     let subject = format!(
         "Acceptance evaluation of `{}` ({})",
         acceptance_brief_text(&evaluation.work_ref, MAX_ACCEPTANCE_BRIEF_LABEL_CHARS),
         evaluation.mode.word()
     );
     let outcome = match &evaluation.submission {
-        AcceptanceEvaluationSubmission::None if acceptance_evaluation_current_write_retired(evaluation) => {
-            format!("{subject}: {ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT}; the retained write was retired locally and will not be resent.")
+        AcceptanceEvaluationSubmission::None
+            if acceptance_evaluation_current_write_retired(evaluation) =>
+        {
+            format!(
+                "{subject}: {ACCEPTANCE_EVALUATION_UNKNOWN_OUTCOME_TEXT}; the retained write was retired locally and will not be resent."
+            )
         }
         // The current attempt's own disposition comes before an earlier
         // retired write; that write's notice is appended below.
-        AcceptanceEvaluationSubmission::None if acceptance_evidence_unfinished(evaluation).is_some() => {
-            let unfinished = acceptance_evidence_unfinished(evaluation).expect("checked unfinished read");
-            let reason = acceptance_brief_text(&unfinished.reason, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS);
+        AcceptanceEvaluationSubmission::None
+            if acceptance_evidence_unfinished(evaluation).is_some() =>
+        {
+            let unfinished =
+                acceptance_evidence_unfinished(evaluation).expect("checked unfinished read");
+            let reason =
+                acceptance_brief_text(&unfinished.reason, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS);
             if unfinished.stale_basis {
-                format!("{subject}: retryable, {reason}. Request a fresh evaluation to judge the current evidence.")
+                format!(
+                    "{subject}: retryable, {reason}. Request a fresh evaluation to judge the current evidence."
+                )
             } else {
-                format!("{subject}: evidence recovery unfinished; no verdict was sent. {reason}. The parent may request a fresh evaluation.")
+                format!(
+                    "{subject}: evidence recovery unfinished; no verdict was sent. {reason}. The parent may request a fresh evaluation."
+                )
             }
         }
-        AcceptanceEvaluationSubmission::None if acceptance_evaluation_has_retired_write(evaluation) => {
-            if let Some(refusal) = evaluation.attempt_history.as_ref().and_then(|history| history.refusal.as_ref()) {
-                format!("{subject}: the current attempt was refused: {}.", acceptance_brief_text(&refusal.message, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS))
+        AcceptanceEvaluationSubmission::None
+            if acceptance_evaluation_has_retired_write(evaluation) =>
+        {
+            if let Some(refusal) = evaluation
+                .attempt_history
+                .as_ref()
+                .and_then(|history| history.refusal.as_ref())
+            {
+                format!(
+                    "{subject}: the current attempt was refused: {}.",
+                    acceptance_brief_text(&refusal.message, MAX_ACCEPTANCE_BRIEF_SUMMARY_CHARS)
+                )
             } else {
                 format!("{subject}: no verdict is recorded for the current attempt.")
             }
@@ -2933,7 +3046,8 @@ fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluatio
         ),
     };
     if acceptance_evaluation_has_retired_write(evaluation)
-        && !acceptance_evaluation_current_write_retired(evaluation) {
+        && !acceptance_evaluation_current_write_retired(evaluation)
+    {
         format!("{outcome} {ACCEPTANCE_EARLIER_RETIRED_WRITE_NOTICE}")
     } else {
         outcome
@@ -2943,7 +3057,9 @@ fn acceptance_evaluation_outcome_line(evaluation: &DelegationAcceptanceEvaluatio
 /// `passed` counts passing criteria out of `verdicts_total`, and `blocking`
 /// names the first criterion that keeps the task from completing. An extract
 /// of an unfamiliar receipt says nothing.
-fn acceptance_evaluation_receipt_summary(receipt: &AcceptanceEvaluationReceiptExtract) -> String {
+pub(crate) fn acceptance_evaluation_receipt_summary(
+    receipt: &AcceptanceEvaluationReceiptExtract,
+) -> String {
     let (Some(passed), Some(total)) = (receipt.passed, receipt.verdicts_total) else {
         return String::new();
     };
@@ -2966,7 +3082,9 @@ fn acceptance_evaluation_receipt_summary(receipt: &AcceptanceEvaluationReceiptEx
 
 /// What is kept of the tracker's receipt, which nests the evaluation. Every
 /// string is one bounded line; a field of an unfamiliar shape is left out.
-fn acceptance_evaluation_receipt_extract(receipt: &Value) -> AcceptanceEvaluationReceiptExtract {
+pub(crate) fn acceptance_evaluation_receipt_extract(
+    receipt: &Value,
+) -> AcceptanceEvaluationReceiptExtract {
     let Some(evaluation) = receipt.get("evaluation") else {
         return AcceptanceEvaluationReceiptExtract::default();
     };
@@ -3010,7 +3128,7 @@ fn acceptance_evaluation_receipt_extract(receipt: &Value) -> AcceptanceEvaluatio
 
 /// The raw receipt for the evaluator's own response: whole when it is small,
 /// otherwise its leading bytes as text, with the cut said.
-fn bounded_acceptance_evaluation_receipt(receipt: Value) -> (Value, bool) {
+pub(crate) fn bounded_acceptance_evaluation_receipt(receipt: Value) -> (Value, bool) {
     let encoded = receipt.to_string();
     if encoded.len() <= MAX_ACCEPTANCE_SUBMIT_RESPONSE_RECEIPT_BYTES {
         return (receipt, false);

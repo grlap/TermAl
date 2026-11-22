@@ -2,22 +2,28 @@
 // Does not own schema changes, transport or an independent rollback witness.
 // Split from persist_federation.rs to keep stored values separate from defaults.
 
-fn federation_persist_image(metadata: &PersistedState) -> Value {
+use super::*;
+
+pub(crate) fn federation_persist_image(metadata: &PersistedState) -> Value {
     json!({"domain": metadata.federation, "settings": metadata.preferences.federation})
 }
 
-fn read_federation_persist_image(connection: &rusqlite::Connection) -> Result<Option<Value>> {
+pub(crate) fn read_federation_persist_image(
+    connection: &rusqlite::Connection,
+) -> Result<Option<Value>> {
     let Some(domain) = read_persisted_metadata_field(connection, "federation")? else {
         return Ok(None);
     };
-    let preferences = read_persisted_metadata_field(connection, "preferences")?
-        .unwrap_or(Value::Null);
+    let preferences =
+        read_persisted_metadata_field(connection, "preferences")?.unwrap_or(Value::Null);
     // Read only this domain's units. A session persist must not reconstruct
     // the entire global document merely to validate federation's marker.
-    Ok(Some(json!({"domain":domain, "settings":preferences["federation"]})))
+    Ok(Some(
+        json!({"domain":domain, "settings":preferences["federation"]}),
+    ))
 }
 
-fn federation_meta_version(connection: &rusqlite::Connection) -> Result<u64> {
+pub(crate) fn federation_meta_version(connection: &rusqlite::Connection) -> Result<u64> {
     let version: Option<String> = connection
         .query_row(
             "SELECT value FROM meta WHERE key='federation_state_version'",
@@ -31,7 +37,10 @@ fn federation_meta_version(connection: &rusqlite::Connection) -> Result<u64> {
         .unwrap_or(0))
 }
 
-fn verify_federation_image_marker(connection: &rusqlite::Connection, raw: &Value) -> Result<()> {
+pub(crate) fn verify_federation_image_marker(
+    connection: &rusqlite::Connection,
+    raw: &Value,
+) -> Result<()> {
     let version = federation_meta_version(connection)?;
     let image_version = raw["domain"]["version"].as_u64().unwrap_or(0);
     if version == 0 && image_version == 0 {
@@ -50,13 +59,13 @@ fn verify_federation_image_marker(connection: &rusqlite::Connection, raw: &Value
 
 /// Used only after the raw digest has been checked. Same-version writes may
 /// add current serde defaults, but cannot change any loaded domain authority.
-fn normalize_federation_persist_image(raw: &Value) -> Result<Value> {
+pub(crate) fn normalize_federation_persist_image(raw: &Value) -> Result<Value> {
     let domain: FederationState = serde_json::from_value(raw["domain"].clone())?;
     let settings: FederationSettings = serde_json::from_value(raw["settings"].clone())?;
     Ok(json!({"domain":domain, "settings":settings}))
 }
 
-fn verify_federation_write(
+pub(crate) fn verify_federation_write(
     connection: &rusqlite::Connection,
     metadata: &PersistedState,
 ) -> Result<()> {
@@ -68,7 +77,7 @@ fn verify_federation_write(
     Ok(())
 }
 
-fn federation_committed_image_matches(
+pub(crate) fn federation_committed_image_matches(
     connection: &rusqlite::Connection,
     expected: &Value,
 ) -> Result<bool> {

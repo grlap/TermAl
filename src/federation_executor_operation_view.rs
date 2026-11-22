@@ -10,17 +10,19 @@
 // journal (federation_executor_journal.rs) or delivery (federation_executor_
 // delivery.rs). New file.
 
+use super::*;
+
 /// A queued prompt's identifying metadata. Never the prompt text or body.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FederationExecutorPendingPromptMetadata {
-    prompt_id: String,
-    timestamp: String,
+pub(crate) struct FederationExecutorPendingPromptMetadata {
+    pub(crate) prompt_id: String,
+    pub(crate) timestamp: String,
     /// Who queued it: a user, a mailbox wake or an orchestrator.
-    source: QueuedPromptSource,
-    mailbox_id: Option<String>,
-    message_id: Option<String>,
-    sequence: Option<u64>,
+    pub(crate) source: QueuedPromptSource,
+    pub(crate) mailbox_id: Option<String>,
+    pub(crate) message_id: Option<String>,
+    pub(crate) sequence: Option<u64>,
 }
 
 /// At most this many of the root's queued prompts are listed.
@@ -28,50 +30,50 @@ const FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT: usize = 100;
 
 /// What the receiver knows of one executor operation, at one read.
 #[derive(Clone, Debug)]
-struct FederationExecutorOperationView {
+pub(crate) struct FederationExecutorOperationView {
     /// The exact identity retained by the journal.
-    operation: FederationExecutorOperation,
-    stage: String,
+    pub(crate) operation: FederationExecutorOperation,
+    pub(crate) stage: String,
     // Read by the receiver's local diagnostic view; the outcome needs only the stage.
     #[cfg_attr(not(test), allow(dead_code))]
-    effect_state: String,
+    pub(crate) effect_state: String,
     #[cfg_attr(not(test), allow(dead_code))]
-    queue_entry_id: Option<String>,
-    runtime_acknowledged: bool,
+    pub(crate) queue_entry_id: Option<String>,
+    pub(crate) runtime_acknowledged: bool,
     /// The root's delivery receipt for this operation's queue entry, when the
     /// receipt names this exact operation.
-    receipt: Option<PromptDeliveryDisposition>,
+    pub(crate) receipt: Option<PromptDeliveryDisposition>,
     /// Whether the queue entry is still queued, and its position if so.
-    queue_position: Option<usize>,
+    pub(crate) queue_position: Option<usize>,
     /// The root's whole queue, as metadata only: its first
     /// FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT entries, its full count, and
     /// whether the list was cut.
     #[cfg_attr(not(test), allow(dead_code))]
-    pending_prompts: Vec<FederationExecutorPendingPromptMetadata>,
+    pub(crate) pending_prompts: Vec<FederationExecutorPendingPromptMetadata>,
     #[cfg_attr(not(test), allow(dead_code))]
-    pending_prompt_count: usize,
+    pub(crate) pending_prompt_count: usize,
     #[cfg_attr(not(test), allow(dead_code))]
-    pending_prompts_truncated: bool,
+    pub(crate) pending_prompts_truncated: bool,
     /// Whether the target root exists at this read; with it absent, every root
     /// field below is its empty value.
     #[cfg_attr(not(test), allow(dead_code))]
-    root_present: bool,
+    pub(crate) root_present: bool,
     /// Whether this host is the operation's target executor. A row targeted
     /// at another host is central's ownership mirror, never execution evidence.
     #[cfg_attr(not(test), allow(dead_code))]
-    executor_local: bool,
-    root_status: Option<SessionStatus>,
-    root_paused: bool,
-    root_stopping: bool,
+    pub(crate) executor_local: bool,
+    pub(crate) root_status: Option<SessionStatus>,
+    pub(crate) root_paused: bool,
+    pub(crate) root_stopping: bool,
     /// Whether the operation's exact target binding is current at this read
     /// (`federation_executor_target_locked`).
-    binding_current: bool,
+    pub(crate) binding_current: bool,
 }
 
 impl AppState {
     /// The receiver's view of the operation `operation_key` from the central
     /// host `central_host_id`, or `None` when the journal holds no such row.
-    fn read_federation_executor_operation_view(
+    pub(crate) fn read_federation_executor_operation_view(
         &self,
         central_host_id: &str,
         operation_key: &str,
@@ -80,18 +82,31 @@ impl AppState {
             let connection = self.mailbox_store.connection()?;
             federation_executor_read(&connection, central_host_id, operation_key)?
         };
-        let Some(record) = record else { return Ok(None); };
+        let Some(record) = record else {
+            return Ok(None);
+        };
         let inner = self.inner.lock().expect("state mutex poisoned");
         let operation = &record.operation;
         let prompt_id = operation.queue_identity();
-        let root = inner.find_session_index(&operation.session_id).map(|index| &inner.sessions[index]);
-        let receipt = root.and_then(|root| root.prompt_deliveries.get(&prompt_id))
+        let root = inner
+            .find_session_index(&operation.session_id)
+            .map(|index| &inner.sessions[index]);
+        let receipt = root
+            .and_then(|root| root.prompt_deliveries.get(&prompt_id))
             .filter(|receipt| receipt.federation_operation.as_ref() == Some(operation))
             .map(|receipt| receipt.disposition);
-        let queued = root.and_then(|root| root.queued_prompts.iter().enumerate()
-            .find(|(_, entry)| entry.pending_prompt.id == prompt_id));
+        let queued = root.and_then(|root| {
+            root.queued_prompts
+                .iter()
+                .enumerate()
+                .find(|(_, entry)| entry.pending_prompt.id == prompt_id)
+        });
         let metadata = |entry: &QueuedPromptRecord| {
-            let mailbox = entry.pending_prompt.source.as_ref().and_then(|source| source.mailbox.as_ref());
+            let mailbox = entry
+                .pending_prompt
+                .source
+                .as_ref()
+                .and_then(|source| source.mailbox.as_ref());
             FederationExecutorPendingPromptMetadata {
                 prompt_id: entry.pending_prompt.id.clone(),
                 timestamp: entry.pending_prompt.timestamp.clone(),
@@ -102,9 +117,19 @@ impl AppState {
             }
         };
         let pending_prompt_count = root.map_or(0, |root| root.queued_prompts.len());
-        let pending_prompts = root.map(|root| root.queued_prompts.iter()
-            .take(FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT).map(metadata).collect()).unwrap_or_default();
-        let executor_local = inner.federation.local.as_ref()
+        let pending_prompts = root
+            .map(|root| {
+                root.queued_prompts
+                    .iter()
+                    .take(FEDERATION_EXECUTOR_VIEW_QUEUE_LIMIT)
+                    .map(metadata)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let executor_local = inner
+            .federation
+            .local
+            .as_ref()
             .is_some_and(|local| local.host_id == operation.target_host_id);
         Ok(Some(FederationExecutorOperationView {
             stage: record.stage.clone(),

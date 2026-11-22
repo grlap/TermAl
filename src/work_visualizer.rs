@@ -4,6 +4,8 @@
 // bound. Never owns integration enablement, doctor runs, binding creation,
 // tracker writes, SQLite access, or agent-turn scheduling.
 
+use super::*;
+
 /// The seat kind the host itself occupies in Engram's `{developer}/{kind}`
 /// actor grammar. Reads never assign, claim or hand off, so this identity only
 /// labels the reader; it never appears as a holder.
@@ -14,23 +16,26 @@ const WORK_HOST_READER_KIND: &str = "termal";
 /// restarts. Engram's read words validate the session without registering it:
 /// only stateful words register sessions, and only inside Engram's
 /// process-default namespace, which this name is outside of.
-const WORK_HOST_READER_SESSION_ID: &str = "termal-work-view";
+pub(crate) const WORK_HOST_READER_SESSION_ID: &str = "termal-work-view";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct WorkReadTarget {
-    connection: EngramConnectionConfig,
-    store: EngramAuthorityStoreKey,
+pub(crate) struct WorkReadTarget {
+    pub(crate) connection: EngramConnectionConfig,
+    pub(crate) store: EngramAuthorityStoreKey,
     /// The reader identity on the wire: a digest of the configuration the read
     /// runs under. A continuation or detail read presenting another key was
     /// issued against another configuration and is refused, never served
     /// from a store the caller did not page through.
-    reader_key: String,
+    pub(crate) reader_key: String,
 }
 
 /// The host reader for a project, or the reason there is none. Every input
 /// is operator-established project state that survives a host restart; no
 /// agent session, binding or runtime descriptor takes part.
-fn work_host_reader(inner: &StateInner, project: &Project) -> Result<WorkReadTarget, &'static str> {
+pub(crate) fn work_host_reader(
+    inner: &StateInner,
+    project: &Project,
+) -> Result<WorkReadTarget, &'static str> {
     if project.remote_id != LOCAL_REMOTE_ID {
         return Err("Remote project Work reads are not supported yet");
     }
@@ -112,7 +117,7 @@ impl AppState {
     /// A `reader` key supplied by the caller must name that reader exactly:
     /// pages and detail windows belong to the configuration they were read
     /// under.
-    fn work_read_snapshot(
+    pub(crate) fn work_read_snapshot(
         &self,
         project_id: &str,
         reader: Option<&str>,
@@ -133,7 +138,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn list_project_work(
+    pub(crate) fn list_project_work(
         &self,
         project_id: &str,
         query: WorkListQuery,
@@ -144,7 +149,7 @@ impl AppState {
     /// Test seam: the production admission closures with the test read budget
     /// (no launch reserve), so fixture coverage is never decided by the clock.
     #[cfg(test)]
-    fn list_project_work_with_admission<P>(
+    pub(crate) fn list_project_work_with_admission<P>(
         &self,
         project_id: &str,
         query: WorkListQuery,
@@ -158,7 +163,7 @@ impl AppState {
         )
     }
 
-    fn list_project_work_with_options<P>(
+    pub(crate) fn list_project_work_with_options<P>(
         &self,
         project_id: &str,
         query: WorkListQuery,
@@ -275,7 +280,7 @@ impl AppState {
         })
     }
 
-    fn validate_work_read_still_current(
+    pub(crate) fn validate_work_read_still_current(
         &self,
         project_id: &str,
         target: &WorkReadTarget,
@@ -290,7 +295,7 @@ impl AppState {
     }
 }
 
-fn validate_work_read_target(target: &WorkReadTarget) -> Result<(), ApiError> {
+pub(crate) fn validate_work_read_target(target: &WorkReadTarget) -> Result<(), ApiError> {
     let c = &target.connection;
     validate_work_read_binary(c)?;
     if !c.home.is_absolute()
@@ -347,7 +352,7 @@ fn validate_work_read_target(target: &WorkReadTarget) -> Result<(), ApiError> {
     Ok(())
 }
 
-fn work_database_path(home: &FsPath, project_id: &str) -> PathBuf {
+pub(crate) fn work_database_path(home: &FsPath, project_id: &str) -> PathBuf {
     home.join("projects")
         .join(format!("{:x}", Sha256::digest(project_id.as_bytes())))
         .join("engram.db")
@@ -355,15 +360,15 @@ fn work_database_path(home: &FsPath, project_id: &str) -> PathBuf {
 
 // Bound simultaneous CLI reads. A waiting client can retry explicitly; no
 // request grows an unbounded background process queue.
-static WORK_READ_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
+pub(crate) static WORK_READ_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 
 // Router-owned admission dependency, never supplied by HTTP query/body. Tests
 // install private limiters while exercising the actual production handlers.
 #[derive(Clone)]
-struct WorkReadLimiter(Arc<tokio::sync::Semaphore>);
+pub(crate) struct WorkReadLimiter(pub(crate) Arc<tokio::sync::Semaphore>);
 
-async fn acquire_work_read_permit_from(
+pub(crate) async fn acquire_work_read_permit_from(
     limiter: Arc<tokio::sync::Semaphore>,
 ) -> Result<tokio::sync::OwnedSemaphorePermit, ApiError> {
     // Abandoned reads still have bounded child lifetimes. Wait for that bound
@@ -384,7 +389,7 @@ async fn acquire_work_read_permit_from(
 
 /// A busy limiter, stale or missing store, or failed first read becomes an
 /// explicit source error; internal failures fail the request.
-fn is_work_source_condition(status: StatusCode) -> bool {
+pub(crate) fn is_work_source_condition(status: StatusCode) -> bool {
     matches!(
         status,
         StatusCode::CONFLICT | StatusCode::TOO_MANY_REQUESTS | StatusCode::BAD_GATEWAY
@@ -394,7 +399,7 @@ fn is_work_source_condition(status: StatusCode) -> bool {
 /// Set when the handler future that asked for a read is dropped (the browser
 /// aborted the request): the client is gone, so the blocking worker admits
 /// and launches nothing more on its behalf.
-struct WorkReadAbandonGuard(Arc<std::sync::atomic::AtomicBool>);
+pub(crate) struct WorkReadAbandonGuard(pub(crate) Arc<std::sync::atomic::AtomicBool>);
 
 impl Drop for WorkReadAbandonGuard {
     fn drop(&mut self) {
@@ -404,7 +409,9 @@ impl Drop for WorkReadAbandonGuard {
 
 /// 499 (nginx's "client closed request"): nobody receives it, it only stops
 /// the worker. It is not a source condition, so the whole read ends.
-fn work_read_not_abandoned(cancelled: &std::sync::atomic::AtomicBool) -> Result<(), ApiError> {
+pub(crate) fn work_read_not_abandoned(
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<(), ApiError> {
     if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(ApiError::from_status(
             StatusCode::from_u16(499).expect("499 is a valid status code"),
@@ -414,7 +421,7 @@ fn work_read_not_abandoned(cancelled: &std::sync::atomic::AtomicBool) -> Result<
     Ok(())
 }
 
-async fn get_project_work(
+pub(crate) async fn get_project_work(
     State(state): State<AppState>,
     AxumPath(project_id): AxumPath<String>,
     limiter: Option<axum::Extension<WorkReadLimiter>>,

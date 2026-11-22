@@ -1,8 +1,10 @@
 // Owns current enrollment snapshots and exact authority validation. Does not own credentials, transport or runtime execution.
 // Split from federation_registry.rs while implementing the new domain foundation.
 
+use super::*;
+
 #[cfg_attr(not(test), allow(dead_code))]
-fn federation_snapshot_locked(
+pub(crate) fn federation_snapshot_locked(
     inner: &StateInner,
     id: &str,
 ) -> Result<FederationPeerSnapshot, ApiError> {
@@ -54,7 +56,7 @@ impl AppState {
     /// Runtime-only availability CAS. Losing a channel must fence admission
     /// immediately, including while an unrelated durable mutation is pending.
     /// A late teardown can never clear a replacement incarnation or basis.
-    fn federation_peer_disconnected(
+    pub(crate) fn federation_peer_disconnected(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: &str,
@@ -65,7 +67,10 @@ impl AppState {
         // Revocation is also required when a guard drops during unwind.
         // Recover only for the exact removal below; poison remains set and
         // no peer, transport, membership or durable authority is installed.
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(peer) = inner.federation.peers.get(&expected.peer.host_id) else {
             return false;
         };
@@ -92,7 +97,7 @@ impl AppState {
 
     /// Reconnect only the caller's unchanged installed transport basis after
     /// its link is gone. Membership may advance; configuration cannot be adopted.
-    fn federation_reconnect_snapshot(
+    pub(crate) fn federation_reconnect_snapshot(
         &self,
         expected: &FederationPeerSnapshot,
     ) -> Result<FederationPeerSnapshot, ApiError> {
@@ -102,7 +107,7 @@ impl AppState {
         )
     }
 
-    fn federation_reconnect_snapshot_locked(
+    pub(crate) fn federation_reconnect_snapshot_locked(
         &self,
         inner: &StateInner,
         expected: &FederationPeerSnapshot,
@@ -119,7 +124,7 @@ impl AppState {
 
     /// Refresh membership bookkeeping only for this channel's unchanged
     /// transport authority. This grants neither placement nor new admission.
-    fn refresh_federation_transport_snapshot(
+    pub(crate) fn refresh_federation_transport_snapshot(
         &self,
         expected: &FederationPeerSnapshot,
         incarnation: &str,
@@ -131,7 +136,7 @@ impl AppState {
         )
     }
 
-    fn refresh_federation_transport_snapshot_locked(
+    pub(crate) fn refresh_federation_transport_snapshot_locked(
         &self,
         inner: &StateInner,
         expected: &FederationPeerSnapshot,
@@ -154,13 +159,13 @@ impl AppState {
 
     /// For NEW coordinated admissions, separately from a transport snapshot
     /// used to establish a link or reconcile an original outcome.
-    fn ensure_federation_admission_allowed(&self) -> Result<(), ApiError> {
+    pub(crate) fn ensure_federation_admission_allowed(&self) -> Result<(), ApiError> {
         self.ensure_federation_admission_allowed_locked(
             &self.inner.lock().expect("state mutex poisoned"),
         )
     }
 
-    fn ensure_federation_admission_allowed_locked(
+    pub(crate) fn ensure_federation_admission_allowed_locked(
         &self,
         inner: &StateInner,
     ) -> Result<(), ApiError> {
@@ -175,7 +180,7 @@ impl AppState {
         }
         Ok(())
     }
-    fn federation_peer_snapshot(
+    pub(crate) fn federation_peer_snapshot(
         &self,
         peer_host_id: &str,
     ) -> Result<FederationPeerSnapshot, ApiError> {
@@ -185,7 +190,9 @@ impl AppState {
         )
     }
 
-    fn federation_peer_snapshots(&self) -> Result<Vec<FederationPeerSnapshot>, ApiError> {
+    pub(crate) fn federation_peer_snapshots(
+        &self,
+    ) -> Result<Vec<FederationPeerSnapshot>, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         if !inner.preferences.federation.enabled
             || inner.preferences.federation.role == FederationRole::Standalone
@@ -207,7 +214,7 @@ impl AppState {
             .collect()
     }
 
-    fn ensure_federation_peer_current(
+    pub(crate) fn ensure_federation_peer_current(
         &self,
         expected: &FederationPeerSnapshot,
     ) -> Result<(), ApiError> {
@@ -217,7 +224,7 @@ impl AppState {
         )
     }
 
-    fn ensure_federation_peer_current_locked(
+    pub(crate) fn ensure_federation_peer_current_locked(
         &self,
         inner: &StateInner,
         expected: &FederationPeerSnapshot,

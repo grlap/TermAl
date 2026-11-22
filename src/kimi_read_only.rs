@@ -21,20 +21,22 @@
 // Kimi streams as the call's content text before the request. A subagent's
 // request has no stream in the parent session and is rejected.
 
+use super::*;
+
 /// Largest number of tool calls whose observations the reader keeps at once.
 /// A call is forgotten when it finishes, so this bounds calls in flight; with
 /// the per-call text cap it bounds the memory a streaming model can hold.
-const KIMI_READ_ONLY_OBSERVED_CALLS_MAX: usize = 32;
+pub(crate) const KIMI_READ_ONLY_OBSERVED_CALLS_MAX: usize = 32;
 
 /// Largest streamed argument text kept for one call. A longer stream marks the
 /// call oversized, and its request is rejected.
-const KIMI_READ_ONLY_STREAMED_ARGS_MAX_BYTES: usize = 256 * 1024;
+pub(crate) const KIMI_READ_ONLY_STREAMED_ARGS_MAX_BYTES: usize = 256 * 1024;
 
 /// What Kimi's summary text says before a Bash command.
 const KIMI_BASH_SUMMARY_PREFIX: &str = "Requesting approval to Running: ";
 
 /// What Kimi's summary text says before an MCP tool name.
-const KIMI_MCP_SUMMARY_PREFIX: &str = "Requesting approval to Approve ";
+pub(crate) const KIMI_MCP_SUMMARY_PREFIX: &str = "Requesting approval to Approve ";
 
 /// The only keys a Bash call may carry for the gate to judge it.
 const KIMI_BASH_ALLOWED_KEYS: &[&str] = &[
@@ -49,20 +51,20 @@ const KIMI_BASH_ALLOWED_KEYS: &[&str] = &[
 /// What the reader saw of one tool call before and after its permission
 /// request.
 #[derive(Clone, Debug, Default)]
-struct KimiToolCallObservation {
+pub(crate) struct KimiToolCallObservation {
     /// The title of the call's first `tool_call`: the exact tool name.
-    title: Option<String>,
+    pub(crate) title: Option<String>,
     /// The last content text streamed before `rawInput` was reported: the
     /// cumulative argument JSON.
-    streamed_args: Option<String>,
+    pub(crate) streamed_args: Option<String>,
     /// The stream outgrew `KIMI_READ_ONLY_STREAMED_ARGS_MAX_BYTES`.
-    oversized: bool,
+    pub(crate) oversized: bool,
     /// The arguments the gate approved, checked against `rawInput` later.
-    approved_args: Option<Value>,
+    pub(crate) approved_args: Option<Value>,
 }
 
 impl KimiToolCallObservation {
-    fn stream(&mut self, text: &str) {
+    pub(crate) fn stream(&mut self, text: &str) {
         if text.len() > KIMI_READ_ONLY_STREAMED_ARGS_MAX_BYTES {
             self.oversized = true;
             self.streamed_args = None;
@@ -92,7 +94,7 @@ fn kimi_streamed_text(update: &Value) -> Option<&str> {
 /// Parses `text` as one JSON object, refusing a repeated key at any depth.
 /// `serde_json::Value` silently keeps the last of two equal keys, and Kimi's
 /// own parser might keep another, so a duplicate is never resolved.
-fn kimi_parse_arguments(text: &str) -> Option<Value> {
+pub(crate) fn kimi_parse_arguments(text: &str) -> Option<Value> {
     struct Strict(Value);
     impl<'de> serde::Deserialize<'de> for Strict {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -156,19 +158,19 @@ fn kimi_parse_arguments(text: &str) -> Option<Value> {
 
 /// Per-runtime observations of Kimi tool calls, bounded.
 #[derive(Default)]
-struct KimiReadOnlyObservations {
-    calls: HashMap<String, KimiToolCallObservation>,
-    order: VecDeque<String>,
+pub(crate) struct KimiReadOnlyObservations {
+    pub(crate) calls: HashMap<String, KimiToolCallObservation>,
+    pub(crate) order: VecDeque<String>,
 }
 
 /// A `rawInput` that differs from what the gate approved.
 #[derive(Debug, PartialEq)]
-struct KimiApprovedInputMismatch {
-    title: String,
+pub(crate) struct KimiApprovedInputMismatch {
+    pub(crate) title: String,
 }
 
 impl KimiReadOnlyObservations {
-    fn entry(&mut self, tool_call_id: &str) -> &mut KimiToolCallObservation {
+    pub(crate) fn entry(&mut self, tool_call_id: &str) -> &mut KimiToolCallObservation {
         if !self.calls.contains_key(tool_call_id) {
             if self.order.len() >= KIMI_READ_ONLY_OBSERVED_CALLS_MAX {
                 // Make room with the oldest call that holds no approval: an
@@ -192,20 +194,20 @@ impl KimiReadOnlyObservations {
         self.calls.entry(tool_call_id.to_owned()).or_default()
     }
 
-    fn forget(&mut self, tool_call_id: &str) {
+    pub(crate) fn forget(&mut self, tool_call_id: &str) {
         if self.calls.remove(tool_call_id).is_some() {
             self.order.retain(|id| id != tool_call_id);
         }
     }
 
-    fn get(&self, tool_call_id: &str) -> Option<&KimiToolCallObservation> {
+    pub(crate) fn get(&self, tool_call_id: &str) -> Option<&KimiToolCallObservation> {
         self.calls.get(tool_call_id)
     }
 
     /// Records a `tool_call` or `tool_call_update`. Returns a mismatch when
     /// Kimi reports a `rawInput` for an approved call that differs from what
     /// was approved.
-    fn observe(&mut self, update: &Value) -> Option<KimiApprovedInputMismatch> {
+    pub(crate) fn observe(&mut self, update: &Value) -> Option<KimiApprovedInputMismatch> {
         let kind = update.get("sessionUpdate").and_then(Value::as_str)?;
         let tool_call_id = update.get("toolCallId").and_then(Value::as_str)?;
         let content_text = kimi_streamed_text(update);
@@ -256,14 +258,14 @@ impl KimiReadOnlyObservations {
         }
     }
 
-    fn record_approval(&mut self, tool_call_id: &str, args: Value) {
+    pub(crate) fn record_approval(&mut self, tool_call_id: &str, args: Value) {
         self.entry(tool_call_id).approved_args = Some(args);
     }
 }
 
 /// The host's answer to one permission request of a read-only Kimi child.
 #[derive(Debug, PartialEq)]
-enum KimiReadOnlyDecision {
+pub(crate) enum KimiReadOnlyDecision {
     /// Approve once; `args` is what was judged and must match `rawInput`.
     Allow { args: Value },
     /// Leave plan mode without accepting the plan.
@@ -282,7 +284,7 @@ fn kimi_read_only_reject(title: &str, why: &str) -> KimiReadOnlyDecision {
 /// `control_plane_allowed` answers whether the child currently holds a
 /// TermAl control-plane capability (delegation authority, checked under the
 /// caller's lock).
-fn kimi_read_only_permission_decision(
+pub(crate) fn kimi_read_only_permission_decision(
     params: &Value,
     observation: Option<&KimiToolCallObservation>,
     workdir: &str,
@@ -476,7 +478,7 @@ fn kimi_bash_summary_matches(summary: &str, command: &str) -> bool {
 /// verbatim prefix is dropped, `\` and `/` are the same separator and case is
 /// ignored. Elsewhere a backslash is an ordinary file-name character, so
 /// `/work\repo` stays a different directory from `/work/repo`.
-fn kimi_path_key(path: &str) -> String {
+pub(crate) fn kimi_path_key(path: &str) -> String {
     if cfg!(windows) {
         let path = path
             .strip_prefix(r"\\?\")
@@ -490,7 +492,10 @@ fn kimi_path_key(path: &str) -> String {
 
 /// The option to select for a decision, from the request's offered options.
 /// `allow_always` is never chosen.
-fn kimi_read_only_option_id(options: &[Value], decision: &KimiReadOnlyDecision) -> Option<String> {
+pub(crate) fn kimi_read_only_option_id(
+    options: &[Value],
+    decision: &KimiReadOnlyDecision,
+) -> Option<String> {
     match decision {
         KimiReadOnlyDecision::Allow { .. } => find_acp_permission_option(options, &["allow_once"]),
         KimiReadOnlyDecision::PlanRejectAndExit => options
@@ -508,21 +513,21 @@ fn kimi_read_only_option_id(options: &[Value], decision: &KimiReadOnlyDecision) 
 
 /// Whether a Kimi mode keeps the host's permission gate in force: Default asks
 /// for every write and command, and Plan is stricter. Auto and yolo do not ask.
-fn kimi_mode_keeps_permission_gate(mode: &str) -> bool {
+pub(crate) fn kimi_mode_keeps_permission_gate(mode: &str) -> bool {
     matches!(mode, "default" | "plan")
 }
 
 /// Opens or closes the window in which the read-only mode guard acts: from
 /// Kimi's effective-mode ACK for a prompt until that prompt settles. Only a
 /// read-only child, whose effective mode is always `default`, is stopped.
-fn set_kimi_mode_gate_armed(runtime_state: &Arc<Mutex<AcpRuntimeState>>, armed: bool) {
+pub(crate) fn set_kimi_mode_gate_armed(runtime_state: &Arc<Mutex<AcpRuntimeState>>, armed: bool) {
     runtime_state
         .lock()
         .expect("ACP runtime state mutex poisoned")
         .kimi_mode_gate_armed = armed;
 }
 
-fn kimi_mode_gate_armed(runtime_state: &Arc<Mutex<AcpRuntimeState>>) -> bool {
+pub(crate) fn kimi_mode_gate_armed(runtime_state: &Arc<Mutex<AcpRuntimeState>>) -> bool {
     runtime_state
         .lock()
         .expect("ACP runtime state mutex poisoned")
@@ -530,7 +535,7 @@ fn kimi_mode_gate_armed(runtime_state: &Arc<Mutex<AcpRuntimeState>>) -> bool {
 }
 
 /// The mode a Kimi session update reports, if it reports one.
-fn kimi_reported_mode(update: &Value) -> Option<String> {
+pub(crate) fn kimi_reported_mode(update: &Value) -> Option<String> {
     match update.get("sessionUpdate").and_then(Value::as_str)? {
         "current_mode_update" => update
             .get("currentModeId")
@@ -552,7 +557,7 @@ impl AppState {
     /// happen under the state lock that also guards Stop and runtime
     /// replacement, and a stale or stopping runtime gets `cancelled`. Nothing
     /// is held: the answer is sent before this returns.
-    fn answer_kimi_read_only_permission(
+    pub(crate) fn answer_kimi_read_only_permission(
         &self,
         message: &Value,
         session_id: &str,
@@ -689,7 +694,7 @@ impl AppState {
     /// Stops the turn of a read-only Kimi child whose permission gate no
     /// longer holds: Kimi left a mode that asks before acting, or ran an
     /// approved call with other arguments. Any other session is left alone.
-    fn stop_kimi_read_only_violation(
+    pub(crate) fn stop_kimi_read_only_violation(
         &self,
         session_id: &str,
         runtime_token: &RuntimeToken,

@@ -3,23 +3,25 @@
 // materialize it after dropping StateInner; serializing an action response
 // uses the same cut as snapshots and the ordered broadcaster.
 
-struct TestRunHistoryProjection {
-    version: u64,
-    cut: TestRunProjectionCut,
-    value: std::sync::OnceLock<TestRunHistoryValue>,
+use super::*;
+
+pub(crate) struct TestRunHistoryProjection {
+    pub(crate) version: u64,
+    pub(crate) cut: TestRunProjectionCut,
+    pub(crate) value: std::sync::OnceLock<TestRunHistoryValue>,
     // Derived metadata DTOs only, never SessionRecord/runtime ownership.
     // Retaining the raw Arc prevents pointer reuse from masquerading as a hit.
     activity_rows: Mutex<HashMap<String, (Arc<StateSessionSummary>, Arc<StateSessionSummary>)>>,
 }
 
-struct TestRunHistoryValue {
-    runs: Vec<TestRunSummary>,
-    overview: TestRunOverview,
-    activity: BTreeMap<String, SessionTestRunActivity>,
+pub(crate) struct TestRunHistoryValue {
+    pub(crate) runs: Vec<TestRunSummary>,
+    pub(crate) overview: TestRunOverview,
+    pub(crate) activity: BTreeMap<String, SessionTestRunActivity>,
 }
 
 impl TestRunHistoryProjection {
-    fn value(&self) -> &TestRunHistoryValue {
+    pub(crate) fn value(&self) -> &TestRunHistoryValue {
         self.value.get_or_init(|| {
             let mut runs = test_run_project_history(&self.cut, true);
             let mut seen = HashSet::new();
@@ -64,7 +66,7 @@ impl TestRunHistoryProjection {
 }
 
 impl AppState {
-    fn test_run_history_projection_locked(
+    pub(crate) fn test_run_history_projection_locked(
         &self,
         inner: &StateInner,
     ) -> Arc<TestRunHistoryProjection> {
@@ -99,20 +101,20 @@ impl AppState {
 // locked without making them project history there. Deserialized remote
 // values never acquire local authority or join this cache.
 #[derive(Clone, Default)]
-struct TestRunOverviewSnapshot {
-    source: Option<Arc<TestRunHistoryProjection>>,
-    wire: TestRunOverview,
+pub(crate) struct TestRunOverviewSnapshot {
+    pub(crate) source: Option<Arc<TestRunHistoryProjection>>,
+    pub(crate) wire: TestRunOverview,
 }
 
 impl TestRunOverviewSnapshot {
-    fn captured(source: Arc<TestRunHistoryProjection>) -> Self {
+    pub(crate) fn captured(source: Arc<TestRunHistoryProjection>) -> Self {
         Self {
             source: Some(source),
             wire: TestRunOverview::default(),
         }
     }
 
-    fn get(&self) -> &TestRunOverview {
+    pub(crate) fn get(&self) -> &TestRunOverview {
         self.source
             .as_ref()
             .map_or(&self.wire, |source| &source.value().overview)
@@ -135,27 +137,27 @@ impl<'de> Deserialize<'de> for TestRunOverviewSnapshot {
 }
 
 #[derive(Clone, Default)]
-struct SessionTestRunActivitySnapshot {
-    source: Option<(Arc<TestRunHistoryProjection>, String)>,
-    wire: SessionTestRunActivity,
+pub(crate) struct SessionTestRunActivitySnapshot {
+    pub(crate) source: Option<(Arc<TestRunHistoryProjection>, String)>,
+    pub(crate) wire: SessionTestRunActivity,
 }
 
 impl SessionTestRunActivitySnapshot {
-    fn captured(source: Arc<TestRunHistoryProjection>, session: &str) -> Self {
+    pub(crate) fn captured(source: Arc<TestRunHistoryProjection>, session: &str) -> Self {
         Self {
             source: Some((source, session.to_owned())),
             wire: SessionTestRunActivity::default(),
         }
     }
 
-    fn get(&self) -> &SessionTestRunActivity {
+    pub(crate) fn get(&self) -> &SessionTestRunActivity {
         self.source
             .as_ref()
             .and_then(|(source, id)| source.value().activity.get(id))
             .unwrap_or(&self.wire)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.get() == &SessionTestRunActivity::default()
     }
 }
@@ -184,9 +186,9 @@ impl<'de> Deserialize<'de> for SessionTestRunActivitySnapshot {
 }
 
 #[derive(Clone, Default)]
-struct TestRunActivitiesSnapshot {
-    source: Option<Arc<TestRunHistoryProjection>>,
-    wire: BTreeMap<String, SessionTestRunActivity>,
+pub(crate) struct TestRunActivitiesSnapshot {
+    pub(crate) source: Option<Arc<TestRunHistoryProjection>>,
+    pub(crate) wire: BTreeMap<String, SessionTestRunActivity>,
 }
 
 impl Serialize for TestRunActivitiesSnapshot {
@@ -212,7 +214,7 @@ impl ImmutableStateSnapshot {
     // Only sessions with running owned/notify work need an enriched row.
     // Last activity disappearing compares an old enriched Arc with the plain
     // successor, so the diff clears it rather than leaving a stale badge.
-    fn prepare_test_run_activity(&mut self) {
+    pub(crate) fn prepare_test_run_activity(&mut self) {
         let Some(source) = self.header.test_run_overview.source.as_ref() else {
             return;
         };

@@ -1,22 +1,24 @@
 // Bounded work over explicit durable pending membership, never mailbox history.
+
+use super::*;
 const CAUSAL_COMPLETION_PENDING_ROWS: usize = 32;
-const CAUSAL_COMPLETION_BATCH: usize = 4;
+pub(crate) const CAUSAL_COMPLETION_BATCH: usize = 4;
 
 #[derive(Clone)]
-struct CausalTestCompletionPlan {
-    selector: CausalTestCompletionSelector,
-    scope: Option<MailboxTestSenderScope>,
-    peer: Option<FederationPeerSnapshot>,
-    settlement: Option<CausalTestSettlement>,
-    pending: CausalPendingRow,
+pub(crate) struct CausalTestCompletionPlan {
+    pub(crate) selector: CausalTestCompletionSelector,
+    pub(crate) scope: Option<MailboxTestSenderScope>,
+    pub(crate) peer: Option<FederationPeerSnapshot>,
+    pub(crate) settlement: Option<CausalTestSettlement>,
+    pub(crate) pending: CausalPendingRow,
 }
 
 impl MailboxStore {
-    fn causal_test_completion_plans(&self) -> Result<Vec<CausalTestCompletionPlan>> {
+    pub(crate) fn causal_test_completion_plans(&self) -> Result<Vec<CausalTestCompletionPlan>> {
         self.causal_test_completion_plans_without(CAUSAL_COMPLETION_BATCH, &BTreeSet::new())
     }
 
-    fn causal_test_completion_plans_without(
+    pub(crate) fn causal_test_completion_plans_without(
         &self,
         limit: usize,
         excluded: &BTreeSet<TestRunCausalKey>,
@@ -118,11 +120,11 @@ impl MailboxStore {
 }
 
 // A private handoff, never a wire or persisted projection.
-struct CausalTestCompletionDelivery {
-    selector: CausalTestCompletionSelector,
-    scope: Option<MailboxTestSenderScope>,
-    completion: native_test_completion::Completion,
-    pending: CausalPendingRow,
+pub(crate) struct CausalTestCompletionDelivery {
+    pub(crate) selector: CausalTestCompletionSelector,
+    pub(crate) scope: Option<MailboxTestSenderScope>,
+    pub(crate) completion: native_test_completion::Completion,
+    pub(crate) pending: CausalPendingRow,
 }
 
 impl AppState {
@@ -141,7 +143,7 @@ impl AppState {
         })
         .await
     }
-    fn causal_test_completion_plan_current(
+    pub(crate) fn causal_test_completion_plan_current(
         &self,
         plan: &CausalTestCompletionPlan,
     ) -> Result<(), ApiError> {
@@ -218,7 +220,7 @@ impl AppState {
 
     // The joined supervisor supplies the admission sink. Original frozen
     // pending operations recover without another origin read or live claim.
-    async fn read_causal_test_completion_batch(
+    pub(crate) async fn read_causal_test_completion_batch(
         &self,
     ) -> Result<Vec<CausalTestCompletionDelivery>, ApiError> {
         let worker = self.clone();
@@ -235,7 +237,7 @@ impl AppState {
 
     // Every scheduler shares this original read/currentness/settlement handoff.
     // A hint can constrain run identity, never supply native facts.
-    async fn read_causal_test_completion_plans(
+    pub(crate) async fn read_causal_test_completion_plans(
         &self,
         plans: Vec<(CausalTestCompletionPlan, Option<String>)>,
     ) -> Result<Vec<CausalTestCompletionDelivery>, ApiError> {

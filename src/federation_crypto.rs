@@ -1,21 +1,23 @@
 // Owns canonical bounded TLV framing, OS randomness and RustCrypto operations.
 // Does not install contexts or authorize RPCs. New A1 protocol primitive leaf.
 
-const FEDERATION_CONTROL_PREFACE: &[u8] = b"TERMAL-CTRL/1\n";
-const FEDERATION_MAC_HEADER: &str = "x-termal-link-mac";
-const FEDERATION_FRAME_LIMIT: usize = 65536;
+use super::*;
 
-fn federation_auth_refused() -> ApiError {
+pub(crate) const FEDERATION_CONTROL_PREFACE: &[u8] = b"TERMAL-CTRL/1\n";
+pub(crate) const FEDERATION_MAC_HEADER: &str = "x-termal-link-mac";
+pub(crate) const FEDERATION_FRAME_LIMIT: usize = 65536;
+
+pub(crate) fn federation_auth_refused() -> ApiError {
     ApiError::conflict("federation message authentication refused")
 }
 
-fn federation_random<const N: usize>() -> Result<[u8; N], ApiError> {
+pub(crate) fn federation_random<const N: usize>() -> Result<[u8; N], ApiError> {
     let mut bytes = [0; N];
     getrandom::fill(&mut bytes).map_err(|_| federation_transport_unavailable())?;
     Ok(bytes)
 }
 
-fn federation_encode(domain: &[u8], values: &[&[u8]]) -> Vec<u8> {
+pub(crate) fn federation_encode(domain: &[u8], values: &[&[u8]]) -> Vec<u8> {
     let mut bytes = vec![1];
     for (index, value) in std::iter::once(domain)
         .chain(values.iter().copied())
@@ -30,7 +32,7 @@ fn federation_encode(domain: &[u8], values: &[&[u8]]) -> Vec<u8> {
     bytes
 }
 
-fn federation_decode<'a>(
+pub(crate) fn federation_decode<'a>(
     bytes: &'a [u8],
     domain: &[u8],
     fields: usize,
@@ -62,7 +64,7 @@ fn federation_decode<'a>(
     Ok(values)
 }
 
-fn federation_mac(key: &[u8], parts: &[&[u8]]) -> Result<Vec<u8>, ApiError> {
+pub(crate) fn federation_mac(key: &[u8], parts: &[&[u8]]) -> Result<Vec<u8>, ApiError> {
     use hmac::Mac;
     let mut mac =
         hmac::Hmac::<Sha256>::new_from_slice(key).map_err(|_| federation_auth_refused())?;
@@ -72,7 +74,11 @@ fn federation_mac(key: &[u8], parts: &[&[u8]]) -> Result<Vec<u8>, ApiError> {
     Ok(mac.finalize().into_bytes().to_vec())
 }
 
-fn federation_verify_mac(key: &[u8], parts: &[&[u8]], tag: &[u8]) -> Result<(), ApiError> {
+pub(crate) fn federation_verify_mac(
+    key: &[u8],
+    parts: &[&[u8]],
+    tag: &[u8],
+) -> Result<(), ApiError> {
     use hmac::Mac;
     if tag.len() != 32 {
         return Err(federation_auth_refused());
@@ -86,7 +92,7 @@ fn federation_verify_mac(key: &[u8], parts: &[&[u8]], tag: &[u8]) -> Result<(), 
 }
 
 impl FederationPairCapability {
-    fn key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, ApiError> {
+    pub(crate) fn key(&self) -> Result<zeroize::Zeroizing<[u8; 32]>, ApiError> {
         let mut bytes = zeroize::Zeroizing::new([0; 32]);
         for (index, hex) in self.0.as_bytes().chunks_exact(2).enumerate() {
             let high = char::from(hex[0])
@@ -101,7 +107,7 @@ impl FederationPairCapability {
     }
 }
 
-async fn federation_read_frame(
+pub(crate) async fn federation_read_frame(
     io: &mut (impl tokio::io::AsyncRead + Unpin),
 ) -> Result<Vec<u8>, ApiError> {
     use tokio::io::AsyncReadExt;
@@ -119,7 +125,7 @@ async fn federation_read_frame(
     Ok(bytes)
 }
 
-async fn federation_write_frame(
+pub(crate) async fn federation_write_frame(
     io: &mut (impl tokio::io::AsyncWrite + Unpin),
     bytes: &[u8],
 ) -> Result<(), ApiError> {
@@ -130,10 +136,10 @@ async fn federation_write_frame(
 
 // Keep framing and status mapping in this owner; callers receive fixed
 // diagnostic classifications, never frame contents or raw OS error messages.
-struct FederationControlFrameFailure {
-    error: ApiError,
-    reason: &'static str,
-    io_kind: Option<&'static str>,
+pub(crate) struct FederationControlFrameFailure {
+    pub(crate) error: ApiError,
+    pub(crate) reason: &'static str,
+    pub(crate) io_kind: Option<&'static str>,
 }
 
 fn federation_control_io_kind(kind: std::io::ErrorKind) -> &'static str {
@@ -194,7 +200,7 @@ impl<T: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for FederationControl
     }
 }
 
-async fn federation_control_read_frame(
+pub(crate) async fn federation_control_read_frame(
     io: &mut (impl tokio::io::AsyncRead + Unpin),
 ) -> Result<Vec<u8>, FederationControlFrameFailure> {
     let mut observed = FederationControlRead {
@@ -227,7 +233,7 @@ async fn federation_control_read_frame(
     })
 }
 
-async fn federation_control_write_frame(
+pub(crate) async fn federation_control_write_frame(
     io: &mut (impl tokio::io::AsyncWrite + Unpin),
     bytes: &[u8],
 ) -> Result<(), FederationControlFrameFailure> {
@@ -244,13 +250,7 @@ async fn federation_control_write_frame(
         reason: "controlWriteIo",
         io_kind: Some(federation_control_io_kind(error.kind())),
     };
-    io.write_u32(bytes.len() as u32)
-        .await
-        .map_err(failure)?;
-    io.write_all(bytes)
-        .await
-        .map_err(failure)?;
-    io.flush()
-        .await
-        .map_err(failure)
+    io.write_u32(bytes.len() as u32).await.map_err(failure)?;
+    io.write_all(bytes).await.map_err(failure)?;
+    io.flush().await.map_err(failure)
 }

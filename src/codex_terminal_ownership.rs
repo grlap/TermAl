@@ -1,20 +1,22 @@
 // Terminal notifications and turn/start replies travel on independent channels.
 // A candidate cannot establish the identity that authorizes its own effects.
-const CODEX_DEFERRED_TERMINAL_LIMIT: usize = 4;
-const CODEX_DEFERRED_TERMINAL_BYTES: usize = 64 * 1024;
+
+use super::*;
+pub(crate) const CODEX_DEFERRED_TERMINAL_LIMIT: usize = 4;
+pub(crate) const CODEX_DEFERRED_TERMINAL_BYTES: usize = 64 * 1024;
 const CODEX_RETIRED_TURN_LIMIT: usize = 32;
 
-struct DeferredCodexTerminal {
-    runtime: RuntimeToken,
-    thread_id: Option<String>,
-    request_id: String,
-    generation: Option<u64>,
-    turn_id: String,
-    message: Value,
-    bytes: usize,
+pub(crate) struct DeferredCodexTerminal {
+    pub(crate) runtime: RuntimeToken,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) request_id: String,
+    pub(crate) generation: Option<u64>,
+    pub(crate) turn_id: String,
+    pub(crate) message: Value,
+    pub(crate) bytes: usize,
 }
 
-fn shared_codex_error_is_retryable(payload: &Value) -> bool {
+pub(crate) fn shared_codex_error_is_retryable(payload: &Value) -> bool {
     let error = payload.get("error").unwrap_or(payload);
     is_retryable_connectivity_error(payload)
         || (is_typed_provider_capacity(error) && codex_error_will_retry(payload))
@@ -26,7 +28,7 @@ fn codex_terminal_notification(method: &str, message: &Value) -> bool {
             && !shared_codex_error_is_retryable(message.get("params").unwrap_or(message)))
 }
 
-fn codex_turn_is_retired(shared: &SharedCodexSessionState, turn_id: &str) -> bool {
+pub(crate) fn codex_turn_is_retired(shared: &SharedCodexSessionState, turn_id: &str) -> bool {
     shared
         .retired_turn_ids
         .iter()
@@ -47,7 +49,7 @@ fn retire_codex_terminal_identity(shared: &mut SharedCodexSessionState, turn_id:
     }
 }
 
-fn hold_unresolved_codex_terminal(
+pub(crate) fn hold_unresolved_codex_terminal(
     state: &AppState,
     session_id: &str,
     runtime: &RuntimeToken,
@@ -79,7 +81,7 @@ fn hold_unresolved_codex_terminal(
 }
 
 /// Called under the shared-session lock, before generic event-id adoption.
-fn codex_terminal_is_owned_or_deferred(
+pub(crate) fn codex_terminal_is_owned_or_deferred(
     method: &str,
     message: &Value,
     state: &AppState,
@@ -159,7 +161,7 @@ fn codex_terminal_is_owned_or_deferred(
 
 /// Remove the handshake's candidates atomically before applying at most one.
 /// The returned id is independent proof, never the candidate's own id.
-fn take_proven_codex_terminal(
+pub(crate) fn take_proven_codex_terminal(
     shared: &mut SharedCodexSessionState,
     runtime: &RuntimeToken,
     request_id: &str,
@@ -184,7 +186,7 @@ fn take_proven_codex_terminal(
         .map(|candidate| candidate.message)
 }
 
-fn apply_owned_shared_codex_notification(
+pub(crate) fn apply_owned_shared_codex_notification(
     method: &str,
     message: &Value,
     state: &AppState,

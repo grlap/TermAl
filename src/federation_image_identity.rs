@@ -2,6 +2,8 @@
 // Does not install/restart binaries or identify an image by a later pathname.
 // Split from federation_onboarding_probe.rs after the replacement-image regression.
 
+use super::*;
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(
     tag = "status",
@@ -9,7 +11,7 @@
     rename_all = "camelCase",
     deny_unknown_fields
 )]
-enum FederationImageObservation {
+pub(crate) enum FederationImageObservation {
     Known(FederationImageIdentity),
     #[default]
     Unknown,
@@ -17,27 +19,27 @@ enum FederationImageObservation {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationImageIdentity {
-    sha256: String,
-    file_identity: FederationImageFileIdentity,
-    size: u64,
+pub(crate) struct FederationImageIdentity {
+    pub(crate) sha256: String,
+    pub(crate) file_identity: FederationImageFileIdentity,
+    pub(crate) size: u64,
     // Diagnostic path at process start, never the identity or a reopen target.
-    path_at_start: String,
+    pub(crate) path_at_start: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "platform", rename_all = "camelCase", deny_unknown_fields)]
-enum FederationImageFileIdentity {
+pub(crate) enum FederationImageFileIdentity {
     Windows { volume: u64, index: u64 },
     Unix { dev: u64, inode: u64 },
 }
 
 impl FederationImageObservation {
-    fn is_unknown(&self) -> bool {
+    pub(crate) fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown)
     }
 
-    fn valid_identity(&self) -> bool {
+    pub(crate) fn valid_identity(&self) -> bool {
         let Self::Known(image) = self else {
             return false;
         };
@@ -57,7 +59,11 @@ impl FederationImageObservation {
             )
     }
 
-    fn matches_profile(&self, profile: &FederationExecutionProfile, platform: &str) -> bool {
+    pub(crate) fn matches_profile(
+        &self,
+        profile: &FederationExecutionProfile,
+        platform: &str,
+    ) -> bool {
         let Self::Known(image) = self else {
             return false;
         };
@@ -75,24 +81,24 @@ impl FederationImageObservation {
     }
 }
 
-struct FederationCapturedImage {
-    file: Mutex<fs::File>,
-    file_identity: FederationImageFileIdentity,
-    size: u64,
-    path_at_start: String,
+pub(crate) struct FederationCapturedImage {
+    pub(crate) file: Mutex<fs::File>,
+    pub(crate) file_identity: FederationImageFileIdentity,
+    pub(crate) size: u64,
+    pub(crate) path_at_start: String,
 }
 
-struct FederationProcessImage {
-    captured: Option<FederationCapturedImage>,
-    observation: OnceLock<FederationImageObservation>,
+pub(crate) struct FederationProcessImage {
+    pub(crate) captured: Option<FederationCapturedImage>,
+    pub(crate) observation: OnceLock<FederationImageObservation>,
     #[cfg(test)]
-    hash_reads: std::sync::atomic::AtomicUsize,
+    pub(crate) hash_reads: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    fail_hash: AtomicBool,
+    pub(crate) fail_hash: AtomicBool,
 }
 
 impl FederationProcessImage {
-    fn capture(path: Option<PathBuf>) -> Self {
+    pub(crate) fn capture(path: Option<PathBuf>) -> Self {
         let captured = (|| {
             let path = path?;
             // Rust's read-only File shares delete on Windows. Retaining this
@@ -120,7 +126,7 @@ impl FederationProcessImage {
         }
     }
 
-    fn observe(&self) -> FederationImageObservation {
+    pub(crate) fn observe(&self) -> FederationImageObservation {
         self.observation
             .get_or_init(|| {
                 let Some(captured) = &self.captured else {
@@ -162,7 +168,7 @@ impl FederationProcessImage {
 
 static FEDERATION_PROCESS_IMAGE: OnceLock<Arc<FederationProcessImage>> = OnceLock::new();
 
-fn capture_federation_process_image() -> Arc<FederationProcessImage> {
+pub(crate) fn capture_federation_process_image() -> Arc<FederationProcessImage> {
     FEDERATION_PROCESS_IMAGE
         .get_or_init(|| {
             Arc::new(FederationProcessImage::capture(
@@ -173,7 +179,7 @@ fn capture_federation_process_image() -> Arc<FederationProcessImage> {
 }
 
 #[cfg(windows)]
-fn federation_image_file_identity(
+pub(crate) fn federation_image_file_identity(
     file: &fs::File,
     _: &fs::Metadata,
 ) -> std::io::Result<FederationImageFileIdentity> {
@@ -194,7 +200,7 @@ fn federation_image_file_identity(
 }
 
 #[cfg(unix)]
-fn federation_image_file_identity(
+pub(crate) fn federation_image_file_identity(
     _: &fs::File,
     metadata: &fs::Metadata,
 ) -> std::io::Result<FederationImageFileIdentity> {
@@ -206,7 +212,7 @@ fn federation_image_file_identity(
 }
 
 #[cfg(not(any(unix, windows)))]
-fn federation_image_file_identity(
+pub(crate) fn federation_image_file_identity(
     _: &fs::File,
     _: &fs::Metadata,
 ) -> std::io::Result<FederationImageFileIdentity> {

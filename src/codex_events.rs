@@ -48,13 +48,15 @@
 // `src/session_interaction.rs` define the record-mutation pattern the
 // recorders use.
 
+use super::*;
+
 /// Entry point for every inbound shared-app-server line. Splits JSON-RPC
 /// responses (routed to the pending-request map) from method-bearing
 /// messages, registers the session lazily if unseen, auto-rejects server
 /// requests for unknown or runtime-mismatched sessions, resets stale
 /// recorder/turn state when `turn/started` carries a fresh turn id, and
 /// dispatches to the request or notification handler.
-fn shared_codex_trace_enabled() -> bool {
+pub(crate) fn shared_codex_trace_enabled() -> bool {
     std::env::var("TERMAL_SHARED_CODEX_TRACE").is_ok_and(|value| {
         matches!(
             value.to_ascii_lowercase().as_str(),
@@ -63,7 +65,7 @@ fn shared_codex_trace_enabled() -> bool {
     })
 }
 
-fn trace_shared_codex_event(
+pub(crate) fn trace_shared_codex_event(
     context: &str,
     method: &str,
     session_id: Option<&str>,
@@ -112,7 +114,7 @@ fn cancel_shared_codex_turn_started_watchdog(
     }
 }
 
-fn try_auto_respond_delegation_control_plane_request(
+pub(crate) fn try_auto_respond_delegation_control_plane_request(
     method: &str,
     message: &Value,
     state: &AppState,
@@ -155,14 +157,14 @@ fn try_auto_respond_delegation_control_plane_request(
     Ok(true)
 }
 
-fn codex_approval_ownership_held(record: &SessionRecord) -> bool {
+pub(crate) fn codex_approval_ownership_held(record: &SessionRecord) -> bool {
     record.runtime_stop_in_progress || record.codex_terminal_identity_unresolved
 }
 
 /// Answers ordinary approvals and explicitly tagged routine MCP permissions
 /// under the current host policy. Genuine input remains interactive. Keep the
 /// policy/delegation/Stop decision and response handoff under one state lock.
-fn try_auto_respond_codex_approval_request(
+pub(crate) fn try_auto_respond_codex_approval_request(
     method: &str,
     message: &Value,
     state: &AppState,
@@ -271,7 +273,7 @@ fn try_auto_respond_codex_approval_request(
     Ok(true)
 }
 
-fn handle_shared_codex_app_server_message(
+pub(crate) fn handle_shared_codex_app_server_message(
     message: &Value,
     state: &AppState,
     runtime_id: &str,
@@ -493,9 +495,13 @@ fn handle_shared_codex_app_server_message(
     }
 
     if method == "mcpServer/startupStatus/updated" {
-        if message.pointer("/params/name").and_then(Value::as_str) == Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
-            && message.pointer("/params/status").and_then(Value::as_str) == Some("failed") {
-            let mut shared = sessions.lock().expect("shared Codex session mutex poisoned");
+        if message.pointer("/params/name").and_then(Value::as_str)
+            == Some(TERMAL_DELEGATION_MCP_SERVER_NAME)
+            && message.pointer("/params/status").and_then(Value::as_str) == Some("failed")
+        {
+            let mut shared = sessions
+                .lock()
+                .expect("shared Codex session mutex poisoned");
             let s = shared.entry(session_id.clone()).or_default();
             if s.thread_id
                 .as_deref()
@@ -525,7 +531,8 @@ fn handle_shared_codex_app_server_message(
     // entry so early events from Codex are not dropped.
     let session_state = shared_sessions.entry(session_id.clone()).or_default();
     if method == "turn/started"
-        && !state.provider_capacity_event_is_current(&session_id, session_state.active_turn_generation)
+        && !state
+            .provider_capacity_event_is_current(&session_id, session_state.active_turn_generation)
     {
         return Ok(());
     }
@@ -651,11 +658,17 @@ fn handle_shared_codex_app_server_message(
         *completed_turn_id = None;
         *turn_started = false;
     }
-    recorder_state.native_tool_provenance = (matches!(method, "item/started" | "item/completed") && *turn_started
-        && !*turn_id_provisional && event_turn_id.is_some() && event_turn_id == turn_id.as_deref())
-        .then_some(*active_turn_generation).flatten().map(|turn_generation| EngramObservationProvenance::Runtime {
-            token: runtime_token.clone(), turn_generation,
-        });
+    recorder_state.native_tool_provenance = (matches!(method, "item/started" | "item/completed")
+        && *turn_started
+        && !*turn_id_provisional
+        && event_turn_id.is_some()
+        && event_turn_id == turn_id.as_deref())
+    .then_some(*active_turn_generation)
+    .flatten()
+    .map(|turn_generation| EngramObservationProvenance::Runtime {
+        token: runtime_token.clone(),
+        turn_generation,
+    });
     let mut recorder = BorrowedSessionRecorder::new(state, &session_id, recorder_state);
     trace_shared_codex_event(
         "route",
@@ -753,7 +766,7 @@ fn handle_shared_codex_app_server_message(
 /// `shared_codex_app_server_event_matches_active_turn` guard, and drops
 /// uninteresting realtime/token-usage notifications that TermAl does
 /// not surface.
-fn handle_shared_codex_app_server_notification(
+pub(crate) fn handle_shared_codex_app_server_notification(
     method: &str,
     message: &Value,
     state: &AppState,
@@ -944,9 +957,12 @@ fn handle_shared_codex_app_server_notification(
                 if !error.is_null() {
                     let typed_capacity = is_typed_provider_capacity(error);
                     if typed_capacity
-                        && (!state.provider_capacity_event_is_current(session_id, runtime_generation)
+                        && (!state
+                            .provider_capacity_event_is_current(session_id, runtime_generation)
                             || state.provider_capacity_failure_already_scheduled(
-                                session_id, runtime_token, runtime_generation,
+                                session_id,
+                                runtime_token,
+                                runtime_generation,
                             ))
                     {
                         return Ok(());
@@ -1048,18 +1064,28 @@ fn handle_shared_codex_app_server_notification(
                     turn_state.remote_compaction_progressed = true;
                 }
                 handle_codex_app_server_item_started(item, recorder)?;
-                if let (Some(key), Some(event_turn)) = (item.get("id").and_then(Value::as_str), event_turn_id)
+                if let (Some(key), Some(event_turn)) =
+                    (item.get("id").and_then(Value::as_str), event_turn_id)
                     && item.get("type").and_then(Value::as_str) == Some("commandExecution")
-                    && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
+                    && message.pointer("/params/threadId").and_then(Value::as_str)
+                        == session_thread_id.as_deref()
                     && turn_id.as_deref() == Some(event_turn)
                     && turn_state.launcher_output.len() < ENGRAM_TURN_CHECK_LIMIT
                     && let Some(output) = state.capture_codex_launcher_output(
-                        session_id, runtime_token, runtime_generation, key)
+                        session_id,
+                        runtime_token,
+                        runtime_generation,
+                        key,
+                    )
                 {
                     match turn_state.launcher_output.entry(key.to_owned()) {
-                        std::collections::hash_map::Entry::Vacant(entry) => { entry.insert(output); }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(output);
+                        }
                         std::collections::hash_map::Entry::Occupied(mut entry) => {
-                            if !entry.get().same_start(&output.check) { entry.get_mut().invalid = true; }
+                            if !entry.get().same_start(&output.check) {
+                                entry.get_mut().invalid = true;
+                            }
                         }
                     }
                 }
@@ -1067,15 +1093,23 @@ fn handle_shared_codex_app_server_notification(
         }
         "item/commandExecution/outputDelta" => {
             if *turn_started
-                && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
+                && message.pointer("/params/threadId").and_then(Value::as_str)
+                    == session_thread_id.as_deref()
                 && turn_id.is_some()
                 && shared_codex_event_turn_id(message) == turn_id.as_deref()
                 && let (Some(key), Some(delta)) = (
                     message.pointer("/params/itemId").and_then(Value::as_str),
-                    message.pointer("/params/delta").and_then(Value::as_str))
+                    message.pointer("/params/delta").and_then(Value::as_str),
+                )
                 && let Some(output) = turn_state.launcher_output.get_mut(key)
             {
-                state.observe_codex_launcher_output(session_id, runtime_token, runtime_generation, output, delta);
+                state.observe_codex_launcher_output(
+                    session_id,
+                    runtime_token,
+                    runtime_generation,
+                    output,
+                    delta,
+                );
             }
         }
         "item/completed" => {
@@ -1084,8 +1118,10 @@ fn handle_shared_codex_app_server_notification(
             };
             if let Some(key) = item.get("id").and_then(Value::as_str)
                 && item.get("type").and_then(Value::as_str) == Some("commandExecution")
-                && message.pointer("/params/threadId").and_then(Value::as_str) == session_thread_id.as_deref()
-                && turn_id.is_some() && shared_codex_event_turn_id(message) == turn_id.as_deref()
+                && message.pointer("/params/threadId").and_then(Value::as_str)
+                    == session_thread_id.as_deref()
+                && turn_id.is_some()
+                && shared_codex_event_turn_id(message) == turn_id.as_deref()
                 && EngramHost::codex_command_exit(item) != EngramCommandExit::NotFinished
             {
                 turn_state.launcher_output.remove(key);
@@ -1256,9 +1292,13 @@ fn handle_shared_codex_app_server_notification(
             if typed_capacity
                 && (!state.provider_capacity_event_is_current(session_id, runtime_generation)
                     || state.provider_capacity_failure_already_scheduled(
-                        session_id, runtime_token, runtime_generation,
+                        session_id,
+                        runtime_token,
+                        runtime_generation,
                     )
-                    || (turn_id.is_some() && event_turn_id.is_some() && event_turn_id != turn_id.as_deref()))
+                    || (turn_id.is_some()
+                        && event_turn_id.is_some()
+                        && event_turn_id != turn_id.as_deref()))
             {
                 return Ok(());
             }
@@ -1280,9 +1320,13 @@ fn handle_shared_codex_app_server_notification(
                 recorder.reset_turn_state()?;
                 *terminal_effect = Some(SharedCodexTerminalOutcome::Failed {
                     usage_limit_refusal: error.get("codexErrorInfo").and_then(Value::as_str)
-                        == Some("usageLimitExceeded") && !codex_error_will_retry(payload),
-                    error: error.clone(), detail, confirmed_terminal,
-                    accept_delivery: false, compacted,
+                        == Some("usageLimitExceeded")
+                        && !codex_error_will_retry(payload),
+                    error: error.clone(),
+                    detail,
+                    confirmed_terminal,
+                    accept_delivery: false,
+                    compacted,
                 });
             }
         }
@@ -1458,7 +1502,7 @@ fn handle_shared_codex_task_complete(
 /// Only an end on the session's own thread, of an item with an id, that
 /// ended, is handed over: a command keyed by its line names no one run.
 /// Returns whether it was taken.
-fn take_shared_codex_late_command_end(
+pub(crate) fn take_shared_codex_late_command_end(
     state: &AppState,
     session_id: &str,
     session_thread_id: Option<&str>,
@@ -1499,7 +1543,7 @@ fn take_shared_codex_late_command_end(
 /// Extracts the turn id from a Codex event by probing the several
 /// pointer locations Codex uses across protocol versions (`msg.turn_id`,
 /// `turnId`, `turn_id`, `id`, `turn.id`).
-fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
+pub(crate) fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
     message
         .pointer("/params/msg/turn_id")
         .and_then(Value::as_str)
@@ -1513,7 +1557,7 @@ fn shared_codex_event_turn_id<'a>(message: &'a Value) -> Option<&'a str> {
 /// turn. Events without a turn id ride along with the active turn;
 /// events with a turn id must match exactly. Used to drop stale events
 /// that Codex sometimes emits after a turn has ended.
-fn shared_codex_event_matches_active_turn(
+pub(crate) fn shared_codex_event_matches_active_turn(
     current_turn_id: Option<&str>,
     event_turn_id: Option<&str>,
 ) -> bool {
@@ -1527,7 +1571,7 @@ fn shared_codex_event_matches_active_turn(
 
 /// Matches shared Codex final-output events against either the active turn or
 /// the most recently completed turn.
-fn shared_codex_event_matches_visible_turn(
+pub(crate) fn shared_codex_event_matches_visible_turn(
     current_turn_id: Option<&str>,
     completed_turn_id: Option<&str>,
     event_turn_id: Option<&str>,
@@ -1546,7 +1590,7 @@ fn shared_codex_event_matches_visible_turn(
 /// method-bearing app-server traffic: events without a turn id are
 /// accepted only once `turn/started` has already arrived, preventing
 /// events from leaking in before the turn is officially open.
-fn shared_codex_app_server_event_matches_active_turn(
+pub(crate) fn shared_codex_app_server_event_matches_active_turn(
     current_turn_id: Option<&str>,
     turn_started: bool,
     event_turn_id: Option<&str>,
@@ -1665,7 +1709,7 @@ fn handle_shared_codex_thread_compacted(
 /// already matches, so a client that missed a suffix can repair it.
 /// Finalizes any prior streaming text
 /// when switching to a new `item_id`.
-fn record_completed_codex_agent_message(
+pub(crate) fn record_completed_codex_agent_message(
     turn_state: &mut CodexTurnState,
     recorder: &mut impl TurnRecorder,
     state: &AppState,
@@ -1719,7 +1763,7 @@ fn record_completed_codex_agent_message(
 /// (agent message or command execution). Accepts events from either
 /// the active turn or the most recently completed turn so late-arriving
 /// finalizations still land correctly.
-fn handle_shared_codex_event_item_completed(
+pub(crate) fn handle_shared_codex_event_item_completed(
     message: &Value,
     _state: &AppState,
     _session_id: &str,

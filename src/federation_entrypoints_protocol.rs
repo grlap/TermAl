@@ -1,34 +1,36 @@
 // Central placement and authenticated satellite binding command vocabulary.
 // The native token is a recreation fence, never an agent or proxy identity.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationBindingInstallIntent {
-    operation_key: String,
-    native_creation_id: String,
-    binding: FederationMailboxBinding,
-    admission_key: String,
-    execution_basis: String,
-    peer_enrollment_generation: u64,
-    peer_verification_basis: String,
-    configuration_basis: String,
+pub(crate) struct FederationBindingInstallIntent {
+    pub(crate) operation_key: String,
+    pub(crate) native_creation_id: String,
+    pub(crate) binding: FederationMailboxBinding,
+    pub(crate) admission_key: String,
+    pub(crate) execution_basis: String,
+    pub(crate) peer_enrollment_generation: u64,
+    pub(crate) peer_verification_basis: String,
+    pub(crate) configuration_basis: String,
 }
 
 #[derive(Clone)]
-struct FederationNativeBindingFence {
-    binding: FederationMailboxBinding,
-    native_creation_id: String,
-    automatic: bool,
+pub(crate) struct FederationNativeBindingFence {
+    pub(crate) binding: FederationMailboxBinding,
+    pub(crate) native_creation_id: String,
+    pub(crate) automatic: bool,
 }
 
 #[derive(Clone)]
-struct FederationBindingsFence {
-    image: Value,
-    sessions: Vec<FederationNativeBindingFence>,
+pub(crate) struct FederationBindingsFence {
+    pub(crate) image: Value,
+    pub(crate) sessions: Vec<FederationNativeBindingFence>,
 }
 
 impl FederationBindingsFence {
-    fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
+    pub(crate) fn is_already_durable(&self, connection: &rusqlite::Connection) -> Result<bool> {
         if !federation_committed_image_matches(connection, &self.image)? {
             return Ok(false);
         }
@@ -46,8 +48,11 @@ impl FederationBindingsFence {
             let actual: PersistedSessionRecord = serde_json::from_str(&stored)?;
             if actual.session.id != expected.binding.identity.session_id
                 || actual.federation_native_creation_id != expected.native_creation_id
-                || (if expected.automatic { actual.federation_automatic_mailbox_binding.as_ref() }
-                    else { actual.federation_mailbox_binding.as_ref() }) != Some(&expected.binding)
+                || (if expected.automatic {
+                    actual.federation_automatic_mailbox_binding.as_ref()
+                } else {
+                    actual.federation_mailbox_binding.as_ref()
+                }) != Some(&expected.binding)
             {
                 return Ok(false);
             }
@@ -56,7 +61,7 @@ impl FederationBindingsFence {
     }
 }
 
-fn federation_validate_binding_install(
+pub(crate) fn federation_validate_binding_install(
     binding: &FederationMailboxBinding,
     native_creation_id: &str,
     operation_key: &str,
@@ -72,7 +77,7 @@ fn federation_validate_binding_install(
 }
 
 impl FederationBindingInstallIntent {
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         validate_federation_reference(&self.admission_key)?;
         if self.peer_enrollment_generation == 0
             || self.execution_basis != self.peer_verification_basis
@@ -91,7 +96,7 @@ impl FederationBindingInstallIntent {
         )
     }
 
-    fn ensure_authority(
+    pub(crate) fn ensure_authority(
         &self,
         domain: &FederationState,
         current: &FederationPeerSnapshot,
@@ -108,7 +113,8 @@ impl FederationBindingInstallIntent {
             || self.binding.identity.host_id != current.peer.host_id
             || self.execution_basis != placement.execution_basis
             || self.peer_enrollment_generation != current.enrollment_generation
-            || (!placement.mailbox_only && self.peer_verification_basis != peer.verification_basis())
+            || (!placement.mailbox_only
+                && self.peer_verification_basis != peer.verification_basis())
             || self.configuration_basis != current.configuration_basis()
             || placement.state == FederationPlacementState::Completed
         {
@@ -121,7 +127,7 @@ impl FederationBindingInstallIntent {
 impl FederationPeerSnapshot {
     // Material central authority, shared by report and retained-intent checks.
     // Link and mutation sequence numbers deliberately do not enter this image.
-    fn configuration_basis(&self) -> String {
+    pub(crate) fn configuration_basis(&self) -> String {
         sha256_hex(
             &serde_json::to_vec(&json!({
                 "local": self.local, "role": self.local_role, "central": self.central,
@@ -135,7 +141,9 @@ impl FederationPeerSnapshot {
 impl AppState {
     // Entry-point mutations never fall back to synchronous disk I/O while a
     // link/state lock is held. A stopped writer leaves an explicit hold.
-    fn queue_federation_entrypoint_persistence(&self) -> Result<PersistDispatch, ApiError> {
+    pub(crate) fn queue_federation_entrypoint_persistence(
+        &self,
+    ) -> Result<PersistDispatch, ApiError> {
         self.persist_tx.send(PersistRequest::Delta).map_err(|_| {
             ApiError::internal("federation persistence unavailable; admission remains held")
         })?;
@@ -150,7 +158,7 @@ impl AppState {
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
-enum FederationBindingCommand {
+pub(crate) enum FederationBindingCommand {
     Prepare {
         native_session_id: String,
     },
@@ -163,32 +171,32 @@ enum FederationBindingCommand {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationBindingPreparation {
-    host: FederationHostIdentity,
-    central: FederationHostIdentity,
-    native_session_id: String,
-    native_creation_id: String,
-    link_incarnation: String,
+pub(crate) struct FederationBindingPreparation {
+    pub(crate) host: FederationHostIdentity,
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) native_session_id: String,
+    pub(crate) native_creation_id: String,
+    pub(crate) link_incarnation: String,
 }
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationBindingInstalled {
-    operation_key: String,
-    native_creation_id: String,
-    binding: FederationMailboxBinding,
-    participant: FederationMailboxParticipant,
+pub(crate) struct FederationBindingInstalled {
+    pub(crate) operation_key: String,
+    pub(crate) native_creation_id: String,
+    pub(crate) binding: FederationMailboxBinding,
+    pub(crate) participant: FederationMailboxParticipant,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationPlacementRequest {
-    native_session_id: String,
-    admission_key: String,
+pub(crate) struct FederationPlacementRequest {
+    pub(crate) native_session_id: String,
+    pub(crate) admission_key: String,
 }
 
 // Called beside a mutation, with the current peer and link from that same cut.
-fn federation_entrypoint_verified(
+pub(crate) fn federation_entrypoint_verified(
     domain: &FederationState,
     settings: &FederationSettings,
     current: &FederationPeerSnapshot,
@@ -223,7 +231,7 @@ fn federation_entrypoint_verified(
     Ok(())
 }
 
-fn federation_entrypoint_peer(
+pub(crate) fn federation_entrypoint_peer(
     app: &AppState,
     id: &str,
 ) -> Result<Arc<FederationPeerHandle>, ApiError> {
@@ -237,14 +245,14 @@ fn federation_entrypoint_peer(
         .ok_or_else(|| ApiError::conflict(FEDERATION_STALE_AUTHORITY))
 }
 
-fn federation_binding_unknown_outcome() -> ApiError {
+pub(crate) fn federation_binding_unknown_outcome() -> ApiError {
     ApiError::from_status(
         StatusCode::SERVICE_UNAVAILABLE,
         "binding command outcome unresolved; retry original operation",
     )
 }
 
-fn federation_binding_rpc_error(status: StatusCode) -> ApiError {
+pub(crate) fn federation_binding_rpc_error(status: StatusCode) -> ApiError {
     match status {
         StatusCode::BAD_REQUEST => ApiError::bad_request("native mailbox root is ineligible"),
         StatusCode::NOT_FOUND => ApiError::not_found("session not found"),

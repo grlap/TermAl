@@ -1,13 +1,15 @@
 // Encoded HTTP/SSE output has one safety budget. Domain data and transcript
 // retention remain owned by their existing producers.
-const MAX_ENCODED_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+
+use super::*;
+pub(crate) const MAX_ENCODED_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
 #[cfg(test)]
 thread_local! {
     static TEST_OUTPUT_BUDGET: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_ENCODED_OUTPUT_BYTES) };
 }
 
-fn output_budget_bytes() -> usize {
+pub(crate) fn output_budget_bytes() -> usize {
     #[cfg(test)]
     {
         TEST_OUTPUT_BUDGET.with(std::cell::Cell::get)
@@ -19,10 +21,10 @@ fn output_budget_bytes() -> usize {
 }
 
 #[cfg(test)]
-struct TestOutputBudget(usize);
+pub(crate) struct TestOutputBudget(pub(crate) usize);
 #[cfg(test)]
 impl TestOutputBudget {
-    fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         Self(TEST_OUTPUT_BUDGET.with(|value| value.replace(limit)))
     }
 }
@@ -34,7 +36,7 @@ impl Drop for TestOutputBudget {
 }
 
 #[derive(Debug)]
-enum OutputEncodingError {
+pub(crate) enum OutputEncodingError {
     Limit {
         limit: usize,
         attempted_at_least: usize,
@@ -98,7 +100,7 @@ impl Write for BoundedOutput {
     }
 }
 
-fn encode_json_bounded<T: Serialize + ?Sized>(
+pub(crate) fn encode_json_bounded<T: Serialize + ?Sized>(
     value: &T,
     limit: usize,
 ) -> Result<Vec<u8>, OutputEncodingError> {
@@ -114,14 +116,14 @@ fn encode_json_bounded<T: Serialize + ?Sized>(
     Ok(writer.bytes)
 }
 
-fn encode_sse_json<T: Serialize + ?Sized>(
+pub(crate) fn encode_sse_json<T: Serialize + ?Sized>(
     event: &'static str,
     value: &T,
 ) -> Result<String, OutputEncodingError> {
     encode_sse_json_with_limit(event, value, output_budget_bytes())
 }
 
-fn encode_sse_json_with_limit<T: Serialize + ?Sized>(
+pub(crate) fn encode_sse_json_with_limit<T: Serialize + ?Sized>(
     event: &'static str,
     value: &T,
     limit: usize,
@@ -153,11 +155,14 @@ fn encode_sse_json_with_limit<T: Serialize + ?Sized>(
     Ok(String::from_utf8(bytes).expect("JSON is UTF-8"))
 }
 
-fn output_encoding_api_error(error: OutputEncodingError, producer: &'static str) -> ApiError {
+pub(crate) fn output_encoding_api_error(
+    error: OutputEncodingError,
+    producer: &'static str,
+) -> ApiError {
     output_encoding_api_error_at(error, producer, None, None)
 }
 
-fn output_encoding_api_error_at(
+pub(crate) fn output_encoding_api_error_at(
     error: OutputEncodingError,
     producer: &'static str,
     revision: Option<u64>,
@@ -177,7 +182,7 @@ fn output_encoding_api_error_at(
     }
 }
 
-fn output_limit_sse_event() -> Event {
+pub(crate) fn output_limit_sse_event() -> Event {
     Event::default().event("outputLimit").data(format!(
         "{{\"code\":\"output_limit_exceeded\",\"limitBytes\":{},\"phase\":\"response_encoding\"}}",
         output_budget_bytes()
@@ -186,7 +191,7 @@ fn output_limit_sse_event() -> Event {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum ResponseMutationOutcome {
+pub(crate) enum ResponseMutationOutcome {
     Committed,
     Accepted,
     Unknown,
@@ -194,13 +199,13 @@ enum ResponseMutationOutcome {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct OutputLimitResponse {
-    limit: usize,
-    outcome: ResponseMutationOutcome,
+pub(crate) struct OutputLimitResponse {
+    pub(crate) limit: usize,
+    pub(crate) outcome: ResponseMutationOutcome,
 }
 
 impl OutputLimitResponse {
-    fn envelope(self) -> Value {
+    pub(crate) fn envelope(self) -> Value {
         let message = match self.outcome {
             ResponseMutationOutcome::Committed => {
                 "The operation completed, but its response exceeded the output limit. Do not repeat the operation; refresh its status."
@@ -223,7 +228,7 @@ impl OutputLimitResponse {
         })
     }
 
-    fn response(self) -> Response {
+    pub(crate) fn response(self) -> Response {
         let body = encode_json_bounded(&self.envelope(), 2048).expect("fixed output error fits");
         let mut response = (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -236,7 +241,7 @@ impl OutputLimitResponse {
     }
 }
 
-fn output_limit_details(value: &Value) -> Option<OutputLimitResponse> {
+pub(crate) fn output_limit_details(value: &Value) -> Option<OutputLimitResponse> {
     if value.get("code").and_then(Value::as_str) != Some("output_limit_exceeded") {
         return None;
     }
@@ -254,7 +259,7 @@ fn output_limit_details(value: &Value) -> Option<OutputLimitResponse> {
     Some(OutputLimitResponse { limit, outcome })
 }
 
-fn observe_output_limit(
+pub(crate) fn observe_output_limit(
     producer: &'static str,
     error: &OutputEncodingError,
     revision: Option<u64>,
@@ -299,7 +304,7 @@ fn observe_output_limit_at(
     }
 }
 
-fn json_output_response<T: Serialize + ?Sized>(
+pub(crate) fn json_output_response<T: Serialize + ?Sized>(
     value: &T,
     limit: usize,
     outcome: ResponseMutationOutcome,
@@ -325,7 +330,7 @@ fn json_output_response<T: Serialize + ?Sized>(
 // Request extraction is delegated unchanged to Axum. Only response encoding
 // differs, so existing Json(...) handler and extractor contracts stay intact.
 #[derive(Debug, Clone, Copy, Default)]
-struct Json<T>(T);
+pub(crate) struct Json<T>(pub(crate) T);
 
 impl<T, S> axum::extract::FromRequest<S> for Json<T>
 where
@@ -353,7 +358,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
     }
 }
 
-fn restore_output_failure(response: Response) -> Response {
+pub(crate) fn restore_output_failure(response: Response) -> Response {
     // The signing owner already normalized the failure. Rewriting its body
     // afterwards would invalidate the authenticated response.
     if response.headers().contains_key(FEDERATION_MAC_HEADER) {
@@ -369,7 +374,7 @@ async fn bound_finite_http_response(response: Response, read: bool) -> Response 
     bound_finite_http_response_with_limit(response, read, MAX_ENCODED_OUTPUT_BYTES).await
 }
 
-async fn bound_finite_http_response_with_limit(
+pub(crate) async fn bound_finite_http_response_with_limit(
     response: Response,
     read: bool,
     limit: usize,
@@ -459,7 +464,7 @@ async fn bound_finite_http_response_with_limit(
     Response::from_parts(parts, axum::body::Body::from(output.bytes))
 }
 
-async fn output_limit_http_guard(
+pub(crate) async fn output_limit_http_guard(
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> Response {

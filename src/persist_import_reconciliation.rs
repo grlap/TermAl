@@ -7,22 +7,24 @@
 // the coordination store, which it never touches. Open, load and ordinary
 // saves never activate it.
 
+use super::*;
+
 /// The successor of the current MAIN reader floor: the predecessor's exact
 /// inventory plus the required import-reconciliation journal field.
-const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-test-request-custody-1-import-reconciliation-1";
-const ENGRAM_IMPORT_RECONCILIATION_FIELD: &str = "engramImportReconciliation";
+pub(crate) const SQLITE_IMPORT_RECONCILIATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-test-request-custody-1-import-reconciliation-1";
+pub(crate) const ENGRAM_IMPORT_RECONCILIATION_FIELD: &str = "engramImportReconciliation";
 
 /// The authority to make the first activation. Only a real enrollment or
 /// hold intent may construct one; this child constructs it in tests alone.
 #[cfg_attr(not(test), allow(dead_code))]
-struct EngramImportActivationCapability {
+pub(crate) struct EngramImportActivationCapability {
     _private: (),
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 impl EngramImportActivationCapability {
     #[cfg(test)]
-    fn for_test() -> Self {
+    pub(crate) fn for_test() -> Self {
         Self { _private: () }
     }
 }
@@ -31,7 +33,7 @@ impl EngramImportActivationCapability {
 thread_local! {
     /// The activation phase at which a test makes activation fail, as a
     /// crash or a failed write would at that point.
-    static TEST_ENGRAM_IMPORT_ACTIVATION_FAULT: std::cell::Cell<Option<&'static str>>
+    pub(crate) static TEST_ENGRAM_IMPORT_ACTIVATION_FAULT: std::cell::Cell<Option<&'static str>>
         = const { std::cell::Cell::new(None) };
 }
 
@@ -48,7 +50,7 @@ fn engram_import_activation_fault(phase: &'static str) -> Result<()> {
 
 /// Whether the store's floor is the import-reconciliation successor. A store
 /// still initializing, with no recorded floor yet, is not.
-fn engram_import_reconciliation_floor_is_successor(
+pub(crate) fn engram_import_reconciliation_floor_is_successor(
     connection: &rusqlite::Connection,
 ) -> Result<bool> {
     let version: Option<String> = connection
@@ -73,7 +75,9 @@ fn engram_import_reconciliation_floor_is_successor(
 
 /// The successor floor's inventory: the predecessor's exact fields plus the
 /// journal's object descriptor.
-fn validate_engram_import_successor_inventory(units: &PersistMetadataUnits) -> Result<()> {
+pub(crate) fn validate_engram_import_successor_inventory(
+    units: &PersistMetadataUnits,
+) -> Result<()> {
     match units.get(&(ENGRAM_IMPORT_RECONCILIATION_FIELD.to_owned(), String::new())) {
         Some((kind, _)) if kind == "object" => {}
         Some(_) => {
@@ -92,7 +96,7 @@ fn validate_engram_import_successor_inventory(units: &PersistMetadataUnits) -> R
 }
 
 /// The current inventory of the store's own floor: predecessor or successor.
-fn validate_metadata_unit_inventory_for_store(
+pub(crate) fn validate_metadata_unit_inventory_for_store(
     connection: &rusqlite::Connection,
     units: &PersistMetadataUnits,
 ) -> Result<()> {
@@ -119,7 +123,7 @@ fn validate_metadata_unit_inventory_for_store(
 /// unit may be written; under the successor floor a capture that does not
 /// carry the journal (unchanged, or taken before activation) keeps the
 /// committed journal units, so a save never drops or downgrades them.
-fn engram_import_reconciliation_writer_floor(
+pub(crate) fn engram_import_reconciliation_writer_floor(
     connection: &rusqlite::Connection,
     previous: &PersistMetadataUnits,
     desired: &mut PersistMetadataUnits,
@@ -146,7 +150,7 @@ fn engram_import_reconciliation_writer_floor(
 }
 
 /// The journal's metadata units, one member per record.
-fn engram_import_reconciliation_units(
+pub(crate) fn engram_import_reconciliation_units(
     journal: &EngramImportReconciliationJournal,
 ) -> Result<PersistMetadataUnits> {
     let mut field = serde_json::Map::new();
@@ -158,7 +162,7 @@ fn engram_import_reconciliation_units(
 }
 
 /// Strictly decode a persisted journal field into its activated state.
-fn deserialize_engram_import_reconciliation<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_engram_import_reconciliation<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<PersistTracked<EngramImportReconciliationState>, D::Error> {
     let value = Value::deserialize(deserializer)?;
@@ -171,7 +175,7 @@ fn deserialize_engram_import_reconciliation<'de, D: serde::Deserializer<'de>>(
 /// connection: `NotActivated` on the predecessor floor, the strictly decoded
 /// journal on the successor floor.
 #[cfg_attr(not(test), allow(dead_code))]
-fn read_engram_import_reconciliation_state(
+pub(crate) fn read_engram_import_reconciliation_state(
     connection: &rusqlite::Connection,
 ) -> Result<EngramImportReconciliationState> {
     if !engram_import_reconciliation_floor_is_successor(connection)? {
@@ -204,7 +208,7 @@ fn read_engram_import_reconciliation_state(
 /// before it stay stale; pending changes stay pending, since only the
 /// durable predecessor moves.
 #[cfg_attr(not(test), allow(dead_code))]
-fn adopt_engram_import_activation_locked(
+pub(crate) fn adopt_engram_import_activation_locked(
     inner: &mut StateInner,
     journal: EngramImportReconciliationJournal,
     committed_generation: u64,
@@ -246,7 +250,7 @@ fn adopt_engram_import_activation_locked(
 /// successor and runs no effect. An already activated store refuses,
 /// unchanged.
 #[cfg_attr(not(test), allow(dead_code))]
-fn activate_engram_import_reconciliation_sqlite<R>(
+pub(crate) fn activate_engram_import_reconciliation_sqlite<R>(
     path: &FsPath,
     connection: &rusqlite::Connection,
     _capability: &EngramImportActivationCapability,

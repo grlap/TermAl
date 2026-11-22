@@ -3,7 +3,7 @@
 // owns no native reservation, registration or verification authority.
 
 impl AppState {
-    fn end_untraced_declared_observation(
+    pub(crate) fn end_untraced_declared_observation(
         &self,
         session_id: &str,
         provenance: &EngramObservationProvenance,

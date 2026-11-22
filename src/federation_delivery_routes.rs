@@ -1,17 +1,19 @@
 // Owns sender-local status, exact retry and terminal payload cleanup routes.
 // Does not route status/read/ACK to a cache or grant authority from an intent.
 // The native creation remains the local owner even while federation is held.
+
+use super::*;
 #[derive(Clone)]
-struct FederationDeliveryCapability {
-    central: FederationHostIdentity,
-    lease: Option<FederationLinkLease>,
-    supported: bool,
+pub(crate) struct FederationDeliveryCapability {
+    pub(crate) central: FederationHostIdentity,
+    pub(crate) lease: Option<FederationLinkLease>,
+    pub(crate) supported: bool,
 }
 
 impl FederationDeliveryCapability {
     // Acquired after writer/connection admission and retained through COMMIT.
     // A reply from a retired link cannot authorize a new durable sender slot.
-    fn lock<'a>(
+    pub(crate) fn lock<'a>(
         &'a self,
         app: &'a AppState,
         session: &str,
@@ -62,7 +64,7 @@ impl FederationDeliveryCapability {
 }
 
 impl AppState {
-    async fn negotiate_federation_delivery_capability(
+    pub(crate) async fn negotiate_federation_delivery_capability(
         &self,
         session: &str,
     ) -> Result<FederationDeliveryCapability, ApiError> {
@@ -85,7 +87,7 @@ impl AppState {
         })
     }
 
-    async fn refuse_unsupported_federation_delivery(
+    pub(crate) async fn refuse_unsupported_federation_delivery(
         &self,
         session: &str,
         delivery: &FederationDelivery,
@@ -110,7 +112,7 @@ impl AppState {
         })
     }
 
-    async fn dispatch_federation_delivery_operation<T: DeserializeOwned>(
+    pub(crate) async fn dispatch_federation_delivery_operation<T: DeserializeOwned>(
         &self,
         session: &str,
         operation: FederationMailboxOperation,
@@ -139,7 +141,7 @@ impl AppState {
         .map(|(value, _)| value)
     }
 
-    fn federation_intent_owner(&self, session: &str) -> Result<String, ApiError> {
+    pub(crate) fn federation_intent_owner(&self, session: &str) -> Result<String, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         if !inner.preferences.federation.enabled {
             return Err(ApiError::not_found("domain delivery intents are disabled"));
@@ -149,7 +151,7 @@ impl AppState {
             .clone())
     }
 
-    fn lock_federation_intent_owner<'a>(
+    pub(crate) fn lock_federation_intent_owner<'a>(
         &'a self,
         session: &str,
         creation: &str,
@@ -174,7 +176,7 @@ impl AppState {
         Ok(inner)
     }
 
-    async fn prepare_federation_delivery(
+    pub(crate) async fn prepare_federation_delivery(
         &self,
         session: &str,
         operation: FederationMailboxOperation,
@@ -360,7 +362,7 @@ impl AppState {
         Ok(delivery)
     }
 
-    async fn resolve_delivery_recipient(
+    pub(crate) async fn resolve_delivery_recipient(
         &self,
         session: &str,
         role: FederationRole,
@@ -428,7 +430,7 @@ impl AppState {
         )
     }
 
-    async fn send_prepared_federation_delivery(
+    pub(crate) async fn send_prepared_federation_delivery(
         &self,
         session: &str,
         delivery: FederationDelivery,
@@ -545,7 +547,7 @@ impl AppState {
         .await
     }
 
-    fn local_federation_intent(
+    pub(crate) fn local_federation_intent(
         &self,
         session: &str,
         key: &str,
@@ -567,14 +569,14 @@ impl AppState {
     }
 }
 
-fn resolve_federation_delivery_target(
+pub(crate) fn resolve_federation_delivery_target(
     rows: &[FederationMailboxParticipant],
     reference: &str,
 ) -> Result<FederationMailboxParticipant, ApiError> {
     resolve_federation_delivery_target_with_basis(rows, reference, None)
 }
 
-fn resolve_federation_delivery_target_with_basis(
+pub(crate) fn resolve_federation_delivery_target_with_basis(
     rows: &[FederationMailboxParticipant],
     reference: &str,
     basis: Option<&FederationMailboxAliasBasis>,
@@ -587,32 +589,32 @@ fn resolve_federation_delivery_target_with_basis(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PrepareFederationIntentRequest {
-    target_session_id: String,
-    message: String,
-    idempotency_key: String,
-    topic: Option<String>,
-    state_stamp: Option<String>,
-    class: Option<String>,
-    target_binding: Option<FederationMailboxBinding>,
+pub(crate) struct PrepareFederationIntentRequest {
+    pub(crate) target_session_id: String,
+    pub(crate) message: String,
+    pub(crate) idempotency_key: String,
+    pub(crate) topic: Option<String>,
+    pub(crate) state_stamp: Option<String>,
+    pub(crate) class: Option<String>,
+    pub(crate) target_binding: Option<FederationMailboxBinding>,
 }
 
 #[derive(Deserialize)]
-struct SendMailboxApiRequest {
+pub(crate) struct SendMailboxApiRequest {
     #[serde(flatten)]
-    message: SendMailboxMessageRequest,
+    pub(crate) message: SendMailboxMessageRequest,
     #[serde(
         default,
         rename = "testRequest",
         deserialize_with = "deserialize_mailbox_test_request"
     )]
-    test_request: Option<MailboxTestRequest>,
+    pub(crate) test_request: Option<MailboxTestRequest>,
     #[serde(
         default,
         rename = "targetBinding",
         deserialize_with = "reject_prepare_target_binding"
     )]
-    _target_binding: (),
+    pub(crate) _target_binding: (),
 }
 
 fn reject_prepare_target_binding<'de, D: serde::Deserializer<'de>>(
@@ -624,7 +626,7 @@ fn reject_prepare_target_binding<'de, D: serde::Deserializer<'de>>(
     ))
 }
 
-async fn prepare_federation_intent_route(
+pub(crate) async fn prepare_federation_intent_route(
     AxumPath(session): AxumPath<String>,
     State(state): State<AppState>,
     Json(request): Json<PrepareFederationIntentRequest>,
@@ -661,7 +663,7 @@ async fn prepare_federation_intent_route(
     Ok((StatusCode::ACCEPTED, Json(value)))
 }
 
-async fn get_federation_intent_route(
+pub(crate) async fn get_federation_intent_route(
     AxumPath((session, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiError> {
@@ -673,7 +675,7 @@ async fn get_federation_intent_route(
     .await
 }
 
-async fn retry_federation_intent_route(
+pub(crate) async fn retry_federation_intent_route(
     AxumPath((session, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<MailboxAppendReceipt>, ApiError> {
@@ -682,7 +684,7 @@ async fn retry_federation_intent_route(
         .map(|receipt| Json(receipt.with_receipt_note()))
 }
 
-async fn retry_retained_federation_intent(
+pub(crate) async fn retry_retained_federation_intent(
     state: AppState,
     session: String,
     key: String,
@@ -710,7 +712,7 @@ async fn retry_retained_federation_intent(
         .await
 }
 
-async fn cancel_federation_intent_route(
+pub(crate) async fn cancel_federation_intent_route(
     AxumPath((session, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiError> {
@@ -765,7 +767,7 @@ async fn cancel_federation_intent_route(
     .await
 }
 
-async fn gc_federation_intent_route(
+pub(crate) async fn gc_federation_intent_route(
     AxumPath((session, key)): AxumPath<(String, String)>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiError> {

@@ -34,10 +34,12 @@
 // them callable from `#[cfg(test)]` code without a `#[cfg(test)]`
 // gate here lets the shared helper stay one definition.
 
+use super::*;
+
 /// Returns the privacy-safe default label for a session id. Keeping this
 /// contract next to `create_session` lets startup import/migration paths reuse
 /// the exact same label instead of reconstructing `{agent} {number}`.
-fn generated_session_name(agent: Agent, session_id: &str) -> String {
+pub(crate) fn generated_session_name(agent: Agent, session_id: &str) -> String {
     session_id
         .strip_prefix("session-")
         .filter(|suffix| {
@@ -53,7 +55,7 @@ impl StateInner {
     /// `session_crud.rs` handles remote proxying, workdir
     /// normalization, idempotence checks, and broadcast; this helper
     /// is the under-lock critical-section.
-    fn create_project(
+    pub(crate) fn create_project(
         &mut self,
         name: Option<String>,
         root_path: String,
@@ -100,7 +102,7 @@ impl StateInner {
     /// readiness cache, and broadcasts. This helper is the under-
     /// lock critical-section that actually builds the record +
     /// appends it.
-    fn create_session(
+    pub(crate) fn create_session(
         &mut self,
         agent: Agent,
         name: Option<String>,
@@ -298,7 +300,7 @@ impl StateInner {
     ///
     /// `session_mut_by_index` eagerly bumps the mutation stamp, so this repair
     /// only calls it after deciding the row must change.
-    fn repair_delegation_child_session_links(&mut self) {
+    pub(crate) fn repair_delegation_child_session_links(&mut self) {
         let links = self
             .delegations
             .iter()
@@ -308,8 +310,10 @@ impl StateInner {
         self.repair_delegation_child_session_links_with(links);
     }
 
-    fn repair_delegation_child_session_links_with(&mut self, mut links: BTreeMap<String, String>) {
-
+    pub(crate) fn repair_delegation_child_session_links_with(
+        &mut self,
+        mut links: BTreeMap<String, String>,
+    ) {
         for record in &self.sessions {
             if links.contains_key(&record.session.id) {
                 continue;
@@ -357,7 +361,7 @@ impl StateInner {
     /// Adds a Codex `threadId` to the user's ignore list so it is
     /// skipped on subsequent startup discovery scans (see
     /// `state_boot.rs::import_discovered_codex_threads`).
-    fn ignore_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
+    pub(crate) fn ignore_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
         if let Some(thread_id) = normalize_optional_identifier(thread_id) {
             self.ignored_discovered_codex_thread_ids
                 .insert(thread_id.to_owned());
@@ -366,14 +370,14 @@ impl StateInner {
 
     /// Removes a Codex `threadId` from the ignore list so the next
     /// discovery scan re-imports it as a resumeable session.
-    fn allow_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
+    pub(crate) fn allow_discovered_codex_thread(&mut self, thread_id: Option<&str>) {
         if let Some(thread_id) = normalize_optional_identifier(thread_id) {
             self.ignored_discovered_codex_thread_ids.remove(thread_id);
         }
     }
 
     /// Returns the next message ID.
-    fn next_message_id(&mut self) -> String {
+    pub(crate) fn next_message_id(&mut self) -> String {
         let id = format!("message-{}", self.next_message_number);
         self.next_message_number = self
             .next_message_number
@@ -390,27 +394,32 @@ impl StateInner {
     /// exact subset of sessions that changed since the last successful
     /// persist, so a `commit_locked` on one session no longer re-
     /// serializes every other session row.
-    fn next_mutation_stamp(&mut self) -> u64 {
+    pub(crate) fn next_mutation_stamp(&mut self) -> u64 {
         self.last_mutation_stamp = self.last_mutation_stamp.saturating_add(1);
         self.last_mutation_stamp
     }
 
-    fn mark_delegation_mutated(&mut self, delegation_index: usize) -> Option<u64> {
+    pub(crate) fn mark_delegation_mutated(&mut self, delegation_index: usize) -> Option<u64> {
         let record = self.delegations.get(delegation_index)?;
         let delegation_id = record.id.clone();
-        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned")
+        self.delegation_catalog_children
+            .get_mut()
+            .expect("catalog child index poisoned")
             .observe(&delegation_id, &record.child_session_id, delegation_index);
         Some(self.mark_delegation_id_mutated(delegation_id))
     }
 
-    fn mark_delegation_id_mutated(&mut self, delegation_id: String) -> u64 {
+    pub(crate) fn mark_delegation_id_mutated(&mut self, delegation_id: String) -> u64 {
         let stamp = self.next_mutation_stamp();
         self.delegation_mutation_stamps.insert(delegation_id, stamp);
         stamp
     }
 
-    fn record_removed_delegation(&mut self, delegation_id: String) {
-        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned").remove(&delegation_id);
+    pub(crate) fn record_removed_delegation(&mut self, delegation_id: String) {
+        self.delegation_catalog_children
+            .get_mut()
+            .expect("catalog child index poisoned")
+            .remove(&delegation_id);
         let stamp = self.next_mutation_stamp();
         self.delegation_mutation_stamps.remove(&delegation_id);
         self.review_packet_retention_failures
@@ -418,7 +427,10 @@ impl StateInner {
         self.removed_delegation_ids.insert(delegation_id, stamp);
     }
 
-    fn restore_drained_delegation_tombstones(&mut self, tombstones: &BTreeMap<String, u64>) {
+    pub(crate) fn restore_drained_delegation_tombstones(
+        &mut self,
+        tombstones: &BTreeMap<String, u64>,
+    ) {
         for (delegation_id, stamp) in tombstones {
             self.removed_delegation_ids
                 .entry(delegation_id.clone())
@@ -428,9 +440,12 @@ impl StateInner {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    fn remove_delegation_at(&mut self, index: usize) -> DelegationRecord {
+    pub(crate) fn remove_delegation_at(&mut self, index: usize) -> DelegationRecord {
         let record = self.delegations.remove(index);
-        self.delegation_catalog_children.get_mut().expect("catalog child index poisoned").removed_at(index);
+        self.delegation_catalog_children
+            .get_mut()
+            .expect("catalog child index poisoned")
+            .removed_at(index);
         self.record_removed_delegation(record.id.clone());
         self.rebuild_running_read_only_delegations();
         record
@@ -446,7 +461,7 @@ impl StateInner {
     /// then re-stamps the slot so the SQLite
     /// delta persist picks up the row. Returns the assigned stamp,
     /// or `None` if the index is out of bounds.
-    fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {
+    pub(crate) fn stamp_session_at_index(&mut self, index: usize) -> Option<u64> {
         // Bounds check before the stamp so an OOB miss does not burn a
         // mutation stamp with no record to attach it to. Advancing
         // `last_mutation_stamp` without a matching record would grow the
@@ -470,7 +485,7 @@ impl StateInner {
     /// [`StateInner::session_mut_by_index`] after an explicit
     /// `find_session_index` to make the visibility filter explicit.
     #[cfg_attr(not(test), allow(dead_code))]
-    fn session_mut(&mut self, session_id: &str) -> Option<&mut SessionRecord> {
+    pub(crate) fn session_mut(&mut self, session_id: &str) -> Option<&mut SessionRecord> {
         let index = self.find_session_index(session_id)?;
         let stamp = self.next_mutation_stamp();
         let record = self.sessions.get_mut(index)?;
@@ -494,7 +509,7 @@ impl StateInner {
     /// after the read should re-borrow via `session_mut_by_index`
     /// to pick up a fresh stamp.
     #[cfg_attr(test, allow(dead_code))]
-    fn session_by_index(&self, index: usize) -> Option<&SessionRecord> {
+    pub(crate) fn session_by_index(&self, index: usize) -> Option<&SessionRecord> {
         self.sessions.get(index)
     }
 
@@ -504,7 +519,7 @@ impl StateInner {
     /// `find_session_index` / `find_visible_session_index` where
     /// possible — the `None` return exists to keep the helper sound on
     /// stale indices, not to make "guess the index" patterns ergonomic.
-    fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
+    pub(crate) fn session_mut_by_index(&mut self, index: usize) -> Option<&mut SessionRecord> {
         // Bounds check before the stamp — see `stamp_session_at_index`
         // for the rationale. The by-id `session_mut` is already safe
         // because `find_session_index` short-circuits on miss before
@@ -522,7 +537,7 @@ impl StateInner {
     /// the last persist tick. Drained by the persist thread and applied
     /// as targeted `DELETE` statements so removed rows do not linger in
     /// SQLite after the move to delta persistence.
-    fn record_removed_session(&mut self, session_id: String) {
+    pub(crate) fn record_removed_session(&mut self, session_id: String) {
         if !session_id.is_empty() {
             let retired_bindings = self
                 .engram_work_source_roots
@@ -557,7 +572,11 @@ impl StateInner {
                         // A retired run's journal was settled with it and
                         // stays settled (engram_retained_run_settlement.rs).
                         if !journal.read_binding.as_ref().is_some_and(|binding| {
-                            engram_run_retired(&self.engram_work_naming_history, &journal.store, binding)
+                            engram_run_retired(
+                                &self.engram_work_naming_history,
+                                &journal.store,
+                                binding,
+                            )
                         }) {
                             journal.retire(EngramRootRetirement::NamingSessionRemoved);
                         }
@@ -579,7 +598,7 @@ impl StateInner {
     ///
     /// Hidden-session deletes are synthesized from still-hidden records on each
     /// collection pass, so they must not be restored into this explicit queue.
-    fn restore_drained_explicit_tombstones(&mut self, session_ids: &[String]) {
+    pub(crate) fn restore_drained_explicit_tombstones(&mut self, session_ids: &[String]) {
         let mut known_removed_ids: HashSet<&str> = self
             .removed_session_ids
             .iter()
@@ -598,7 +617,7 @@ impl StateInner {
     /// Inserts a new session record, stamping it so the persist thread
     /// picks it up on its next tick. Returns the index at which the
     /// record was inserted (end of the `sessions` vec).
-    fn push_session(&mut self, mut record: SessionRecord) -> usize {
+    pub(crate) fn push_session(&mut self, mut record: SessionRecord) -> usize {
         let stamp = self.next_mutation_stamp();
         record.mutation_stamp = stamp;
         if record.prompt_history_mutation_stamp == 0 && !record.session.prompt_history.is_empty() {
@@ -614,7 +633,7 @@ impl StateInner {
     /// underlying `Vec::remove` it wraps.
     /// Returns `None` when source tracking defers removal; the original session
     /// and affected subtree remain visible for explicit tracking recovery.
-    fn remove_session_at(&mut self, index: usize) -> Option<SessionRecord> {
+    pub(crate) fn remove_session_at(&mut self, index: usize) -> Option<SessionRecord> {
         let session_id = self.sessions[index].session.id.clone();
         if self.defer_source_observation_removal(&session_id) {
             return None;
@@ -632,7 +651,7 @@ impl StateInner {
     /// as a tombstone. The predicate is called once per record.
     /// Requested removals with unfinished source tracking keep their affected
     /// subtree visible for recovery and create no tombstones for those rows.
-    fn retain_sessions<F>(&mut self, mut keep: F)
+    pub(crate) fn retain_sessions<F>(&mut self, mut keep: F)
     where
         F: FnMut(&SessionRecord) -> bool,
     {
@@ -692,12 +711,20 @@ impl StateInner {
     /// Tests also use this selection boundary directly to verify that
     /// concurrent mutations are deferred rather than mixed across revisions.
     #[cfg_attr(test, allow(dead_code))]
-    fn collect_persist_delta_plan(&mut self, watermark: u64) -> PersistDeltaPlan {
+    pub(crate) fn collect_persist_delta_plan(&mut self, watermark: u64) -> PersistDeltaPlan {
         self.retain_hidden_source_observation_sessions();
         let mut changed_sessions = Vec::new();
         let complete = self.delegation_inventory_complete();
-        let retry_removed_ids = if complete { std::mem::take(&mut self.removed_session_ids) } else { Vec::new() };
-        let retry_removed_delegation_ids = if complete { std::mem::take(&mut self.removed_delegation_ids) } else { BTreeMap::new() };
+        let retry_removed_ids = if complete {
+            std::mem::take(&mut self.removed_session_ids)
+        } else {
+            Vec::new()
+        };
+        let retry_removed_delegation_ids = if complete {
+            std::mem::take(&mut self.removed_delegation_ids)
+        } else {
+            BTreeMap::new()
+        };
         let mut removed_ids = retry_removed_ids.clone();
         for record in &self.sessions {
             if record.mutation_stamp <= watermark {
@@ -756,7 +783,7 @@ impl StateInner {
     /// worker uses [`collect_persist_delta_from_shared_state`] so it can release
     /// the global mutex between individual record snapshots.
     #[cfg(test)]
-    fn materialize_persist_delta(&self, plan: PersistDeltaPlan) -> PersistDelta {
+    pub(crate) fn materialize_persist_delta(&self, plan: PersistDeltaPlan) -> PersistDelta {
         materialize_persist_delta_plan(
             plan,
             |candidate| {
@@ -801,13 +828,17 @@ impl StateInner {
     /// call [`collect_persist_delta_from_shared_state`] to avoid one cumulative
     /// lock hold across all large records.
     #[cfg(test)]
-    fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
+    pub(crate) fn collect_persist_delta(&mut self, watermark: u64) -> PersistDelta {
         let plan = self.collect_persist_delta_plan(watermark);
         self.materialize_persist_delta(plan)
     }
 
     #[cfg(test)]
-    fn trim_persisted_session_tails(&mut self, watermark: u64, persisted_session_ids: &[String]) {
+    pub(crate) fn trim_persisted_session_tails(
+        &mut self,
+        watermark: u64,
+        persisted_session_ids: &[String],
+    ) {
         for session_id in persisted_session_ids {
             drop(self.trim_persisted_session_tail(watermark, session_id));
         }
@@ -834,14 +865,14 @@ impl StateInner {
     /// Returns the index of any session, including internal records, by
     /// TermAl session id. User-facing queries should use
     /// [`StateInner::find_visible_session_index`].
-    fn find_session_index(&self, session_id: &str) -> Option<usize> {
+    pub(crate) fn find_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
             .iter()
             .position(|record| record.session.id == session_id)
     }
 
     /// Returns the index of a visible (non-hidden) session by id.
-    fn find_visible_session_index(&self, session_id: &str) -> Option<usize> {
+    pub(crate) fn find_visible_session_index(&self, session_id: &str) -> Option<usize> {
         self.sessions
             .iter()
             .position(|record| !record.hidden && record.session.id == session_id)
@@ -851,7 +882,11 @@ impl StateInner {
     /// remote_session_id)` pair — used by the SSE bridge in
     /// `remote_sync.rs` when replaying events arriving from a
     /// remote.
-    fn find_remote_session_index(&self, remote_id: &str, remote_session_id: &str) -> Option<usize> {
+    pub(crate) fn find_remote_session_index(
+        &self,
+        remote_id: &str,
+        remote_session_id: &str,
+    ) -> Option<usize> {
         self.sessions.iter().position(|record| {
             record.remote_id.as_deref() == Some(remote_id)
                 && record.remote_session_id.as_deref() == Some(remote_session_id)
@@ -860,7 +895,7 @@ impl StateInner {
 
     /// Locates a remote-proxy orchestrator instance by its
     /// `(remote_id, remote_orchestrator_instance_id)` pair.
-    fn find_remote_orchestrator_index(
+    pub(crate) fn find_remote_orchestrator_index(
         &self,
         remote_id: &str,
         remote_orchestrator_id: &str,
@@ -873,7 +908,7 @@ impl StateInner {
 
     /// Returns a reference to the [`Project`] with the given id, or
     /// `None` if not present.
-    fn find_project(&self, project_id: &str) -> Option<&Project> {
+    pub(crate) fn find_project(&self, project_id: &str) -> Option<&Project> {
         self.projects
             .iter()
             .find(|project| project.id == project_id)
@@ -881,7 +916,7 @@ impl StateInner {
 
     /// Returns a reference to the [`RemoteConfig`] with the given
     /// id, or `None` if not present.
-    fn find_remote(&self, remote_id: &str) -> Option<&RemoteConfig> {
+    pub(crate) fn find_remote(&self, remote_id: &str) -> Option<&RemoteConfig> {
         self.preferences
             .remotes
             .iter()
@@ -892,7 +927,7 @@ impl StateInner {
     /// `root_path` is an ancestor of `workdir`, or `None` if no
     /// project owns the path. Used by `create_session` to auto-bind
     /// new sessions to an enclosing project.
-    fn find_project_for_workdir(&self, workdir: &str) -> Option<&Project> {
+    pub(crate) fn find_project_for_workdir(&self, workdir: &str) -> Option<&Project> {
         let target = FsPath::new(workdir);
         self.projects
             .iter()
@@ -980,7 +1015,10 @@ fn materialize_persist_delta_plan(
 /// snapshot. Session prompt-history persistence is cumulative across the two
 /// passes so replacing an older row snapshot cannot lose a history write that
 /// was selected by the first watermark.
-fn merge_persist_delta_passes(mut earlier: PersistDelta, later: PersistDelta) -> PersistDelta {
+pub(crate) fn merge_persist_delta_passes(
+    mut earlier: PersistDelta,
+    later: PersistDelta,
+) -> PersistDelta {
     let PersistDelta {
         metadata,
         changed_sessions: later_changed_sessions,
@@ -1067,7 +1105,7 @@ fn merge_persist_delta_passes(mut earlier: PersistDelta, later: PersistDelta) ->
 /// pointer storage and any last message bodies are destroyed after release.
 /// The writer owns watermark advancement and fence acknowledgement separately.
 #[track_caller]
-fn trim_persisted_session_tails_from_shared_state(
+pub(crate) fn trim_persisted_session_tails_from_shared_state(
     inner: &StateMutex<StateInner>,
     watermark: u64,
     persisted_session_ids: &[String],
@@ -1090,7 +1128,7 @@ fn trim_persisted_session_tails_from_shared_state(
 
 #[cfg(test)]
 thread_local! {
-    static PERSIST_TAIL_TRIM_BOUNDARY: std::cell::RefCell<Option<Box<dyn FnMut(&str, &'static str)>>> =
+    pub(crate) static PERSIST_TAIL_TRIM_BOUNDARY: std::cell::RefCell<Option<Box<dyn FnMut(&str, &'static str)>>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -1110,7 +1148,7 @@ fn observe_persist_tail_trim_boundary(session_id: &str, phase: &'static str) {
 /// the target watermark. Each large session/delegation snapshot gets its own
 /// acquisition, allowing unrelated state work to run between records.
 #[cfg(test)]
-fn collect_persist_delta_from_shared_state(
+pub(crate) fn collect_persist_delta_from_shared_state(
     inner: &StateMutex<StateInner>,
     watermark: u64,
 ) -> PersistDelta {
@@ -1123,19 +1161,26 @@ fn collect_persist_delta_from_shared_state(
 
 /// Reuse the session mutation owner for rejected rows. The successful global
 /// watermark may advance, but neither their bodies nor prompt history was saved.
-fn retain_unpersisted_session_changes(
+pub(crate) fn retain_unpersisted_session_changes(
     inner: &StateMutex<StateInner>,
     delta: &PersistDelta,
     persisted_session_ids: &[String],
 ) {
-    let committed = persisted_session_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    let committed = persisted_session_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
     for captured in &delta.changed_sessions {
         if committed.contains(captured.session.id.as_str()) {
             continue;
         }
         let mut state = inner.lock().expect("state mutex poisoned");
-        let Some(index) = state.find_session_index(&captured.session.id) else { continue };
-        if state.sessions[index].hidden { continue; }
+        let Some(index) = state.find_session_index(&captured.session.id) else {
+            continue;
+        };
+        if state.sessions[index].hidden {
+            continue;
+        }
         if state.sessions[index].mutation_stamp <= delta.watermark {
             // No successor change is overwritten, and no rejected content is
             // installed. Only the existing dirty-row selection clock advances.
@@ -1148,7 +1193,7 @@ fn retain_unpersisted_session_changes(
     }
 }
 
-fn collect_persist_delta_from_shared_state_with_prompt_history_carry(
+pub(crate) fn collect_persist_delta_from_shared_state_with_prompt_history_carry(
     inner: &StateMutex<StateInner>,
     watermark: u64,
     prompt_history_carry: &BTreeSet<String>,
@@ -1162,7 +1207,7 @@ fn collect_persist_delta_from_shared_state_with_prompt_history_carry(
 }
 
 #[cfg(test)]
-fn collect_persist_delta_from_shared_state_with_first_plan_hook(
+pub(crate) fn collect_persist_delta_from_shared_state_with_first_plan_hook(
     inner: &StateMutex<StateInner>,
     watermark: u64,
     after_first_plan: impl FnOnce(),
@@ -1175,7 +1220,7 @@ fn collect_persist_delta_from_shared_state_with_first_plan_hook(
     )
 }
 
-fn collect_persist_delta_from_shared_state_with_carry_and_first_plan_hook(
+pub(crate) fn collect_persist_delta_from_shared_state_with_carry_and_first_plan_hook(
     inner: &StateMutex<StateInner>,
     watermark: u64,
     prompt_history_carry: &BTreeSet<String>,
@@ -1214,7 +1259,7 @@ fn collect_persist_delta_from_shared_state_with_carry_and_first_plan_hook(
     merged
 }
 
-fn collect_persist_delta_pass_from_shared_state(
+pub(crate) fn collect_persist_delta_pass_from_shared_state(
     inner: &StateMutex<StateInner>,
     watermark: u64,
     prompt_history_carry: &BTreeSet<String>,
@@ -1291,7 +1336,7 @@ fn delegation_id_from_message_marker(
     }
 }
 
-fn delegation_id_from_delegated_child_marker(
+pub(crate) fn delegation_id_from_delegated_child_marker(
     text: &str,
     expected_child_session_id: &str,
 ) -> Option<String> {
@@ -1324,7 +1369,7 @@ fn delegated_child_marker_parts(text: &str) -> Option<(&str, &str)> {
     Some((delegation_id, child_session_id))
 }
 
-fn is_delegated_child_bootstrap_title(text: &str) -> bool {
+pub(crate) fn is_delegated_child_bootstrap_title(text: &str) -> bool {
     delegated_child_marker_parts(text).is_some()
 }
 

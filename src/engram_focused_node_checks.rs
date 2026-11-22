@@ -2,6 +2,8 @@
 // and feedback. Registered record policy, launcher validation and the
 // lifecycle's source/grant fences own admission; only Node TAP/spec is counted here.
 
+use super::*;
+
 fn engram_is_direct_vitest_script(script: &str) -> bool {
     let script = script.replace('\\', "/");
     script == "node_modules/vitest/vitest.mjs"
@@ -11,7 +13,7 @@ fn engram_is_direct_vitest_script(script: &str) -> bool {
 /// Vitest's native JavaScript CLI avoids Windows package-manager shims. Only
 /// execution mode and bounded selection/reporting options identify this Test;
 /// unknown options, watch, discovery and help never borrow the stage's label.
-fn engram_is_direct_vitest_run(args: &[String]) -> bool {
+pub(crate) fn engram_is_direct_vitest_run(args: &[String]) -> bool {
     let [script, mode, rest @ ..] = args else {
         return false;
     };
@@ -63,7 +65,7 @@ fn engram_is_direct_vitest_run(args: &[String]) -> bool {
     true
 }
 
-fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<String>> {
+pub(crate) fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<String>> {
     let [node, rest @ ..] = engram_focused_launcher_words(program, args)?.ok()? else {
         return None;
     };
@@ -131,7 +133,7 @@ fn engram_focused_node_words(program: &str, args: &[String]) -> Option<Vec<Strin
     )
 }
 
-fn engram_is_focused_node_check(check: &EngramCheckCommand) -> bool {
+pub(crate) fn engram_is_focused_node_check(check: &EngramCheckCommand) -> bool {
     check.kind == EngramVerificationKind::Test
         && engram_focused_node_words(&check.program, &check.argv[1..]).is_some()
 }
@@ -142,7 +144,7 @@ fn engram_is_focused_node_check(check: &EngramCheckCommand) -> bool {
 /// first guard that failed, as a Build's does (`EngramBuildDiagnostic`); the
 /// exit stays out of the check's own, so it earns nothing. Only a run that
 /// reported no terminal at all ends without an exit status.
-fn engram_focused_node_completion(
+pub(crate) fn engram_focused_node_completion(
     check: &EngramTurnCheck,
     session_id: &str,
     output: &str,
@@ -164,8 +166,8 @@ fn engram_focused_node_completion(
             return Err(engram_pipe_rejection(&check.command));
         }
         let words = &check.command.argv;
-        let node = engram_focused_node_words(&check.command.program, &words[1..])
-            .ok_or(Rejected::Argv)?;
+        let node =
+            engram_focused_node_words(&check.command.program, &words[1..]).ok_or(Rejected::Argv)?;
         let (native, stage) =
             engram_validated_focused_stage_result(check, session_id, output, exit, &node)?;
         let counts = stage
@@ -175,7 +177,12 @@ fn engram_focused_node_completion(
         if counts.get("runner").and_then(Value::as_str) != Some("node-test") {
             return Err(Rejected::Runner);
         }
-        let count = |name: &str| counts.get(name).and_then(Value::as_u64).ok_or(Rejected::Counts);
+        let count = |name: &str| {
+            counts
+                .get(name)
+                .and_then(Value::as_u64)
+                .ok_or(Rejected::Counts)
+        };
         let (passed, failed, ignored) = (count("passed")?, count("failed")?, count("ignored")?);
         let executed = passed.checked_add(failed).ok_or(Rejected::Counts)?;
         executed.checked_add(ignored).ok_or(Rejected::Counts)?;
@@ -226,7 +233,7 @@ fn engram_focused_node_completion(
 /// Only this bounded foreground launcher form gets a non-recognition notice.
 /// Describe non-test commands separately from unsupported test forms. This
 /// changes feedback only; recognized checks (including Builds) stay excluded.
-fn engram_unsupported_focused_line(command: &str) -> Option<String> {
+pub(crate) fn engram_unsupported_focused_line(command: &str) -> Option<String> {
     if engram_check_command(command).is_some() {
         return None;
     }

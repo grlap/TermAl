@@ -38,7 +38,9 @@
 //   proxies that don't mutate remote state (pure GETs, no
 //   sync_remote_state_for_target call).
 
-fn remote_model_refresh_timeout(agent: Agent) -> Duration {
+use super::*;
+
+pub(crate) fn remote_model_refresh_timeout(agent: Agent) -> Duration {
     if agent == Agent::Kimi {
         KIMI_MODEL_REFRESH_TIMEOUT + Duration::from_secs(5)
     } else {
@@ -47,7 +49,7 @@ fn remote_model_refresh_timeout(agent: Agent) -> Duration {
 }
 
 impl AppState {
-    fn proxy_remote_session_settings(
+    pub(crate) fn proxy_remote_session_settings(
         &self,
         session_id: &str,
         request: UpdateSessionSettingsRequest,
@@ -76,7 +78,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_refresh_session_model_options(
+    pub(crate) fn proxy_remote_refresh_session_model_options(
         &self,
         session_id: &str,
     ) -> Result<StateResponse, ApiError> {
@@ -106,7 +108,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_turn_dispatch(
+    pub(crate) fn proxy_remote_turn_dispatch(
         &self,
         session_id: &str,
         request: SendMessageRequest,
@@ -114,7 +116,7 @@ impl AppState {
         self.proxy_remote_turn_dispatch_with_origin(session_id, request, None)
     }
 
-    fn proxy_remote_turn_dispatch_with_origin(
+    pub(crate) fn proxy_remote_turn_dispatch_with_origin(
         &self,
         session_id: &str,
         request: SendMessageRequest,
@@ -143,7 +145,7 @@ impl AppState {
         Ok(())
     }
 
-    fn proxy_remote_cancel_queued_prompt(
+    pub(crate) fn proxy_remote_cancel_queued_prompt(
         &self,
         session_id: &str,
         prompt_id: &str,
@@ -167,14 +169,14 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_resume_session_queue(
+    pub(crate) fn proxy_remote_resume_session_queue(
         &self,
         session_id: &str,
     ) -> Result<StateResponse, ApiError> {
         self.proxy_remote_resume_session_queue_with_request(session_id, None)
     }
 
-    fn proxy_remote_resume_session_queue_with_request(
+    pub(crate) fn proxy_remote_resume_session_queue_with_request(
         &self,
         session_id: &str,
         mut request: Option<ResumeQueueRequest>,
@@ -239,7 +241,10 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_stop_session(&self, session_id: &str) -> Result<StateResponse, ApiError> {
+    pub(crate) fn proxy_remote_stop_session(
+        &self,
+        session_id: &str,
+    ) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
@@ -262,7 +267,10 @@ impl AppState {
     /// `SessionRecord` on success in addition to applying the returned
     /// `StateResponse`, since the remote session no longer exists after
     /// this call.
-    fn proxy_remote_kill_session(&self, session_id: &str) -> Result<StateResponse, ApiError> {
+    pub(crate) fn proxy_remote_kill_session(
+        &self,
+        session_id: &str,
+    ) -> Result<StateResponse, ApiError> {
         let Some(target) = self.remote_session_target(session_id)? else {
             return Err(ApiError::bad_request("session is not assigned to a remote"));
         };
@@ -284,9 +292,14 @@ impl AppState {
             let sessions = source_observation_removal_set(&inner, session_id);
             if let Some(blocker) = source_observation_removal_blocker(&inner, &sessions) {
                 retain_source_observation_removal_locked(&mut inner, &sessions);
-                self.commit_locked(&mut inner).map_err(|error|
-                    ApiError::internal(format!("Session retained; source tracking persistence is uncertain: {error:#}")))?;
-                return Err(ApiError::conflict(format!("{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}.")));
+                self.commit_locked(&mut inner).map_err(|error| {
+                    ApiError::internal(format!(
+                        "Session retained; source tracking persistence is uncertain: {error:#}"
+                    ))
+                })?;
+                return Err(ApiError::conflict(format!(
+                    "{SOURCE_OBSERVATION_DELETE_RETAINED} Affected session: {blocker}."
+                )));
             }
             self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
                 .map_err(|err| {
@@ -343,7 +356,7 @@ impl AppState {
         Ok(snapshot)
     }
 
-    fn proxy_remote_update_approval(
+    pub(crate) fn proxy_remote_update_approval(
         &self,
         session_id: &str,
         message_id: &str,
@@ -368,7 +381,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_submit_user_input(
+    pub(crate) fn proxy_remote_submit_user_input(
         &self,
         session_id: &str,
         message_id: &str,
@@ -394,7 +407,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_submit_codex_mcp_elicitation(
+    pub(crate) fn proxy_remote_submit_codex_mcp_elicitation(
         &self,
         session_id: &str,
         message_id: &str,
@@ -423,7 +436,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_submit_codex_app_request(
+    pub(crate) fn proxy_remote_submit_codex_app_request(
         &self,
         session_id: &str,
         message_id: &str,
@@ -448,7 +461,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn proxy_remote_list_agent_commands(
+    pub(crate) fn proxy_remote_list_agent_commands(
         &self,
         session_id: &str,
     ) -> Result<AgentCommandsResponse, ApiError> {
@@ -467,7 +480,7 @@ impl AppState {
         )
     }
 
-    fn proxy_remote_list_codex_mcp_servers(
+    pub(crate) fn proxy_remote_list_codex_mcp_servers(
         &self,
         session_id: &str,
     ) -> Result<CodexMcpServersResponse, ApiError> {
@@ -486,7 +499,7 @@ impl AppState {
         )
     }
 
-    fn proxy_remote_resolve_agent_command(
+    pub(crate) fn proxy_remote_resolve_agent_command(
         &self,
         session_id: &str,
         command_name: &str,
@@ -513,7 +526,7 @@ impl AppState {
         )
     }
 
-    fn proxy_remote_search_instructions(
+    pub(crate) fn proxy_remote_search_instructions(
         &self,
         session_id: &str,
         query: &str,

@@ -1,33 +1,35 @@
 // Owns immutable delivery identity and canonical digest version 1.
 // Does not resolve aliases, grant authority, or read mailbox content.
 // Fixed typed serialization distinguishes absent metadata from empty strings.
+
+use super::*;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationDelivery {
-    version: u16,
-    sender: FederationMailboxBinding,
-    target: FederationMailboxBinding,
-    key: String,
-    message: String,
-    topic: Option<String>,
-    state_stamp: Option<String>,
+pub(crate) struct FederationDelivery {
+    pub(crate) version: u16,
+    pub(crate) sender: FederationMailboxBinding,
+    pub(crate) target: FederationMailboxBinding,
+    pub(crate) key: String,
+    pub(crate) message: String,
+    pub(crate) topic: Option<String>,
+    pub(crate) state_stamp: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct FederationDeliveryIdentity {
-    version: u16,
-    sender: FederationMailboxBinding,
-    target: FederationMailboxBinding,
-    key: String,
+pub(crate) struct FederationDeliveryIdentity {
+    pub(crate) version: u16,
+    pub(crate) sender: FederationMailboxBinding,
+    pub(crate) target: FederationMailboxBinding,
+    pub(crate) key: String,
 }
 
 impl FederationDelivery {
-    fn digest(&self) -> String {
+    pub(crate) fn digest(&self) -> String {
         sha256_hex(&serde_json::to_vec(self).expect("typed delivery serializes"))
     }
 
-    fn input(&self, sender_name: String, target_name: String) -> MailboxAppendInput {
+    pub(crate) fn input(&self, sender_name: String, target_name: String) -> MailboxAppendInput {
         MailboxAppendInput {
             sender_session_id: self.sender.participant_key(),
             target_session_id: self.target.participant_key(),
@@ -40,7 +42,7 @@ impl FederationDelivery {
         }
     }
 
-    fn validate(&self) -> Result<(), ApiError> {
+    pub(crate) fn validate(&self) -> Result<(), ApiError> {
         self.sender.validate()?;
         self.target.validate()?;
         if self.version != 1 || self.sender.central != self.target.central {
@@ -53,12 +55,12 @@ impl FederationDelivery {
 
 #[cfg(test)]
 thread_local! {
-    static FEDERATION_DELIVERY_TEST_CUT: std::cell::RefCell<Option<(&'static str, Box<dyn FnOnce()>)>> =
+    pub(crate) static FEDERATION_DELIVERY_TEST_CUT: std::cell::RefCell<Option<(&'static str, Box<dyn FnOnce()>)>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-fn federation_delivery_test_cut(phase: &str) {
+pub(crate) fn federation_delivery_test_cut(phase: &str) {
     FEDERATION_DELIVERY_TEST_CUT.with(|cell| {
         let hook = {
             let mut slot = cell.borrow_mut();
@@ -77,14 +79,14 @@ fn federation_delivery_test_cut(phase: &str) {
     });
 }
 
-fn federation_delivery_conflict() -> anyhow::Error {
+pub(crate) fn federation_delivery_conflict() -> anyhow::Error {
     mailbox_store_error(
         MailboxStoreErrorKind::Conflict,
         "delivery key, captured target or sender namespace conflicts with its retained outcome",
     )
 }
 
-fn federation_delivery_check_central(
+pub(crate) fn federation_delivery_check_central(
     connection: &rusqlite::Connection,
     delivery: &FederationDelivery,
 ) -> Result<()> {
@@ -111,7 +113,7 @@ fn federation_delivery_check_central(
     Ok(())
 }
 
-fn federation_delivery_commit_central(
+pub(crate) fn federation_delivery_commit_central(
     transaction: &rusqlite::Transaction<'_>,
     delivery: &FederationDelivery,
     message_id: &str,
@@ -142,28 +144,41 @@ fn federation_delivery_commit_central(
 // Called inside the append transaction after current mailbox authority is
 // locked, retaining that lock through COMMIT. A later explicit grant cannot
 // turn a routing-only append into previously authorized executor work.
-fn settle_routing_only_mailbox_delivery(
-    transaction: &rusqlite::Transaction<'_>, delivery: &FederationDelivery, inner: &StateInner,
+pub(crate) fn settle_routing_only_mailbox_delivery(
+    transaction: &rusqlite::Transaction<'_>,
+    delivery: &FederationDelivery,
+    inner: &StateInner,
 ) -> Result<bool> {
     if delivery.target.identity.host_id == delivery.target.central.host_id {
         return Ok(false);
     }
-    let executable = inner.federation.placements.values().any(|placement|
+    let executable = inner.federation.placements.values().any(|placement| {
         placement.identity == delivery.target.identity
             && placement.placement_generation == delivery.target.placement_generation
-            && federation_placement_authority(&inner.federation, &inner.preferences.federation, placement));
-    if executable { return Ok(false); }
+            && federation_placement_authority(
+                &inner.federation,
+                &inner.preferences.federation,
+                placement,
+            )
+    });
+    if executable {
+        return Ok(false);
+    }
     transaction.execute(
         "UPDATE federation_mailbox_wake_obligations SET state='settled'
          WHERE state='pending' AND message_id=(SELECT message_id FROM federation_mailbox_dedup
          WHERE sender_host_id=?1 AND sender_session_id=?2 AND idempotency_key=?3)",
-        rusqlite::params![delivery.sender.identity.host_id, delivery.sender.participant_key(), delivery.key],
+        rusqlite::params![
+            delivery.sender.identity.host_id,
+            delivery.sender.participant_key(),
+            delivery.key
+        ],
     )?;
     Ok(true)
 }
 
 impl MailboxStore {
-    fn refuse_federation_delivery<G>(
+    pub(crate) fn refuse_federation_delivery<G>(
         &self,
         delivery: &FederationDelivery,
         authorize: impl FnOnce() -> Result<G>,
@@ -207,7 +222,7 @@ impl MailboxStore {
         Ok(())
     }
 
-    fn cancel_federation_delivery<G>(
+    pub(crate) fn cancel_federation_delivery<G>(
         &self,
         delivery: &FederationDelivery,
         authorize: impl FnOnce() -> Result<G>,

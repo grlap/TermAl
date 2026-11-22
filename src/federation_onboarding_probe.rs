@@ -2,22 +2,24 @@
 // Does not execute peer commands, install tools or operate user sessions. New O1
 // probes reuse bounded_read_process.rs for finite child ownership and reaping.
 
+use super::*;
+
 #[derive(Clone)]
-struct FederationOnboardingIo {
-    profile: Arc<dyn Fn() -> Result<FederationExecutionProfile, ApiError> + Send + Sync>,
-    image: Arc<dyn Fn() -> FederationImageObservation + Send + Sync>,
-    platform: Arc<dyn Fn() -> Result<FederationPlatformProbe, ApiError> + Send + Sync>,
-    engram: Arc<
+pub(crate) struct FederationOnboardingIo {
+    pub(crate) profile: Arc<dyn Fn() -> Result<FederationExecutionProfile, ApiError> + Send + Sync>,
+    pub(crate) image: Arc<dyn Fn() -> FederationImageObservation + Send + Sync>,
+    pub(crate) platform: Arc<dyn Fn() -> Result<FederationPlatformProbe, ApiError> + Send + Sync>,
+    pub(crate) engram: Arc<
         dyn Fn(&FederationEngramProbeCommand) -> FederationEngramOnboardingOutcome + Send + Sync,
     >,
 }
 
 impl FederationOnboardingIo {
-    fn local(directory: PathBuf) -> Self {
+    pub(crate) fn local(directory: PathBuf) -> Self {
         Self::local_with_image(directory, capture_federation_process_image())
     }
 
-    fn local_with_image(directory: PathBuf, image: Arc<FederationProcessImage>) -> Self {
+    pub(crate) fn local_with_image(directory: PathBuf, image: Arc<FederationProcessImage>) -> Self {
         let probe_directory = directory.clone();
         let profile_image = image.clone();
         Self {
@@ -31,7 +33,7 @@ impl FederationOnboardingIo {
     }
 }
 
-fn federation_probe_command(
+pub(crate) fn federation_probe_command(
     program: &str,
     args: &[&str],
     directory: &FsPath,
@@ -48,12 +50,10 @@ fn federation_probe_command(
         true,
     )
     .map_err(|error| {
-        let message = format!("isolated platform probe could not spawn and reap its child: {error:#}");
+        let message =
+            format!("isolated platform probe could not spawn and reap its child: {error:#}");
         eprintln!("federation onboarding> {message}");
-        ApiError::from_status(
-            StatusCode::SERVICE_UNAVAILABLE,
-            message,
-        )
+        ApiError::from_status(StatusCode::SERVICE_UNAVAILABLE, message)
     })?;
     if !output.status.success() {
         return Err(ApiError::from_status(
@@ -73,7 +73,7 @@ fn federation_local_execution_profile(
     federation_execution_profile_with_probe(directory, image, federation_probe_command)
 }
 
-fn federation_execution_profile_with_probe(
+pub(crate) fn federation_execution_profile_with_probe(
     directory: &FsPath,
     image: &FederationProcessImage,
     probe: impl Fn(&str, &[&str], &FsPath) -> Result<String, ApiError>,
@@ -93,7 +93,7 @@ fn federation_execution_profile_with_probe(
     })
 }
 
-fn federation_local_platform_probe(
+pub(crate) fn federation_local_platform_probe(
     directory: &FsPath,
 ) -> Result<FederationPlatformProbe, ApiError> {
     federation_platform_probe_with(directory, federation_probe_command)
@@ -106,7 +106,7 @@ fn federation_toolchain_observation(observed: Result<String, ApiError>) -> Strin
         .unwrap_or_else(|| "unavailable".to_owned())
 }
 
-fn federation_platform_probe_with(
+pub(crate) fn federation_platform_probe_with(
     directory: &FsPath,
     probe: impl Fn(&str, &[&str], &FsPath) -> Result<String, ApiError>,
 ) -> Result<FederationPlatformProbe, ApiError> {

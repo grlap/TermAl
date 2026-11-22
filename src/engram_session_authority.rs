@@ -15,29 +15,33 @@
 // comparison of a reader's connection, which still needs a full target. New
 // module, split from the builders' shared prefix in engram_host_adapter.rs.
 
+use super::*;
+
 /// What a session's binding target is built from, once every predicate that
 /// decides whether it has one has passed.
-struct EngramSessionAuthority<'a> {
+pub(crate) struct EngramSessionAuthority<'a> {
     /// The session id the target's connection carries.
-    connection_session_id: &'a str,
-    record: &'a SessionRecord,
-    delegation: Option<&'a DelegationRecord>,
-    project: &'a Project,
-    settings: &'a EngramProjectSettings,
-    binary_path: &'a str,
-    home: &'a str,
+    pub(crate) connection_session_id: &'a str,
+    pub(crate) record: &'a SessionRecord,
+    pub(crate) delegation: Option<&'a DelegationRecord>,
+    pub(crate) project: &'a Project,
+    pub(crate) settings: &'a EngramProjectSettings,
+    pub(crate) binary_path: &'a str,
+    pub(crate) home: &'a str,
 }
 
 /// A child-shaped session's authority (it never falls back to a parent
 /// shape). `Err` keeps the builders' errors: a missing child session or a
 /// missing binary path or home on an enabled project.
-fn engram_child_session_authority_locked<'a>(
+pub(crate) fn engram_child_session_authority_locked<'a>(
     inner: &'a StateInner,
     session_id: &'a str,
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
-    inner.require_delegation_inventory().map_err(|error| error.message)?;
+    inner
+        .require_delegation_inventory()
+        .map_err(|error| error.message)?;
     let Some(delegation) = inner
         .delegations
         .iter()
@@ -69,13 +73,15 @@ fn engram_child_session_authority_locked<'a>(
 }
 
 /// A root (parent-shaped) session's authority.
-fn engram_parent_session_authority_locked<'a>(
+pub(crate) fn engram_parent_session_authority_locked<'a>(
     inner: &'a StateInner,
     session_id: &'a str,
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
-    inner.require_delegation_inventory().map_err(|error| error.message)?;
+    inner
+        .require_delegation_inventory()
+        .map_err(|error| error.message)?;
     let record = inner
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))
@@ -151,7 +157,9 @@ fn engram_session_authority_locked<'a>(
     require_runtime_enabled: bool,
     project_reset_owner_generation: Option<u64>,
 ) -> std::result::Result<Option<EngramSessionAuthority<'a>>, String> {
-    inner.require_delegation_inventory().map_err(|error| error.message)?;
+    inner
+        .require_delegation_inventory()
+        .map_err(|error| error.message)?;
     if AppState::engram_session_has_child_binding_shape_locked(inner, session_id) {
         engram_child_session_authority_locked(
             inner,
@@ -170,7 +178,10 @@ fn engram_session_authority_locked<'a>(
 }
 
 // Naming and its canonical readers preserve exact session/store authority.
-fn engram_source_root_base_is_enabled_locked(inner: &StateInner, session_id: &str) -> bool {
+pub(crate) fn engram_source_root_base_is_enabled_locked(
+    inner: &StateInner,
+    session_id: &str,
+) -> bool {
     let Some(record) = inner
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))
@@ -183,11 +194,14 @@ fn engram_source_root_base_is_enabled_locked(inner: &StateInner, session_id: &st
     record.is_local_session()
         && !inner.engram_project_resets.contains(&project.id)
         && project.remote_id == LOCAL_REMOTE_ID
-        && project.engram.as_ref().is_some_and(EngramProjectSettings::is_base_enabled)
+        && project
+            .engram
+            .as_ref()
+            .is_some_and(EngramProjectSettings::is_base_enabled)
 }
 
 impl AppState {
-    fn engram_source_root_target_locked(
+    pub(crate) fn engram_source_root_target_locked(
         inner: &StateInner,
         session_id: &str,
     ) -> std::result::Result<Option<EngramBindingTarget>, String> {
@@ -203,11 +217,11 @@ impl AppState {
 
 /// The narrow view of the Base-service naming target, or None when it would
 /// build none or fail. Nothing is cloned and no turn grant is created.
-struct EngramSessionReaderView<'a> {
-    store: Option<&'a EngramAuthorityStoreKey>,
+pub(crate) struct EngramSessionReaderView<'a> {
+    pub(crate) store: Option<&'a EngramAuthorityStoreKey>,
 }
 
-fn engram_session_reader_view_locked<'a>(
+pub(crate) fn engram_session_reader_view_locked<'a>(
     inner: &'a StateInner,
     session_id: &'a str,
 ) -> Option<EngramSessionReaderView<'a>> {

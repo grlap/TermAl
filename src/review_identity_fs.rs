@@ -1,11 +1,13 @@
 // Raw filesystem observations for review identity. Never follows a reviewed
 // link; regular reads compare the opened handle, path identity and metadata.
-fn identity_utf8_path(path: &FsPath) -> Result<String> {
+
+use super::*;
+pub(crate) fn identity_utf8_path(path: &FsPath) -> Result<String> {
     path.to_str()
         .map(str::to_owned)
         .ok_or_else(|| identity_refusal("path_encoding_unsupported"))
 }
-fn identity_plain_metadata(metadata: &fs::Metadata) -> Result<()> {
+pub(crate) fn identity_plain_metadata(metadata: &fs::Metadata) -> Result<()> {
     if metadata.file_type().is_symlink() {
         return Err(identity_refusal("git_metadata_escape"));
     }
@@ -18,7 +20,7 @@ fn identity_plain_metadata(metadata: &fs::Metadata) -> Result<()> {
     }
     Ok(())
 }
-fn identity_no_links(path: &FsPath) -> Result<()> {
+pub(crate) fn identity_no_links(path: &FsPath) -> Result<()> {
     let mut current = PathBuf::new();
     for component in path.components() {
         if component == std::path::Component::ParentDir {
@@ -33,12 +35,13 @@ fn identity_no_links(path: &FsPath) -> Result<()> {
             continue;
         }
         identity_plain_metadata(
-            &fs::symlink_metadata(&current).map_err(|error| identity_io_failure(&current, error))?,
+            &fs::symlink_metadata(&current)
+                .map_err(|error| identity_io_failure(&current, error))?,
         )?;
     }
     Ok(())
 }
-fn identity_safe_path(root: &FsPath, relative: &str) -> Result<PathBuf> {
+pub(crate) fn identity_safe_path(root: &FsPath, relative: &str) -> Result<PathBuf> {
     identity_relative(relative.as_bytes())?;
     let full = root.join(relative);
     let mut current = root.to_path_buf();
@@ -72,7 +75,7 @@ fn identity_safe_path(root: &FsPath, relative: &str) -> Result<PathBuf> {
     }
     Ok(full)
 }
-fn identity_exact_spelling(git: &ReviewIdentityGit, relative: &str) -> Result<bool> {
+pub(crate) fn identity_exact_spelling(git: &ReviewIdentityGit, relative: &str) -> Result<bool> {
     let mut parent = git.root.clone();
     for component in relative.split('/') {
         let mut found = false;
@@ -94,7 +97,7 @@ fn identity_exact_spelling(git: &ReviewIdentityGit, relative: &str) -> Result<bo
     }
     Ok(true)
 }
-fn identity_open(path: &FsPath) -> io::Result<fs::File> {
+pub(crate) fn identity_open(path: &FsPath) -> io::Result<fs::File> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(windows)]
@@ -110,7 +113,7 @@ fn identity_open(path: &FsPath) -> io::Result<fs::File> {
     }
     options.open(path)
 }
-fn identity_physical_key(path: &FsPath) -> Result<String> {
+pub(crate) fn identity_physical_key(path: &FsPath) -> Result<String> {
     identity_at(path, identity_physical_key_unnamed(path))
 }
 fn identity_physical_key_unnamed(path: &FsPath) -> Result<String> {
@@ -130,7 +133,7 @@ fn identity_physical_key_unnamed(path: &FsPath) -> Result<String> {
         ))
     }
 }
-fn identity_read_file(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
+pub(crate) fn identity_read_file(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
     identity_at(path, identity_read_file_unnamed(path, limit))
 }
 fn identity_read_file_unnamed(path: &FsPath, limit: usize) -> Result<(Vec<u8>, fs::Metadata)> {
@@ -164,7 +167,7 @@ fn identity_read_file_unnamed(path: &FsPath, limit: usize) -> Result<(Vec<u8>, f
     Ok((bytes, opened))
 }
 
-fn identity_hash_file(
+pub(crate) fn identity_hash_file(
     path: &FsPath,
     deadline: std::time::Instant,
     capture: &mut ReviewIdentityCapture,
@@ -221,7 +224,10 @@ fn identity_hash_file_unnamed(
 }
 
 #[cfg(windows)]
-fn identity_reparse_kind(path: &FsPath, metadata: &fs::Metadata) -> Result<Option<&'static str>> {
+pub(crate) fn identity_reparse_kind(
+    path: &FsPath,
+    metadata: &fs::Metadata,
+) -> Result<Option<&'static str>> {
     use std::os::windows::{fs::MetadataExt, io::AsRawHandle};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_TAG_INFO, FileAttributeTagInfo, GetFileInformationByHandleEx,
@@ -250,7 +256,7 @@ fn identity_reparse_kind(path: &FsPath, metadata: &fs::Metadata) -> Result<Optio
         _ => Err(identity_refusal("special_file")),
     }
 }
-fn identity_worktree_entry(
+pub(crate) fn identity_worktree_entry(
     git: &ReviewIdentityGit,
     path: &str,
     prefix: &str,

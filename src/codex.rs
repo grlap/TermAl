@@ -27,8 +27,10 @@
 // single largest extraction of the refactor. The crate still compiles as
 // one flat module, so no visibility changes are required.
 
+use super::*;
+
 /// Spawns Codex runtime.
-fn spawn_codex_runtime(
+pub(crate) fn spawn_codex_runtime(
     state: AppState,
     session_id: String,
     _workdir: String,
@@ -52,12 +54,12 @@ fn spawn_codex_runtime(
 }
 
 /// Spawns shared Codex runtime.
-const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const SHARED_CODEX_STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(60);
 const SHARED_CODEX_STDIN_WARNING_AFTER: Duration = Duration::from_secs(10);
 const SHARED_CODEX_STDIN_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-const SHARED_CODEX_THREAD_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const SHARED_CODEX_THREAD_SETUP_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// How often `wait_for_shared_codex_response_while_server_active` wakes up to
 /// re-check the server's stdout liveness while a response is outstanding.
@@ -81,13 +83,13 @@ const SHARED_CODEX_RESPONSE_MAX_WAIT_WHILE_ACTIVE: Duration = Duration::from_sec
 /// extends only while the shared app-server keeps producing stdout, up to the
 /// same hard 15-minute cap. That avoids interrupting a legitimate turn queued
 /// behind busy sibling work while still bounding a lost notification.
-const SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const SHARED_CODEX_TURN_STARTED_EVENT_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Copy)]
-struct SharedCodexTurnStartedWatchdogConfig {
-    silence_limit: Duration,
-    max_wait_while_active: Duration,
-    poll_slice: Duration,
+pub(crate) struct SharedCodexTurnStartedWatchdogConfig {
+    pub(crate) silence_limit: Duration,
+    pub(crate) max_wait_while_active: Duration,
+    pub(crate) poll_slice: Duration,
 }
 
 const SHARED_CODEX_TURN_STARTED_WATCHDOG: SharedCodexTurnStartedWatchdogConfig =
@@ -99,7 +101,7 @@ const SHARED_CODEX_TURN_STARTED_WATCHDOG: SharedCodexTurnStartedWatchdogConfig =
 
 impl SharedCodexTurnStartedWatchdogConfig {
     #[cfg(test)]
-    fn fixed(timeout: Duration) -> Self {
+    pub(crate) fn fixed(timeout: Duration) -> Self {
         Self {
             silence_limit: timeout,
             max_wait_while_active: timeout,
@@ -111,13 +113,13 @@ impl SharedCodexTurnStartedWatchdogConfig {
 // The interrupt backstop runs after an explicit Stop and retains its own budget.
 // Every ordinary write/flush keeps the instant captured by its activity guard.
 #[derive(Clone, Copy, Debug)]
-enum SharedCodexStdinBudget {
+pub(crate) enum SharedCodexStdinBudget {
     Ordinary,
     StopEscalation,
 }
 
 impl SharedCodexStdinBudget {
-    fn limit(self, ordinary_timeout: Duration) -> Duration {
+    pub(crate) fn limit(self, ordinary_timeout: Duration) -> Duration {
         match self {
             Self::Ordinary => ordinary_timeout,
             Self::StopEscalation => ordinary_timeout.min(SHARED_CODEX_STDIN_STOP_TIMEOUT),
@@ -126,17 +128,17 @@ impl SharedCodexStdinBudget {
 }
 
 #[derive(Clone, Debug)]
-struct SharedCodexStdinActivity {
-    operation: &'static str,
-    context: String,
-    started_at: std::time::Instant,
-    budget: SharedCodexStdinBudget,
-    warned: bool,
-    timed_out: bool,
+pub(crate) struct SharedCodexStdinActivity {
+    pub(crate) operation: &'static str,
+    pub(crate) context: String,
+    pub(crate) started_at: std::time::Instant,
+    pub(crate) budget: SharedCodexStdinBudget,
+    pub(crate) warned: bool,
+    pub(crate) timed_out: bool,
 }
 
-type SharedCodexStdinActivityState = Arc<Mutex<Option<SharedCodexStdinActivity>>>;
-type SharedCodexStdinContextState = Arc<Mutex<String>>;
+pub(crate) type SharedCodexStdinActivityState = Arc<Mutex<Option<SharedCodexStdinActivity>>>;
+pub(crate) type SharedCodexStdinContextState = Arc<Mutex<String>>;
 
 struct SharedCodexStdinActivityGuard<'a> {
     activity: &'a SharedCodexStdinActivityState,
@@ -173,15 +175,15 @@ impl Drop for SharedCodexStdinActivityGuard<'_> {
     }
 }
 
-struct SharedCodexWatchedWriter<W> {
-    inner: W,
-    activity: SharedCodexStdinActivityState,
-    context: SharedCodexStdinContextState,
-    budget: SharedCodexStdinBudget,
+pub(crate) struct SharedCodexWatchedWriter<W> {
+    pub(crate) inner: W,
+    pub(crate) activity: SharedCodexStdinActivityState,
+    pub(crate) context: SharedCodexStdinContextState,
+    pub(crate) budget: SharedCodexStdinBudget,
 }
 
 impl<W> SharedCodexWatchedWriter<W> {
-    fn new(inner: W, activity: SharedCodexStdinActivityState) -> Self {
+    pub(crate) fn new(inner: W, activity: SharedCodexStdinActivityState) -> Self {
         SharedCodexWatchedWriter {
             inner,
             activity,
@@ -190,14 +192,14 @@ impl<W> SharedCodexWatchedWriter<W> {
         }
     }
 
-    fn set_command_budget(&mut self, command: &CodexRuntimeCommand) {
+    pub(crate) fn set_command_budget(&mut self, command: &CodexRuntimeCommand) {
         self.budget = match command {
             CodexRuntimeCommand::InterruptTurn { .. } => SharedCodexStdinBudget::StopEscalation,
             _ => SharedCodexStdinBudget::Ordinary,
         };
     }
 
-    fn set_activity_context(&mut self, context: impl Into<String>) {
+    pub(crate) fn set_activity_context(&mut self, context: impl Into<String>) {
         *self
             .context
             .lock()
@@ -216,7 +218,8 @@ impl<W: Write> Write for SharedCodexWatchedWriter<W> {
             .lock()
             .expect("shared Codex stdin context mutex poisoned")
             .clone();
-        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "write", context, self.budget);
+        let _guard =
+            SharedCodexStdinActivityGuard::new(&self.activity, "write", context, self.budget);
         self.inner.write(buf)
     }
 
@@ -226,12 +229,13 @@ impl<W: Write> Write for SharedCodexWatchedWriter<W> {
             .lock()
             .expect("shared Codex stdin context mutex poisoned")
             .clone();
-        let _guard = SharedCodexStdinActivityGuard::new(&self.activity, "flush", context, self.budget);
+        let _guard =
+            SharedCodexStdinActivityGuard::new(&self.activity, "flush", context, self.budget);
         self.inner.flush()
     }
 }
 
-fn set_shared_codex_writer_context(
+pub(crate) fn set_shared_codex_writer_context(
     context: Option<&SharedCodexStdinContextState>,
     value: impl Into<String>,
 ) {
@@ -265,7 +269,7 @@ fn shared_codex_stdin_timeout_detail(
 // One tick of the existing watchdog. Sampling and the once-only warning bit share
 // the write/flush activity owner; diagnostics and runtime teardown run off-lock.
 // The explicit instant also lets tests advance time without a real timeout wait.
-fn poll_shared_codex_stdin_watchdog(
+pub(crate) fn poll_shared_codex_stdin_watchdog(
     state: &AppState,
     runtime_id: &str,
     process: &Arc<SharedChild>,
@@ -303,14 +307,10 @@ fn poll_shared_codex_stdin_watchdog(
     let Some(activity) = timed_out_activity else {
         return false;
     };
-    let detail = shared_codex_stdin_timeout_detail(
-        &activity,
-        activity.budget.limit(ordinary_timeout),
-    );
+    let detail =
+        shared_codex_stdin_timeout_detail(&activity, activity.budget.limit(ordinary_timeout));
     if let Err(err) = state.handle_shared_codex_runtime_exit(runtime_id, Some(&detail)) {
-        eprintln!(
-            "[termal] shared Codex watchdog cleanup failed; killing app-server: {err:#}"
-        );
+        eprintln!("[termal] shared Codex watchdog cleanup failed; killing app-server: {err:#}");
         if let Err(kill_err) = kill_child_process(process, "shared Codex runtime") {
             eprintln!("[termal] shared Codex watchdog fallback kill failed: {kill_err:#}");
         }
@@ -318,7 +318,7 @@ fn poll_shared_codex_stdin_watchdog(
     true
 }
 
-fn spawn_shared_codex_stdin_watchdog(
+pub(crate) fn spawn_shared_codex_stdin_watchdog(
     state: &AppState,
     runtime_id: &str,
     process: Arc<SharedChild>,
@@ -333,32 +333,36 @@ fn spawn_shared_codex_stdin_watchdog(
     let watchdog_activity = activity.clone();
     std::thread::Builder::new()
         .name("termal-codex-stdin-watchdog".to_owned())
-        .spawn(move || loop {
-            match stop_rx.recv_timeout(poll_interval) {
-                Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
+        .spawn(move || {
+            loop {
+                match stop_rx.recv_timeout(poll_interval) {
+                    Ok(_) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
 
-            if poll_shared_codex_stdin_watchdog(
-                &watchdog_state,
-                &watchdog_runtime_id,
-                &watchdog_process,
-                &watchdog_activity,
-                timeout,
-                std::time::Instant::now(),
-                |activity| eprintln!(
-                    "[termal] shared Codex stdin {} has been waiting at least 10s",
-                    activity.operation,
-                ),
-            ) {
-                break;
+                if poll_shared_codex_stdin_watchdog(
+                    &watchdog_state,
+                    &watchdog_runtime_id,
+                    &watchdog_process,
+                    &watchdog_activity,
+                    timeout,
+                    std::time::Instant::now(),
+                    |activity| {
+                        eprintln!(
+                            "[termal] shared Codex stdin {} has been waiting at least 10s",
+                            activity.operation,
+                        )
+                    },
+                ) {
+                    break;
+                }
             }
         })
         .context("failed to spawn shared Codex stdin watchdog")?;
     Ok(())
 }
 
-fn start_shared_codex_rpc_command(
+pub(crate) fn start_shared_codex_rpc_command(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     request_id: String,
@@ -397,7 +401,7 @@ fn start_shared_codex_rpc_command(
     }
 }
 
-fn spawn_shared_codex_runtime(
+pub(crate) fn spawn_shared_codex_runtime(
     state: AppState,
     profile: SharedCodexProfile,
 ) -> Result<SharedCodexRuntime> {
@@ -422,8 +426,9 @@ fn spawn_shared_codex_runtime(
         // select this process environment. Their sandbox and approval policy
         // still travel per thread. The Codex executable itself was resolved
         // above, before PATH changes; see `shared_codex_profile.rs`.
-        let path = shared_codex_read_only_sandbox_path()
-            .ok_or_else(|| anyhow!("cannot build the PATH for the sandbox-compatible Codex app-server"))?;
+        let path = shared_codex_read_only_sandbox_path().ok_or_else(|| {
+            anyhow!("cannot build the PATH for the sandbox-compatible Codex app-server")
+        })?;
         command.env("PATH", path);
     }
     // This process hosts many TermAl sessions. Never let process-global
@@ -434,7 +439,7 @@ fn spawn_shared_codex_runtime(
     start_shared_codex_runtime(state, codex_home, &mut command)
 }
 
-fn start_shared_codex_runtime(
+pub(crate) fn start_shared_codex_runtime(
     state: AppState,
     codex_home: PathBuf,
     command: &mut Command,
@@ -1022,7 +1027,7 @@ fn forget_shared_codex_thread(
 }
 
 /// Finds shared Codex session ID.
-fn find_shared_codex_session_id(
+pub(crate) fn find_shared_codex_session_id(
     state: &AppState,
     thread_sessions: &SharedCodexThreadMap,
     thread_id: &str,
@@ -1052,7 +1057,7 @@ fn find_shared_codex_session_id(
 }
 
 /// Finds shared Codex session ID by active/completed turn ID.
-fn find_shared_codex_session_id_by_turn_id(
+pub(crate) fn find_shared_codex_session_id_by_turn_id(
     sessions: &SharedCodexSessionMap,
     turn_id: &str,
 ) -> Option<String> {
@@ -1076,7 +1081,10 @@ fn codex_message_thread_id<'a>(message: &'a Value) -> Option<&'a str> {
 }
 
 /// Handles shared Codex session thread ID.
-fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Option<&'a str> {
+pub(crate) fn shared_codex_session_thread_id<'a>(
+    method: &str,
+    message: &'a Value,
+) -> Option<&'a str> {
     codex_message_thread_id(message).or_else(|| match method {
         _ if method.starts_with("codex/event/") => message
             .pointer("/params/msg/thread_id")
@@ -1121,7 +1129,7 @@ fn shared_codex_session_thread_id<'a>(method: &str, message: &'a Value) -> Optio
 /// Only used for requests a busy server can legitimately answer late (thread
 /// setup, `turn/start`). The initialize request keeps its flat window —
 /// nothing else runs on a server that has not even said hello.
-fn wait_for_shared_codex_response_while_server_active(
+pub(crate) fn wait_for_shared_codex_response_while_server_active(
     pending_requests: &CodexPendingRequestMap,
     pending_request: PendingCodexJsonRpcRequest,
     method: &str,
@@ -1179,7 +1187,7 @@ fn wait_for_shared_codex_response_while_server_active(
 ///
 /// `true` means the silence/active cap expired and the caller still owns the
 /// watchdog. A cancellation signal or a dropped sender returns `false`.
-fn wait_for_shared_codex_turn_started_or_timeout(
+pub(crate) fn wait_for_shared_codex_turn_started_or_timeout(
     cancel_rx: &mpsc::Receiver<()>,
     config: SharedCodexTurnStartedWatchdogConfig,
     mut stdout_silence: impl FnMut() -> Option<Duration>,
@@ -1214,7 +1222,7 @@ fn wait_for_shared_codex_turn_started_or_timeout(
 /// feeds a `StartTurnAfterSetup` command back through `input_tx`. The writer
 /// thread returns immediately in both cases so other commands are never
 /// blocked behind thread setup.
-fn handle_shared_codex_prompt_command(
+pub(crate) fn handle_shared_codex_prompt_command(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
@@ -1370,7 +1378,7 @@ fn handle_shared_codex_prompt_command(
     )
 }
 
-fn start_shared_codex_thread_setup_request(
+pub(crate) fn start_shared_codex_thread_setup_request(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
@@ -1480,7 +1488,7 @@ fn start_shared_codex_thread_setup_request(
 
 /// The config waiter returns to the writer through a command. Recheck the slot
 /// here: stop/detach may have happened after the config response was queued.
-fn finish_shared_codex_thread_setup(
+pub(crate) fn finish_shared_codex_thread_setup(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
@@ -1838,7 +1846,7 @@ fn finish_shared_codex_thread_setup(
 /// Sends `turn/start` as a fire-and-forget request and spawns a waiter thread
 /// for the response. Called directly when the thread id is already known, or
 /// via the `StartTurnAfterSetup` command after thread setup completes.
-fn handle_shared_codex_start_turn(
+pub(crate) fn handle_shared_codex_start_turn(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
@@ -1867,7 +1875,7 @@ fn handle_shared_codex_start_turn(
     )
 }
 
-fn handle_shared_codex_start_turn_inner(
+pub(crate) fn handle_shared_codex_start_turn_inner(
     writer: &mut impl Write,
     pending_requests: &CodexPendingRequestMap,
     state: &AppState,
@@ -2105,7 +2113,8 @@ fn handle_shared_codex_start_turn_inner(
     }
 
     let project_environment_notice = state.project_environment_notice(session_id);
-    let prompt = project_environment_notice.as_ref()
+    let prompt = project_environment_notice
+        .as_ref()
         .map(|notice| format!("{notice}\n\n{}", command.prompt));
     set_shared_codex_writer_context(
         writer_context,
@@ -2385,7 +2394,9 @@ fn handle_shared_codex_start_turn_inner(
                         ) {
                             Ok(effect) => terminal_effect = effect,
                             Err(error) => {
-                                eprintln!("runtime state warning> deferred Codex terminal: {error:#}");
+                                eprintln!(
+                                    "runtime state warning> deferred Codex terminal: {error:#}"
+                                );
                             }
                         }
                     }
@@ -2517,7 +2528,7 @@ fn handle_shared_codex_start_turn_inner(
 /// the liveness-scaled waiter may have stayed longer, but only while the
 /// server kept talking); the `Timeout` arm compares it against the server's
 /// stdout silence to pick between failing one turn and retiring the runtime.
-fn handle_shared_codex_startup_response_error(
+pub(crate) fn handle_shared_codex_startup_response_error(
     state: &AppState,
     runtime_id: &str,
     session_id: &str,
@@ -2638,13 +2649,13 @@ enum CodexThreadSetupDecision {
 /// These come from the prompt that OPENED the setup. The turn that eventually runs
 /// uses the PARKED command's parameters instead — see `PendingCodexThreadSetup`.
 /// These shape the thread; that shapes the turn.
-struct CodexThreadSetupRequest {
-    approval_policy: CodexApprovalPolicy,
-    cwd: String,
-    model: String,
-    service_tier: Option<String>,
-    resume_thread_id: Option<String>,
-    sandbox_mode: CodexSandboxMode,
+pub(crate) struct CodexThreadSetupRequest {
+    pub(crate) approval_policy: CodexApprovalPolicy,
+    pub(crate) cwd: String,
+    pub(crate) model: String,
+    pub(crate) service_tier: Option<String>,
+    pub(crate) resume_thread_id: Option<String>,
+    pub(crate) sandbox_mode: CodexSandboxMode,
 }
 
 /// Reports whether `request_id` is still this session's current thread setup.
@@ -2653,7 +2664,7 @@ struct CodexThreadSetupRequest {
 /// actually bound: a session observed as neither `{setup in flight}` nor
 /// `{thread bound}` is free to start a new setup, which is exactly how one prompt
 /// used to make the app-server mint several threads.
-fn shared_codex_thread_setup_is_current(
+pub(crate) fn shared_codex_thread_setup_is_current(
     sessions: &SharedCodexSessionMap,
     session_id: &str,
     request_id: &str,
@@ -2675,7 +2686,7 @@ fn shared_codex_thread_setup_is_current(
 /// caller that then fails "the session's turn" can be failing a turn that now
 /// belongs to somebody else.
 #[must_use]
-enum CodexThreadSetupAbort {
+pub(crate) enum CodexThreadSetupAbort {
     /// The setup was ours: it is released and any prompt parked on it is dropped.
     Released { active_turn_generation: u64 },
     /// The slot has already moved on to a different setup. Nothing was touched.
@@ -2690,7 +2701,7 @@ enum CodexThreadSetupAbort {
 /// section keeps the state machine honest — a later prompt must find
 /// `{no thread, no setup}` and be free to start a fresh setup, and must never
 /// inherit a command belonging to a dead one.
-fn abort_shared_codex_thread_setup(
+pub(crate) fn abort_shared_codex_thread_setup(
     sessions: &SharedCodexSessionMap,
     session_id: &str,
     request_id: &str,
@@ -2737,17 +2748,21 @@ fn abort_shared_codex_thread_setup(
 /// waiter owns the slot, and releasing it from here would abort a live setup — which
 /// is why the disarm is explicit rather than implied by reaching the end of the
 /// function.
-struct PendingCodexThreadSetupGuard<'a> {
-    armed: bool,
-    request_id: &'a str,
-    session_id: &'a str,
-    sessions: &'a SharedCodexSessionMap,
+pub(crate) struct PendingCodexThreadSetupGuard<'a> {
+    pub(crate) armed: bool,
+    pub(crate) request_id: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) sessions: &'a SharedCodexSessionMap,
     /// The state and runtime whose receipted prompt a release settles.
     unsent_prompt_owner: Option<(&'a AppState, &'a str)>,
 }
 
 impl<'a> PendingCodexThreadSetupGuard<'a> {
-    fn new(sessions: &'a SharedCodexSessionMap, session_id: &'a str, request_id: &'a str) -> Self {
+    pub(crate) fn new(
+        sessions: &'a SharedCodexSessionMap,
+        session_id: &'a str,
+        request_id: &'a str,
+    ) -> Self {
         Self {
             armed: true,
             request_id,
@@ -2766,7 +2781,7 @@ impl<'a> PendingCodexThreadSetupGuard<'a> {
     }
 
     /// The request is in flight; the waiter owns the slot from here.
-    fn disarm(mut self) {
+    pub(crate) fn disarm(mut self) {
         self.armed = false;
     }
 }
@@ -2779,7 +2794,8 @@ impl Drop for PendingCodexThreadSetupGuard<'_> {
         // The caller is returning `Err` either way; the slot just must not stay
         // claimed. `NotCurrent` is fine and expected — a detach can have taken the
         // whole session out from under us while we were failing.
-        let released = abort_shared_codex_thread_setup(self.sessions, self.session_id, self.request_id);
+        let released =
+            abort_shared_codex_thread_setup(self.sessions, self.session_id, self.request_id);
         let (
             CodexThreadSetupAbort::Released {
                 active_turn_generation,
@@ -2888,7 +2904,7 @@ fn complete_shared_codex_thread_setup(
 /// Applies thread-setup failures only for the currently pending setup
 /// request, so stale waiters from a stopped/restarted session cannot retire
 /// a newer turn on the same shared Codex app-server.
-fn handle_shared_codex_thread_setup_response_error_if_current(
+pub(crate) fn handle_shared_codex_thread_setup_response_error_if_current(
     sessions: &SharedCodexSessionMap,
     state: &AppState,
     runtime_id: &str,
@@ -2931,7 +2947,7 @@ fn handle_shared_codex_thread_setup_response_error_if_current(
     );
 }
 
-fn fail_shared_codex_turn_without_runtime_exit(
+pub(crate) fn fail_shared_codex_turn_without_runtime_exit(
     state: &AppState,
     session_id: &str,
     runtime_id: &str,
@@ -2957,7 +2973,7 @@ fn fail_shared_codex_turn_without_runtime_exit(
 /// expired turn generation. Terminalization may synchronously dispatch a
 /// successor on the same thread; the generation guard preserves that newer
 /// attachment while still removing late routing left by the expired turn.
-fn forget_shared_codex_thread_if_generation_matches(
+pub(crate) fn forget_shared_codex_thread_if_generation_matches(
     sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
     session_id: &str,
@@ -3012,7 +3028,7 @@ fn fail_shared_codex_turn_after_start_error(
 /// Expires only the exact turn/start request that armed this watchdog. A
 /// `turn/started` event, Stop/detach, or a newer request clears/replaces the
 /// marker first and turns the watchdog into a no-op.
-fn handle_shared_codex_turn_started_watchdog_expiry(
+pub(crate) fn handle_shared_codex_turn_started_watchdog_expiry(
     state: &AppState,
     sessions: &SharedCodexSessionMap,
     thread_sessions: &SharedCodexThreadMap,
@@ -3172,7 +3188,7 @@ fn handle_shared_codex_turn_started_watchdog_expiry(
 }
 
 /// Handles shared Codex prompt command results.
-fn handle_shared_codex_prompt_command_result(
+pub(crate) fn handle_shared_codex_prompt_command_result(
     state: &AppState,
     session_id: &str,
     runtime_token: &RuntimeToken,

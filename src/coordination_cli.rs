@@ -16,6 +16,8 @@
  * moved here from another file.
  */
 
+use super::*;
+
 const COORDINATION_CLI_USAGE: &str = "usage:
   termal federation status [--as-session <id>] [--json] [--base-url <url>]
   termal sessions list [--as-session <id>] [--json] [--base-url <url>]
@@ -70,7 +72,7 @@ issueReceipt are previews; upgrade/restart that bridge or use the current CLI.
 Exit codes: 0 success; 2 usage or argument error (no request was sent);
 1 any failure after a request was attempted (details on stderr).";
 
-fn coordination_cli_usage() -> String {
+pub(crate) fn coordination_cli_usage() -> String {
     format!(
         "TermAl commands:
   termal [server]                         Start the HTTP server (default).
@@ -119,7 +121,7 @@ fn coordination_cli_usage_error(message: impl Into<String>) -> anyhow::Error {
 
 /// Process exit code for a top-level failure: usage errors are 2, everything
 /// else (transport, backend rejection, unexpected response shape) is 1.
-fn coordination_cli_exit_code(err: &anyhow::Error) -> i32 {
+pub(crate) fn coordination_cli_exit_code(err: &anyhow::Error) -> i32 {
     if err.downcast_ref::<CoordinationCliUsageError>().is_some() {
         2
     } else {
@@ -130,14 +132,14 @@ fn coordination_cli_exit_code(err: &anyhow::Error) -> i32 {
 /// Where the body of a `mailbox send` comes from. Resolved only after parsing
 /// succeeds, so a bad file path is still a usage error and sends nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum CoordinationCliMessageSource {
+pub(crate) enum CoordinationCliMessageSource {
     Inline(String),
     File(PathBuf),
     Stdin,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum CoordinationCliCommand {
+pub(crate) enum CoordinationCliCommand {
     Help,
     MailboxTestSend {
         ordinary: Box<CoordinationCliCommand>,
@@ -186,10 +188,10 @@ enum CoordinationCliCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CoordinationCliInvocation {
-    command: CoordinationCliCommand,
-    json: bool,
-    base_url: Option<String>,
+pub(crate) struct CoordinationCliInvocation {
+    pub(crate) command: CoordinationCliCommand,
+    pub(crate) json: bool,
+    pub(crate) base_url: Option<String>,
 }
 
 /// Named flag values collected before the command is known, so every command
@@ -269,7 +271,7 @@ fn split_coordination_cli_flag(argument: &str) -> (String, Option<String>) {
     (argument.to_owned(), None)
 }
 
-fn coordination_cli_help() -> CoordinationCliInvocation {
+pub(crate) fn coordination_cli_help() -> CoordinationCliInvocation {
     CoordinationCliInvocation {
         command: CoordinationCliCommand::Help,
         json: false,
@@ -277,7 +279,7 @@ fn coordination_cli_help() -> CoordinationCliInvocation {
     }
 }
 
-fn is_cli_help_argument(argument: &str) -> bool {
+pub(crate) fn is_cli_help_argument(argument: &str) -> bool {
     matches!(argument, "--help" | "-h" | "help")
 }
 
@@ -318,13 +320,13 @@ fn take_coordination_cli_session_id(
 
 /// Parses `sessions ...` / `mailbox ...` arguments (the group word included).
 /// Every rejection is a `CoordinationCliUsageError`; nothing here performs I/O.
-fn parse_coordination_cli_args(
+pub(crate) fn parse_coordination_cli_args(
     args: impl IntoIterator<Item = String>,
 ) -> Result<CoordinationCliInvocation> {
     parse_coordination_cli_args_with_default_session_id(args, default_termal_session_id())
 }
 
-fn parse_coordination_cli_args_with_default_session_id(
+pub(crate) fn parse_coordination_cli_args_with_default_session_id(
     args: impl IntoIterator<Item = String>,
     default_session_id: Option<String>,
 ) -> Result<CoordinationCliInvocation> {
@@ -650,7 +652,7 @@ fn coordination_cli_authorized_bridge(
 /// a row of dashes. Mailbox payloads are checked with the wire types
 /// themselves; the session inventory is checked field by field because the
 /// bridge builds it from a state snapshot.
-fn validate_coordination_cli_output(
+pub(crate) fn validate_coordination_cli_output(
     command: &CoordinationCliCommand,
     output: &Value,
 ) -> Result<()> {
@@ -803,7 +805,10 @@ fn coordination_cli_error_is_broken_pipe(err: &anyhow::Error) -> bool {
 
 /// Executes one command against `base_url` and returns the same JSON the
 /// corresponding MCP tool would return.
-fn execute_coordination_cli(command: &CoordinationCliCommand, base_url: &str) -> Result<Value> {
+pub(crate) fn execute_coordination_cli(
+    command: &CoordinationCliCommand,
+    base_url: &str,
+) -> Result<Value> {
     execute_coordination_cli_with_test_request(command, base_url, None)
 }
 
@@ -1139,7 +1144,7 @@ fn coordination_cli_mailbox_unavailability(output: &Value) -> Result<Vec<String>
 
 /// Concise human rendering used when `--json` is absent. The JSON form is the
 /// stable contract; this text may change.
-fn render_coordination_cli_output(
+pub(crate) fn render_coordination_cli_output(
     command: &CoordinationCliCommand,
     output: &Value,
     out: &mut impl Write,
@@ -1337,7 +1342,7 @@ fn write_coordination_cli_output(
 /// command against the loopback API, validates the response shape, and
 /// prints the result to stdout. Errors propagate to `main`, which prints them
 /// on stderr and picks the exit code through `coordination_cli_exit_code`.
-fn run_coordination_cli(invocation: CoordinationCliInvocation) -> Result<()> {
+pub(crate) fn run_coordination_cli(invocation: CoordinationCliInvocation) -> Result<()> {
     let base_url = normalize_termal_http_base_url(
         invocation
             .base_url

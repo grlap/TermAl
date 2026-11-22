@@ -46,6 +46,8 @@
 // action helper here (`resolve_codex_thread_action_context`) is the
 // shared prologue for the operations in `src/codex_thread_actions.rs`.
 
+use super::*;
+
 impl AppState {
     /// Returns the shared Codex app-server runtime of `profile`, spawning it
     /// on first demand. Subsequent callers get a clone of the same handle so
@@ -60,7 +62,10 @@ impl AppState {
     ///
     /// Each profile has a slot of its own (`shared_codex_profile.rs`); a
     /// session uses the one its sandbox mode needs.
-    fn shared_codex_runtime_for(&self, profile: SharedCodexProfile) -> Result<SharedCodexRuntime> {
+    pub(crate) fn shared_codex_runtime_for(
+        &self,
+        profile: SharedCodexProfile,
+    ) -> Result<SharedCodexRuntime> {
         let mut shared_runtime = self
             .shared_codex_runtime_slot(profile)
             .lock()
@@ -74,7 +79,7 @@ impl AppState {
     }
 
     /// The running app-server of `profile`, without spawning one.
-    fn running_shared_codex_runtime(
+    pub(crate) fn running_shared_codex_runtime(
         &self,
         profile: SharedCodexProfile,
     ) -> Option<SharedCodexRuntime> {
@@ -84,7 +89,7 @@ impl AppState {
             .clone()
     }
 
-    fn shared_codex_runtime_slot(
+    pub(crate) fn shared_codex_runtime_slot(
         &self,
         profile: SharedCodexProfile,
     ) -> &Arc<Mutex<Option<SharedCodexRuntime>>> {
@@ -97,10 +102,11 @@ impl AppState {
 
     /// The profile whose slot holds the runtime `runtime_id`, or `None` when
     /// no slot holds it (torn down or replaced).
-    fn shared_codex_profile_holding(&self, runtime_id: &str) -> Option<SharedCodexProfile> {
-        SharedCodexProfile::ALL
-        .into_iter()
-        .find(|profile| {
+    pub(crate) fn shared_codex_profile_holding(
+        &self,
+        runtime_id: &str,
+    ) -> Option<SharedCodexProfile> {
+        SharedCodexProfile::ALL.into_iter().find(|profile| {
             self.shared_codex_runtime_slot(*profile)
                 .lock()
                 .expect("shared Codex runtime mutex poisoned")
@@ -110,7 +116,7 @@ impl AppState {
     }
 
     /// The profile a session's thread operations use, from its record.
-    fn shared_codex_profile_of_session(&self, session_id: &str) -> SharedCodexProfile {
+    pub(crate) fn shared_codex_profile_of_session(&self, session_id: &str) -> SharedCodexProfile {
         let inner = self.inner.lock().expect("state mutex poisoned");
         inner
             .find_session_index(session_id)
@@ -124,9 +130,7 @@ impl AppState {
         &self,
         runtime_id: &str,
     ) -> Option<(SharedCodexProfile, SharedCodexRuntime)> {
-        SharedCodexProfile::ALL
-        .into_iter()
-        .find_map(|profile| {
+        SharedCodexProfile::ALL.into_iter().find_map(|profile| {
             let mut slot = self
                 .shared_codex_runtime_slot(profile)
                 .lock()
@@ -153,7 +157,7 @@ impl AppState {
     /// act on ([`Self::perform_codex_json_rpc_request_for`]); this default-
     /// profile form is kept for tests.
     #[cfg(test)]
-    fn perform_codex_json_rpc_request(
+    pub(crate) fn perform_codex_json_rpc_request(
         &self,
         method: &str,
         params: Value,
@@ -183,7 +187,7 @@ impl AppState {
     /// As [`Self::perform_codex_json_rpc_request`], on the app-server of
     /// `profile`: a request about one session's thread goes to the
     /// app-server that holds that thread.
-    fn perform_codex_json_rpc_request_for(
+    pub(crate) fn perform_codex_json_rpc_request_for(
         &self,
         profile: SharedCodexProfile,
         method: &str,
@@ -207,7 +211,7 @@ impl AppState {
         self.perform_codex_json_rpc_request_on_runtime(&runtime, method, params, timeout)
     }
 
-    fn perform_codex_json_rpc_request_on_runtime(
+    pub(crate) fn perform_codex_json_rpc_request_on_runtime(
         &self,
         runtime: &SharedCodexRuntime,
         method: &str,
@@ -253,7 +257,7 @@ impl AppState {
     /// `threadId`), and normalizes the thread state / approval policy /
     /// sandbox mode / reasoning effort back to concrete values for the
     /// subsequent `thread/*` JSON-RPC call.
-    fn resolve_codex_thread_action_context(
+    pub(crate) fn resolve_codex_thread_action_context(
         &self,
         session_id: &str,
     ) -> Result<CodexThreadActionContext, ApiError> {
@@ -332,10 +336,11 @@ impl AppState {
     /// unanswered request. Genuinely dead servers never need this probe —
     /// the stdout reader's EOF path and the `wait()` thread already fail
     /// pending requests and retire the runtime (`src/codex.rs`).
-    fn shared_codex_stdout_silence_if_matches(&self, runtime_id: &str) -> Option<Duration> {
-        SharedCodexProfile::ALL
-        .into_iter()
-        .find_map(|profile| {
+    pub(crate) fn shared_codex_stdout_silence_if_matches(
+        &self,
+        runtime_id: &str,
+    ) -> Option<Duration> {
+        SharedCodexProfile::ALL.into_iter().find_map(|profile| {
             let shared_runtime = self
                 .shared_codex_runtime_slot(profile)
                 .lock()
@@ -364,7 +369,7 @@ impl AppState {
     /// the slot unconditionally would clobber the fresh runtime and
     /// leave its clients orphaned. Only the handler whose runtime still
     /// matches may take the slot and terminate the child.
-    fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) -> Result<()> {
+    pub(crate) fn clear_shared_codex_runtime_if_matches(&self, runtime_id: &str) -> Result<()> {
         let removed_runtime = self
             .take_shared_codex_runtime_if_matches(runtime_id)
             .map(|(_, runtime)| runtime);
@@ -393,7 +398,7 @@ impl AppState {
     /// so the UI shows a concrete reason. Finally
     /// [`Self::clear_shared_codex_runtime_if_matches`] releases the slot
     /// so the next Codex session triggers a fresh spawn.
-    fn handle_shared_codex_runtime_exit(
+    pub(crate) fn handle_shared_codex_runtime_exit(
         &self,
         runtime_id: &str,
         error_message: Option<&str>,
@@ -412,7 +417,8 @@ impl AppState {
                 return Ok(());
             }
         }
-        let removed_runtime = self.take_shared_codex_runtime_if_matches(runtime_id)
+        let removed_runtime = self
+            .take_shared_codex_runtime_if_matches(runtime_id)
             .map(|(_, runtime)| runtime);
         let session_exits = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -437,7 +443,9 @@ impl AppState {
         let mut exit_error = None;
         for (session_id, was_busy) in session_exits {
             let session_error = was_busy.then_some(error_message).flatten();
-            if let Err(error) = self.handle_runtime_exit_if_matches(&session_id, &token, session_error) {
+            if let Err(error) =
+                self.handle_runtime_exit_if_matches(&session_id, &token, session_error)
+            {
                 // Complete the cascade and retire the removed shared process,
                 // even if one session's local completion cannot be published.
                 if exit_error.is_none() {

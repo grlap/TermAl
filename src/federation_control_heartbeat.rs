@@ -1,12 +1,17 @@
 // Owns symmetric authenticated heartbeat deadlines and freshness sequencing.
 // Does not carry commands or refresh liveness from RPCs. New A1 control FSM.
 
+use super::*;
+
 fn federation_control_sequence(bytes: &[u8]) -> Result<u64, ApiError> {
     let array: [u8; 8] = bytes.try_into().map_err(|_| federation_auth_refused())?;
     Ok(u64::from_be_bytes(array))
 }
 
-async fn federation_control_satellite(channel: FederationChannel, mut io: FederationControlIo) {
+pub(crate) async fn federation_control_satellite(
+    channel: FederationChannel,
+    mut io: FederationControlIo,
+) {
     let (context, _guard) = match federation_attest_satellite(&channel, &mut io).await {
         Ok(value) => value,
         Err(_) => return,
@@ -15,7 +20,7 @@ async fn federation_control_satellite(channel: FederationChannel, mut io: Federa
 }
 
 // The caller retains the installed context's guard while receiving control.
-async fn federation_control_satellite_established(
+pub(crate) async fn federation_control_satellite_established(
     channel: &FederationChannel,
     mut io: &mut FederationControlIo,
     context: &Arc<FederationSecurityContext>,
@@ -51,13 +56,21 @@ async fn federation_control_satellite_established(
         }
         let fields = match federation_decode(&frame, b"termal-hb-req-v1", 3) {
             Ok(fields) => fields,
-            Err(_) => { terminal.reason = "controlFrameDecodeInvalid"; break; },
+            Err(_) => {
+                terminal.reason = "controlFrameDecodeInvalid";
+                break;
+            }
         };
         let sequence = match federation_control_sequence(fields[0]) {
             Ok(value) => value,
-            Err(_) => { terminal.reason = "controlSequenceInvalid"; break; },
+            Err(_) => {
+                terminal.reason = "controlSequenceInvalid";
+                break;
+            }
         };
-        context.last_control_sequence.store(sequence, Ordering::SeqCst);
+        context
+            .last_control_sequence
+            .store(sequence, Ordering::SeqCst);
         let valid = fields[1].len() == 16
             && federation_verify_mac(
                 &context.keys[4],
@@ -81,7 +94,10 @@ async fn federation_control_satellite_established(
             &[b"hb-resp", &context.transcript, fields[0], fields[1]],
         ) {
             Ok(tag) => tag,
-            Err(_) => { terminal.reason = "controlMacError"; break; },
+            Err(_) => {
+                terminal.reason = "controlMacError";
+                break;
+            }
         };
         let response = federation_encode(b"termal-hb-resp-v1", &[fields[0], &tag]);
         let result = tokio::select! {
@@ -102,7 +118,7 @@ async fn federation_control_satellite_established(
     // expiry. A delayed old task cannot fence a newer successful handshake.
 }
 
-async fn federation_control_central(
+pub(crate) async fn federation_control_central(
     channel: FederationChannel,
     io: FederationControlIo,
     context: Arc<FederationSecurityContext>,
@@ -182,7 +198,9 @@ async fn federation_control_central(
             terminal.reason = "controlSequenceInvalid";
             error
         })?;
-        context.last_control_sequence.store(received, Ordering::SeqCst);
+        context
+            .last_control_sequence
+            .store(received, Ordering::SeqCst);
         let valid = outstanding.as_ref().is_some_and(|(number, challenge)| {
             received == *number
                 && federation_verify_mac(

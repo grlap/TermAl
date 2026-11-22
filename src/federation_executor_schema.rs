@@ -3,7 +3,7 @@
 // A row targeted at another host is an immutable central ownership mirror:
 // received/not_started with all queue, runtime and processing columns NULL.
 // Its existence records receiver ownership, never local executor permission.
-const FEDERATION_EXECUTOR_SCHEMA_SQL: &str = "
+pub(crate) const FEDERATION_EXECUTOR_SCHEMA_SQL: &str = "
     CREATE TABLE federation_executor_operations (
       central_host_id TEXT NOT NULL CHECK (length(central_host_id) BETWEEN 1 AND 256),
       operation_key TEXT NOT NULL CHECK (length(operation_key) BETWEEN 1 AND 1024),

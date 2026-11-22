@@ -1,9 +1,11 @@
 // Authority and compiled-worker observation for raw review identities.
 // No caller chooses a process, command, environment or executable.
-const TERMAL_REVIEW_IDENTITY_TOOL_NAME: &str = "termal_review_identity";
-const TERMAL_REVIEW_IDENTITY_QUALIFIED_TOOL_NAME: &str =
+
+use super::*;
+pub(crate) const TERMAL_REVIEW_IDENTITY_TOOL_NAME: &str = "termal_review_identity";
+pub(crate) const TERMAL_REVIEW_IDENTITY_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_review_identity";
-const TERMAL_REVIEW_IDENTITY_TOOL_DESCRIPTION: &str = "Check a termal-review-identity-v1 candidate using the host-owned bounded raw inventory engine. Required check fields: operation=\"check\", schemaVersion=1, expectedFingerprint (the parent's independent lowercase SHA-256 literal), platformProfile (\"windows\" or \"unix\"). Optional pageLimit=1..100 and cursor. The host derives a read-only review child's cwd; capture and root overrides are forbidden to children. Root sessions may capture an admitted project worktree with operation=\"capture\" and optional root. Returns complete, verified, native platform coverage, counts and a fingerprint-bound inventory page. No shell, scripts, writes or fallback to Engram schema-1.";
+pub(crate) const TERMAL_REVIEW_IDENTITY_TOOL_DESCRIPTION: &str = "Check a termal-review-identity-v1 candidate using the host-owned bounded raw inventory engine. Required check fields: operation=\"check\", schemaVersion=1, expectedFingerprint (the parent's independent lowercase SHA-256 literal), platformProfile (\"windows\" or \"unix\"). Optional pageLimit=1..100 and cursor. The host derives a read-only review child's cwd; capture and root overrides are forbidden to children. Root sessions may capture an admitted project worktree with operation=\"capture\" and optional root. Returns complete, verified, native platform coverage, counts and a fingerprint-bound inventory page. No shell, scripts, writes or fallback to Engram schema-1.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ReviewIdentityAuthority {
@@ -81,7 +83,7 @@ impl AppState {
             )
         })
     }
-    fn observe_review_identity_with(
+    pub(crate) fn observe_review_identity_with(
         &self,
         session: &str,
         request: ReviewIdentityRequest,
@@ -184,13 +186,13 @@ impl AppState {
 // session snapshot. It is never part of the HTTP/MCP caller's request schema.
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReviewIdentityScope {
-    cwd: String,
-    project: String,
-    named: Vec<String>,
+pub(crate) struct ReviewIdentityScope {
+    pub(crate) cwd: String,
+    pub(crate) project: String,
+    pub(crate) named: Vec<String>,
 }
 impl ReviewIdentityScope {
-    fn admit(&self, root: &FsPath) -> Result<PathBuf> {
+    pub(crate) fn admit(&self, root: &FsPath) -> Result<PathBuf> {
         let canonical = identity_canonical(root)?;
         let cwd = identity_canonical(FsPath::new(&self.cwd))?;
         let project = identity_canonical(FsPath::new(&self.project))?;
@@ -207,7 +209,7 @@ impl ReviewIdentityScope {
         Ok(common)
     }
 }
-async fn review_identity_api(
+pub(crate) async fn review_identity_api(
     AxumPath(session): AxumPath<String>,
     State(state): State<AppState>,
     request: Result<Json<ReviewIdentityRequest>, JsonRejection>,
@@ -226,7 +228,7 @@ async fn review_identity_api(
     .await
 }
 
-fn review_identity_tool_definition() -> Value {
+pub(crate) fn review_identity_tool_definition() -> Value {
     json!({
         "name": TERMAL_REVIEW_IDENTITY_TOOL_NAME,
         "description": TERMAL_REVIEW_IDENTITY_TOOL_DESCRIPTION,
@@ -248,7 +250,7 @@ fn review_identity_tool_definition() -> Value {
 }
 
 impl TermalDelegationMcpBridge {
-    fn tool_review_identity(&self, arguments: Value) -> Result<Value> {
+    pub(crate) fn tool_review_identity(&self, arguments: Value) -> Result<Value> {
         let request: ReviewIdentityRequest = serde_json::from_value(arguments.clone())?;
         request.validate()?;
         if self.caller_is_delegation_child()
@@ -266,7 +268,7 @@ impl TermalDelegationMcpBridge {
     }
 }
 
-fn review_identity_snapshot_allows(state: &Value, session: &str) -> bool {
+pub(crate) fn review_identity_snapshot_allows(state: &Value, session: &str) -> bool {
     state
         .get("delegations")
         .and_then(Value::as_array)
@@ -280,7 +282,7 @@ fn review_identity_snapshot_allows(state: &Value, session: &str) -> bool {
 
 // Validate exactly one requested registration, with bounded metadata reads.
 // Never enumerate a filesystem or accept an arbitrary .git pointer.
-fn identity_registered_common(root: &FsPath) -> Result<PathBuf> {
+pub(crate) fn identity_registered_common(root: &FsPath) -> Result<PathBuf> {
     identity_no_links(root)?;
     let dotgit = root.join(".git");
     let metadata = identity_metadata(&dotgit)?;

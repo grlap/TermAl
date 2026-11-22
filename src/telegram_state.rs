@@ -5,69 +5,71 @@ Owns the current telegram-bot.json runtime-only shape, persistence, corrupt-file
 and token redaction used by runtime/client error paths.
 */
 
+use super::*;
+
 /// Tracks Telegram bot state.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TelegramBotState {
+pub(crate) struct TelegramBotState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    chat_id: Option<i64>,
+    pub(crate) chat_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    selected_project_id: Option<String>,
+    pub(crate) selected_project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    selected_session_id: Option<String>,
+    pub(crate) selected_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_digest_hash: Option<String>,
+    pub(crate) last_digest_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_digest_message_id: Option<i64>,
+    pub(crate) last_digest_message_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    next_update_id: Option<i64>,
+    pub(crate) next_update_id: Option<i64>,
     /// Authoritative session-keyed delivery cursors, including chunk retry and
     /// pending-footer state. A cursor never applies to another session.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    assistant_forwarding_cursors: HashMap<String, TelegramAssistantForwardingCursor>,
+    pub(crate) assistant_forwarding_cursors: HashMap<String, TelegramAssistantForwardingCursor>,
     /// Ordered session ids armed by Telegram prompts, including sessions with
     /// no previous assistant message to use as a baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    forward_next_assistant_message_session_ids: Vec<String>,
+    pub(crate) forward_next_assistant_message_session_ids: Vec<String>,
     #[serde(skip)]
-    chat_work_rate_limit: HashMap<i64, VecDeque<std::time::Instant>>,
+    pub(crate) chat_work_rate_limit: HashMap<i64, VecDeque<std::time::Instant>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TelegramAssistantForwardingCursor {
+pub(crate) struct TelegramAssistantForwardingCursor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    message_id: Option<String>,
+    pub(crate) message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    text_chars: Option<usize>,
+    pub(crate) text_chars: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    text_hash: Option<String>,
+    pub(crate) text_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    text_start_chars: Option<usize>,
+    pub(crate) text_start_chars: Option<usize>,
     #[serde(default, skip_serializing_if = "is_false")]
-    resend_if_grown: bool,
+    pub(crate) resend_if_grown: bool,
     /// Number of chunks already delivered for `message_id` when a long
     /// assistant message failed mid-message. `None` means the message is
     /// complete, not partially delivered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    sent_chunks: Option<usize>,
+    pub(crate) sent_chunks: Option<usize>,
     /// Failed delivery attempts for the next chunk after `sent_chunks`.
     /// This lets the relay bound retries for chunks Telegram repeatedly
     /// rejects before any visible content can be delivered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    failed_chunk_send_attempts: Option<usize>,
+    pub(crate) failed_chunk_send_attempts: Option<usize>,
     /// True when assistant content was delivered but the final footer marker
     /// failed. The next poll retries the footer without replaying content.
     #[serde(default, skip_serializing_if = "is_false")]
-    footer_pending: bool,
+    pub(crate) footer_pending: bool,
     /// Holds the boundary for a Telegram prompt queued behind an already
     /// running or approval-paused local turn.
     #[serde(default, skip_serializing_if = "is_false")]
-    baseline_while_active: bool,
+    pub(crate) baseline_while_active: bool,
 }
 
 impl TelegramAssistantForwardingCursor {
-    fn from_latest(latest: Option<(String, usize)>, resend_if_grown: bool) -> Self {
+    pub(crate) fn from_latest(latest: Option<(String, usize)>, resend_if_grown: bool) -> Self {
         latest
             .map(|(message_id, text_chars)| Self {
                 message_id: Some(message_id),
@@ -83,14 +85,14 @@ impl TelegramAssistantForwardingCursor {
             .unwrap_or_default()
     }
 
-    fn active_baseline(latest: Option<(String, usize)>) -> Self {
+    pub(crate) fn active_baseline(latest: Option<(String, usize)>) -> Self {
         Self {
             baseline_while_active: true,
             ..Self::from_latest(latest, false)
         }
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.message_id.is_none()
             && self.text_chars.is_none()
             && self.text_hash.is_none()
@@ -104,7 +106,7 @@ impl TelegramAssistantForwardingCursor {
 }
 
 /// Loads Telegram bot state.
-fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
+pub(crate) fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
     let raw = match fs::read(path) {
         Ok(raw) => raw,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -124,7 +126,7 @@ fn load_telegram_bot_state(path: &FsPath) -> Result<TelegramBotState> {
 }
 
 /// Persists Telegram bot state.
-fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result<()> {
+pub(crate) fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result<()> {
     let _guard = telegram_settings_file_guard();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -155,7 +157,7 @@ fn persist_telegram_bot_state(path: &FsPath, state: &TelegramBotState) -> Result
         .with_context(|| format!("failed to write `{}`", path.display()))
 }
 
-fn persist_dirty_telegram_state_after_poll_error(
+pub(crate) fn persist_dirty_telegram_state_after_poll_error(
     path: &FsPath,
     state: &TelegramBotState,
     dirty: bool,
@@ -173,7 +175,7 @@ fn persist_dirty_telegram_state_after_poll_error(
     }
 }
 
-fn persist_telegram_update_cursor_after_update(path: &FsPath, state: &TelegramBotState) {
+pub(crate) fn persist_telegram_update_cursor_after_update(path: &FsPath, state: &TelegramBotState) {
     if let Err(err) = persist_telegram_bot_state(path, state) {
         log_telegram_error("failed to persist Telegram update cursor", &err);
     }
@@ -192,7 +194,7 @@ fn backup_corrupt_telegram_bot_file(path: &FsPath, err: impl std::fmt::Display) 
     })
 }
 
-fn backup_corrupt_telegram_bot_file_with_rename(
+pub(crate) fn backup_corrupt_telegram_bot_file_with_rename(
     path: &FsPath,
     backup_path: &FsPath,
     rename_fn: impl FnOnce(&FsPath, &FsPath) -> io::Result<()>,
@@ -239,7 +241,7 @@ fn harden_telegram_backup_file_or_remove(path: &FsPath) -> io::Result<()> {
     Ok(())
 }
 
-fn corrupt_telegram_bot_file_backup_path(path: &FsPath) -> PathBuf {
+pub(crate) fn corrupt_telegram_bot_file_backup_path(path: &FsPath) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| FsPath::new("."));
     let file_name = path
         .file_name()
@@ -249,11 +251,14 @@ fn corrupt_telegram_bot_file_backup_path(path: &FsPath) -> PathBuf {
 }
 
 /// Computes the effective Telegram chat ID.
-fn effective_telegram_chat_id(config: &TelegramBotConfig, state: &TelegramBotState) -> Option<i64> {
+pub(crate) fn effective_telegram_chat_id(
+    config: &TelegramBotConfig,
+    state: &TelegramBotState,
+) -> Option<i64> {
     config.chat_id.or(state.chat_id)
 }
 
-fn telegram_project_is_subscribed(config: &TelegramBotConfig, project_id: &str) -> bool {
+pub(crate) fn telegram_project_is_subscribed(config: &TelegramBotConfig, project_id: &str) -> bool {
     config
         .subscribed_project_ids
         .iter()
@@ -261,7 +266,7 @@ fn telegram_project_is_subscribed(config: &TelegramBotConfig, project_id: &str) 
         || config.project_id == project_id
 }
 
-fn telegram_active_project_id<'a>(
+pub(crate) fn telegram_active_project_id<'a>(
     config: &'a TelegramBotConfig,
     state: &'a TelegramBotState,
 ) -> &'a str {
@@ -272,7 +277,7 @@ fn telegram_active_project_id<'a>(
         .unwrap_or(config.project_id.as_str())
 }
 
-fn resolve_telegram_active_project_id(
+pub(crate) fn resolve_telegram_active_project_id(
     config: &TelegramBotConfig,
     state: &mut TelegramBotState,
 ) -> (String, bool) {
@@ -289,7 +294,7 @@ fn resolve_telegram_active_project_id(
     }
 }
 
-fn clear_telegram_project_scoped_state(state: &mut TelegramBotState) -> bool {
+pub(crate) fn clear_telegram_project_scoped_state(state: &mut TelegramBotState) -> bool {
     let mut dirty = false;
     if let Some(session_id) = state.selected_session_id.take() {
         dirty = true;
@@ -304,14 +309,14 @@ fn clear_telegram_project_scoped_state(state: &mut TelegramBotState) -> bool {
     dirty
 }
 
-fn log_telegram_error(context: &str, err: &anyhow::Error) {
+pub(crate) fn log_telegram_error(context: &str, err: &anyhow::Error) {
     eprintln!(
         "telegram> {context}: {}",
         sanitize_telegram_log_detail(&err.to_string())
     );
 }
 
-fn sanitize_telegram_log_detail(detail: &str) -> String {
+pub(crate) fn sanitize_telegram_log_detail(detail: &str) -> String {
     const MAX_LOG_DETAIL_CHARS: usize = 256;
     let redacted = redact_telegram_bot_tokens(detail);
     let mut chars = redacted.chars();

@@ -1,14 +1,16 @@
 // Owns per-incarnation keys, replay reservation and bounded sender allocation.
 // Does not perform IO or grant application authority. New A1 context leaf.
 
+use super::*;
+
 #[derive(Default)]
-struct FederationReplayWindow {
-    high: u64,
+pub(crate) struct FederationReplayWindow {
+    pub(crate) high: u64,
     bitmap: u64,
 }
 
 impl FederationReplayWindow {
-    fn reserve(&mut self, counter: u64) -> Result<(), ApiError> {
+    pub(crate) fn reserve(&mut self, counter: u64) -> Result<(), ApiError> {
         if counter == 0 {
             return Err(federation_auth_refused());
         }
@@ -35,22 +37,22 @@ impl FederationReplayWindow {
 /// outcome and its counter retired after this long. No timeout tears down the
 /// authenticated link: the receiver's replay window still refuses a duplicate
 /// or too-old counter.
-const FEDERATION_SENDER_RETIREMENT: Duration = Duration::from_secs(10);
+pub(crate) const FEDERATION_SENDER_RETIREMENT: Duration = Duration::from_secs(10);
 
-struct FederationSenderWindow {
-    next: u64,
-    outstanding: std::collections::BTreeMap<u64, FederationSenderDeadline>,
+pub(crate) struct FederationSenderWindow {
+    pub(crate) next: u64,
+    pub(crate) outstanding: std::collections::BTreeMap<u64, FederationSenderDeadline>,
 }
 
 /// One unsettled counter, allocated by a fixed local operation.
-struct FederationSenderDeadline {
-    started: std::time::Instant,
-    retire_at: std::time::Instant,
-    operation: &'static str,
+pub(crate) struct FederationSenderDeadline {
+    pub(crate) started: std::time::Instant,
+    pub(crate) retire_at: std::time::Instant,
+    pub(crate) operation: &'static str,
 }
 
 impl FederationSenderDeadline {
-    fn new(now: std::time::Instant, operation: &'static str) -> Self {
+    pub(crate) fn new(now: std::time::Instant, operation: &'static str) -> Self {
         Self {
             started: now,
             retire_at: now + FEDERATION_SENDER_RETIREMENT,
@@ -63,10 +65,10 @@ impl FederationSenderDeadline {
 /// operation, the counter and the elapsed time, never a payload or path.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct FederationSenderEvent {
-    kind: &'static str,
-    operation: &'static str,
-    counter: u64,
+pub(crate) struct FederationSenderEvent {
+    pub(crate) kind: &'static str,
+    pub(crate) operation: &'static str,
+    pub(crate) counter: u64,
 }
 
 impl Default for FederationSenderWindow {
@@ -78,31 +80,31 @@ impl Default for FederationSenderWindow {
     }
 }
 
-struct FederationSecurityContext {
-    owner: u64,
-    incarnation: String,
-    transcript: Vec<u8>,
-    keys: zeroize::Zeroizing<[[u8; 32]; 6]>,
-    received: Mutex<FederationReplayWindow>,
-    sender: Mutex<FederationSenderWindow>,
-    changed: tokio::sync::Notify,
-    watchdog_started: AtomicBool,
+pub(crate) struct FederationSecurityContext {
+    pub(crate) owner: u64,
+    pub(crate) incarnation: String,
+    pub(crate) transcript: Vec<u8>,
+    pub(crate) keys: zeroize::Zeroizing<[[u8; 32]; 6]>,
+    pub(crate) received: Mutex<FederationReplayWindow>,
+    pub(crate) sender: Mutex<FederationSenderWindow>,
+    pub(crate) changed: tokio::sync::Notify,
+    pub(crate) watchdog_started: AtomicBool,
     // A satellite installs before central receives its final proof. Only a
     // valid central heartbeat proves the peer has installed this context too.
-    outgoing_rpc_ready: AtomicBool,
+    pub(crate) outgoing_rpc_ready: AtomicBool,
     // Diagnostic facts stay with this exact context, including after replacement.
-    installed_at: std::sync::OnceLock<std::time::Instant>,
-    diagnostic_basis: std::sync::OnceLock<(u64, u64)>,
-    diagnostic_attempt_basis: std::sync::OnceLock<(u64, u64)>,
-    terminal_logged: AtomicBool,
-    last_control_sequence: std::sync::atomic::AtomicU64,
-    retired: tokio::sync::watch::Sender<bool>,
+    pub(crate) installed_at: std::sync::OnceLock<std::time::Instant>,
+    pub(crate) diagnostic_basis: std::sync::OnceLock<(u64, u64)>,
+    pub(crate) diagnostic_attempt_basis: std::sync::OnceLock<(u64, u64)>,
+    pub(crate) terminal_logged: AtomicBool,
+    pub(crate) last_control_sequence: std::sync::atomic::AtomicU64,
+    pub(crate) retired: tokio::sync::watch::Sender<bool>,
     #[cfg(test)]
-    sender_events: Mutex<Vec<FederationSenderEvent>>,
+    pub(crate) sender_events: Mutex<Vec<FederationSenderEvent>>,
 }
 
 impl FederationSecurityContext {
-    fn derive(
+    pub(crate) fn derive(
         owner: u64,
         incarnation: String,
         transcript: Vec<u8>,
@@ -152,7 +154,7 @@ impl FederationSecurityContext {
     /// Settles a counter by its verified reply. Returns false if it was no
     /// longer outstanding, because it had already been retired as UNKNOWN: the
     /// caller then keeps that UNKNOWN outcome, so caller and record agree.
-    fn settle(&self, counter: u64) -> bool {
+    pub(crate) fn settle(&self, counter: u64) -> bool {
         let settled = self
             .sender
             .lock()
@@ -167,7 +169,12 @@ impl FederationSecurityContext {
     /// Gives an unsettled counter an UNKNOWN outcome without touching the
     /// link, and records that once. Returns false if it had already settled
     /// or been retired, so a racing caller records nothing.
-    fn retire_unknown(&self, counter: u64, reason: &'static str, now: std::time::Instant) -> bool {
+    pub(crate) fn retire_unknown(
+        &self,
+        counter: u64,
+        reason: &'static str,
+        now: std::time::Instant,
+    ) -> bool {
         let Some(entry) = self
             .sender
             .lock()
@@ -216,14 +223,14 @@ impl FederationSecurityContext {
             });
     }
 
-    fn retire(&self) {
+    pub(crate) fn retire(&self) {
         self.retired.send_replace(true);
         self.changed.notify_waiters();
     }
 }
 
 impl FederationChannel {
-    fn security_context(&self) -> Result<Arc<FederationSecurityContext>, ApiError> {
+    pub(crate) fn security_context(&self) -> Result<Arc<FederationSecurityContext>, ApiError> {
         self.state
             .lock()
             .expect("federation link mutex poisoned")
@@ -232,7 +239,10 @@ impl FederationChannel {
             .ok_or_else(federation_auth_refused)
     }
 
-    fn security_current(&self, context: &Arc<FederationSecurityContext>) -> Result<(), ApiError> {
+    pub(crate) fn security_current(
+        &self,
+        context: &Arc<FederationSecurityContext>,
+    ) -> Result<(), ApiError> {
         let state = self.state.lock().expect("federation link mutex poisoned");
         if state
             .security
@@ -246,10 +256,13 @@ impl FederationChannel {
         Ok(())
     }
 
-    fn fence_security(&self, owner: u64, incarnation: &str) {
+    pub(crate) fn fence_security(&self, owner: u64, incarnation: &str) {
         // Teardown can run during an earlier failure. Recover only to revoke
         // this exact owner; leave poison set so admission cannot reuse it.
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if state
             .security
             .as_ref()

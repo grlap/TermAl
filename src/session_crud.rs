@@ -43,7 +43,9 @@
 // change. Orchestrator instances that reference the project also
 // have their `project_id` cleared for the same reason.
 
-const MAX_DEFAULT_MODEL_CHARS: usize = 200;
+use super::*;
+
+pub(crate) const MAX_DEFAULT_MODEL_CHARS: usize = 200;
 
 fn normalize_default_model_preference(model: String, agent: Agent) -> Result<String, ApiError> {
     let trimmed = model.trim();
@@ -69,7 +71,7 @@ fn normalize_default_model_preference(model: String, agent: Agent) -> Result<Str
     Ok(trimmed.to_owned())
 }
 
-fn validate_claude_default_model_preference(model: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_claude_default_model_preference(model: &str) -> Result<(), ApiError> {
     if model.starts_with('-') {
         return Err(ApiError::bad_request(
             "Claude default model must not start with `-`",
@@ -107,7 +109,10 @@ where
     Ok(())
 }
 
-fn project_engram_session_ids_locked(inner: &StateInner, project_id: &str) -> Vec<String> {
+pub(crate) fn project_engram_session_ids_locked(
+    inner: &StateInner,
+    project_id: &str,
+) -> Vec<String> {
     let mut session_ids = inner
         .sessions
         .iter()
@@ -143,10 +148,9 @@ fn engram_settings_change_ends_session_associations(
     let Some(current) = current else {
         return false;
     };
-    let store_changed = current.home != next.home
-        || current.authority_store_key != next.authority_store_key;
-    store_changed
-        || (current.enabled && (!next.enabled || current.binary_path != next.binary_path))
+    let store_changed =
+        current.home != next.home || current.authority_store_key != next.authority_store_key;
+    store_changed || (current.enabled && (!next.enabled || current.binary_path != next.binary_path))
 }
 
 /// Ends the ordinary claim association of each of `session_ids`: its work
@@ -172,14 +176,23 @@ fn reset_engram_session_associations_locked(
         let mut closing_jobs = old.unadmitted_closing_jobs.clone();
         if let Some(selection) = old.pending_naming_selection.as_ref() {
             for member in &selection.predecessors {
-                if member.capture_durable || member.terminal_no_report.is_some()
-                    || old.unadmitted_reports.iter().any(|report| report.host_turn_ref == member.turn_ref)
+                if member.capture_durable
+                    || member.terminal_no_report.is_some()
+                    || old
+                        .unadmitted_reports
+                        .iter()
+                        .any(|report| report.host_turn_ref == member.turn_ref)
                 {
                     continue;
                 }
                 let turn = &member.turn_ref;
-                let diagnostic = format!("Runtime-started turn {turn}: no predecessor report: the Engram association was reset before predecessor capture. Its checks remain uncredited.");
-                if let Some(job) = closing_jobs.iter_mut().find(|job| &job.trace.host_turn_ref == turn) {
+                let diagnostic = format!(
+                    "Runtime-started turn {turn}: no predecessor report: the Engram association was reset before predecessor capture. Its checks remain uncredited."
+                );
+                if let Some(job) = closing_jobs
+                    .iter_mut()
+                    .find(|job| &job.trace.host_turn_ref == turn)
+                {
                     job.last_error = Some(diagnostic.clone());
                 }
                 lines.push(diagnostic);
@@ -315,7 +328,7 @@ fn validate_engram_project_home_for_update(
     Ok(())
 }
 
-fn default_engram_home_path() -> Result<PathBuf, ApiError> {
+pub(crate) fn default_engram_home_path() -> Result<PathBuf, ApiError> {
     let base = std::env::var_os("USERPROFILE")
         .filter(|value| !value.is_empty())
         .or_else(|| std::env::var_os("HOME").filter(|value| !value.is_empty()))
@@ -386,7 +399,7 @@ fn normalize_engram_project_paths(settings: &mut EngramProjectSettings) -> Resul
     Ok(())
 }
 
-fn normalize_engram_host_settings(
+pub(crate) fn normalize_engram_host_settings(
     settings: EngramHostSettings,
 ) -> Result<EngramHostSettings, ApiError> {
     let developer_name = settings.developer_name.trim().to_ascii_lowercase();
@@ -587,16 +600,16 @@ fn rollback_engram_mcp_rotation_notices_locked(
 
 /// Runtime reset changes only these fields. Preserve a deferred compaction
 /// refresh as well as its undelivered page when persisting settings fails.
-struct EngramMcpRuntimeResetSnapshot {
-    session_id: String,
-    runtime_reset_required: bool,
-    context_nudge_generation: u64,
-    context_nudge_pending: bool,
-    pending_context_nudge: Option<String>,
-    context_refresh_needed: bool,
+pub(crate) struct EngramMcpRuntimeResetSnapshot {
+    pub(crate) session_id: String,
+    pub(crate) runtime_reset_required: bool,
+    pub(crate) context_nudge_generation: u64,
+    pub(crate) context_nudge_pending: bool,
+    pub(crate) pending_context_nudge: Option<String>,
+    pub(crate) context_refresh_needed: bool,
 }
 
-fn mark_engram_mcp_runtime_resets_locked(
+pub(crate) fn mark_engram_mcp_runtime_resets_locked(
     inner: &mut StateInner,
     session_ids: &[String],
 ) -> Vec<EngramMcpRuntimeResetSnapshot> {
@@ -625,7 +638,7 @@ fn mark_engram_mcp_runtime_resets_locked(
     previous
 }
 
-fn restore_engram_mcp_runtime_resets_locked(
+pub(crate) fn restore_engram_mcp_runtime_resets_locked(
     inner: &mut StateInner,
     previous: Vec<EngramMcpRuntimeResetSnapshot>,
 ) {
@@ -654,7 +667,7 @@ fn project_matches_engram_connection_snapshot(project: &Project, snapshot: &Proj
 
 #[cfg(test)]
 thread_local! {
-    static TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY: std::cell::RefCell<
+    pub(crate) static TEST_ENGRAM_SETTINGS_MUTATION_BOUNDARY: std::cell::RefCell<
         Option<(&'static str, Box<dyn FnOnce()>)>
     > = const { std::cell::RefCell::new(None) };
 }
@@ -681,7 +694,12 @@ fn run_engram_settings_mutation_boundary(boundary: &'static str) {
 
 impl AppState {
     #[cfg(test)]
-    fn note_engram_cleanup_degraded(&self, project_id: &str, notice: &str, context: &str) {
+    pub(crate) fn note_engram_cleanup_degraded(
+        &self,
+        project_id: &str,
+        notice: &str,
+        context: &str,
+    ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(project_index) = inner
             .projects
@@ -713,7 +731,7 @@ impl AppState {
     }
 
     #[cfg(test)]
-    fn clear_engram_cleanup_warning_if_matches(
+    pub(crate) fn clear_engram_cleanup_warning_if_matches(
         &self,
         project_id: &str,
         notice: &str,
@@ -742,7 +760,7 @@ impl AppState {
         }
     }
 
-    fn shutdown_revoked_engram_mcp_runtimes(
+    pub(crate) fn shutdown_revoked_engram_mcp_runtimes(
         &self,
         batch: EngramMcpRuntimeRevocationBatch,
         context: &str,
@@ -807,7 +825,7 @@ impl AppState {
         result
     }
 
-    fn finalize_revoked_engram_mcp_runtimes(
+    pub(crate) fn finalize_revoked_engram_mcp_runtimes(
         &self,
         batch: EngramMcpRuntimeRevocationShutdownBatch,
     ) -> EngramMcpRuntimeRevocationOutcome {
@@ -838,7 +856,10 @@ impl AppState {
         outcome
     }
 
-    fn resume_revoked_engram_mcp_sessions(&self, outcome: &mut EngramMcpRuntimeRevocationOutcome) {
+    pub(crate) fn resume_revoked_engram_mcp_sessions(
+        &self,
+        outcome: &mut EngramMcpRuntimeRevocationOutcome,
+    ) {
         let should_resume_orchestrators = outcome
             .completions
             .iter()
@@ -891,7 +912,7 @@ impl AppState {
         }
     }
 
-    fn finish_revoked_engram_mcp_runtime_outcome(
+    pub(crate) fn finish_revoked_engram_mcp_runtime_outcome(
         &self,
         outcome: EngramMcpRuntimeRevocationOutcome,
     ) -> Result<Vec<String>, ApiError> {
@@ -914,7 +935,7 @@ impl AppState {
         }
     }
 
-    fn teardown_revoked_engram_mcp_runtimes(
+    pub(crate) fn teardown_revoked_engram_mcp_runtimes(
         &self,
         batch: EngramMcpRuntimeRevocationBatch,
         context: &str,
@@ -928,7 +949,7 @@ impl AppState {
     /// Verifies a proposed project Engram configuration without mutating
     /// project state. Save repeats the same checks, so this response is UI
     /// guidance rather than an authorization token.
-    fn verify_project_engram_settings(
+    pub(crate) fn verify_project_engram_settings(
         &self,
         project_id: &str,
         request: UpdateProjectEngramSettingsRequest,
@@ -1006,7 +1027,7 @@ impl AppState {
     /// checks and `engram readiness` run off-lock; the project identity/root are
     /// fenced before the validated settings are committed.
     #[cfg(test)]
-    fn update_project_engram_settings(
+    pub(crate) fn update_project_engram_settings(
         &self,
         project_id: &str,
         settings: EngramProjectSettings,
@@ -1014,7 +1035,7 @@ impl AppState {
         self.update_project_engram_settings_checked(project_id, settings, None, false)
     }
 
-    fn patch_project_engram_settings(
+    pub(crate) fn patch_project_engram_settings(
         &self,
         project_id: &str,
         request: UpdateProjectEngramSettingsRequest,
@@ -1032,7 +1053,10 @@ impl AppState {
         settings.home = Some(host_settings.home.clone());
         settings.deadline_ms = None;
         self.update_project_engram_settings_checked(
-            project_id, settings, Some(host_settings), keep_stored_observability,
+            project_id,
+            settings,
+            Some(host_settings),
+            keep_stored_observability,
         )
     }
 
@@ -1325,7 +1349,7 @@ impl AppState {
         Ok(self.snapshot_from_inner(&inner))
     }
 
-    fn create_session(
+    pub(crate) fn create_session(
         &self,
         request: CreateSessionRequest,
     ) -> Result<CreateSessionResponse, ApiError> {
@@ -1339,7 +1363,7 @@ impl AppState {
     /// The explicit interleaving point lets lifecycle tests remove a project
     /// during validation without introducing test-only behavior into the
     /// production readiness resolver.
-    fn create_session_with_agent_setup_validator(
+    pub(crate) fn create_session_with_agent_setup_validator(
         &self,
         request: CreateSessionRequest,
         mut validate_agent_session_setup: impl FnMut(Agent, &str) -> Result<(), String>,
@@ -1375,7 +1399,9 @@ impl AppState {
         // Keep the request bytes for that host, including its path semantics.
         let explicit_remote_project = {
             let inner = self.inner.lock().expect("state mutex poisoned");
-            request.project_id.as_deref()
+            request
+                .project_id
+                .as_deref()
                 .and_then(|id| inner.find_project(id))
                 .filter(|project| project.remote_id != LOCAL_REMOTE_ID)
                 .cloned()
@@ -1383,7 +1409,11 @@ impl AppState {
         let requested_workdir = if explicit_remote_project.is_some() {
             None
         } else {
-            request.workdir.as_deref().map(resolve_session_workdir).transpose()?
+            request
+                .workdir
+                .as_deref()
+                .map(resolve_session_workdir)
+                .transpose()?
         };
         let requested_model = request
             .model
@@ -1654,7 +1684,7 @@ impl AppState {
     /// the SSE channel gets a full state snapshot — settings changes
     /// touch many UI surfaces at once and a delta event would be
     /// awkward to fan out reliably.
-    fn update_app_settings(
+    pub(crate) fn update_app_settings(
         &self,
         request: UpdateAppSettingsRequest,
     ) -> Result<StateResponse, ApiError> {
@@ -1879,7 +1909,7 @@ impl AppState {
     /// Updates machine-scoped Engram process settings. Enabled projects must
     /// be vetoed first so a host-path rotation cannot silently strand or reuse
     /// project authority against a different store.
-    fn update_engram_host_settings(
+    pub(crate) fn update_engram_host_settings(
         &self,
         request: UpdateEngramHostSettingsRequest,
     ) -> Result<StateResponse, ApiError> {
@@ -1925,7 +1955,7 @@ impl AppState {
     /// through `resolve_session_workdir` and commit only if the
     /// `projects` vec actually grew — idempotent re-creates with the
     /// same id no-op rather than broadcasting redundant state.
-    fn create_project(
+    pub(crate) fn create_project(
         &self,
         request: CreateProjectRequest,
     ) -> Result<CreateProjectResponse, ApiError> {
@@ -1974,7 +2004,7 @@ impl AppState {
     /// outside project scope. Remote-backed projects are intentionally removed
     /// only from this local state; TermAl does not delete remote project data
     /// from a local project-list action.
-    fn delete_project(&self, project_id: &str) -> Result<StateResponse, ApiError> {
+    pub(crate) fn delete_project(&self, project_id: &str) -> Result<StateResponse, ApiError> {
         let project_id = normalize_optional_identifier(Some(project_id))
             .ok_or_else(|| ApiError::bad_request("project id is required"))?
             .to_owned();
@@ -1996,12 +2026,17 @@ impl AppState {
             settings.enabled = false;
             // Use the ordinary connection owner to stop installed descriptors.
             // No project is detached while that cleanup is failed or pending.
-            self.update_project_engram_settings_checked(&project_id, settings.clone(), None, false)?;
+            self.update_project_engram_settings_checked(
+                &project_id,
+                settings.clone(),
+                None,
+                false,
+            )?;
         }
         self.delete_project_reference(&project_id, &snapshot)
     }
 
-    fn delete_project_reference(
+    pub(crate) fn delete_project_reference(
         &self,
         project_id: &str,
         expected: &Project,
@@ -2102,7 +2137,7 @@ impl AppState {
         Ok(self.snapshot())
     }
 
-    fn replay_pending_coordination_scope_deletions(&self) -> Result<()> {
+    pub(crate) fn replay_pending_coordination_scope_deletions(&self) -> Result<()> {
         // This path is used only after the primary persist worker has stopped
         // (or by worker-less test AppStates). Match the dedicated cleanup
         // worker's semantics exactly: every cleanup failure remains in the
@@ -2121,7 +2156,7 @@ impl AppState {
         self.persist_internal_locked(&inner)
     }
 
-    fn replay_pending_response_board_project_detachments(&self) {
+    pub(crate) fn replay_pending_response_board_project_detachments(&self) {
         // The project removal and this outbox entry are already durable. A
         // secondary SQLite failure must not turn that irreversible success
         // into an HTTP 500: retain the entry and retry on the next worker pass
