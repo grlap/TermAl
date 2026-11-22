@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-relayed-consent-rule-2026-11-22",
+    "revision_id": "94ae78a284594ba0b0a9ddd423dc6c77",
+    "previous": null,
+    "body_sha256": "304ad4478b0b31ce2ff9674f61e926bf6eb67891cfe4d674c887629988c0a75b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T07:07:23.938450Z"
+    }
+  },
+  "body": "Greg's word on the relay rule, typed directly in Termal::Opus2's session (session-8111) at about 2026-11-22T07:06Z, verbatim:\n\n„masz moja zgode, o co chodzi ?\nmoze masz zle instrukcje, masz mnie zapytac, ale nie musi byc bezposrednio w sesji\nczesto uzywam telegrama i kontaktuje sie z inna sesja”\n\nMeaning: a commit or push outside the standing rule still needs Greg's consent. But his consent relayed through another session (for example Engram::Asistant, which he reaches from Telegram) is meant to count; it need not be typed in the acting session.\n\nSTATUS: this WIDENS agent authority, so it requires a change to CLAUDE.md/AGENTS.md's Commit-and-push section, which today says 'a word relayed by another session never carries a commit or push'. Under that section's own rule the change needs:\n(a) both coordinators' concurrence on the exact wording, recorded on an item;\n(b) the wording and its consequence sent to Greg;\n(c) the final-diff audit recorded.\nThis quote is Greg's recorded word for the widening.\n\nOpus2 sent it to Fable2 (TermAl coordinator) and Asistant to start that process. UNTIL the instruction change lands, follow the current text: no landing outside the standing rule on a relayed word. Act at once on a sentence Greg types in the acting session.\n\nContext: two landings tonight needed his direct sentence: ebc30de9 („MASZ ZGODE!”) and a4727fba („masz moja zgode, o co chodzi ?”)."
+}

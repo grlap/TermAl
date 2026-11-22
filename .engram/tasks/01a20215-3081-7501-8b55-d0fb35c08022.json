@@ -1,0 +1,30 @@
+{
+  "id": "01a20215-3081-7501-8b55-d0fb35c08022",
+  "external_ref": null,
+  "title": "Commit rule: Greg's word for a commit or push outside the standing rule may be relayed verbatim through another session",
+  "outcome": "Greg's word, typed in Termal::Opus2's session (session-8111) at about 07:06Z on 2026-11-22, reported verbatim by Opus2 in TermAl mailbox 4daa5b87 #7525: „moze masz zle instrukcje, masz mnie zapytac, ale nie musi byc bezposrednio w sesji / czesto uzywam telegrama i kontaktuje sie z inna sesja” (\"maybe your instructions are wrong; you have to ask me, but it doesn't have to be directly in the session / I often use Telegram and contact another session\").\nThe CLAUDE.md and AGENTS.md \"Commit and push\" bullet (CLAUDE.md lines 205-211, AGENTS.md lines 280-286) currently says a commit or push outside the standing rule \"needs Greg's own word in the acting session\" and that \"a word relayed by another session never carries a commit or push\". This item changes that text in both files so that Greg's word counts when another session relays it verbatim with its source. Greg's consent is still required; only the route widens.\nIt widens agent authority, so under that section it needs:\n(a) both coordinators' concurrence on the exact wording, recorded on this item;\n(b) the exact wording and its consequence sent to Greg before landing;\n(c) the final-diff audit recorded here;\nplus Greg's recorded word on the widening, which is the quote above.\nIt's Markdown only, so the gate is the doc link check; both reviewers still review. Engram's twin rule is Engram::Fable's to change.",
+  "acceptance": [
+    "CLAUDE.md and AGENTS.md carry the same concurred wording in the Commit and push bullet that today requires Greg's word in the acting session, and no other sentence of either file changes.",
+    "Both coordinators' concurrence on the exact wording, the wording and its consequence as sent to Greg, and the coordinator's final-diff audit are recorded on this item before landing.",
+    "The independent review pair has no outstanding in-scope finding of Medium or higher, and the doc link check passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "authority",
+    "commit-rule",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a2021d-3fff-77d1-8672-802afdab345e",
+  "external_ref": null,
+  "title": "DL560 TermAl host process restarted at 06:43:39Z with no known operator action, killing a running test run",
+  "outcome": "Reported by Opus2 (#7535) from C7's read-only facts (#3604/#3605), 2026-11-22. The w-b3c1 GREEN7 run test-9b5bc520 on DL560 C7 died at about 06:43:35Z (SIGKILL, cleanup trigger \"launcher-exit\", mid-compile). DL560's TermAl host process (target/release/termal, pid 2918479) STARTED at 06:43:39Z, 5 s after the run's last log write. C7's codex app-server restarted at 06:46:11Z. The OS was not rebooted (uptime since Nov 9), and journalctl -k has no OOM lines. Central's federation status at about 06:43Z showed DL560's host utilization briefly as unavailable/peerDisconnected/stale (the last snapshot 06:43:09Z), then fresh at 06:43:19Z, while the link record stayed at worker attempt 2. No deliberate restart by Greg is known to the coordinator. The cause is not assumed: a crash, an external restart, or a host-side lifecycle action.",
+  "acceptance": [
+    "The reason the DL560 TermAl host process ended before 06:43:39Z is identified from DL560's own records (host lifecycle journal, previousInstance from GET /api/diagnostics/host-lifecycle, console log), read through supported routes, never SSH, or recorded as unknown with what was checked.",
+    "If a TermAl defect caused it: a behaviour test that fails before the fix, the fix in the owning mechanism, a clean review pair and the full gate. If it was an operator or environment action: a recorded disposition."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "dl560",
+    "federation",
+    "host-crash"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
