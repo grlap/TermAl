@@ -10,6 +10,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createRun, executeRun, startDetachedRun, summarize } from "./test-launcher.mjs";
 import { registerTestRun, validateRunRegistration, validateRequestMessageId } from "./test-run-registration.mjs";
 import { registrationHost } from "./test-launcher-registration-fixtures.mjs";
+import { fixtureSourceEnvironment } from "./test-launcher-source-owner-fixture.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { testTempDirectory } from "./test-temp-root.mjs";
@@ -28,7 +29,11 @@ function fixture(t, { full = false, detached = false } = {}) {
   return { root, runDirectory, request };
 }
 function saveRequest(f) { writeFileSync(join(f.runDirectory, "request.json"), JSON.stringify(f.request)); }
-function env(host) { return { ...process.env, TERMAL_SESSION_ID: "fixture-owner", TERMAL_BASE_URL: host.url, TERMAL_CLI: process.execPath }; }
+function env(host) {
+  return fixtureSourceEnvironment({
+    ...process.env, TERMAL_SESSION_ID: "fixture-owner", TERMAL_BASE_URL: host.url, TERMAL_CLI: process.execPath,
+  });
+}
 
 function initializeRepository(root) {
   const options = { cwd: root, env: isolatedGitEnvironment(process.env), windowsHide: true, stdio: "pipe" };
@@ -314,7 +319,7 @@ const correction = "register at start with --input commit in the claim's named r
 const hostlessEnv = () => {
   const hostless = { ...process.env };
   for (const name of ["TERMAL_BASE_URL", "TERMAL_SESSION_ID", "TERMAL_CLI"]) delete hostless[name];
-  return hostless;
+  return fixtureSourceEnvironment(hostless);
 };
 
 test("a hostless passing run says why it earned no credit and how to get it", async (t) => {

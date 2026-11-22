@@ -6,7 +6,7 @@ import { sourceIdsEqual, captureCommitInputStatus as captureOwnerStatus } from "
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
-  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync,
+  copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
   writeFileSync, renameSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
@@ -23,6 +23,7 @@ import {
   summarize,
 } from "./test-launcher.mjs";
 import { registrationHost, withHostedRegistrationFixture } from "./test-launcher-registration-fixtures.mjs";
+import { fixtureObservationPath, fixtureSourceEnvironment } from "./test-launcher-source-owner-fixture.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 
 import { writeUiBootstrapFixture } from "./test-ui-bootstrap-fixtures.mjs";
@@ -46,7 +47,7 @@ function fixtureEnv() {
     TERMAL_CLI: process.execPath,
   });
   delete env.NODE_TEST_CONTEXT;
-  return env;
+  return fixtureSourceEnvironment(env);
 }
 
 function gitRepository(t, files = {}, { full = false, objectFormat } = {}) {
@@ -295,7 +296,7 @@ for (const [name, configure, reason] of [
   });
 }
 
-test("SHA-256 roots have a named unsupported-format refusal", async (t) => {
+test("a source owner refusal for a SHA-256 root stops committed input before any stage", async (t) => {
   await hosted(t, async ({ root, env, git, head, admin }) => {
     assert.equal(head.length, 64);
     git(["update-index", "--add", "--cacheinfo", `160000,${head},dep`]);
@@ -303,7 +304,8 @@ test("SHA-256 roots have a named unsupported-format refusal", async (t) => {
     const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
     const refused = await executeRun(runDir, env);
     assert.equal(refused.state, "failed");
-    assert.match(refused.error, /SHA-256 repositories are unsupported/u);
+    assert.match(refused.error, /input_unavailable: Fixture owner supports SHA-1 roots only/u);
+    assert.equal(refused.sourceIdBefore, null);
     assert.ok(refused.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
   }, {}, { objectFormat: "sha256" });
@@ -327,7 +329,7 @@ test("initialized pinned clean submodules earn the existing automatic committed-
   });
 });
 
-for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missing-mapping"]) {
+for (const change of ["tracked", "untracked", "off-pin", "uninitialized"]) {
   test(`submodule ${change} refuses explicit commit before a stage starts`, async (t) => {
     const dependency = gitRepository(t);
     await hosted(t, async ({ root, env, git, admin }) => {
@@ -340,22 +342,18 @@ for (const change of ["tracked", "untracked", "off-pin", "uninitialized", "missi
       if (change === "off-pin") {
         childGit(["-c", "user.name=Fixture", "-c", "user.email=test@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "off pin"]);
       }
-      if (change === "uninitialized") git(["submodule", "deinit", "--force", "--", "dep"]);
-      if (change === "missing-mapping") {
-        git(["config", "--file", ".gitmodules", "--remove-section", "submodule.dep"]);
-        git(["add", "--", ".gitmodules"]);
-        git(["commit", "--quiet", "--no-gpg-sign", "-m", "remove child mapping"]);
-        assert.equal(childGit(["rev-parse", "HEAD"]).trim(), dependency.head, "child remains at its pin");
-        assert.equal(git(["status", "--porcelain=v1", "--ignore-submodules=none"]), "", "dirt alone does not refuse this unmapped child");
+      if (change === "uninitialized") {
+        git(["submodule", "deinit", "--force", "--", "dep"]);
+        assert.match(git(["submodule", "status", "--", "dep"]), /^-/u);
+        writeFileSync(fixtureObservationPath(admin), JSON.stringify({ refusal: "Fixture dependency is uninitialized" }));
       }
       const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
       const result = await executeRun(runDir, env);
       assert.equal(result.state, "failed", change);
       assert.ok(result.stages.every((entry) => entry.state === "unrun"));
       assert.equal(executed(admin), false);
-      const reason = ["tracked", "untracked", "off-pin"].includes(change) ? /path\(s\) reported by git status/u
-        : change === "missing-mapping" ? /submodule|mapping/u
-          : /uninitialized/u;
+      const reason = change === "uninitialized" ? /input_unavailable: Fixture dependency is uninitialized/u
+        : /path\(s\) reported by git status/u;
       assert.match(result.error, reason);
     });
   });
@@ -400,43 +398,33 @@ test("a child's local status setting cannot hide untracked input", async (t) => 
 });
 
 for (const boundary of ["before execution", "after exit 0", "after exit 7"]) {
-  test(`a child filter installed ${boundary} is refused by the source owner before observation`, async (t) => {
-    const dependency = gitRepository(t);
-    writeFileSync(join(dependency.root, ".gitattributes"), "tracked.txt filter=mark\n");
-    dependency.git(["add", "--", ".gitattributes"]);
-    dependency.git(["commit", "--quiet", "--no-gpg-sign", "-m", "attribute without driver"]);
-    await hosted(t, async ({ root, env, git, admin }) => {
-      git(["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", dependency.root, "dep"]);
-      git(["commit", "--quiet", "--no-gpg-sign", "-m", "pin dependency"]);
-      const filterRan = join(admin, "child-filter-ran.marker");
-      const script = join(admin, "child-filter.cjs");
-      writeFileSync(script, `require('node:fs').appendFileSync(${JSON.stringify(filterRan)}, 'x');process.stdin.pipe(process.stdout);`);
-      const slash = (path) => path.replaceAll("\\", "/");
-      const command = `"${slash(process.execPath)}" "${slash(script)}"`;
-      const install = `require('node:child_process').execFileSync('git', ['-C', 'dep', 'config', 'filter.mark.clean', ${JSON.stringify(command)}]);`
-        + "const later = new Date(Date.now() + 120000);require('node:fs').utimesSync('dep/tracked.txt', later, later);";
+  test(`an unavailable owner ${boundary} preserves the exact launcher outcome`, async (t) => {
+    await hosted(t, async ({ root, env, admin }) => {
+      const observation = fixtureObservationPath(admin);
+      const refusal = JSON.stringify({ refusal: "Fixture source was unavailable at the boundary" });
       const code = boundary === "after exit 7" ? 7 : 0;
       const beforeExecution = boundary === "before execution";
-      const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin, "install-filter",
-        beforeExecution ? "" : `${install}process.exit(${code});`)] }, env);
-      if (beforeExecution) execFileSync(process.execPath, ["-e", install], { cwd: root, env, windowsHide: true });
+      const reply = `require('node:fs').writeFileSync(${JSON.stringify(observation)}, ${JSON.stringify(refusal)});`;
+      const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin, "boundary",
+        beforeExecution ? "" : `${reply}process.exit(${code});`)] }, env);
+      const request = json(join(runDir, "request.json"));
+      if (beforeExecution) writeFileSync(observation, refusal);
       const result = await executeRun(runDir, env);
-      assert.equal(existsSync(filterRan), false, "input observation must never execute the installed child filter");
+      assert.equal(result.state, "failed");
       assert.equal(result.input.eligible, false);
+      assert.equal(executed(admin), !beforeExecution);
+      assert.equal(result.sourceIdAfter, null);
       if (beforeExecution) {
-        assert.equal(result.state, "failed");
-        assert.equal(executed(admin), false);
-        assert.match(result.error, /configured Git filters/u);
+        assert.match(result.error, /input_unavailable: Fixture source was unavailable at the boundary/u);
         assert.ok(result.stages.every((entry) => entry.state === "unrun"));
       } else {
-        assert.equal(executed(admin), true);
-        assert.equal(result.state, "failed");
+        assert.deepEqual(result.sourceIdBefore, request.sourceId);
         assert.equal(result.exitCode, code || 1);
+        assert.equal(result.stages[0].state, code ? "failed" : "passed");
         assert.equal(result.stages[0].code, code);
         assert.equal(result.input.outcome, undefined);
-        assert.equal(result.input.after, undefined, "an unavailable owner supplies no partial source input");
-        assert.match(result.input.unavailableReason, /configured Git filters/u);
-        assert.equal(result.sourceIdAfter, null);
+        assert.equal(result.input.after, undefined);
+        assert.match(result.input.unavailableReason, /input_unavailable: Fixture source was unavailable at the boundary/u);
       }
     });
   });
@@ -482,9 +470,20 @@ test("automatic fallback does not bypass plain's readable HEAD precondition", as
 });
 
 test("an automatic plain run compares the full post-run source_id", async (t) => {
-  await hosted(t, async ({ root, env, admin }) => {
+  await hosted(t, async ({ root, env, git, admin }) => {
     writeFileSync(join(root, "tracked.txt"), "dirty before\n");
-    const edit = `require('node:fs').writeFileSync(${JSON.stringify(join(root, "tracked.txt"))}, 'changed during');`;
+    const commit = git(["rev-parse", "HEAD"]).trim();
+    const tree = git(["rev-parse", "HEAD^{tree}"]).trim();
+    const closingObservation = {
+      version: 1, status: "not_clean", source: `git-commit:${commit}`, tree,
+      entries: [{ status: " M", path: "tracked.txt" }], refusal: null,
+      source_id: { commit, tree, git_delta: { sha256: "2".repeat(64), dirty: true, gitlinks: [] } },
+    };
+    const edit = [
+      "const { writeFileSync } = require('node:fs');",
+      "writeFileSync('tracked.txt', 'changed during');",
+      `writeFileSync(${JSON.stringify(fixtureObservationPath(admin))}, ${JSON.stringify(JSON.stringify(closingObservation))});`,
+    ].join("\n");
     const runDir = await createRun({ root, stages: [markingStage(admin, "edit", edit)], automaticInput: true }, env);
     const result = await executeRun(runDir, env);
     assert.ok(executed(admin));
@@ -543,12 +542,38 @@ test("a path only .git/info/exclude hides before the run leaves the checkout cle
   });
 });
 
-test("a stage that configures a Git filter retains its command pass but has no after source", async (t) => {
-  await hosted(t, async ({ root, env }) => {
-    const runDir = await createRun({ root, input: "commit", stages: [stage("filters", [
-      "const { execFileSync } = require('node:child_process');",
-      "execFileSync('git', ['config', 'filter.fixture.clean', 'cat']);",
-    ].join("\n"))] }, env);
+test("an inconsistent compact gitlink is refused at source admission", async (t) => {
+  await hosted(t, async ({ root, env, head, git, admin }) => {
+    const tree = git(["rev-parse", "HEAD^{tree}"]).trim();
+    writeFileSync(fixtureObservationPath(admin), JSON.stringify({
+      version: 1, status: "not_clean", source: `git-commit:${head}`, tree,
+      entries: [{ status: " M", path: "dep" }], refusal: null,
+      source_id: { commit: head, tree, git_delta: {
+        sha256: "1".repeat(64), dirty: true,
+        gitlinks: [{ path: "dep", head_pin: head, index_pin: head, checkout_head: null }],
+      } },
+    }));
+    const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin)] }, env);
+    const result = await executeRun(runDir, env);
+    assert.equal(result.state, "failed");
+    assert.equal(result.sourceIdBefore, null);
+    assert.match(result.error, /owner returned an inconsistent source_id/u);
+    assert.equal(result.stages[0].state, "unrun");
+    assert.equal(executed(admin), false);
+  });
+});
+
+test("a closing observation of another root cannot become the run's after source", async (t) => {
+  const other = gitRepository(t);
+  await hosted(t, async ({ root, env, head, git, admin }) => {
+    const tree = git(["rev-parse", "HEAD^{tree}"]).trim();
+    const closingObservation = JSON.stringify({
+      version: 1, status: "clean", root: other.root, source: `git-commit:${head}`, tree,
+      entries: [], refusal: null, source_id: { commit: head, tree,
+        git_delta: { sha256: "0".repeat(64), dirty: false, gitlinks: [] } },
+    });
+    const reply = `require('node:fs').writeFileSync(${JSON.stringify(fixtureObservationPath(admin))}, ${JSON.stringify(closingObservation)});`;
+    const runDir = await createRun({ root, input: "commit", stages: [markingStage(admin, "finish", reply)] }, env);
     const result = await executeRun(runDir, env);
     assert.equal(result.state, "failed");
     assert.equal(result.stages[0].code, 0);
@@ -556,78 +581,23 @@ test("a stage that configures a Git filter retains its command pass but has no a
     assert.equal(result.sourceIdAfter, null);
     assert.equal(result.input.eligible, false);
     assert.equal(result.input.after, undefined);
-    assert.match(result.input.unavailableReason, /filter/u);
+    assert.match(result.input.unavailableReason, /owner .*root/u);
   });
 });
 
-test("a configured Git filter before the run is refused with its own reason and no stage runs", async (t) => {
-  await hosted(t, async ({ root, env, git, admin }) => {
-    git(["config", "filter.fixture.process", "cat"]);
+test("an unavailable owner before admission publishes a refusal without starting a stage", async (t) => {
+  await hosted(t, async ({ root, env, admin }) => {
+    writeFileSync(fixtureObservationPath(admin), JSON.stringify({ refusal: "Fixture source could not be observed" }));
     const runDir = await createRun({ root, stages: [markingStage(admin)], input: "commit" }, env);
     const refused = json(join(runDir, "results.json"));
     assert.equal(refused.state, "failed");
     assert.equal(refused.input, undefined);
     assert.equal(refused.sourceIdBefore, null);
-    assert.match(refused.error, /filter/u);
+    assert.match(refused.error, /input_unavailable: Fixture source could not be observed/u);
     const result = await executeRun(runDir, env);
     assert.ok(result.stages.every((entry) => entry.state === "unrun"));
     assert.equal(executed(admin), false);
     assert.match(await summarize(runDir), /^input: unknown; source_id;/mu);
-  });
-});
-
-test("a submodule's configured filter is refused before recursive status can run it", async (t) => {
-  await hosted(t, async ({ root, env, git, admin }) => {
-    // The submodule configures a clean filter in its own config, which the
-    // superproject's filter check does not see; the filter leaves a marker.
-    const sub = join(root, "sub");
-    mkdirSync(sub);
-    const subGit = (args) => execFileSync("git", args, { cwd: sub, env, encoding: "utf8", windowsHide: true });
-    subGit(["init", "--quiet", "--template="]);
-    for (const [key, value] of [
-      ["user.name", "TermAl Test"], ["user.email", "test@example.invalid"], ["core.autocrlf", "false"],
-    ]) subGit(["config", key, value]);
-    const filterRan = join(root, ".tmp", "submodule-filter-ran.marker");
-    const script = join(root, ".tmp", "submodule-filter.js");
-    mkdirSync(dirname(script), { recursive: true });
-    writeFileSync(script, `require("node:fs").appendFileSync(${JSON.stringify(filterRan)}, "x");`
-      + "process.stdin.pipe(process.stdout);\n");
-    const slash = (path) => path.replaceAll("\\", "/");
-    writeFileSync(join(sub, ".gitattributes"), "inner.txt filter=mark\n");
-    writeFileSync(join(sub, "inner.txt"), "inner\n");
-    subGit(["add", "--", ".gitattributes", "inner.txt"]);
-    subGit(["commit", "--quiet", "--no-gpg-sign", "-m", "inner"]);
-    subGit(["config", "filter.mark.clean", `"${slash(process.execPath)}" "${slash(script)}"`]);
-    writeFileSync(join(root, ".gitmodules"), "[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n");
-    git(["-c", "advice.addEmbeddedRepo=false", "add", "--", ".gitmodules", "sub"]);
-    git(["commit", "--quiet", "--no-gpg-sign", "-m", "submodule"]);
-    git(["config", "submodule.sub.url", "./sub"]);
-    assert.match(git(["submodule", "status", "--recursive"]), /^ [0-9a-f]{40} sub(?: |\r?\n|$)/u,
-      "the filter fixture must be initialized at its pin");
-    assert.equal(git(["ls-files", "-s", "sub"]).slice(0, 6), "160000", "sub is a gitlink");
-    // A new mtime makes Git hash the file again, through the filter.
-    let seconds = 60;
-    const touch = () => {
-      const later = new Date(Date.now() + (seconds += 60) * 1000);
-      utimesSync(join(sub, "inner.txt"), later, later);
-    };
-    touch();
-    git(["status", "--porcelain=v1", "--ignore-submodules=none"]);
-    assert.ok(existsSync(filterRan), "plain status runs the submodule's filter");
-    rmSync(filterRan);
-    touch();
-
-    const runDir = await createRun({ root, stages: [markingStage(admin)], input: "commit" }, env);
-    const refused = json(join(runDir, "results.json"));
-    assert.equal(refused.state, "failed");
-    assert.equal(refused.input, undefined);
-    assert.equal(refused.sourceIdBefore, null);
-    assert.match(refused.error, /filter/u);
-    const result = await executeRun(runDir, env);
-    assert.ok(result.stages.every((entry) => entry.state === "unrun"));
-    assert.equal(executed(admin), false);
-    assert.match(await summarize(runDir), /^input: unknown; source_id;/mu);
-    assert.equal(existsSync(filterRan), false, "the committed-input status never ran the filter");
   });
 });
 

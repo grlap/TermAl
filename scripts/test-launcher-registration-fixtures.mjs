@@ -11,19 +11,16 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createRun, executeRun, startDetachedRun } from "./test-launcher.mjs";
 import { registerTestRun, validateRunRegistration, boundedStateLockEvidence, registrationBudgetMs, sourceRegistrationBudgetMs } from "./test-run-registration.mjs";
-import { sourceBinaryPath } from "./test-launcher-input.mjs";
+import { fixtureSourceEnvironment } from "./test-launcher-source-owner-fixture.mjs";
 import { sourceMetadataBudgetMs } from "./source-id-budget.mjs";
 
-// Fixture host metadata uses the test process's explicitly selected owner, not
-// per-case Cargo homes containing fake compilers. Production never resolves a
-// second executable after the host's metadata endpoint refuses.
+// Use this Node executable with the fixture preload, independent of the
+// installed Engram or a fixture's Cargo home.
 let fixtureSourceOwner;
 function sourceOwnerFixture() {
   if (!fixtureSourceOwner) {
-    const binaryPath = realpathSync.native(sourceBinaryPath(process.env));
-    const binaryVersion = execFileSync(binaryPath, ["--version"], {
-      encoding: "utf8", windowsHide: true, timeout: 8_000,
-    }).trim();
+    const binaryPath = realpathSync.native(process.execPath);
+    const binaryVersion = `engram launcher fixture (Node ${process.version})`;
     fixtureSourceOwner = { binaryPath,
       sha256: createHash("sha256").update(readFileSync(binaryPath)).digest("hex"),
       binaryVersion, sourceVersion: 1 };
@@ -176,7 +173,7 @@ export async function registrationHost(callback, {
 // The outer real launcher retains its actual host and session environment.
 export async function withHostedRegistrationFixture(root, env, callback) {
   await registrationHost(async (host) => {
-    await callback({ ...env, TERMAL_BASE_URL: host.url });
+    await callback(fixtureSourceEnvironment({ ...env, TERMAL_BASE_URL: host.url }));
   }, { autoAcknowledge: true });
 }
 

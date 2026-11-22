@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { HELPER_TEST_HANG_GUARD_MS } from "./test-launcher.mjs";
 import { registrationHost } from "./test-launcher-registration-fixtures.mjs";
+import { fixtureSourceEnvironment } from "./test-launcher-source-owner-fixture.mjs";
 import { removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
 
 const launcherUrl = new URL("./test-launcher.mjs", import.meta.url).href;
@@ -38,12 +39,12 @@ function fixture(t, linked, longRun = false) {
   mkdirSync(worktreeBase, { recursive: true });
   const main = join(worktreeBase, "main worktree");
   mkdirSync(main);
-  const env = isolatedGitEnvironment({
+  const env = fixtureSourceEnvironment(isolatedGitEnvironment({
     ...process.env,
     TERMAL_BASE_URL: "http://127.0.0.1:0",
     TERMAL_SESSION_ID: "git-path-fixture-owner",
     TERMAL_CLI: process.execPath,
-  });
+  }));
   delete env.NODE_TEST_CONTEXT;
   const git = (args, cwd = main) => execFileSync("git", args, {
     cwd, env, encoding: "utf8", windowsHide: true,

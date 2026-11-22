@@ -122,6 +122,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-launcher-source.mjs",
   "scripts/test-launcher-input.mjs",
   "scripts/test-launcher-registration-fixtures.mjs",
+  "scripts/test-launcher-source-owner-fixture.mjs",
   "scripts/test-launcher-lifecycle-tests.mjs",
   "scripts/test-process-owner.mjs",
   "scripts/test-process-owner-windows.mjs",

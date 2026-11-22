@@ -454,8 +454,15 @@ for (const explicit of [false, true]) {
 
 test("launcher source metadata: failed Rust preflight cannot claim a known toolchain", async (t) => {
   await sourceMetadataRepository(t, async (root, originalEnv) => {
-    const env = { ...originalEnv, TERMAL_TEST_CARGO: process.execPath,
-      NODE_OPTIONS: `${originalEnv.NODE_OPTIONS ?? ""} --not-a-source-preflight-option` };
+    const env = { ...originalEnv, TERMAL_TEST_CARGO: process.execPath };
+    const spawnPreflight = childProcess.spawn;
+    const preflight = t.mock.method(childProcess, "spawn", (command, args, options) => (
+      command === process.execPath && args.join(" ") === "--version"
+        ? spawnPreflight(command, ["-e", "process.exit(7)"], options)
+        : spawnPreflight(command, args, options)
+    ));
+    syncBuiltinESMExports();
+    t.after(() => { preflight.mock.restore(); syncBuiltinESMExports(); });
     const runDir = await createRun({ root, needsCargo: true,
       stages: [{ name: "cargo-check", command: "cargo", args: ["-e", "process.exit(0)"] }],
     }, env);
@@ -1716,7 +1723,7 @@ test("stage cwd controls the real child directory and relative file lookup", asy
   });
 });
 
-test("launcher fixtures and fingerprints ignore inherited Git config, hooks, and retargeting", async (t) => {
+test("launcher fixtures and source capture ignore inherited Git config, hooks, and retargeting", async (t) => {
   const hostileRoot = mkdtempSync(join(testTempDirectory(), "launcher-hostile-git-"));
   removeFixtureOnPass(t, hostileRoot);
   const hooks = join(hostileRoot, "hooks");
@@ -1726,8 +1733,7 @@ test("launcher fixtures and fingerprints ignore inherited Git config, hooks, and
   chmodSync(hook, 0o755);
   const globalConfig = join(hostileRoot, "gitconfig");
   writeFileSync(globalConfig, `[core]\n\thooksPath = ${hooks.replaceAll("\\", "/")}\n`);
-  const poisoned = {
-    ...fixtureEnv,
+  const hostileGit = {
     GIT_CONFIG_GLOBAL: globalConfig,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "core.hooksPath",
@@ -1738,15 +1744,16 @@ test("launcher fixtures and fingerprints ignore inherited Git config, hooks, and
   };
   await repository(t, async (root, registrationFixtureEnv) => {
     assert.equal(existsSync(join(root, "inherited-hook-ran")), false);
-    const runEnv = { ...poisoned, TERMAL_BASE_URL: registrationFixtureEnv.TERMAL_BASE_URL };
+    const runEnv = { ...registrationFixtureEnv, ...hostileGit };
     const runDir = await createRun({
       root,
       stages: [stage("clean")],
     }, runEnv);
-    assert.equal((await executeRun(runDir, runEnv)).state, "passed");
+    const result = await executeRun(runDir, runEnv);
+    assert.equal(result.state, "passed", result.error);
     assert.equal(existsSync(join(root, "inherited-hook-ran")), false);
-    assert.equal(existsSync(poisoned.GIT_INDEX_FILE), false);
-  }, poisoned);
+    assert.equal(existsSync(hostileGit.GIT_INDEX_FILE), false);
+  }, { ...fixtureEnv, ...hostileGit });
 });
 
 test("clean pass retains logs and summarizes without passing-test lists", async (t) => {
@@ -1991,7 +1998,10 @@ test("source drift before and during execution cannot pass", async (t) => {
     const refused = await executeRun(before, registrationFixtureEnv);
     assert.equal(refused.stages[0].state, "unrun");
     assert.match(refused.error, /source_id changed before execution/u);
-    assert.match(refused.error, /tracked\.txt/u);
+    assert.match(refused.error, /Git delta differs/u);
+    assert.equal(json(join(before, "request.json")).sourceId.git_delta.dirty, false);
+    assert.equal(refused.sourceIdBefore.git_delta.dirty, true);
+    assert.equal(refused.sourceIdAfter, null);
     assert.match(refused.error, /sourceIdBefore\/sourceIdAfter/u);
 
     writeFileSync(join(root, "tracked.txt"), "baseline\n");
@@ -2002,7 +2012,10 @@ test("source drift before and during execution cannot pass", async (t) => {
     const result = await executeRun(during, registrationFixtureEnv);
     assert.equal(result.state, "failed");
     assert.match(result.error, /source_id changed during execution/u);
-    assert.match(result.error, /tracked\.txt/u);
+    assert.match(result.error, /Git delta differs/u);
+    assert.equal(result.stages[0].state, "passed");
+    assert.equal(result.sourceIdBefore.git_delta.dirty, false);
+    assert.equal(result.sourceIdAfter.git_delta.dirty, true);
     assert.match(result.error, /sourceIdBefore\/sourceIdAfter/u);
   });
 });
@@ -2118,38 +2131,23 @@ test("an oversized optional duration summary keeps the complete raw artifact and
   });
 });
 
-// Only the closing owner response is scripted: real stages, result writes,
-// source validation and terminal publication still run. This fixture does not
-// claim that its synthetic changed paths came from a Git producer.
+// Missing named tests produce a long stage diagnostic. The failing stage
+// also changes the Git delta so terminal publication records both conditions.
 async function terminalDiagnosticFixture(t, { writeError } = {}) {
   await repository(t, async (root, env) => {
     const workerOutput = "worker stage output\n";
     const failedOutput = "test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n";
+    const absent = Array.from({ length: 18 }, (_, index) => `fixture::missing_${index}_${"x".repeat(150)}`);
     const runDir = await createRun({ root, input: "commit", stages: [
       stage("worker", `process.stdout.write(${JSON.stringify(workerOutput)})`),
-      stage("focused", `process.stdout.write(${JSON.stringify(failedOutput)}); process.exitCode = 7`),
+      { ...stage("focused", [
+        "require('node:fs').writeFileSync('tracked.txt', 'changed during failing stage');",
+        `process.stdout.write(${JSON.stringify(failedOutput)}); process.exitCode = 7;`,
+      ].join("\n")), liveTests: absent },
     ] }, env);
     const request = json(join(runDir, "request.json"));
-    const changes = Array.from({ length: 12 }, (_, index) => ({
-      path: `${String(index).padStart(2, "0")}-${"x".repeat(150)}`,
-      status: "??", origin: null, blob: "c".repeat(40), mode: "100644",
-    }));
-    const sourceId = { ...request.sourceId, changes };
-    const observation = { version: 1, status: "not_clean", root: request.root,
-      source: `git-commit:${sourceId.commit}`, tree: sourceId.tree,
-      entries: changes.map(({ path, status }) => ({ path, status })),
-      refusal: null, source_id: sourceId };
-    const originalExecFile = childProcess.execFile;
     const originalWrite = fs.writeFileSync;
-    let sourceCalls = 0;
     const diagnostics = [];
-    const sourceMock = t.mock.method(childProcess, "execFile", (command, args, options, callback) => {
-      if (args[0] === "source" && args[2] === request.root && ++sourceCalls === 2) {
-        queueMicrotask(() => callback(null, Buffer.from(JSON.stringify(observation)), Buffer.alloc(0)));
-        return { stdin: { end() {} } };
-      }
-      return originalExecFile(command, args, options, callback);
-    });
     const writeMock = t.mock.method(fs, "writeFileSync", (path, data, options) => {
       if (typeof path === "string" && dirname(path) === runDir && basename(path).startsWith("launcher.diagnostic-")) {
         diagnostics.push({ path, data, options });
@@ -2162,18 +2160,20 @@ async function terminalDiagnosticFixture(t, { writeError } = {}) {
     try {
       result = await executeRun(runDir, env);
     } finally {
-      sourceMock.mock.restore();
       writeMock.mock.restore();
       syncBuiltinESMExports();
     }
-    assert.equal(sourceCalls, 2);
     assert.equal(result.state, "failed");
     assert.equal(result.exitCode, 7, "source drift and diagnostic storage cannot replace the command's exit");
     assert.ok(result.ended);
     assert.equal(result.sourceInputReason, "input-changed");
     assert.equal(result.input.eligible, false);
     assert.equal(result.input.outcome, "input_changed");
-    assert.deepEqual(result.sourceIdAfter, sourceId);
+    assert.equal(result.sourceIdAfter.commit, request.sourceId.commit);
+    assert.equal(result.sourceIdAfter.tree, request.sourceId.tree);
+    assert.equal(result.sourceIdAfter.git_delta.dirty, true);
+    assert.notEqual(result.sourceIdAfter.git_delta.sha256, request.sourceId.git_delta.sha256);
+    assert.match(result.error, /source_id changed during execution; Git delta differs/u);
     assert.deepEqual(result.stages.map(({ state, code }) => ({ state, code })), [
       { state: "passed", code: 0 }, { state: "failed", code: 7 },
     ]);
@@ -2188,7 +2188,7 @@ async function terminalDiagnosticFixture(t, { writeError } = {}) {
     assert.equal(persisted.input.eligible, false);
     assert.equal(persisted.input.outcome, "input_changed");
     assert.deepEqual(persisted.sourceIdBefore, request.sourceId);
-    assert.deepEqual(persisted.sourceIdAfter, sourceId);
+    assert.deepEqual(persisted.sourceIdAfter, result.sourceIdAfter);
     assert.deepEqual(persisted.stages.map(({ name, state, code }) => ({ name, state, code })), [
       { name: "worker", state: "passed", code: 0 }, { name: "focused", state: "failed", code: 7 },
     ]);
@@ -2196,17 +2196,19 @@ async function terminalDiagnosticFixture(t, { writeError } = {}) {
     assert.equal(persisted.error, result.error);
     assert.ok(statSync(join(runDir, "results.json")).size <= RUN_RECORD_JSON_BYTES);
     assert.match(await summarize(runDir), /^FAIL .*exit=7/mu);
-    assert.equal(diagnostics.length, 1, "the long source mismatch reaches diagnostic persistence");
+    assert.equal(diagnostics.length, 1, "the long stage diagnostic reaches diagnostic persistence");
     const diagnostic = diagnostics[0];
     assert.ok(diagnostic.data.length > 2400);
-    assert.match(diagnostic.data, /source_id changed during execution/u);
-    assert.ok(result.error.length <= 2400);
+    assert.equal(diagnostic.data, `named live tests did not run: ${absent.join(", ")}\n`);
+    const stageError = result.stages[1].error;
+    assert.equal(persisted.stages[1].error, stageError);
+    assert.ok(stageError.length <= 2400);
     if (writeError) {
-      assert.ok(result.error.endsWith(`[full diagnostic unavailable: ${writeError}]`));
-      assert.equal(result.error.includes("[full diagnostic in "), false);
+      assert.ok(stageError.endsWith(`[full diagnostic unavailable: ${writeError}]`));
+      assert.equal(stageError.includes("[full diagnostic in "), false);
       assert.equal(existsSync(diagnostic.path), false);
     } else {
-      assert.ok(result.error.endsWith(`[full diagnostic in ${basename(diagnostic.path)}]`));
+      assert.ok(stageError.endsWith(`[full diagnostic in ${basename(diagnostic.path)}]`));
       assert.deepEqual(diagnostic.options, { flag: "wx", mode: 0o600 });
       assert.equal(readFileSync(diagnostic.path, "utf8"), diagnostic.data);
       assert.notEqual(diagnostic.path, logPath(runDir, result.stages[0]));
