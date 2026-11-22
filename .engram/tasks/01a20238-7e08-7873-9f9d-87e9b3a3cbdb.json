@@ -1,0 +1,30 @@
+{
+  "id": "01a20238-7e08-7873-9f9d-87e9b3a3cbdb",
+  "external_ref": null,
+  "title": "Migration left an unused `use super::*;` warning in the review_freeze_cli integration test (test_temp_paths.rs)",
+  "outcome": "Migration left an unused `use super::*;` warning in the review_freeze_cli integration test (test_temp_paths.rs)",
+  "acceptance": [
+    "cargo test --test review_freeze_cli --no-run reports no unused-import warning for src/test_temp_paths.rs, and cargo check --bin termal and cargo test --bin termal --no-run add no warning over their current baseline.",
+    "The change touches only the wiring of test_temp_paths.rs (its import line or the integration test's include site); no expression, name or behaviour changes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a202e4-dc89-7ba0-9832-349e9704a6f2",
+  "external_ref": null,
+  "title": "On Central, the launcher's node tests run against the installed engram.exe and fail 13 source-identity cases, so a registered FULL cannot pass",
+  "outcome": "On Central, the launcher's node tests run against the installed engram.exe and fail 13 source-identity cases, so a registered FULL cannot pass",
+  "acceptance": [
+    "The cause is confirmed by a discriminating check: the first failing test run alone on a clean master checkout on Central, plus the code path by which these tests select their owner.",
+    "The 13 launcher tests pass on Central with the installed engram.exe present, without uninstalling or changing it, because they use the fixture owner they create themselves; they still pass on DL560 and Windows B.",
+    "A registered Central full gate (full --input commit) passes its node-helper-tests stage."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

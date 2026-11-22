@@ -1,0 +1,30 @@
+{
+  "id": "01a20436-3c73-7301-8b09-676599ebdad7",
+  "external_ref": null,
+  "title": "Rust test fixtures still build the legacy changes[] source_id as the ordinary case; switch them to git_delta",
+  "outcome": "Ordinary native test fixtures and the operator live admission test use the current git_delta source_id shape (or the producer's/pin's own reading), with the legacy changes[] shape kept only in explicitly named historical-compatibility tests. Removing the review-freeze and review-identity scanners is NOT this item: that is w-e12f9cdba686.",
+  "acceptance": [
+    "src/tests/engram_declared_source_fixture.rs builds the git_delta shape for ordinary native fixtures, and every module that used its legacy changes[] default (three, per Engram::Inquisitor) builds the current shape; legacy changes[] remains only in tests named as historical compatibility.",
+    "src/tests/engram_remote_admission_live.rs (an #[ignore] operator test) takes its before/after source identity from the existing producer or pin reading instead of building it from Git HEAD/tree with git_delta None; no new test and no new local hashing is added.",
+    "The full gate passes on the exact committed tree with a clean independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "review-freeze",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

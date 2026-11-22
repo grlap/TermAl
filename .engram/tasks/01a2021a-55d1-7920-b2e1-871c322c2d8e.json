@@ -4,7 +4,7 @@
   "title": "Reviewer lens files still describe main.rs as a single-file architecture after the include! migration",
   "outcome": "Found by Fable52 (mailbox 30a7a691 #62). .claude/reviewers/architecture.md:76 and .claude/reviewers/rust.md:56 tell reviewers not to flag that main.rs is \"a single large file\" or the \"single-file architecture (`main.rs`)\". After the migration (master ebc30de9 and later), main.rs is mostly module declarations, so the lines are stale, though harmless as ignore-rules. These are reviewer guidance, not authority-granting text. Markdown only.",
   "acceptance": [
-    "The two reviewer lens lines describe the current module layout (or are removed if no longer needed), with no other change to those files.",
+    "The two reviewer lens lines describe the current module layout (or are removed if no longer needed), and the App.tsx line that followed the first one states its own reason; no other change to those files.",
     "The independent review pair has no outstanding in-scope finding of Medium or higher, and the doc link check passes on the exact landed input."
   ],
   "acceptance_bindings": [],

@@ -6,7 +6,7 @@
   "acceptance": [
     "A boot over a store holding finished delegation children (delegation terminal, child idle or failed, nothing queued, running or pending) reads no transcript tail for those children before /api/state is served, proven by a test that counts tail reads per session on the production boot path; roots, live children and children of open delegations still load their tail.",
     "Every per-id tail, history page and delegation result-output read after boot returns the same content as before this change for roots, live children, finished children and dangling links, covered by tests on a real temporary SQLite store; a full and a delta persistence while a child is cold, then a follow-up append and a reopen, keep every original position, id and body.",
-    "The measured boot duration and resident memory before and after are recorded on the item; the full gate passes on the exact committed tree with a clean independent review pair."
+    "The measured boot duration and resident memory before this change are recorded on the item, and the measurement after the restart is carried by w-e5a0838445b6; the full gate passes on the exact committed tree with a clean independent review pair."
   ],
   "acceptance_bindings": [
     {

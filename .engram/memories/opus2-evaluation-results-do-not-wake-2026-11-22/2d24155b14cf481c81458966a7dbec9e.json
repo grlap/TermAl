@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-evaluation-results-do-not-wake-2026-11-22",
+    "revision_id": "2d24155b14cf481c81458966a7dbec9e",
+    "previous": null,
+    "body_sha256": "381f3b5cca5becee6f9cd51e528911f2bf96fb5b21756936c2406ebadfa3356b",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T17:00:38.492334200Z"
+    }
+  },
+  "body": "Opus2 lesson (2026-11-22): an acceptance evaluation that another session requests does NOT wake the integration owner when it ends. On w-b3c1, evaluation 9ab86378 came back 0/3 at about 11:52-12:00Z, and nobody acted until 17:00Z: Opus3, Fable2 and I were all waiting with no waker. Fable52 hit the same gap from 07:58Z to 16:57Z. Rule for myself: when I hand off to an evaluation or wait on a result that arrives only as tracker state, not as mail, ask the requester to mail me the verdict, or check the item with `engram work show <ref>` on my next wake. Never just wait."
+}

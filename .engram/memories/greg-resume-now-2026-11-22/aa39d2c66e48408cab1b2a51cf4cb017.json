@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-resume-now-2026-11-22",
+    "revision_id": "aa39d2c66e48408cab1b2a51cf4cb017",
+    "previous": null,
+    "body_sha256": "235a0939d65f6e4a8b96ab7e69710019d7e282cc341ee51e6fdb9303ec0e9144",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T17:04:10.107848Z"
+    }
+  },
+  "body": "Greg's decision (2026-11-22 ~17:02Z, relayed verbatim by Engram::Asistant, TermAl mailbox 588693a8 #2540): „termal ma 1.3GB, chyba mozemy ruszyc z innymi pracami” (\"termal is at 1.3 GB, I think we can start the other work\"). Asistant's framing: resume the rest of TermAl's work now, in parallel with the memory fix (w-b3c1cd1bcea1) and the launcher-test fix (w-349e9704a6f2), using the available hosts and the existing limits, without waiting for the memory fix or the restart.\nThis SUPERSEDES greg-resume-after-memory-fix-2026-11-22: the hold is lifted, and the coordinator's master landing freeze is lifted too (Fable2 to Opus2, 17:04Z). Resume order is unchanged: (a) federation w-e42f6b850a2d, w-15752bc88638, then the cause fix; (b) w-e2972bb21221; (c) w-4483f709da27; (d) w-d2982d6f0d3f; (e) w-05336c2d00a3; (f) disk sweeps w-b92d241c0154 and w-a0803adfb50c; (g) the older queue. Capacity limits are unchanged (Central 18 GiB cold floor at -j1). w-b3c1 and w-349e keep first call on Central and C7."
+}

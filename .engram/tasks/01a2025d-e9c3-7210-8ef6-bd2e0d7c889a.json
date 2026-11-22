@@ -1,0 +1,25 @@
+{
+  "id": "01a2025d-e9c3-7210-8ef6-bd2e0d7c889a",
+  "external_ref": null,
+  "title": "A status poll during a cold-window transcript read moves the stamp and returns a retryable 409",
+  "outcome": "A status poll during a cold-window transcript read moves the stamp and returns a retryable 409",
+  "acceptance": [
+    "A status poll of the same delegation that runs during a cold-window result read no longer makes that read return 409; a behavioural test interleaves the two without sleeps.",
+    "A change to the transcript itself during the read still fails revalidation as before."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a20243-f08a-7900-ad7d-381898940727",
+  "external_ref": null,
+  "title": "Make a cold reviewer child's window resident before a recovered review submission reopens its Failed delegation",
+  "outcome": "record_delegation_review_submission, reached from recover_durable_delegation_review_submission (src/delegation_review_results.rs:532), reopens a Failed reviewer delegation and calls refresh_delegation_from_child_locked, which reads the child's resident messages for its outcome and observed workspace changes. With a cold finished child (from the cold-transcript change), those messages are empty. The outcome then reads as idle without a result, the delegation records the transport note \"Child became idle without a final assistant packet after structured result submission\", and transcript-derived observed changes are lost. The result itself still comes from the submitted envelope. Fix direction: call hydrate_cold_session_window and hold its pin across the record step, as the follow-up and review-attempt paths already do. Provenance: Low from the Claude reviewer of round-4 pair B3C1-PAIR4-B7083A1E (resultId review-result-bd6ac0260f911b9f0e2480f6787a6b22e7ddb34af9f749427c89c643273eb4ed, attempt 1) on w-b3c1cd1bcea1 candidate b7083a1e. The reviewer called it narrow and did not establish that it happens in practice.",
+  "acceptance": [
+    "Make a cold reviewer child's window resident before a recovered review submission reopens its Failed delegation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

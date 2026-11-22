@@ -21,12 +21,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Three documents that still described the include!() assembly as current now describe the module layout: docs/architecture.md (the project-structure listing, the sentence under it, and the design decision, now \"Module-split backend\"), docs/rust-type-safety-plan.md (why StateInner.sessions is not yet hidden and what would let it be), and docs/features/host-architecture.md, which keeps its account of the build at 28e9ed5 and gains dated \"Since 2026-11-22\" notes saying the conversion gave each file a boundary but left the Engram session state crate-visible, so the brief's ownership work remains. Markdown only. Landed as 33b6a031bc00692ac84c0e639f81d475be800356 (tree 69eae4945f08d91d334e6cfa7caf6a0b6b5b573f) on origin master at 2026-11-22T07:42:07Z under the standing rule; nothing to install. Review took four rounds (candidates 3b47c00c, 9b77dee4, 8d55d90e, 33b6a031); rounds 1-3 each found a Medium, each a real inaccuracy in the wording, each fixed and reviewed again; round 4 was clean. Doc link check test-af1cda24 passed on the exact landed commit. Post-landing evaluation: all 3 criteria passed. Left: one Low (privacy reaches descendant modules, not only children), filed as w-59bf4a5b15a0.",
+    "completed_at": "2026-11-22T07:44:58.671806900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

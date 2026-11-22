@@ -1,0 +1,28 @@
+{
+  "id": "01a20238-1cc4-7442-b3be-a2505f93bc3c",
+  "external_ref": null,
+  "title": "Windows: review_freeze_cli test target warns \"unused import super::*\" in src/test_temp_paths.rs:5 after the include! migration",
+  "outcome": "Windows B's registered FULL on ebc30de9 (test-775069d9, PASS, relay #848, 07:45Z) shows one warning in the integration test target review_freeze_cli: \"warning: unused import: `super::*` --> tests\\../src/test_temp_paths.rs:5:5\". This warning was not in the retained S0 (bd01930c) Windows FULL baseline log. Since the migration (w-f621028c8a08), src/test_temp_paths.rs opens with `use super::*;`. It is a module of the binary (src/main.rs:1269), and tests/review_freeze_cli.rs:12 also pastes it with include!(\"../src/test_temp_paths.rs\"). In that include context, on Windows, the glob import is unused. The bin warning counts are still at the 7/27 baseline. Outcome: the review_freeze_cli target compiles on Windows without this warning, by giving the include site the imports it needs or by narrowing the glob, and the binary's module behaviour is unchanged. Provenance: filed by Opus2 from Windows B's run report. It is not a gate failure.",
+  "acceptance": [
+    "Windows: review_freeze_cli test target warns \"unused import super::*\" in src/test_temp_paths.rs:5 after the include! migration is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "include-migration",
+    "warnings",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a20238-7e08-7873-9f9d-87e9b3a3cbdb",
+  "disposal_reason": "Duplicate. Fable2 filed the same Windows review_freeze_cli warning (\"unused import super::*\" at src/test_temp_paths.rs:5, from Windows B's test-775069d9) as w-87e9b3a3cbdb at about the same time (Fable52 #131). That item carries the work; it is batched with w-96042a4b7acf after w-b3c1.",
+  "completion": null
+}

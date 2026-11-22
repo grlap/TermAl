@@ -1,0 +1,29 @@
+{
+  "id": "01a20430-8175-7b30-a622-25e537533d79",
+  "external_ref": null,
+  "title": "Coder skill: a later-turn acceptance evaluation must end with a wake, not a note",
+  "outcome": "Coder skill: a later-turn acceptance evaluation must end with a wake, not a note",
+  "acceptance": [
+    "The quoted paragraph appears verbatim in .agents/skills/coder-test-execution/SKILL.md immediately after READY step 6, with no other change to that file, and the doc link check passes on the candidate commit.",
+    "No test reads or pins the skill text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "greg-directed",
+    "markdown",
+    "process"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

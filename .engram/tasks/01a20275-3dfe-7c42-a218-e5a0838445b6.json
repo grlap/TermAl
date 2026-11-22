@@ -1,0 +1,25 @@
+{
+  "id": "01a20275-3dfe-7c42-a218-e5a0838445b6",
+  "external_ref": null,
+  "title": "Measure boot duration and resident memory of the installed memory-fix build after the restart",
+  "outcome": "Measure boot duration and resident memory of the installed memory-fix build after the restart",
+  "acceptance": [
+    "After Greg's restart on the build that carries w-b3c1cd1bcea1, the boot duration and the host's resident memory are measured the same way and on the same host as the 'before' figures recorded on w-b3c1cd1bcea1, and both pairs of figures are recorded on this item with the build hash.",
+    "Any regression against the 'before' figures is reported to the TermAl coordinator with the numbers."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a2025f-4537-7f72-902a-d4f16767670e",
+  "external_ref": null,
+  "title": "Re-read a cold delegation child's window when only a status read stamped it, instead of refusing a follow-up or review capture with a conflict",
+  "outcome": "install_cold_session_window (src/cold_transcript.rs) refuses a window whose record stamp moved since it was read off-lock, and hydrate_cold_session_window then fails the follow-up or review capture with a conflict. get_delegation on a terminal delegation stamps the child unconditionally through session_mut_by_index (src/delegations.rs, detach and status paths), so a status poll that lands during the window read makes the operation fail with a retryable conflict, even though the transcript did not change. Fix direction: re-read the window a bounded number of times on a stamp mismatch, as get_delegation_result_output now does. Provenance: a Low from the Claude reviewer of round-6 pair B3C1-PAIR6-9868EEDF (resultId review-result-afa7701272875818ca3569e81057f68bbcbe3d942d53bb0fde08bd571e16e419, attempt 1) on w-b3c1cd1bcea1. The result-output half of that Low is fixed in the change itself; the install half is this item.",
+  "acceptance": [
+    "Re-read a cold delegation child's window when only a status read stamped it, instead of refusing a follow-up or review capture with a conflict is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Duplicate of w-bd2e0d7c889a. Termal::Fable2 filed that item for the whole round-6 Claude Low: the result-output half and the follow-up/review-capture half (Fable2 #5907). The result-output fix and its stamping-hook test are kept for that item in .tmp/opus3-scratch/w-bd2e-result-output-fix.patch and .tmp/opus3-scratch/w-bd2e-green12-test-hunks.patch. Both come from the unreferenced candidate a18968682c7b96be5f9a40e81d75ecf7e4b2e826.",
+  "completion": null
+}
