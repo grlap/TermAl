@@ -327,9 +327,6 @@ pub(crate) fn kimi_read_only_permission_decision(
         TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::ReviewFreeze)
         }
-        TERMAL_REVIEW_IDENTITY_QUALIFIED_TOOL_NAME => {
-            Some(DelegationControlPlaneCapability::ReviewIdentity)
-        }
         _ => None,
     };
     let tracker_word = engram_mcp_tool_word(title);
@@ -393,12 +390,6 @@ pub(crate) fn kimi_read_only_permission_decision(
                 serde_json::from_value::<ReviewFreezeRequest>(args.clone())
                     .is_ok_and(|request| request.validate().is_ok())
             }
-            DelegationControlPlaneCapability::ReviewIdentity => serde_json::from_value::<
-                ReviewIdentityRequest,
-            >(args.clone())
-            .is_ok_and(|request| {
-                request.operation == "check" && request.root.is_none() && request.validate().is_ok()
-            }),
             DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => false,
             DelegationControlPlaneCapability::ReadAcceptanceEvidence => false,
         };

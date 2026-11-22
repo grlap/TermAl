@@ -29,7 +29,6 @@ fn cli_help_dispatches_without_a_host_or_provider() {
             vec!["delegation-mcp", "--parent-session-id", "session-x"],
             vec!["delegation-mcp", "--parent-session-id", "help"],
             vec!["review-freeze-check"],
-            vec!["review-identity"],
             vec!["sessions"],
             vec!["sessions", "list"],
             vec!["mailbox"],
@@ -52,7 +51,6 @@ fn cli_help_dispatches_without_a_host_or_provider() {
                 "termal repl",
                 "termal delegation-mcp",
                 "termal review-freeze-check",
-                "termal review-identity",
                 "termal sessions list",
                 "termal mailbox send",
                 "--receipt <receipt>",
@@ -76,14 +74,6 @@ fn cli_help_preserves_complete_review_command_positionals() {
             panic!("a full verification command must not become help");
         };
         assert_eq!(actual, freeze);
-        let identity: Vec<String> = ["review-identity", value, "{\"operation\":\"check\"}"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-        let Mode::ReviewIdentity(actual) = Mode::parse(identity.clone()).unwrap() else {
-            panic!("a full identity command must not become help");
-        };
-        assert_eq!(actual, identity);
     }
     // Non-root positionals must stay data too.
     let Mode::ReviewFreeze(actual) = Mode::parse(

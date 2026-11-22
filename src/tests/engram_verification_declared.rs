@@ -433,7 +433,7 @@ fn native_source_retains_child_changes_in_the_full_owner_object() {
             "child fixture",
         ],
     );
-    let donor_path = identity_git_path(&fs::canonicalize(&donor).unwrap()).unwrap();
+    let donor_path = normalize_user_facing_path(&fs::canonicalize(&donor).unwrap());
     run_git_test_command(
         &fixture.root,
         &[
@@ -445,7 +445,7 @@ fn native_source_retains_child_changes_in_the_full_owner_object() {
             "add",
             "--quiet",
             "--",
-            &donor_path,
+            donor_path.to_str().unwrap(),
             "child",
         ],
     );
@@ -661,7 +661,8 @@ fn codex_native_command_and_claude_one_call_select_the_same_opening_entry() {
         .match_command("dotnet test", &fixture.root)
         .unwrap()
         .1;
-    let directory = identity_git_path(&fs::canonicalize(&fixture.root).unwrap())
+    let directory = normalize_user_facing_path(&fs::canonicalize(&fixture.root).unwrap())
+        .to_str()
         .unwrap()
         .replace('\\', "/");
     let one_call = format!("pushd \"{directory}\" && dotnet test");

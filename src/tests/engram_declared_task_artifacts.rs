@@ -96,7 +96,8 @@ fn start(fixture: &NativeFixture, recorder: &mut SessionRecorder, mode: &str) {
 
 fn start_route(fixture: &NativeFixture, recorder: &mut SessionRecorder, mode: &str, native: bool) {
     let mut frame = fixture.frame();
-    let path = identity_git_path(&fs::canonicalize(&fixture.fixture.root).unwrap())
+    let path = normalize_user_facing_path(&fs::canonicalize(&fixture.fixture.root).unwrap())
+        .to_str()
         .unwrap()
         .replace('\\', "/");
     frame["input"]["command"] = json!(format!("pushd \"{path}\" && {COMMAND}"));

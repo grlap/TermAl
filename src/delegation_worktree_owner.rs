@@ -37,7 +37,7 @@ fn delegation_worktree_exact_line(path: &FsPath) -> io::Result<Option<String>> {
     if !regular(&fs::symlink_metadata(path)?) {
         return Ok(None);
     }
-    let file = identity_open(path)?;
+    let file = delegation_git_boundary::open_metadata_entry(path)?;
     if !regular(&file.metadata()?) {
         return Ok(None);
     }

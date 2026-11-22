@@ -132,9 +132,6 @@ async fn run() -> Result<()> {
         Mode::ReviewFreeze(args) => {
             tokio::task::spawn_blocking(move || review_freeze_mode(&args)).await?
         }
-        Mode::ReviewIdentity(args) => {
-            tokio::task::spawn_blocking(move || review_identity_mode(&args)).await?
-        }
         Mode::DelegationMcp {
             parent_session_id,
             base_url,
@@ -722,10 +719,6 @@ fn app_router_with_acceptance_policy_limiter(
             post(verify_delegation_review_freeze),
         )
         .route(
-            "/api/sessions/{id}/review-identity",
-            post(review_identity_api),
-        )
-        .route(
             "/api/sessions/{id}/acceptance-evaluations",
             post(request_session_acceptance_evaluation),
         )
@@ -908,7 +901,6 @@ fn run_repl(agent: Agent) -> Result<()> {
 enum Mode {
     Server,
     ReviewFreeze(Vec<String>),
-    ReviewIdentity(Vec<String>),
     Repl {
         agent: Agent,
     },
@@ -935,9 +927,7 @@ impl Mode {
             Some("--help" | "-h" | "help") => true,
             // Complete verification commands own every positional argument,
             // including paths named help, -h or --help.
-            Some("review-freeze-check" | "review-identity") => {
-                args.len() == 2 && tail_requests_help()
-            }
+            Some("review-freeze-check") => args.len() == 2 && tail_requests_help(),
             // These parsers distinguish options from consumed data values.
             Some("sessions" | "mailbox" | "federation" | "delegation-mcp") | None => false,
             Some("server" | "repl" | "cli" | "--agent" | "telegram" | "telegram-bot") => {
@@ -951,7 +941,6 @@ impl Mode {
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
             Some("review-freeze-check") => Ok(Self::ReviewFreeze(args)),
-            Some("review-identity") => Ok(Self::ReviewIdentity(args)),
             Some("sessions") | Some("mailbox") | Some("federation") => {
                 Ok(Self::CoordinationCli(parse_coordination_cli_args(args)?))
             }
@@ -1467,18 +1456,6 @@ mod review_freeze_process;
 use review_freeze_process::*;
 mod review_freeze_api;
 use review_freeze_api::*;
-mod review_identity;
-use review_identity::*;
-mod review_identity_git;
-use review_identity_git::*;
-mod review_identity_inventory;
-use review_identity_inventory::*;
-mod review_identity_discovery;
-use review_identity_discovery::*;
-mod review_identity_fs;
-use review_identity_fs::*;
-mod review_identity_api;
-use review_identity_api::*;
 mod acceptance_evaluation;
 use acceptance_evaluation::*;
 mod acceptance_source;

@@ -4,7 +4,27 @@
 
 use std::{fs, io, path::Path as FsPath};
 
-use super::{identity_open, normalize_path_best_effort, review_freeze_is_reparse};
+use super::{normalize_path_best_effort, review_freeze_is_reparse};
+
+/// Opens the final entry itself. Callers check that its handle is a regular file.
+pub(crate) fn open_metadata_entry(path: &FsPath) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS);
+    }
+    options.open(path)
+}
 
 pub(crate) fn is_valid(directory: &FsPath, marker_is_dir: bool) -> io::Result<bool> {
     let marker = directory.join(".git");
@@ -68,7 +88,7 @@ pub(crate) fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
     }
     // The shared opener uses O_NONBLOCK/O_NOFOLLOW on Unix, so a FIFO or
     // link substituted after inspection cannot make this request wait.
-    let file = identity_open(path)?;
+    let file = open_metadata_entry(path)?;
     let opened = file.metadata()?;
     if !opened.is_file() || opened.file_type().is_symlink() || review_freeze_is_reparse(&opened) {
         return Ok(None);

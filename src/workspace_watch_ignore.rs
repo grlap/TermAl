@@ -1,6 +1,46 @@
 // Classifies supplied notification paths only. Git owns ignore semantics;
 // this module does not walk repositories or alter check-credit observations.
 // Queries are batched per workdir, off the watcher callback and StateInner.
+
+fn parse_check_ignore_matches(requests: &[Vec<u8>], output: &[u8]) -> Result<HashSet<Vec<u8>>> {
+    if requests.is_empty() && output.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let body = output
+        .strip_suffix(&[0])
+        .context("unterminated git check-ignore output")?;
+    let fields: Vec<_> = body.split(|byte| *byte == 0).collect();
+    if fields.len() != requests.len() * 4 {
+        anyhow::bail!("incorrect git check-ignore record count");
+    }
+    let mut remaining: HashSet<Vec<u8>> = requests.iter().cloned().collect();
+    if remaining.len() != requests.len() {
+        anyhow::bail!("duplicate git check-ignore request path");
+    }
+    let mut ignored = HashSet::new();
+    for record in fields.chunks_exact(4) {
+        if !remaining.remove(record[3]) {
+            anyhow::bail!("unexpected git check-ignore response path");
+        }
+        if record[0].is_empty() {
+            if !record[1].is_empty() || !record[2].is_empty() {
+                anyhow::bail!("invalid git check-ignore unmatched record");
+            }
+        } else {
+            if record[1].is_empty()
+                || !record[1].iter().all(u8::is_ascii_digit)
+                || record[2].is_empty()
+            {
+                anyhow::bail!("invalid git check-ignore match record");
+            }
+            if !record[2].starts_with(b"!") {
+                ignored.insert(record[3].to_vec());
+            }
+        }
+    }
+    Ok(ignored)
+}
+
 pub(crate) fn query_workspace_ignored_changes(
     root: &str, changes: &[WorkspaceFileChangeEvent], project_roots: &[PathBuf], deadline: std::time::Instant,
 ) -> Result<HashSet<String>> {
@@ -37,7 +77,7 @@ pub(crate) fn query_workspace_ignored_changes(
         anyhow::bail!("ignore query unavailable");
     }
     let keys = requests.keys().cloned().collect::<Vec<_>>();
-    let ignored = identity_ignore_matches(&keys, &output.stdout)?;
+    let ignored = parse_check_ignore_matches(&keys, &output.stdout)?;
     Ok(ignored.into_iter().filter_map(|key| requests.remove(&key)).collect())
 }
 

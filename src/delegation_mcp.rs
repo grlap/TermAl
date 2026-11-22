@@ -67,7 +67,6 @@ const TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET: Duration = Duration::from
 pub(crate) enum DelegationControlPlaneCapability {
     SubmitReviewResult,
     ReviewFreeze,
-    ReviewIdentity,
     SubmitAcceptanceEvaluation,
     ReadAcceptanceEvidence,
 }
@@ -88,9 +87,6 @@ pub(crate) fn delegation_control_plane_capability_for_claude_tool_name(
         }
         TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::ReviewFreeze)
-        }
-        TERMAL_REVIEW_IDENTITY_QUALIFIED_TOOL_NAME => {
-            Some(DelegationControlPlaneCapability::ReviewIdentity)
         }
         TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::SubmitAcceptanceEvaluation)
@@ -115,17 +111,6 @@ pub(crate) fn delegation_control_plane_capability_for_codex_elicitation(
         return None;
     };
     let metadata = meta.as_object()?;
-    if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
-        && metadata.get("tool_description").and_then(Value::as_str)
-            == Some(TERMAL_REVIEW_IDENTITY_TOOL_DESCRIPTION)
-        && metadata.get("tool_params").is_some_and(|value| {
-            serde_json::from_value::<ReviewIdentityRequest>(value.clone()).is_ok_and(|request| {
-                request.operation == "check" && request.root.is_none() && request.validate().is_ok()
-            })
-        })
-    {
-        return Some(DelegationControlPlaneCapability::ReviewIdentity);
-    }
     if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
         && metadata.get("tool_description").and_then(Value::as_str)
             == Some(TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION)
@@ -400,7 +385,6 @@ fn codex_never_root_coordination_tool_approvals() -> Value {
             "termal_list_delegations",
             "termal_board_get",
             "termal_board_list",
-            "termal_review_identity",
         ]
         .into_iter()
         .map(|tool| (tool.to_owned(), json!({ "approval_mode": "approve" })))
@@ -859,7 +843,6 @@ pub(crate) struct TermalDelegationMcpBridge {
     /// worker children never receive the reviewer-only submission tool.
     caller_requires_structured_review_result: OnceLock<bool>,
     caller_allows_review_freeze: OnceLock<bool>,
-    pub(crate) caller_allows_review_identity: OnceLock<bool>,
     /// Same snapshot again: only an evaluator child sees the submission tool.
     caller_allows_acceptance_evaluation: OnceLock<bool>,
     // Sleep hook for explicit safe-replay retries. Production uses
@@ -962,7 +945,6 @@ impl TermalDelegationMcpBridge {
             caller_is_delegation_child: OnceLock::new(),
             caller_requires_structured_review_result: OnceLock::new(),
             caller_allows_review_freeze: OnceLock::new(),
-            caller_allows_review_identity: OnceLock::new(),
             caller_allows_acceptance_evaluation: OnceLock::new(),
             safe_replay_retry_sleeper: std::thread::sleep,
             turn_delivery_budget: termal_delegation_turn_delivery_budget(),
@@ -1097,7 +1079,6 @@ impl TermalDelegationMcpBridge {
             "termal_followup_session" => self.tool_followup_session(arguments),
             "termal_submit_review_result" => self.tool_submit_review_result(arguments),
             "termal_review_freeze_check" => self.tool_review_freeze_check(arguments),
-            "termal_review_identity" => self.tool_review_identity(arguments),
             "termal_evaluate_acceptance" => self.tool_evaluate_acceptance(arguments),
             "termal_replay_acceptance_evaluation" => {
                 self.tool_replay_acceptance_evaluation(arguments)
@@ -2201,11 +2182,6 @@ impl TermalDelegationMcpBridge {
                             == Some(true)
                 });
         let _ = self.caller_allows_review_freeze.set(allows_review_freeze);
-        let allows_review_identity = requires_structured_review_result
-            && review_identity_snapshot_allows(&state, &self.serving_session_id);
-        let _ = self
-            .caller_allows_review_identity
-            .set(allows_review_identity);
         let _ = self
             .caller_allows_acceptance_evaluation
             .set(allows_acceptance_evaluation);
@@ -2233,13 +2209,6 @@ impl TermalDelegationMcpBridge {
             .copied()
             .unwrap_or(false)
     }
-    pub(crate) fn caller_allows_review_identity(&self) -> bool {
-        let _ = self.caller_is_delegation_child();
-        self.caller_allows_review_identity
-            .get()
-            .copied()
-            .unwrap_or(false)
-    }
 
     fn caller_allows_acceptance_evaluation(&self) -> bool {
         let _ = self.caller_is_delegation_child();
@@ -2256,33 +2225,12 @@ impl TermalDelegationMcpBridge {
         let mut result = mcp_tools_list_result();
         let caller_is_child = self.caller_is_delegation_child();
         if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
-            if caller_is_child {
-                for tool in tools
-                    .iter_mut()
-                    .filter(|tool| tool["name"] == TERMAL_REVIEW_IDENTITY_TOOL_NAME)
-                {
-                    tool["inputSchema"]["properties"]
-                        .as_object_mut()
-                        .map(|p| p.remove("root"));
-                    tool["inputSchema"]["properties"]["operation"] =
-                        json!({"type":"string","const":"check"});
-                    tool["inputSchema"]["required"] = json!([
-                        "operation",
-                        "schemaVersion",
-                        "expectedFingerprint",
-                        "platformProfile"
-                    ]);
-                }
-            }
             tools.retain(|tool| {
                 let Some(name) = tool.get("name").and_then(Value::as_str) else {
                     return true;
                 };
                 if name == TERMAL_REVIEW_FREEZE_TOOL_NAME {
                     return caller_is_child && self.caller_allows_review_freeze();
-                }
-                if name == TERMAL_REVIEW_IDENTITY_TOOL_NAME {
-                    return !caller_is_child || self.caller_allows_review_identity();
                 }
                 if matches!(
                     name,
@@ -3115,11 +3063,6 @@ pub(crate) fn mcp_tools_list_result() -> Value {
     );
     insert_mcp_tool_after(
         &mut result,
-        TERMAL_REVIEW_FREEZE_TOOL_NAME,
-        review_identity_tool_definition(),
-    );
-    insert_mcp_tool_after(
-        &mut result,
         "termal_followup_session",
         acceptance_evaluation_request_tool_definition(),
     );
@@ -3255,10 +3198,8 @@ fn mcp_json_rpc_tool_error(id: Value, message: String) -> Value {
 }
 
 pub(crate) fn delegation_mcp_tool_result(name: &str, result: &Value) -> Value {
-    let is_error = (name == TERMAL_REVIEW_FREEZE_TOOL_NAME
-        && result.get("verified").and_then(Value::as_bool) != Some(true))
-        || (name == TERMAL_REVIEW_IDENTITY_TOOL_NAME
-            && (result["complete"] != true || result["verified"] == false));
+    let is_error = name == TERMAL_REVIEW_FREEZE_TOOL_NAME
+        && result.get("verified").and_then(Value::as_bool) != Some(true);
     mcp_tool_text_result(result, is_error)
 }
 

@@ -790,11 +790,14 @@ fn native_opening_observes_the_named_worktree_once_without_borrowing_project_roo
     let _placement = TestTempRootDirectoryScope::repository_local();
     let mut native = NativeFixture::new("native-opening-distinct-root", false);
     let named_parent = native.fixture.root.join(".tmp");
-    // Windows path identity checks canonicalize their input. Convert the
-    // existing parent; Git creates the new child worktree below it.
+    // Use Git's ordinary path spelling for the existing parent. Git creates
+    // the new child worktree below it.
     let named_path = format!(
         "{}/named-root",
-        identity_git_path(&named_parent).unwrap().replace('\\', "/")
+        normalize_user_facing_path(&named_parent)
+            .to_str()
+            .unwrap()
+            .replace('\\', "/")
     );
     run_git_test_command(
         &native.fixture.root,
@@ -1227,7 +1230,8 @@ impl NativeFixture {
 
     fn frame(&self) -> Value {
         if self.claude {
-            let path = identity_git_path(&fs::canonicalize(&self.fixture.root).unwrap())
+            let path = normalize_user_facing_path(&fs::canonicalize(&self.fixture.root).unwrap())
+                .to_str()
                 .unwrap()
                 .replace('\\', "/");
             json!({"id":"native-tool","name":"Bash","timestamp":"2000-01-01T00:00:00Z",

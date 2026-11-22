@@ -2301,8 +2301,6 @@ pub(crate) struct DelegationStateSummary {
     /// Static policy capability; the endpoint separately checks live authority.
     #[serde(default)]
     pub(crate) review_freeze_allowed: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(crate) review_identity_allowed: bool,
     /// Static policy capability for the evaluator-only submission tool; the
     /// endpoint separately checks live authority. Written only when true, so
     /// every other delegation's broad-state link keeps its shape.

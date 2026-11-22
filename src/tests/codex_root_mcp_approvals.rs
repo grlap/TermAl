@@ -32,7 +32,6 @@ fn codex_never_root_start_and_resume_approve_only_coordination_tools() {
             "termal_list_sessions",
             "termal_read_mailbox",
             "termal_read_mailbox_message",
-            "termal_review_identity",
             "termal_send_to_session",
         ];
         assert_eq!(

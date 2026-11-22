@@ -1468,7 +1468,7 @@ Agent integration hooks:
   parent-scoped bridge arguments as the stdio bridge.
   A root using `approvalPolicy: "never"` receives per-tool approval for mailbox
   read/read-message/send/acknowledge/list and the read-only session list,
-  delegation list/status/result, board get/list and review-identity tools.
+  delegation list/status/result and board get/list tools.
   Codex otherwise refuses approval-needed MCP calls under `never`. These
   exceptions apply only to TermAl's owned bridge on both start and resume,
   including sessions created on a remote host. Work creation, steering,

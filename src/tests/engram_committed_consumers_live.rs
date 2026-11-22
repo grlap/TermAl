@@ -38,7 +38,7 @@ fn source_path(value: &Value) -> PathBuf {
     );
     assert!(path.is_absolute() && path.is_dir(), "{}", path.display());
     let canonical = fs::canonicalize(path).unwrap();
-    PathBuf::from(identity_git_path(&canonical).expect("object donor has a Git-compatible path"))
+    normalize_user_facing_path(&canonical)
 }
 
 fn consumer_fixture(consumer: &Consumer) -> CompletionFixture {
@@ -390,7 +390,7 @@ fn mutate(matrix: &Matrix, consumer: &Consumer, change: Change) {
                     "nested input",
                 ],
             );
-            let donor = identity_git_path(&fs::canonicalize(donor).unwrap()).unwrap();
+            let donor = normalize_user_facing_path(&fs::canonicalize(donor).unwrap());
             run_git_test_command(
                 &child,
                 &[
@@ -401,7 +401,7 @@ fn mutate(matrix: &Matrix, consumer: &Consumer, change: Change) {
                     "submodule",
                     "add",
                     "--quiet",
-                    &donor,
+                    donor.to_str().unwrap(),
                     "nested-fixture",
                 ],
             );

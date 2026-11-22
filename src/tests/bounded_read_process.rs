@@ -3,26 +3,28 @@
 use super::*;
 
 #[test]
-fn bounded_read_diagnostics_preserve_identity_failure_categories() {
-    for (kind, detail, expected) in [
+fn bounded_read_diagnostics_preserve_io_kind_and_detail() {
+    for (kind, detail, expected_kind) in [
         (
             io::ErrorKind::Other,
             "bounded read output limit exceeded",
-            "input_limit_exceeded",
+            "Other",
         ),
         (
             io::ErrorKind::NotFound,
             "executable unavailable",
-            "input_unavailable",
+            "NotFound",
         ),
         (
             io::ErrorKind::TimedOut,
             "bounded read deadline exceeded",
-            "deadline_exceeded",
+            "TimedOut",
         ),
     ] {
         let error = BoundedReadObservation::new().failure(io::Error::new(kind, detail).into());
-        assert_eq!(identity_error_code(&error), expected, "{error:#}");
+        let diagnostic = error.downcast_ref::<BoundedReadFailure>().unwrap();
+        assert_eq!(diagnostic.kind, expected_kind, "{error:#}");
+        assert_eq!(diagnostic.detail, detail, "{error:#}");
     }
 }
 

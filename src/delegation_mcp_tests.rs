@@ -470,7 +470,6 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_evaluate_acceptance",
             "termal_replay_acceptance_evaluation",
             "termal_review_freeze_check",
-            "termal_review_identity",
             "termal_submit_review_result",
             "termal_submit_acceptance_evaluation",
             "termal_read_acceptance_evidence",

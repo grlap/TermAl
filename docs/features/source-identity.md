@@ -25,10 +25,10 @@ checks the producer's executable custody, root and current authority around
 capture. An unavailable producer supplies no source basis, not a locally
 reconstructed revision.
 
-Other consumers, including TermAl's `review_freeze` and `review_identity`
-and Engram's separate freeze tooling, retain their own packaging and authority
-checks. Migrating a consumer remains explicit; this documentation correction
-does not replace its identity or claim new implementation coverage.
+TermAl reviews use the shared `source_id` from a recorded execution when they
+need source identity. Git commits and diff ranges select the content to inspect.
+TermAl's `review_freeze` and Engram's separate freeze tooling retain their
+packaging and authority checks until explicitly migrated.
 
 A source identity is not a run, record, review, evaluation or build identity. It
 does not prove that a command ran, that it passed, that a root is authorized, or
@@ -330,6 +330,7 @@ See [the launcher contract](../test.md#ordinary-committed-input-runs---input-com
 | --- | --- | --- |
 | Ordinary observations and test credit | Complete Engram-owned source_id; the registered Commit lane also checks its eligibility predicate at both boundaries | Root commit, command/check identity, real execution/result, root/work/run/claim/fence and frozen input |
 | TermAl clean-commit reviews and gates | Cite the complete Engram-owned source_id and compare the launcher's admitted and boundary values for the exact candidate | Base and candidate commits, diff scope, read-only checkout checks and review and gate results |
+| TermAl review_freeze | Requires explicit migration | Existing fingerprint, reviewer identity and packaging checks |
 | Engram's separate freeze consumer | Requires explicit migration without replacing its packaging checks | HEAD, index, untracked/cleanliness components and before/after execution identity |
 
 Engram's freeze answers whether the worktree changed, including packaging

@@ -83,7 +83,6 @@ pub(crate) fn coordination_cli_usage() -> String {
   termal delegation-mcp --parent-session-id <id> [--base-url <url>]
                                          Run the parent-scoped stdio MCP bridge.
   termal review-freeze-check <root> <manifest> <expected-sha256>
-  termal review-identity <root> <request-json> [<scope-json>]
   termal --help | -h | help               Print help without starting the host.
     Help is also available after a subcommand.
 
