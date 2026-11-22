@@ -1589,8 +1589,8 @@ When a session is busy (Active, Approval, or Stopping), new messages are queued 
 termal/
 |-- src/
 |   |-- main.rs              # process mode selection + router assembly;
-|   |                        # assembles the other *.rs files via include!()
-|   |                        # into a single flat crate
+|   |                        # declares the files it used to include as modules
+|   |                        # (mod x;) and imports what they share (use x::*;)
 |   |-- process_limits.rs    # early Unix RLIMIT_NOFILE lift inherited by agents
 |   |
 |   |-- # State: core types + sessions + persist + broadcast
@@ -1745,7 +1745,7 @@ termal/
 `-- README.md
 ```
 
-The backend is still compiled as one crate-level module through `include!`, but the implementation is now split by concern instead of living entirely inside `main.rs`.
+Most backend files are Rust modules that `main.rs` declares with `mod`; until 2026-11-22 it pasted nearly all of them into one crate-level module with `include!()`. A few files are child modules of another module, and some are files a module includes into itself. The implementation is split by concern instead of living entirely inside `main.rs`.
 
 ---
 
@@ -1759,7 +1759,7 @@ The backend is still compiled as one crate-level module through `include!`, but 
 
 **Shared Codex app-server.** Codex threads already carry their own cwd and thread identity, so one shared app-server process can service many Codex sessions. That reduces process churn while keeping session state logically separate.
 
-**Include-split backend.** The backend still shares one crate namespace but is split across many focused files (see the Project Structure listing above) assembled via `include!()` in `main.rs`. Each file owns a specific concern — agent protocol driver, HTTP route group, wire DTO cluster, state sub-area, remote proxy family — so day-to-day edits touch one or two files instead of navigating a monolith. Rust's multiple-impl-blocks rule lets `AppState` / `StateInner` method clusters live in whichever file matches their domain, and the flat namespace means types and helpers are visible across every file without any `pub use` boilerplate.
+**Module-split backend.** The backend is split across many focused files (see the Project Structure listing above). Most are modules that `main.rs` declares with `mod`. A few are child modules that another module declares (`remote_sync.rs` declares `remote_summary_compat.rs`), and some are files a module pulls into itself with `include!()` (`persist.rs` does this for seventeen files); an included file shares that module's private scope. Each file owns a specific concern — agent protocol driver, HTTP route group, wire DTO cluster, state sub-area, remote proxy family — so day-to-day edits touch one or two files instead of navigating a monolith. Rust's multiple-impl-blocks rule lets `AppState` / `StateInner` method clusters live in whichever file matches their domain. `main.rs` imports what each module shares, usually with `use x::*;`, and a module that needs the crate root starts with `use super::*;`, so types and helpers are still named without a path. What another module uses is normally marked `pub(crate)`; a function, type, constant or struct field left unmarked can be used only inside its own module and that module's children. Until 2026-11-22 `main.rs` pasted nearly all of these files in with `include!()`, so their top-level functions, types and constants shared one namespace.
 
 **Agent-agnostic UI message model.** Claude, Codex, Cursor, Gemini, and OpenCode are normalized into the same `Message` enum. Adding a new agent is mostly a runtime and normalization task rather than a frontend rewrite.
 

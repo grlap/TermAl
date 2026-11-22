@@ -31,6 +31,14 @@ References elsewhere in this proposal to per-turn grants, admission or
 gated recovery are historical design context; the linked Execution
 Observability and host-adapter contracts describe the current implementation.
 
+Since 2026-11-22 `src/main.rs` includes no file: each file it used to paste in
+with `include!()` is a Rust module that it declares with `mod`. Sections 2.1,
+2.2 and 2.4 and the situation in section 3.1 describe the build at
+`28e9ed5`, where those files were fragments of one module, and "fragment" in
+this brief means such a file. Sections 2.1 and 3.1 each end with a dated note
+on what the change does and does not alter; section 7.1 and the open risks in
+section 12 carry the same date where they depend on it.
+
 **Why now.** New feature work in the Engram host area (the adapter, turn
 checks, carried checks, acceptance evaluation) is frozen until this brief is
 agreed. Bug fixes with regression tests continue. The project's coordinator
@@ -119,6 +127,31 @@ file is a place to put code, not a boundary:
   counted.
 - 29 call sites in 9 files outside the fragments report a fact to the check
   machinery (section 2.4).
+
+**Since 2026-11-22** this subsection's title no longer describes `master`.
+Every file `src/main.rs` pasted in is a module: `main.rs` declares it with
+`mod` and imports what it shares, usually with `use x::*;`, and a file that
+needs the crate root starts with `use super::*;`, so code still names shared
+types without a path. A script converted most of the files and the rest were
+converted by hand. The conversion was meant to change no functional behaviour
+and the full gates passed on it; a diagnostic that prints a source position,
+a module path or a test's name prints the new one where the conversion
+changed it. As a rule, an item, method or field was marked `pub(crate)` where
+another file named it and left private otherwise. The script's rule is wider
+in places (it always marks traits and module-level imports, for example),
+and some items are `pub(super)`.
+
+That gives each converted file a boundary and puts it where the code already
+was. The counts above are of the build at `28e9ed5` and have not been taken
+again; some of the fields they name no longer exist. Every field
+`EngramSessionState` has today is `pub(crate)`, so code outside the Engram
+files can still read and write them, and turning such accesses into calls is
+still the work. What changed is that an item can now be private to its module
+and that module's children, and that a new use of a private item from
+elsewhere does not compile.
+Some modules still pull further files into themselves with `include!()`
+(`src/persist.rs` includes seventeen); those files share that one module's
+private scope, not the crate's.
 
 ### 2.2 The Engram host area
 
@@ -387,8 +420,8 @@ The rest of the brief follows these.
 This subsection is the one decision in the brief that reverses a stated
 trade-off, so it is written to be read without the rest.
 
-**The situation.** The backend is built by pasting 150 source files into one
-Rust module (`include!()` in `src/main.rs`). `main.rs` and
+**The situation, at `28e9ed5`.** The backend is built by pasting 150 source
+files into one Rust module (`include!()` in `src/main.rs`). `main.rs` and
 `.claude/reviewers/architecture.md` call that intentional: every type is
 visible everywhere and no file needs export declarations. The price is that
 no file can keep anything to itself. A session's Engram state has 49 fields;
@@ -419,7 +452,9 @@ once.
 - *Effect on the `include!()` build.* None for existing fragments. A module
   can also be assembled from existing fragment files (`include!` inside the
   module's file, with `use super::*;`), which gives the boundary before any
-  file is rewritten. That tactic has not been compiled for this brief.
+  file is rewritten. That tactic had not been compiled when this brief was
+  written; since 2026-11-22 `src/persist.rs` and fourteen other production
+  modules on `master` are built that way.
 - *Precedent.* `host_command` and `windows_launch` are real modules with a
   `pub(crate)` surface on `master` today.
 - *Reviewer guidance.* `.claude/reviewers/architecture.md` would add one
@@ -444,6 +479,24 @@ every later change respects it.
 
 The brief is written for option 1. Under option 2, sections 5 and 6 keep
 their ownership tables and lose their enforcement.
+
+**Since 2026-11-22** the choice above is no longer between a module and a
+fragment. Every file `src/main.rs` included has been converted to a module
+(section 2.1), so no crate-root fragment is left for new code to join, and
+two points of option 1 are settled: what other files call is already visible
+to them, in nearly every case as `pub(crate)`, and a module assembled from
+files with `include!` inside it compiles.
+
+The boundary option 1 is for is still to be built. The conversion set
+visibility to match existing use: every field `EngramSessionState` has today
+is `pub(crate)`. Making fields private and turning the accesses to them into
+calls, a few at a time, remains the migration, and the facade of section 5.2
+is still a list to write: today `pub(crate)` marks most of what some other
+file happens to use, which is wider than what a component should offer.
+Option 2 now reads as leaving visibility where the conversion put it. Its
+cost is the one stated above, with one difference: most items that nothing
+outside their file used are private, and a new use of one from outside its
+module and that module's children fails to compile.
 
 ## 4. The host event stream
 
@@ -1195,12 +1248,13 @@ owns admission and credit authority. Neither becomes a second process owner.
 | Provider-reported command | Execution component records observations; TermAl does not acquire OS ownership merely because a provider reports a command. |
 | Launcher run | A separately identified logical run, linked to its launch and observed stages. Its persisted result does not establish descendant termination. |
 
-The recommended boundary is a real Rust module with private resources and one
-handle. An `include!()` fragment with broadly visible fields is the
-alternative: it makes the initial move smaller, but cannot prevent callers
-from taking a job lease, bypassing cancellation fencing or mutating execution
-state. Transitional fragment bridges must delegate to the private owner and
-have named removal steps.
+The recommended boundary is a Rust module with private resources and one
+handle. A file with broadly visible fields is the alternative: an `include!()`
+fragment when this brief was written, and since 2026-11-22 a module whose
+fields are `pub(crate)`. It makes the initial move smaller, but cannot prevent
+callers from taking a job lease, bypassing cancellation fencing or mutating
+execution state. Transitional bridges with such fields must delegate to the
+private owner and have named removal steps.
 
 ### 7.2 Creation, supervision and locks
 
@@ -1868,8 +1922,10 @@ answers at once and the evaluation is deferred.
   deterministic for a given input. The values behind the placeholders (the
   root, the fingerprint that hashes it, the stamped times, and the revision,
   not shown equal across platforms) are checked on their own.
-- Assembling a module from existing fragments by `include!` has not been
-  compiled.
+- Assembling a module from existing fragments by `include!` had not been
+  compiled when this brief was written. Since 2026-11-22 fifteen production
+  modules on `master` are built that way and pass the gates, so this risk is
+  closed.
 - The target keeps the rule that an unknown place counts everywhere and
   extends it: an observation that is admitted and not yet resolved counts as
   a possible write in every worktree, and from step 10b an incomplete cut

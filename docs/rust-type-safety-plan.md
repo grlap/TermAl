@@ -192,9 +192,13 @@ wrapper rather than a plain `&mut SessionRecord`.
 
 **Implementation notes:**
 
-- The crate currently uses `include!()` fragments, so module privacy cannot
-  fully hide `StateInner.sessions`. The wrapper still helps because call-site
-  types and helper names make the stamping requirement explicit.
+- Module privacy does not yet hide `StateInner.sessions`. Until 2026-11-22
+  `src/state.rs` was an `include!()` fragment of the crate root, where every
+  other fragment could reach the field whatever its visibility. It is now a
+  module, but the field is `pub(crate)` because other files read and write it
+  directly. It can become private once those accesses go through helpers.
+  Until then the wrapper still helps because call-site types and helper names
+  make the stamping requirement explicit.
 - Start with high-risk production paths:
   - remote sync
   - project deletion
