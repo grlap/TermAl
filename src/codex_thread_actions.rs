@@ -34,8 +34,8 @@
 // via `thread/resume` (see `src/turns.rs`).
 //
 // the methods below sit in their own `impl AppState { ... }` block —
-// rust allows multiple impl blocks per type across `include!()`
-// fragments, which is how this flat backend module is assembled. tests
+// rust allows multiple impl blocks per type across the modules of a
+// crate, which is how `AppState`'s methods are spread over files. tests
 // pinning these behaviors live in `src/tests/codex_threads.rs`.
 
 use super::*;

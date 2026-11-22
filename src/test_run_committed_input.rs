@@ -8,7 +8,7 @@
 // scripts/test-launcher.mjs), the rest of the run detail (`test_run_detail`
 // in src/test_runs_disk.rs), or any credit, eligibility or disposition
 // decision: it reports what the launcher recorded and infers nothing from
-// any other field. New module, included beside src/test_runs_disk.rs.
+// any other field. New module, declared beside src/test_runs_disk.rs.
 
 use super::*;
 

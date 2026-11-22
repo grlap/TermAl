@@ -20,7 +20,7 @@
 // (src/engram_test_child_temp.rs), the launcher's temp guard (unchanged), and
 // when a child is terminated (the callers' timeouts and job teardown).
 //
-// New file, not split from another; included from main.rs under cfg(test).
+// New file, not split from another; declared in main.rs under cfg(test).
 
 use super::*;
 

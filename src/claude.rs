@@ -8,7 +8,7 @@
 // reconciliation (delta + completed), thinking-line splitting, and the
 // description/summary helpers used to render tool requests in the transcript.
 //
-// Extracted from turns.rs into its own `include!()` fragment so turns.rs
+// Extracted from turns.rs into its own module so turns.rs
 // stays focused on the TurnRecorder abstraction + shared helpers used
 // across agents (error summarization, preview text, command language
 // inference, prompt-image parsing, etc.).

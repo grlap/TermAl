@@ -3,7 +3,7 @@
 // admission, recovery holds, prompt dispatch or runtime control. Every call
 // belongs off StateInner: the observation worker or naming's acknowledgement
 // readback, never a turn's critical path.
-// New fragment beside engram_unadmitted_capture.rs.
+// New module beside engram_unadmitted_capture.rs.
 
 use super::*;
 

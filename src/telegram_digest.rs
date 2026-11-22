@@ -2,7 +2,7 @@
 Telegram digest rendering, project/session selection, command parsing, and
 user-facing error text.
 
-This include! fragment owns the presentation layer for compact project digests
+This module owns the presentation layer for compact project digests
 and slash-command responses.
 */
 

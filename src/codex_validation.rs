@@ -13,7 +13,7 @@
 // with byte-size + depth caps, and the helper extractors for MCP
 // elicitation string/array option sets.
 //
-// Extracted from state.rs into its own `include!()` fragment so state.rs
+// Extracted from state.rs into its own module so state.rs
 // stays focused on the core state model rather than protocol-specific
 // request-body validators.
 

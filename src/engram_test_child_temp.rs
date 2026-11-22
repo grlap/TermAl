@@ -17,7 +17,7 @@
 // production children keep the inherited TEMP), the launcher's temp guard
 // (unchanged), and when a child is terminated (the callers' deadlines).
 //
-// New file, not split from another; included from main.rs under cfg(test).
+// New file, not split from another; declared in main.rs under cfg(test).
 
 use super::*;
 

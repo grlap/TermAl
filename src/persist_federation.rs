@@ -1,6 +1,6 @@
 // Owns stable host metadata and validation of the domain's persisted projection.
 // Does not own a writer, credentials, transport, or session execution. New
-// persistence fragment used by persist.rs and the ordinary state writer.
+// persistence module used by persist.rs and the ordinary state writer.
 
 use super::*;
 

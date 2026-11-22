@@ -6,7 +6,7 @@
 // `commit_git_changes`, `push_git_changes`, `sync_git_changes`) stay in
 // api.rs, along with the low-level status-code parsing in the 7000s block.
 //
-// Extracted from api.rs into its own `include!()` fragment so HTTP handler
+// Extracted from api.rs into its own module so HTTP handler
 // code and git-command plumbing live in separate files.
 
 use super::*;

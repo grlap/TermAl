@@ -11,9 +11,8 @@
 // runtime.rs next to the Codex + Claude types — this file owns only the
 // implementation.
 //
-// Extracted from runtime.rs into its own `include!()` fragment so the ACP
-// subsystem lives in one place. The crate still compiles as one flat module,
-// so no visibility changes are required.
+// Extracted from runtime.rs into its own module so the ACP
+// subsystem lives in one place.
 //
 // Protocol flow contract
 // ----------------------

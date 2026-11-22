@@ -6,7 +6,7 @@
 // cancels a worker still waiting for that acknowledgement.
 //
 // Does not change production deadlines, unregistered diagnostic calls, process
-// tree cleanup, or the staged-readiness/expired-launch seams. Included from
+// tree cleanup, or the staged-readiness/expired-launch seams. Declared in
 // main.rs only under cfg(test).
 
 use super::*;

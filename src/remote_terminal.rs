@@ -14,7 +14,7 @@
 // and the SSE frame parser (`parse_terminal_sse_frame`,
 // `find_sse_frame_delimiter`).
 //
-// Extracted from remote.rs into its own `include!()` fragment so remote.rs
+// Extracted from remote.rs into its own module so remote.rs
 // stays focused on SSH transport + connection lifecycle.
 
 use super::*;

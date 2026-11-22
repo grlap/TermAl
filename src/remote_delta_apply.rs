@@ -2,7 +2,8 @@
 //
 // Extracted from remote_routes.rs so route resolution/proxying stays
 // separate from the high-volume state-delta apply machinery. This file is
-// included into the crate root and therefore shares the surrounding types.
+// a module of the crate root and reads the root's types through
+// `use super::*;`.
 //
 // The event match intentionally keeps per-variant mutation, persistence, and
 // publish ordering explicit. Those variants differ in hydration, idempotency,

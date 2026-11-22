@@ -3,9 +3,8 @@
 // Windows job-object / Unix process-group lifecycle, SSE event framing,
 // and the shared terminal output buffer with UTF-8 safe streaming.
 //
-// Extracted from api.rs into its own `include!()` fragment so the terminal
-// subsystem lives in one place. The crate still compiles as one flat
-// module, so no visibility changes are required.
+// Extracted from api.rs into its own module so the terminal
+// subsystem lives in one place.
 
 use super::*;
 

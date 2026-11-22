@@ -1,6 +1,6 @@
 // Host-owned raw review identity protocol. Owns strict request admission,
 // canonical framing, bounded double capture and inventory paging. Git/FS
-// readers are separate fragments; no project helper or policy code is loaded.
+// readers are separate modules; no project helper or policy code is loaded.
 
 use super::*;
 pub(crate) const REVIEW_IDENTITY_ALGORITHM: &str = "termal-review-identity-v1";

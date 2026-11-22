@@ -6,7 +6,7 @@
  * and the exact HTTP contracts the CLI forwards through the delegation MCP
  * bridge. It reuses the local HTTP fixture from `delegation_mcp_tests.rs` so
  * CLI and MCP behaviour are proved against the same fake backend. Declared from
- * the production fragment, like `delegation_mcp_tests.rs`, not from
+ * the production module, like `delegation_mcp_tests.rs`, not from
  * `src/tests/mod.rs`.
  */
 

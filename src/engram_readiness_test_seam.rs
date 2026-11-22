@@ -24,7 +24,7 @@
 // product's and unchanged), any receipt other than the `fixture-ready` one,
 // and other Engram processes, which keep their own launches and budgets.
 //
-// New file, not split from another; included from main.rs under cfg(test).
+// New file, not split from another; declared in main.rs under cfg(test).
 
 use super::*;
 

@@ -3,10 +3,10 @@
  *
  * This module owns only test support and assertions for the production bridge in
  * `src/delegation_mcp.rs`; it does not define runtime behavior or public APIs.
- * It intentionally lives beside that production fragment instead of under
+ * It intentionally lives beside that production module instead of under
  * `src/tests/`, whose files are declared through `src/tests/mod.rs`. The explicit
- * placement avoids accidental double compilation and makes the crate-root test
- * module path unambiguous.
+ * placement avoids accidental double compilation and makes the test module's
+ * path unambiguous.
  */
 
 use super::*;

@@ -4,7 +4,7 @@
 // watcher-seen change may follow a gate's launch, and the times a watcher
 // refusal names. Does not own the fences
 // themselves, the settlement that re-judges an exemption, or the watcher
-// thread (src/engram_carried_checks.rs, src/workspace_watch.rs). New fragment,
+// thread (src/engram_carried_checks.rs, src/workspace_watch.rs). New module,
 // split out of src/engram_carried_checks.rs so that file does not grow
 // further.
 

@@ -3,7 +3,7 @@
 // prettification, project name defaulting, and related helpers used
 // across the HTTP layer.
 //
-// Extracted from api.rs into its own `include!()` fragment so the FS-path
+// Extracted from api.rs into its own module so the FS-path
 // plumbing is distinct from HTTP handler code.
 
 use super::*;

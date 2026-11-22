@@ -9,7 +9,7 @@
 // are reconciled. Session creation also force-refreshes a session's
 // corresponding agent's readiness via `agent_readiness_for`.
 //
-// Extracted from runtime.rs into its own `include!()` fragment so runtime.rs
+// Extracted from runtime.rs into its own module so runtime.rs
 // stays focused on actual runtime processes.
 
 use super::*;

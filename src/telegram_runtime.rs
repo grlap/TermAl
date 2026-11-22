@@ -1,7 +1,7 @@
 /*
 Telegram relay runtime and configuration.
 
-This include! fragment keeps process lifecycle, UI-derived config, and
+This module keeps process lifecycle, UI-derived config, and
 in-process relay supervision out of the update handling module.
 */
 

@@ -38,7 +38,7 @@
 // + `replace_streaming_text` + `finish_streaming_text`) is the main
 // source of subtle UI bugs, so keep those semantics stable.
 //
-// Extracted from turns.rs into its own `include!()` fragment alongside
+// Extracted from turns.rs into its own module alongside
 // the rest of the backend so turns.rs can stay focused on the
 // `run_turn_blocking` / `run_codex_turn` / `run_acp_turn` dispatch and
 // shared helpers.

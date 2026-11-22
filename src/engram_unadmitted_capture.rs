@@ -1,7 +1,7 @@
 // Observation-only facts for an ordinary or adopted runtime-started turn. Owns its
 // stable identity, unbounded observed-check collection and immutable request
 // preparation. Does not admit a turn, operate on grants or send a request.
-// New fragment beside engram_unadmitted_observation.rs.
+// New module beside engram_unadmitted_observation.rs.
 
 use super::*;
 

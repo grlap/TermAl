@@ -3,8 +3,8 @@
 // threads/anchors/change-set ids, and the default empty document.
 //
 // HTTP handlers (`get_review`, `put_review`, `get_review_summary`) stay in
-// api.rs. This file owns the on-disk review document lifecycle; everything
-// is visible across the flat `include!()`-assembled module.
+// api.rs. This file owns the on-disk review document lifecycle; what other
+// files use is `pub(crate)` and re-exported at the crate root.
 
 use super::*;
 

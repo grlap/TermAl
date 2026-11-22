@@ -36,7 +36,7 @@
 // src/test_run_named_root.rs); the committed-input record
 // (src/test_run_committed_input.rs); or the verification record's sender and
 // its files (src/engram_verification_record.rs), which it only reads. It
-// grants no verdict. New module, included beside
+// grants no verdict. New module, declared beside
 // src/acceptance_named_root_sighting.rs.
 
 use super::*;

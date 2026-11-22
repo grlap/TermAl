@@ -23,9 +23,8 @@
 // `PendingSubagentResult`) stay in runtime.rs next to the ACP + Claude
 // type definitions — this file owns only the implementation.
 //
-// Extracted from runtime.rs into its own `include!()` fragment — the
-// single largest extraction of the refactor. The crate still compiles as
-// one flat module, so no visibility changes are required.
+// Extracted from runtime.rs into its own module — the
+// single largest extraction of the refactor.
 
 use super::*;
 

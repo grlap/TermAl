@@ -16,7 +16,7 @@
 // and the event-stream fan-out (`process_remote_event_stream`,
 // `dispatch_remote_event`, `resync_remote_state_snapshot_with_authority`).
 //
-// Extracted from remote.rs into its own `include!()` fragment so remote.rs
+// Extracted from remote.rs into its own module so remote.rs
 // stays focused on SSH + HTTP transport and terminal stream forwarding.
 
 use super::*;

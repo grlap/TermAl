@@ -34,7 +34,7 @@
 // panic hook aborts at once. Writing the panic line first means even that case
 // keeps the panic. Readers join the two lines by process id and sequence.
 //
-// New file, not split from another; included from main.rs under cfg(test).
+// New file, not split from another; declared in main.rs under cfg(test).
 
 /// The variable naming a run's journal file. Without it nothing is installed
 /// and nothing is written.

@@ -14,7 +14,7 @@
 // dispatch (task complete, agent message delta + final, item completed,
 // model rerouted, thread compacted), and process shutdown.
 //
-// Extracted from turns.rs into its own `include!()` fragment so turns.rs
+// Extracted from turns.rs into its own module so turns.rs
 // stays focused on the TurnRecorder abstraction + Claude turn handling.
 
 use super::*;

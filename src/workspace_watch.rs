@@ -11,7 +11,7 @@
 // below the deepest selected root, preserving notifications that cover a root
 // even when it lies below another root's `.git/`, `target/`, etc.
 //
-// Extracted from state.rs into its own `include!()` fragment so state.rs
+// Extracted from state.rs into its own module so state.rs
 // stays focused on the core state model.
 
 use super::*;

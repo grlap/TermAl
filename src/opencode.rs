@@ -2,7 +2,7 @@
 //
 // The ACP protocol and OpenCode config-authority reconciliation stay in
 // `src/acp.rs` because both participate in the ordered handshake that gates
-// prompt dispatch. This fragment owns only the OpenCode CLI boundary
+// prompt dispatch. This module owns only the OpenCode CLI boundary
 // (`opencode acp`) and executable discovery. Provider credentials are
 // intentionally not inspected here: OpenCode can source them from environment,
 // enterprise providers, plugins, or `opencode auth login`, and its ACP

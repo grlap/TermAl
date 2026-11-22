@@ -13,7 +13,7 @@
 // (`session_lifecycle.rs`). An Idle session with no pending wait is left to
 // the caller, which still refuses it as not running.
 //
-// New fragment; not split from an existing file.
+// New module; not split from an existing file.
 
 use super::*;
 

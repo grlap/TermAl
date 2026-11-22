@@ -13,7 +13,7 @@
 // rollback) and the `AcpAgent` enum that identifies which ACP agent a
 // handle wraps.
 //
-// Extracted from state.rs into its own `include!()` fragment so state.rs
+// Extracted from state.rs into its own module so state.rs
 // can stay focused on the StateInner state model and its impls.
 
 use super::*;

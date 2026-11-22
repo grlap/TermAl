@@ -11,7 +11,7 @@
 // evidence still reads bound records Engram already holds
 // (`acceptance_evidence_selection.rs`).
 //
-// Included from main.rs beside the ordinary carried-check owner.
+// Declared in main.rs beside the ordinary carried-check owner.
 
 use super::*;
 

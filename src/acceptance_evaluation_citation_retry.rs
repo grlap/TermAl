@@ -8,7 +8,7 @@
 // its persistence (acceptance_evaluation_refusal.rs), the typed resubmit and
 // its refreshed brief (acceptance_evaluation_api.rs), or which records Engram
 // admits, which the tracker alone decides.
-// A new module beside acceptance_evaluation_refusal.rs, included from main.rs.
+// A new module beside acceptance_evaluation_refusal.rs, declared in main.rs.
 
 use super::*;
 

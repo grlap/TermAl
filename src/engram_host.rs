@@ -9,7 +9,7 @@
 //! Observed facts and registered native verification retain separate owners.
 //!
 //! Does not own the checks, their captures, the overlap marking, the carried
-//! facts or observation delivery: those stay in the fragments
+//! facts or observation delivery: those stay in the modules
 //! `engram_turn_checks.rs`, `engram_carried_checks.rs`, `engram_reported_ends.rs`,
 //! `engram_check_recognition.rs`, `engram_launcher_stages.rs` and
 //! `engram_one_call.rs`, which only the

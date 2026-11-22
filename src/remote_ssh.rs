@@ -33,9 +33,8 @@
 // usable. if the ssh child dies during the wait we capture its stderr tail
 // and surface that instead of a generic timeout.
 //
-// this file was extracted from `src/remote.rs` and is pulled back in as a
-// flat `include!()` fragment, so everything here shares the surrounding
-// module's types and imports.
+// this file was extracted from `src/remote.rs` and is a module of its own;
+// `use super::*;` gives it the crate root's types and imports.
 
 use super::*;
 
