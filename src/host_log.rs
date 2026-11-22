@@ -7,6 +7,10 @@
 // what any line says. A line that names an error or failure, and the first
 // line of a kind in each window, are never suppressed.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
+
 /// How long a recurring kind stays quiet after it prints.
 const HOST_LOG_REPEAT_WINDOW: chrono::Duration = chrono::Duration::seconds(60);
 
@@ -24,7 +28,10 @@ const HOST_LOG_RECURRING_MARKERS: &[(&str, Option<&str>)] = &[
     ("state lock> file-change tracking ", None),
     ("native relay notification ", None),
     ("engram> named-root reclamation pass ", None),
-    ("engram> named-root reclamation store=", Some("outcome=deferred: less than ")),
+    (
+        "engram> named-root reclamation store=",
+        Some("outcome=deferred: less than "),
+    ),
 ];
 
 /// Words that make a line a real error, which is never suppressed. Fields
@@ -38,6 +45,10 @@ const HOST_LOG_LAST_MAX_CHARS: usize = 1_000;
 /// interactive prototype, the delegation bridge, the coordination CLI and
 /// tests) write their stderr lines unchanged.
 static HOST_LOG_CONSOLE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn enable_host_console() {
+    HOST_LOG_CONSOLE.store(true, Ordering::Relaxed);
+}
 
 thread_local! {
     /// Whether this thread is inside a host log write, holding the limiter.
@@ -61,7 +72,7 @@ impl Drop for HostLogWriting {
     }
 }
 
-fn host_log_line(args: std::fmt::Arguments<'_>) {
+pub(crate) fn host_log_line(args: std::fmt::Arguments<'_>) {
     static LIMITER: LazyLock<Mutex<HostLogLimiter>> =
         LazyLock::new(|| Mutex::new(HostLogLimiter::default()));
     // Both paths write through std's own macro, which keeps its semantics,
@@ -75,13 +86,18 @@ fn host_log_line(args: std::fmt::Arguments<'_>) {
     // hook that logs while a write panics) bypasses the limiter, which this
     // thread holds: it is stamped and written directly, never waited on.
     if HOST_LOG_WRITING.with(std::cell::Cell::get) {
-        ::std::eprintln!("{}", host_log_stamped(&host_log_timestamp(chrono::Utc::now()), &line));
+        ::std::eprintln!(
+            "{}",
+            host_log_stamped(&host_log_timestamp(chrono::Utc::now()), &line)
+        );
         return;
     }
     let _writing = HostLogWriting::enter();
     // Stamped and written under the limiter, so console order follows
     // timestamp order.
-    let mut limiter = LIMITER.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut limiter = LIMITER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = chrono::Utc::now();
     for line in limiter.admit(&line, now) {
         ::std::eprintln!("{line}");
@@ -97,12 +113,17 @@ fn host_log_names_error(line: &str) -> bool {
         .filter(|token| !(token.ends_with("=false") || token.ends_with("=0")))
         .collect::<Vec<_>>()
         .join(" ");
-    HOST_LOG_ERROR_WORDS.iter().any(|word| reported.contains(word))
+    HOST_LOG_ERROR_WORDS
+        .iter()
+        .any(|word| reported.contains(word))
 }
 
 /// `line` with the timestamp at the start of each of its physical lines.
 fn host_log_stamped(stamp: &str, line: &str) -> String {
-    line.split('\n').map(|part| format!("{stamp} {part}")).collect::<Vec<_>>().join("\n")
+    line.split('\n')
+        .map(|part| format!("{stamp} {part}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn host_log_timestamp(now: chrono::DateTime<chrono::Utc>) -> String {
@@ -115,15 +136,17 @@ fn host_log_recurring_kind(line: &str) -> Option<String> {
     if host_log_names_error(line) {
         return None;
     }
-    let end = HOST_LOG_RECURRING_MARKERS.iter().find_map(|(prefix, then)| {
-        if !line.starts_with(prefix) {
-            return None;
-        }
-        match then {
-            None => Some(prefix.len()),
-            Some(then) => line.find(then).map(|at| at + then.len()),
-        }
-    })?;
+    let end = HOST_LOG_RECURRING_MARKERS
+        .iter()
+        .find_map(|(prefix, then)| {
+            if !line.starts_with(prefix) {
+                return None;
+            }
+            match then {
+                None => Some(prefix.len()),
+                Some(then) => line.find(then).map(|at| at + then.len()),
+            }
+        })?;
     // The kind is the anchored marker and the words after it, up to the
     // first number, colon or parenthesis, so ids, timings and payloads
     // share one kind.
@@ -169,9 +192,14 @@ impl HostLogLimiter {
                 window.last = line.chars().take(HOST_LOG_LAST_MAX_CHARS).collect();
             }
             _ => {
-                self.kinds.insert(kind, HostLogKindWindow {
-                    printed_at: now, suppressed: 0, last: String::new(),
-                });
+                self.kinds.insert(
+                    kind,
+                    HostLogKindWindow {
+                        printed_at: now,
+                        suppressed: 0,
+                        last: String::new(),
+                    },
+                );
                 out.push(host_log_stamped(&stamp, line));
             }
         }
@@ -193,12 +221,15 @@ impl HostLogLimiter {
             .filter_map(|kind| {
                 let window = self.kinds.remove(&kind)?;
                 (window.suppressed > 0).then(|| {
-                    host_log_stamped(stamp, &format!(
-                        "{kind}: {} similar line(s) suppressed since {}; last: {}",
-                        window.suppressed,
-                        host_log_timestamp(window.printed_at),
-                        window.last,
-                    ))
+                    host_log_stamped(
+                        stamp,
+                        &format!(
+                            "{kind}: {} similar line(s) suppressed since {}; last: {}",
+                            window.suppressed,
+                            host_log_timestamp(window.printed_at),
+                            window.last,
+                        ),
+                    )
                 })
             })
             .collect()
@@ -208,9 +239,12 @@ impl HostLogLimiter {
 #[cfg(test)]
 mod host_log_tests {
     use super::*;
+    use crate::FileChangeTrackingDiagnostic;
 
     fn at(millis: i64) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::parse_from_rfc3339("2026-11-03T03:52:00.000Z").unwrap().to_utc()
+        chrono::DateTime::parse_from_rfc3339("2026-11-03T03:52:00.000Z")
+            .unwrap()
+            .to_utc()
             + chrono::Duration::milliseconds(millis)
     }
 
@@ -225,10 +259,16 @@ mod host_log_tests {
     #[test]
     fn every_physical_line_carries_a_utc_millisecond_timestamp() {
         let mut limiter = HostLogLimiter::default();
-        assert_eq!(limiter.admit("startup> listener bound elapsed_ms=12", at(728)),
-            ["2026-11-03T03:52:00.728Z startup> listener bound elapsed_ms=12"]);
-        assert_eq!(limiter.admit("engram> failed:\ncaused by: disk full", at(1_005)),
-            ["2026-11-03T03:52:01.005Z engram> failed:\n2026-11-03T03:52:01.005Z caused by: disk full"]);
+        assert_eq!(
+            limiter.admit("startup> listener bound elapsed_ms=12", at(728)),
+            ["2026-11-03T03:52:00.728Z startup> listener bound elapsed_ms=12"]
+        );
+        assert_eq!(
+            limiter.admit("engram> failed:\ncaused by: disk full", at(1_005)),
+            [
+                "2026-11-03T03:52:01.005Z engram> failed:\n2026-11-03T03:52:01.005Z caused by: disk full"
+            ]
+        );
     }
 
     #[test]
@@ -251,15 +291,25 @@ mod host_log_tests {
         ];
         for line in &lines {
             for repeat in 0..20 {
-                assert_eq!(limiter.admit(line, at(repeat * 100)).len(), 1, "{line} is never suppressed");
+                assert_eq!(
+                    limiter.admit(line, at(repeat * 100)).len(),
+                    1,
+                    "{line} is never suppressed"
+                );
             }
         }
     }
 
     #[test]
     fn negative_flags_do_not_make_a_line_an_error() {
-        assert!(!host_log_names_error(&file_change_line(false)), "commit_failed=false is not a failure");
-        assert!(host_log_names_error(&file_change_line(true)), "commit_failed=true is a failure");
+        assert!(
+            !host_log_names_error(&file_change_line(false)),
+            "commit_failed=false is not a failure"
+        );
+        assert!(
+            host_log_names_error(&file_change_line(true)),
+            "commit_failed=true is a failure"
+        );
         assert!(!host_log_names_error("relay> retried errors=0"));
         assert!(host_log_names_error("relay> retried errors=3"));
     }
@@ -267,15 +317,36 @@ mod host_log_tests {
     #[test]
     fn recurring_kinds_ignore_numbers_and_payloads_but_keep_their_words() {
         let kind = |line: &str| host_log_recurring_kind(line).unwrap();
-        assert_eq!(kind("state lock> held 12ms by src/a.rs:1:2 (acquisition wait 0ms)"), "state lock> held");
-        assert_eq!(kind("state lock> held 340ms by src/b.rs:9:9 (acquisition wait 3ms)"), "state lock> held");
-        assert_eq!(kind("state lock> waited 40ms at src/a.rs:1:2"), "state lock> waited");
-        assert_eq!(kind(&file_change_line(false)), "state lock> file-change tracking preparation_ms=");
-        assert_eq!(kind("native relay notification 17 deferred (409 Conflict)"), "native relay notification");
-        assert_eq!(kind("native relay notification 91 deferred (409 Conflict)"), "native relay notification");
-        assert_eq!(kind("engram> named-root reclamation pass attempted=3 limit=8 elapsed_ms=12"),
-            "engram> named-root reclamation pass attempted=");
-        for unlisted in ["engram> no source basis for the named root",
+        assert_eq!(
+            kind("state lock> held 12ms by src/a.rs:1:2 (acquisition wait 0ms)"),
+            "state lock> held"
+        );
+        assert_eq!(
+            kind("state lock> held 340ms by src/b.rs:9:9 (acquisition wait 3ms)"),
+            "state lock> held"
+        );
+        assert_eq!(
+            kind("state lock> waited 40ms at src/a.rs:1:2"),
+            "state lock> waited"
+        );
+        assert_eq!(
+            kind(&file_change_line(false)),
+            "state lock> file-change tracking preparation_ms="
+        );
+        assert_eq!(
+            kind("native relay notification 17 deferred (409 Conflict)"),
+            "native relay notification"
+        );
+        assert_eq!(
+            kind("native relay notification 91 deferred (409 Conflict)"),
+            "native relay notification"
+        );
+        assert_eq!(
+            kind("engram> named-root reclamation pass attempted=3 limit=8 elapsed_ms=12"),
+            "engram> named-root reclamation pass attempted="
+        );
+        for unlisted in [
+            "engram> no source basis for the named root",
             "codex diagnostic> unhandled shared Codex app-server notification `a/b`: {}",
             "claude acp diagnostic> unhandled ACP notification `x`: {}",
             r#"gemini acp diagnostic> unhandled ACP notification `log`: {"level":"fatal","message":"database is locked"}"#,
@@ -286,7 +357,9 @@ mod host_log_tests {
             "relay> state lock> held 12ms by src/a.rs:1:2",
             "engram> named-root reclamation store=s work=w-1 generation=2 route=Live outcome=retained: database is locked",
             "engram> named-root reclamation store=s work=w-1 generation=2 route=Live outcome=retired",
-            "native mailbox wake scan deferred: busy", "received executor activation deferred (409): busy"] {
+            "native mailbox wake scan deferred: busy",
+            "received executor activation deferred (409): busy",
+        ] {
             assert_eq!(host_log_recurring_kind(unlisted), None, "{unlisted}");
         }
     }
@@ -310,7 +383,11 @@ mod host_log_tests {
             after.extend(limiter.admit(&flood[tick % flood.len()], at(tick as i64 * 100)));
         }
         assert_eq!(before, 600, "60 s at ten lines a second");
-        assert_eq!(after.len(), flood.len(), "one first occurrence per kind in the minute: {after:#?}");
+        assert_eq!(
+            after.len(),
+            flood.len(),
+            "one first occurrence per kind in the minute: {after:#?}"
+        );
 
         // Once every window has closed, the next line brings one summary per
         // kind, each with its exact suppressed count and last line.
@@ -328,15 +405,21 @@ mod host_log_tests {
             let last = flood.iter().find(|line| host_log_recurring_kind(line).unwrap() == kind).unwrap();
             assert!(summary.ends_with(&format!("; last: {last}")), "{summary}");
         }
-        assert_eq!(next.last().unwrap(), &format!("2026-11-03T03:53:00.400Z {}", flood[0]));
+        assert_eq!(
+            next.last().unwrap(),
+            &format!("2026-11-03T03:53:00.400Z {}", flood[0])
+        );
     }
 
     #[test]
     fn a_summary_stamps_every_physical_line_of_its_last_message() {
         let mut limiter = HostLogLimiter::default();
         limiter.admit("state lock> held 120ms by src/a.rs:1:2", at(0));
-        limiter.admit("state lock> held 900ms by src/b.rs:3:4
-continued detail", at(100));
+        limiter.admit(
+            "state lock> held 900ms by src/b.rs:3:4
+continued detail",
+            at(100),
+        );
         let next = limiter.admit("mailbox> delivered", at(60_000));
         assert_eq!(next, [
             "2026-11-03T03:53:00.000Z state lock> held: 1 similar line(s) suppressed since 2026-11-03T03:52:00.000Z; last: state lock> held 900ms by src/b.rs:3:4
@@ -350,10 +433,16 @@ continued detail", at(100));
         assert!(!HOST_LOG_WRITING.with(std::cell::Cell::get));
         let unwound = std::panic::catch_unwind(|| {
             let _writing = HostLogWriting::enter();
-            assert!(HOST_LOG_WRITING.with(std::cell::Cell::get), "a nested log on this thread bypasses the limiter");
+            assert!(
+                HOST_LOG_WRITING.with(std::cell::Cell::get),
+                "a nested log on this thread bypasses the limiter"
+            );
             panic!("the stderr write failed");
         });
         assert!(unwound.is_err());
-        assert!(!HOST_LOG_WRITING.with(std::cell::Cell::get), "the thread logs through the limiter again");
+        assert!(
+            !HOST_LOG_WRITING.with(std::cell::Cell::get),
+            "the thread logs through the limiter again"
+        );
     }
 }

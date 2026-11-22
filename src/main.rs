@@ -25,10 +25,10 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 // gets a UTC timestamp and recurring diagnostics are rate limited per kind.
 macro_rules! eprintln {
     () => {
-        $crate::host_log_line(::std::format_args!(""))
+        $crate::host_log::host_log_line(::std::format_args!(""))
     };
     ($($arg:tt)*) => {
-        $crate::host_log_line(::std::format_args!($($arg)*))
+        $crate::host_log::host_log_line(::std::format_args!($($arg)*))
     };
 }
 
@@ -36,6 +36,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 mod engram_host;
 use engram_host::{EngramHost, EngramRecorderObservation};
 mod host_command;
+mod host_log;
 mod host_utilization;
 // The foundation is exercised by tests until the delivery routes are mounted.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -90,7 +91,7 @@ const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 #[tokio::main]
 async fn main() {
     capture_federation_process_image();
-    configure_process_open_file_limit();
+    process_limits::configure_process_open_file_limit();
     ignore_sigpipe();
     if let Err(err) = run().await {
         eprintln!("fatal: {err:#}");
@@ -155,7 +156,7 @@ async fn run() -> Result<()> {
 
 /// Runs the backend server.
 async fn run_server() -> Result<()> {
-    HOST_LOG_CONSOLE.store(true, Ordering::Relaxed);
+    host_log::enable_host_console();
     let boot_started = std::time::Instant::now();
     let cwd_path = std::env::current_dir().context("failed to resolve current directory")?;
     let ui_dist_dir = cwd_path.join("ui").join("dist");
@@ -975,8 +976,7 @@ impl Mode {
     }
 }
 
-include!("host_log.rs");
-include!("process_limits.rs");
+mod process_limits;
 include!("remote_authority.rs");
 include!("federation_identity.rs");
 include!("federation_mailbox_protocol.rs");

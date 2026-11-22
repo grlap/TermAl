@@ -20,7 +20,7 @@ const OPEN_FILE_LIMIT_ENV: &str = "TERMAL_NOFILE_LIMIT";
 /// should not prevent TermAl from starting. All subsequently spawned agent
 /// runtimes inherit the effective limit.
 #[cfg(unix)]
-fn configure_process_open_file_limit() {
+pub(crate) fn configure_process_open_file_limit() {
     let requested = requested_open_file_soft_limit();
     configure_process_open_file_limit_with(
         requested,
@@ -75,7 +75,7 @@ fn configure_process_open_file_limit_with(
 }
 
 #[cfg(not(unix))]
-fn configure_process_open_file_limit() {}
+pub(crate) fn configure_process_open_file_limit() {}
 
 #[cfg(unix)]
 fn requested_open_file_soft_limit() -> u64 {
@@ -342,5 +342,4 @@ fn desired_open_file_soft_limit(current_soft: u64, hard_limit: Option<u64>, requ
 }
 
 #[cfg(test)]
-#[path = "process_limits_tests.rs"]
-mod process_limit_tests;
+mod tests;
