@@ -1,0 +1,33 @@
+{
+  "id": "01a20453-a432-79b2-a2a9-ab12952d085c",
+  "external_ref": null,
+  "title": "Nested include! slice A, wiring: 27 `mod name { include!() }` test blocks become `#[path] mod name;`",
+  "outcome": "27 blocks under src/tests of the form `mod name { include!(\"f.rs\"); }` (8 of them with `use super::*;` before the include) become `#[path = \"f.rs\"] mod name;` declarations, so that each fragment is an ordinary module file that `cargo fmt` reaches. The module keeps its name and its place, so module paths and libtest names are expected not to change. Where the block held `use super::*;` and the file has no such line, the line moves into the file. Follows the formatting-only candidate of the same slice (sibling item). The 12 blocks of codex_reviewer_mcp_startup.rs and of the federation_* files are left out because in-flight candidates change those files; they go to a later slice. The 27 blocks are listed in a note on this item.",
+  "acceptance": [
+    "On the candidate, none of the 27 listed blocks remains; each is a `#[path = \"f.rs\"] mod name;` declaration with the same module name, and no file other than the 27 fragments and their parents changes.",
+    "The set of test names printed by `cargo test --bin termal -- --list` is the same on the candidate as on its parent, on one host.",
+    "`cargo fmt --all -- --check` passes on the candidate.",
+    "No test reads or pins source text for this change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

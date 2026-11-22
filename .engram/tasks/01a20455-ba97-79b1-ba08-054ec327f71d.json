@@ -1,0 +1,29 @@
+{
+  "id": "01a20455-ba97-79b1-ba08-054ec327f71d",
+  "external_ref": null,
+  "title": "Consolidate duplicate launcher admission-refusal fixtures",
+  "outcome": "Remove condition-specific duplicate fixture refusals that exercise the same launcher admission boundary, while preserving typed refusal, null source identity and no-stage assertions.",
+  "acceptance": [
+    "The launcher tests cover an unavailable owner before admission and preserve the no-stage, null source identity, and persisted refusal assertions.",
+    "Distinct dirty-submodule and before-execution and closing-source boundary tests remain, and the admission cases describe the behavior observable from the launcher."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "test-runner",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a202e4-dc89-7ba0-9832-349e9704a6f2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

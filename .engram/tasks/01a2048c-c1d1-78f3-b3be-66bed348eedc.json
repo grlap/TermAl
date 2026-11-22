@@ -1,0 +1,28 @@
+{
+  "id": "01a2048c-c1d1-78f3-b3be-66bed348eedc",
+  "external_ref": null,
+  "title": "Mailbox read succeeds and issues a receipt, then ACK and a fresh read return 404 \"mailbox not found for this participant\" for the same caller",
+  "outcome": "Mailbox read succeeds and issues a receipt, then ACK and a fresh read return 404 \"mailbox not found for this participant\" for the same caller",
+  "acceptance": [
+    "The cause is identified from source and host evidence: why a participant that list shows, and that just read the mailbox, is not found as a native member for ack and later reads.",
+    "A participant that can read a mailbox can acknowledge the receipt it was issued and read again, covered by a behaviour test of the read, ack and read sequence for the membership shape that failed here; a non-member is still refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

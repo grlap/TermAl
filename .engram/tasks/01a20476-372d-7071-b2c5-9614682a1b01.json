@@ -1,0 +1,30 @@
+{
+  "id": "01a20476-372d-7071-b2c5-9614682a1b01",
+  "external_ref": null,
+  "title": "Central's shared Codex app-server holds 23 per-thread MCP sets (about 2.6 GB private), possibly not released when delegation threads are archived",
+  "outcome": "Central's shared Codex app-server holds 23 per-thread MCP sets (about 2.6 GB private), possibly not released when delegation threads are archived",
+  "acceptance": [
+    "Each MCP set under the shared app-server is mapped, read-only, to its parent session and thread, and the count belonging to finished or archived work is recorded with evidence.",
+    "If any belong to finished work: when a thread is archived or its session ends, its MCP servers exit, shown by a behaviour test on the production path with no timing threshold, on Windows and Linux; if none do, the item records that and closes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "central",
+    "codex",
+    "delegation",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

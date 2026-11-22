@@ -1,0 +1,28 @@
+{
+  "id": "01a20484-5bbd-76e3-bcb0-6e26db2cdecf",
+  "external_ref": null,
+  "title": "Restore workspace watcher coverage for a negated Git ignore rule",
+  "outcome": "A behavioral Git fixture proves that an ignore rule still suppresses an ordinary ignored path and keeps a re-included sibling visible through the production workspace watcher classification route.",
+  "acceptance": [
+    "A fixture repository with a plain Git ignore pattern and a negated rule exercises the existing watcher classification route. It observes that events for the re-included file remain visible and events for an ignored sibling are suppressed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-follow-up",
+    "testing",
+    "workspace-watcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a2044d-dfe1-7721-bc90-01972c8202e9",
+  "external_ref": null,
+  "title": "Cover legacy top-level launcher diagnostic overflow and write failure",
+  "outcome": "Keep test coverage for a long legacy-v1 run-level source mismatch while the launcher still accepts historical source records.",
+  "acceptance": [
+    "A controlled run produces two valid legacy-v1 owner observations whose long mismatch reaches top-level results.error, preserves the actual failing stage exit and records a bounded diagnostic.",
+    "A successful diagnostic sidecar and a refused diagnostic write each preserve the terminal result and independent stage logs without invoking a real legacy owner or hashing source files."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "test-runner",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a202e4-dc89-7ba0-9832-349e9704a6f2",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

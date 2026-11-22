@@ -1,0 +1,33 @@
+{
+  "id": "01a20470-b447-7143-9eb0-d58f21b4401a",
+  "external_ref": null,
+  "title": "Docs: telegram-markdown-documents.md still calls telegram_document_safety.rs \"included\" after the slice A wiring",
+  "outcome": "Found by the Codex reviewer of the slice A wiring pair (WAB12-PAIR1-4223AAA0, delegation-dd7d491f-de3b-45db-a5db-661e0dc28d86, a Note outside the diff). docs/features/telegram-markdown-documents.md:118 says \"`src/tests/telegram_documents.rs` and its included `src/tests/telegram_document_safety.rs`\". Once the wiring of w-ab12952d085c lands, that file is a child module declared with `#[path]`, not included text, so the sentence is stale. To do only after that wiring is on master. A Markdown-only change. The same follow-up can carry any comment in the converted files that still says a file is \"included\" by another; the reviewers found none in the 20 changed files of slice A. Criteria are to be worded and concurred when it is scheduled.",
+  "acceptance": [
+    "Docs: telegram-markdown-documents.md still calls telegram_document_safety.rs \"included\" after the slice A wiring is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "architecture",
+    "docs",
+    "greg-directed",
+    "include-to-mod",
+    "markdown",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

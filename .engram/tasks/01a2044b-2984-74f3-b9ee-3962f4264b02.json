@@ -1,0 +1,30 @@
+{
+  "id": "01a2044b-2984-74f3-b9ee-3962f4264b02",
+  "external_ref": null,
+  "title": "Cold finished children: restore failure_detail_version with the terminal flag, and repair a durable \"Running\" card left by a kill inside a persist deferral window",
+  "outcome": "Cold finished children: restore failure_detail_version with the terminal flag, and repair a durable \"Running\" card left by a kill inside a persist deferral window",
+  "acceptance": [
+    "A cold finished child whose stored terminal card is a failed, still-indexed run records failure_detail_version together with the terminal flag, so a rescan does not re-read the failure excerpt; a behavioural test counts the excerpt reads across two scans.",
+    "After a restart in which a child's terminal flag was committed but its transcript row was deferred, the child's card does not stay Running: a behavioural test simulates that durable state and asserts the card is terminal after boot and the first scan.",
+    "The comment at persisted_state.rs:651-655 describes the actual behaviour; the full gate passes on the exact committed tree with a clean independent review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "memory",
+    "test-run-cards"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

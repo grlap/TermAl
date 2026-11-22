@@ -1,0 +1,27 @@
+{
+  "id": "01a20476-47a1-76f2-9b15-8fc0b2422fa9",
+  "external_ref": null,
+  "title": "Root sessions: an interrupted Codex tool process tree can outlive the turn under the shared app-server",
+  "outcome": "Root sessions: an interrupted Codex tool process tree can outlive the turn under the shared app-server",
+  "acceptance": [
+    "A concrete root-session orphan is observed and recorded with its process tree, or the class is shown not to occur; if it occurs, an interrupted root turn leaves no tool process running, shown by a behaviour test without timing thresholds on Linux and Windows."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "process-cleanup"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

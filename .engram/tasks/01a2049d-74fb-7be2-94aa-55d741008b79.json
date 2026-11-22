@@ -1,0 +1,29 @@
+{
+  "id": "01a2049d-74fb-7be2-94aa-55d741008b79",
+  "external_ref": null,
+  "title": "Bound-evidence check does not admit a registered run's stage record (\"source identity differs or is unavailable\") although the run's sourceIds equal the judged commit",
+  "outcome": "Bound-evidence check does not admit a registered run's stage record (\"source identity differs or is unavailable\") although the run's sourceIds equal the judged commit",
+  "acceptance": [
+    "The cause is identified from source and the w-349e evaluation's evidence: why the record of test-69ddade9 was not admitted although its sourceIds equal the judged commit.",
+    "A registered committed-input run whose sourceIds equal the judged revision is admitted as citable evidence for a test-bound criterion, covered by a behaviour test with a git_delta-format source_id; a run on a different input is still refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

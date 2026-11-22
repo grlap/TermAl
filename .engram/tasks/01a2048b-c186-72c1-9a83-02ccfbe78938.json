@@ -1,0 +1,27 @@
+{
+  "id": "01a2048b-c186-72c1-9a83-02ccfbe78938",
+  "external_ref": null,
+  "title": "Mailbox ACK returns 404 'no original native mailbox membership row' after a successful read of the same mailbox",
+  "outcome": "Reported by Engram::Merger (Central session-11859) to Opus2 at about 18:36Z on 2026-11-22. At about 18:35Z, session-11859 called termal_read_mailbox on mailbox-93903743-954f-4dbb-a735-b066bbc534d7 with afterSequence omitted. It returned message #1736, receipt 32c7e141-52f4-4317-ae61-0e53015f9eff, processedThrough 1735, hasMore=false. After processing that only message, termal_acknowledge_mailbox with the same mailboxId and unchanged receipt returned 404: \"mailbox not found for this session; domain mailbox acknowledge returned 404 after no original native mailbox membership row matched for caller session-11859 …\". So the read authorizes the caller while the acknowledge path doesn't find its membership, and the page can't be acknowledged. Note: the mailbox id the Merger names (…954f…) differs from the Opus2<->Merger mailbox id on Opus2's side (mailbox-93903743-d329-4a85-bb31-4aa20538567a). The read and ack paths may resolve the mailbox identity differently (native vs domain). Outcome: a session that can read a mailbox page can acknowledge that page with the returned receipt; read and acknowledge resolve the same membership.",
+  "acceptance": [
+    "Mailbox ACK returns 404 'no original native mailbox membership row' after a successful read of the same mailbox is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a2048c-c1d1-78f3-b3be-66bed348eedc",
+  "disposal_reason": "Duplicate. Fable2 filed the same Engram::Merger mailbox bug, read succeeds and issues a receipt, then ACK and a fresh read return 404 for the same caller, as w-66bed348eedc at about the same time. My two notes here (both occurrences, and the 954f-vs-d329 mailbox id observation) are context for that item.",
+  "completion": null
+}

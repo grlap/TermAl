@@ -1,0 +1,36 @@
+{
+  "id": "01a20473-a19b-7ff1-8c61-38d0f43282ee",
+  "external_ref": null,
+  "title": "Nested include!: extend scripts/include-to-mod.mjs to fragments of modules other than src/main.rs",
+  "outcome": "scripts/include-to-mod.mjs converts fragments that src/main.rs includes. Slices B and C of w-05336c2d00a3 are 49 fragments that other module files include at their top level (30 outside persist, 19 in persist). The coordinator ruled (mailbox 30a7a691 #103, #112) that the tool is extended to a parent other than src/main.rs, in a candidate of its own that changes no file under src, so that `verify` gives the same proof for a nested unit as for a unit of src/main.rs; the conversions that use it come after. What differs from the root case and has to be decided in the tool: a fragment's private items were private to its parent module and that module's descendants, so the faithful marker for an item the parent uses is `pub(super)`, not `pub(crate)`; the parent has to hand the fragment's names on at the visibility they had; and text that says `super`, `self`, `pub(super)` or `pub(in …)` changes meaning when it becomes a child module, which is a hazard the tool has to report and refuse. Standing bar for tool findings (coordinator): a finding blocks only on a concrete wrong conversion on this tree that verify misses. Criteria are to be worded when the design is implemented and concurred by the coordinator before the evaluation.",
+  "acceptance": [
+    "The candidate changes only scripts/include-to-mod.mjs and scripts/include-to-mod.test.mjs.",
+    "`node --test scripts/include-to-mod.test.mjs` passes on the candidate, and the candidate removes or alters no line of the tests that file held before.",
+    "`analyze` lists every fragment that a module file other than src/main.rs includes at its top level, with its parent, and reports a hazard for each unit the tool will not convert; the counts on the candidate's tree are recorded on the item.",
+    "For a unit whose parent is not src/main.rs, `convert` mounts the module in the parent with `#[path]`, inserts `pub(super)` where a unit of src/main.rs gets `pub(crate)`, and refuses the request before writing anything when a unit holds a `super::` path or a `pub(super)` that climbs out of the file, or `module_path!()`; the tool's tests show each on fixture trees they create.",
+    "`verify` accepts the tool's own conversion of a nested unit and reports a problem for a hand edit beyond it; the tool's tests show both.",
+    "No test reads or pins the text of a repository source or Markdown file."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "tooling",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

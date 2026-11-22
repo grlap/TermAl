@@ -1,0 +1,29 @@
+{
+  "id": "01a2046d-1d77-7672-a621-adfaa5aaacac",
+  "external_ref": null,
+  "title": "Windows B: repeated rustc internal compiler errors (ICE) on unchanged inputs; toolchain or hardware fault suspected",
+  "outcome": "Windows B: repeated rustc internal compiler errors (ICE) on unchanged inputs; toolchain or hardware fault suspected",
+  "acceptance": [
+    "Each further rustc ICE on Windows B is recorded here with run id, input commit, query and rustc version, until Greg decides on the toolchain or hardware.",
+    "Greg's decision (toolchain reinstall, hardware check, or no action) is recorded verbatim with its source, and the item closes on it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "environment",
+    "runner",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

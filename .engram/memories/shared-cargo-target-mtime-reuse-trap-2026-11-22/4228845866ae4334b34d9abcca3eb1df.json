@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "shared-cargo-target-mtime-reuse-trap-2026-11-22",
+    "revision_id": "4228845866ae4334b34d9abcca3eb1df",
+    "previous": null,
+    "body_sha256": "647d4caf9a809f676c46e82001ec86194b0d39623943d0e431eb743110317c55",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T17:52:58.104409100Z"
+    }
+  },
+  "body": "Trap: two worktrees of different commits sharing one CARGO_TARGET_DIR can make Cargo silently REUSE the other commit's binary. On 2026-11-22, C7 ran `cargo test --bin termal -- --list` on b090b35b and then on 4223aaa0 with the same target. Both checkouts had been created before the first build, so the candidate's source files had mtimes older than the build's dep-info. Cargo reported 'Finished in 0.17s' with no 'Compiling termal' line and the same termal-<hash>, so the candidate's list was the baseline's, which is invalid evidence (C7 #3641). Rule: any comparison or compile check across commits uses a SEPARATE, empty CARGO_TARGET_DIR per commit, or confirms that 'Compiling termal' appears in the log. Warm-target reuse is fine only for the SAME commit, or for a later commit whose checkout was created AFTER the previous build."
+}
