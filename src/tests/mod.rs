@@ -13,7 +13,6 @@ use super::*;
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
 use phase_sync::receive_result as recv_within_guard;
-use std::io::Read as _;
 use tower::util::ServiceExt;
 
 mod fixture_timings;

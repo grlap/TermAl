@@ -80,11 +80,11 @@ fn decode_snapshot<T: DeserializeOwned>(payload: &str) -> serde_json::Result<T> 
     serde_json::from_str(&serde_json::to_string(&object)?)
 }
 
-pub(super) fn decode_state_event(payload: &str) -> serde_json::Result<StateEventPayload> {
+pub(crate) fn decode_state_event(payload: &str) -> serde_json::Result<StateEventPayload> {
     decode_snapshot(payload)
 }
 
-pub(super) fn decode_delta_event(payload: &str) -> serde_json::Result<DeltaEvent> {
+pub(crate) fn decode_delta_event(payload: &str) -> serde_json::Result<DeltaEvent> {
     // Current peers, especially streaming text deltas, keep the direct path.
     if let Ok(delta) = serde_json::from_str(payload) {
         return Ok(delta);
@@ -116,7 +116,7 @@ pub(super) fn decode_delta_event(payload: &str) -> serde_json::Result<DeltaEvent
 
 // Decode every inbound remote state response inside request_json's existing
 // lease checks, including snapshots nested in creation responses.
-pub(super) struct RemoteStateResponse(pub(super) StateResponse);
+pub(crate) struct RemoteStateResponse(pub(crate) StateResponse);
 
 impl<'de> Deserialize<'de> for RemoteStateResponse {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -127,7 +127,7 @@ impl<'de> Deserialize<'de> for RemoteStateResponse {
     }
 }
 
-pub(super) struct RemoteCreateProjectResponse(pub(super) CreateProjectResponse);
+pub(crate) struct RemoteCreateProjectResponse(pub(crate) CreateProjectResponse);
 
 impl<'de> Deserialize<'de> for RemoteCreateProjectResponse {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -146,8 +146,8 @@ impl<'de> Deserialize<'de> for RemoteCreateProjectResponse {
     }
 }
 
-pub(super) struct RemoteCreateOrchestratorInstanceResponse(
-    pub(super) CreateOrchestratorInstanceResponse,
+pub(crate) struct RemoteCreateOrchestratorInstanceResponse(
+    pub(crate) CreateOrchestratorInstanceResponse,
 );
 
 impl<'de> Deserialize<'de> for RemoteCreateOrchestratorInstanceResponse {

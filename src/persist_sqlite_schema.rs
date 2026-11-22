@@ -3,7 +3,7 @@
 // Does not own connection lifetimes, path locks, transaction orchestration,
 // physical message layout conversion, overview backfill or transcript reads.
 
-fn sqlite_state_user_table_names(connection: &rusqlite::Connection) -> Result<BTreeSet<String>> {
+pub(crate) fn sqlite_state_user_table_names(connection: &rusqlite::Connection) -> Result<BTreeSet<String>> {
     let mut statement = connection
         .prepare(
             "SELECT name
@@ -35,7 +35,7 @@ fn sqlite_state_table_columns(
         .with_context(|| format!("failed to decode state table `{table_name}`"))
 }
 
-const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
+pub(crate) const CURRENT_SQLITE_STATE_TABLE_COLUMNS: &[(&str, &[&str])] = &[
     ("meta", &["key", "value"]),
     ("sessions", &["id", "value_json"]),
     (
@@ -221,14 +221,14 @@ const SQLITE_STATE_AUXILIARY_SCHEMA_SQL: &str = "
     );
 ";
 
-fn reject_unsupported_state_schema(detail: impl std::fmt::Display) -> anyhow::Error {
+pub(crate) fn reject_unsupported_state_schema(detail: impl std::fmt::Display) -> anyhow::Error {
     anyhow!(
         "unsupported state database schema ({detail}); this schema cannot be migrated by this build. \
          Move or delete `termal.sqlite` to reset local app state, then restart TermAl"
     )
 }
 
-fn required_state_meta_value(connection: &rusqlite::Connection, key: &str) -> Result<String> {
+pub(crate) fn required_state_meta_value(connection: &rusqlite::Connection, key: &str) -> Result<String> {
     connection
         .query_row(
             "SELECT value FROM meta WHERE key = ?1",
@@ -438,7 +438,7 @@ fn sqlite_state_schema_header(
     Ok((actual_tables, stored_schema_version))
 }
 
-fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     // The import-reconciliation successor keeps every table of the current
     // floor; only its metadata inventory differs. Activation is explicit;
     // migration of an already activated predecessor preserves that state.
@@ -451,7 +451,7 @@ fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Re
     validate_sqlite_state_schema_for_version(connection, expected)
 }
 
-fn validate_sqlite_state_schema_for_version(
+pub(crate) fn validate_sqlite_state_schema_for_version(
     connection: &rusqlite::Connection,
     expected_version: &str,
 ) -> Result<()> {
@@ -487,7 +487,7 @@ fn validate_sqlite_state_schema_for_version(
 
 /// Preserve the complete predecessor handoff contract and install the joint
 /// observation/obligation reader floor atomically, before maintenance or mutation.
-fn prepare_existing_sqlite_state_reader_floor(
+pub(crate) fn prepare_existing_sqlite_state_reader_floor(
     connection: &rusqlite::Connection,
     for_load: bool,
 ) -> Result<Option<PersistedState>> {
@@ -551,7 +551,7 @@ fn initialize_current_sqlite_state_schema(connection: &rusqlite::Connection) -> 
 ///
 /// Deep metadata deserialization and the legacy session-JSON authority scan
 /// belong exclusively to [`ensure_sqlite_state_schema_for_load`].
-fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
     ensure_sqlite_state_schema_with_initialization(connection).map(|_| ())
 }
 
@@ -594,7 +594,7 @@ fn finish_existing_sqlite_state_schema_setup(connection: &rusqlite::Connection) 
 /// Startup alone pays for the fail-closed legacy-authority checks. Returning
 /// the value parsed from the raw metadata string keeps the guard and loader on
 /// one `serde_json::from_str` path instead of re-reading and re-parsing it.
-fn ensure_sqlite_state_schema_for_load(
+pub(crate) fn ensure_sqlite_state_schema_for_load(
     connection: &rusqlite::Connection,
 ) -> Result<Option<PersistedState>> {
     if sqlite_state_user_table_names(connection)?.is_empty()
@@ -612,7 +612,7 @@ fn ensure_sqlite_state_schema_for_load(
 }
 
 #[cfg(test)]
-fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
+pub(crate) fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
     if !sqlite_state_user_table_names(connection)
         .unwrap()
         .contains("state_metadata_units")
@@ -629,7 +629,7 @@ fn seed_current_state_auxiliary_tables(connection: &rusqlite::Connection) {
 /// Shared current core fixture. Tests may explicitly drop only the two
 /// maintenance-owned message columns to exercise validate-before-backfill.
 #[cfg(test)]
-fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
+pub(crate) fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
     connection
         .execute_batch(SQLITE_STATE_CORE_SCHEMA_SQL)
         .expect("current core state tables should initialize");
@@ -656,7 +656,7 @@ fn seed_current_state_core_tables(connection: &rusqlite::Connection) {
 }
 
 #[cfg(test)]
-fn seed_current_state_metadata(connection: &rusqlite::Connection) {
+pub(crate) fn seed_current_state_metadata(connection: &rusqlite::Connection) {
     let metadata = PersistedState::metadata_from_inner(&StateInner::new());
     replace_metadata_units_for_test(connection, serde_json::to_value(metadata).unwrap());
 }
@@ -664,7 +664,7 @@ fn seed_current_state_metadata(connection: &rusqlite::Connection) {
 // Deliberate fixture injection, bypassing production semantic validation. A
 // caller with concurrent readers supplies its existing transaction boundary.
 #[cfg(test)]
-fn replace_metadata_units_for_test(connection: &rusqlite::Connection, value: Value) {
+pub(crate) fn replace_metadata_units_for_test(connection: &rusqlite::Connection, value: Value) {
     // Whole-struct serde omits default collections; the durable format requires
     // every descriptor. Fill only omitted fields from a complete default
     // projection, then overlay raw fixture values (including deliberate errors).
@@ -685,7 +685,7 @@ fn replace_metadata_units_for_test(connection: &rusqlite::Connection, value: Val
 }
 
 #[cfg(test)]
-fn seed_primary2_state_schema_for_test(connection: &rusqlite::Connection) {
+pub(crate) fn seed_primary2_state_schema_for_test(connection: &rusqlite::Connection) {
     connection
         .execute_batch(include_str!("tests/fixtures/state_schema2.sql"))
         .unwrap();

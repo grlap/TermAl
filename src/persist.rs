@@ -25,35 +25,38 @@ in separate files. The crate still compiles as one `include!()`-assembled
 module, so no visibility changes are required.
 */
 
+use super::*;
+
 include!("persist_boot_timings.rs");
 
 /// Resolves persistence path.
-fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
+pub(crate) fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir).join("termal.sqlite")
 }
 
 // The joint floor inherits units-2 and ordinary handoff, and additionally
 // requires canonical containment, retirement and checkpoint custody metadata.
-const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
-const SQLITE_OBSERVATION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
-const SQLITE_OBSERVATION_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
-const SQLITE_CHECKPOINT_RESULT_PREDECESSOR: &str =
+pub(crate) const SQLITE_METADATA_UNITS_VERSION: &str = "2-metadata-units-2";
+pub(crate) const SQLITE_OBSERVATION_PREDECESSOR: &str = "2-metadata-units-2-handoff-1";
+pub(crate) const SQLITE_OBSERVATION_SCHEMA_VERSION: &str =
+    "2-metadata-units-2-handoff-1-unadmitted-outbox-1";
+pub(crate) const SQLITE_CHECKPOINT_RESULT_PREDECESSOR: &str =
     "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1";
-const SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR: &str =
+pub(crate) const SQLITE_NATIVE_TEST_COMPLETION_PREDECESSOR: &str =
     "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1";
-const SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-import-reconciliation-1";
-const SQLITE_DIRECT_PROMPT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1";
-const SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-import-reconciliation-1";
-const SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1";
-const SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-import-reconciliation-1";
+pub(crate) const SQLITE_NATIVE_TEST_COMPLETION_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-import-reconciliation-1";
+pub(crate) const SQLITE_DIRECT_PROMPT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1";
+pub(crate) const SQLITE_DIRECT_PROMPT_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-import-reconciliation-1";
+pub(crate) const SQLITE_DIRECT_PROMPT_DELIVERY_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1";
+pub(crate) const SQLITE_DIRECT_PROMPT_DELIVERY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-import-reconciliation-1";
 const SQLITE_TEST_REQUEST_CUSTODY_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1";
-const SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-import-reconciliation-1";
-const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-test-request-custody-1";
-const SQLITE_METADATA_KEY: &str = "metadataState";
+pub(crate) const SQLITE_TEST_REQUEST_CUSTODY_IMPORT_PREDECESSOR: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-import-reconciliation-1";
+pub(crate) const SQLITE_SCHEMA_VERSION: &str = "2-metadata-units-2-handoff-1-unadmitted-outbox-1-obligations-1-checkpoint-result-1-native-test-completion-1-direct-prompt-1-direct-prompt-delivery-1-test-request-custody-1";
+pub(crate) const SQLITE_METADATA_KEY: &str = "metadataState";
 const SQLITE_PROMPT_HISTORY_STORAGE_KEY: &str = "prompt_history_storage_version";
 const SQLITE_PROMPT_HISTORY_STORAGE_VERSION: &str = "1";
-const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
-const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
+pub(crate) const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const SQLITE_SESSION_TAIL_MESSAGES: usize = 64;
 
 /// Per-database writer locks shared by every in-process SQLite write path.
 ///
@@ -69,21 +72,21 @@ static SQLITE_STATE_WRITE_LOCKS: LazyLock<
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Default)]
-struct SqliteStateWriterAdmissionState {
-    next_ticket: u64,
+pub(crate) struct SqliteStateWriterAdmissionState {
+    pub(crate) next_ticket: u64,
     serving_ticket: u64,
     canceled_tickets: BTreeSet<u64>,
 }
 
 #[derive(Default)]
-struct SqliteStateWriterAdmission {
-    state: Mutex<SqliteStateWriterAdmissionState>,
-    changed: Condvar,
+pub(crate) struct SqliteStateWriterAdmission {
+    pub(crate) state: Mutex<SqliteStateWriterAdmissionState>,
+    pub(crate) changed: Condvar,
 }
 
-struct SqliteStateWriterGuard<'a> {
-    admission: &'a SqliteStateWriterAdmission,
-    ticket: u64,
+pub(crate) struct SqliteStateWriterGuard<'a> {
+    pub(crate) admission: &'a SqliteStateWriterAdmission,
+    pub(crate) ticket: u64,
 }
 
 static SQLITE_STATE_WRITER_POISON_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
@@ -168,7 +171,7 @@ impl Drop for SqliteStateWriterGuard<'_> {
     }
 }
 
-fn sqlite_state_write_lock(path: &FsPath) -> Arc<SqliteStateWriterAdmission> {
+pub(crate) fn sqlite_state_write_lock(path: &FsPath) -> Arc<SqliteStateWriterAdmission> {
     let mut locks = SQLITE_STATE_WRITE_LOCKS
         .lock()
         .expect("SQLite state write-lock registry poisoned");
@@ -181,7 +184,9 @@ fn sqlite_state_write_lock(path: &FsPath) -> Arc<SqliteStateWriterAdmission> {
     lock
 }
 
-fn lock_sqlite_state_writer(lock: &SqliteStateWriterAdmission) -> SqliteStateWriterGuard<'_> {
+pub(crate) fn lock_sqlite_state_writer(
+    lock: &SqliteStateWriterAdmission,
+) -> SqliteStateWriterGuard<'_> {
     let mut state = lock_sqlite_state_writer_admission(lock);
     let ticket = issue_sqlite_state_writer_ticket(lock, &mut state);
     while state.serving_ticket != ticket {
@@ -194,7 +199,7 @@ fn lock_sqlite_state_writer(lock: &SqliteStateWriterAdmission) -> SqliteStateWri
     }
 }
 
-fn lock_sqlite_state_writer_for(
+pub(crate) fn lock_sqlite_state_writer_for(
     lock: &SqliteStateWriterAdmission,
     timeout: Duration,
 ) -> Option<SqliteStateWriterGuard<'_>> {
@@ -250,12 +255,15 @@ fn lock_sqlite_state_writer_with_wait(
 }
 
 #[cfg(test)]
-fn sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission) -> u64 {
+pub(crate) fn sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission) -> u64 {
     lock_sqlite_state_writer_admission(lock).next_ticket
 }
 
 #[cfg(test)]
-fn wait_for_sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission, expected: u64) {
+pub(crate) fn wait_for_sqlite_state_writer_issued_tickets(
+    lock: &SqliteStateWriterAdmission,
+    expected: u64,
+) {
     let deadline = std::time::Instant::now() + crate::TEST_PHASE_DEADLOCK_GUARD;
     let mut state = lock_sqlite_state_writer_admission(lock);
     while state.next_ticket < expected {
@@ -276,7 +284,9 @@ fn wait_for_sqlite_state_writer_issued_tickets(lock: &SqliteStateWriterAdmission
 /// PRAGMAs or schema maintenance. This handle is not ready for writes: callers
 /// must complete the applicable path-aware schema setup (including foreign-key
 /// enforcement and post-WAL hardening), or explicitly configure it themselves.
-fn open_sqlite_state_connection_unconfigured(path: &FsPath) -> Result<rusqlite::Connection> {
+pub(crate) fn open_sqlite_state_connection_unconfigured(
+    path: &FsPath,
+) -> Result<rusqlite::Connection> {
     if let Some(parent) = path.parent() {
         harden_local_state_directory_permissions(parent)?;
     }
@@ -290,7 +300,7 @@ fn open_sqlite_state_connection_unconfigured(path: &FsPath) -> Result<rusqlite::
     Ok(connection)
 }
 
-fn configure_sqlite_state_connection(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn configure_sqlite_state_connection(connection: &rusqlite::Connection) -> Result<()> {
     // WAL lets readers coexist with the background persistence writer. NORMAL
     // sync is the common local-app tradeoff: durable enough for TermAl state,
     // with much lower fsync cost than FULL on every small create-session write.
@@ -305,7 +315,7 @@ fn configure_sqlite_state_connection(connection: &rusqlite::Connection) -> Resul
         .context("failed to configure SQLite state pragmas")
 }
 
-fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+pub(crate) fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     let connection = open_sqlite_state_connection_unconfigured(path)?;
     let setup = {
         let write_lock = sqlite_state_write_lock(path);
@@ -329,7 +339,7 @@ fn open_sqlite_state_connection(path: &FsPath) -> Result<rusqlite::Connection> {
 /// failure separately. Successful setup must never hide a hardening failure.
 /// Call while holding the path's writer guard, before releasing the connection,
 /// so another in-process writer cannot create sidecars between setup and chmod.
-fn finish_sqlite_state_file_setup<T>(path: &FsPath, setup: Result<T>) -> Result<T> {
+pub(crate) fn finish_sqlite_state_file_setup<T>(path: &FsPath, setup: Result<T>) -> Result<T> {
     let hardening = harden_sqlite_state_file_permissions(path);
     resolve_sqlite_state_setup_result(path, setup, hardening)
 }
@@ -356,7 +366,7 @@ fn resolve_sqlite_state_setup_result<T>(
     }
 }
 
-fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connection> {
+pub(crate) fn open_sqlite_state_read_connection(path: &FsPath) -> Result<rusqlite::Connection> {
     open_sqlite_state_read_connection_with_busy_timeout(path, SQLITE_BUSY_TIMEOUT)
 }
 
@@ -386,7 +396,7 @@ fn open_sqlite_state_read_connection_with_busy_timeout(
     Ok(connection)
 }
 
-fn open_sqlite_history_snapshot_with_busy_timeout(
+pub(crate) fn open_sqlite_history_snapshot_with_busy_timeout(
     path: &FsPath,
     busy_timeout: Duration,
 ) -> Result<rusqlite::Connection> {
@@ -520,7 +530,7 @@ fn reject_existing_state_directory_redirection(_path: &FsPath) -> Result<()> {
 }
 
 #[cfg(all(not(test), unix))]
-fn create_local_state_directory(path: &FsPath) -> Result<()> {
+pub(crate) fn create_local_state_directory(path: &FsPath) -> Result<()> {
     use std::os::unix::fs::DirBuilderExt;
 
     fs::DirBuilder::new()
@@ -533,7 +543,7 @@ fn create_local_state_directory(path: &FsPath) -> Result<()> {
 }
 
 #[cfg(all(not(test), not(unix)))]
-fn create_local_state_directory(path: &FsPath) -> Result<()> {
+pub(crate) fn create_local_state_directory(path: &FsPath) -> Result<()> {
     fs::create_dir_all(path).with_context(|| format!("failed to create `{}`", path.display()))
 }
 
@@ -557,11 +567,11 @@ fn harden_persist_commit_files(path: &FsPath) -> Result<()> {
 
 #[cfg(test)]
 thread_local! {
-    static PERSIST_MESSAGE_COMMIT_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
-    static METADATA_COMMIT_INTEGRITY_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub(crate) static PERSIST_MESSAGE_COMMIT_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+    pub(crate) static METADATA_COMMIT_INTEGRITY_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-fn verify_persist_commit_integrity(path: &FsPath) -> Result<()> {
+pub(crate) fn verify_persist_commit_integrity(path: &FsPath) -> Result<()> {
     #[cfg(test)]
     if METADATA_COMMIT_INTEGRITY_FAULT.with(|fault| fault.replace(false)) {
         return Err(anyhow!("injected metadata post-commit integrity failure"));
@@ -633,8 +643,8 @@ fn reject_existing_sqlite_state_file_symlinks(_path: &FsPath) -> Result<()> {
 
 #[cfg(all(test, windows))]
 thread_local! {
-    static WINDOWS_STATE_PATH_METADATA_FAILURES: std::cell::RefCell<std::collections::VecDeque<(PathBuf, i32)>> = const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
-    static WINDOWS_STATE_PATH_METADATA_PAUSES: std::cell::RefCell<Vec<Duration>> = const { std::cell::RefCell::new(Vec::new()) };
+    pub(crate) static WINDOWS_STATE_PATH_METADATA_FAILURES: std::cell::RefCell<std::collections::VecDeque<(PathBuf, i32)>> = const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    pub(crate) static WINDOWS_STATE_PATH_METADATA_PAUSES: std::cell::RefCell<Vec<Duration>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(windows)]
@@ -716,7 +726,7 @@ fn reject_windows_state_path_metadata_redirection(
     }
 }
 
-fn reject_existing_sqlite_state_path_redirection(path: &FsPath) -> Result<()> {
+pub(crate) fn reject_existing_sqlite_state_path_redirection(path: &FsPath) -> Result<()> {
     if let Some(parent) = path.parent() {
         reject_existing_state_directory_redirection(parent)?;
     }
@@ -724,7 +734,7 @@ fn reject_existing_sqlite_state_path_redirection(path: &FsPath) -> Result<()> {
 }
 
 #[cfg(test)]
-fn create_local_state_directory(path: &FsPath) -> Result<()> {
+pub(crate) fn create_local_state_directory(path: &FsPath) -> Result<()> {
     fs::create_dir_all(path).with_context(|| format!("failed to create `{}`", path.display()))?;
     #[cfg(unix)]
     harden_local_state_directory_permissions(path)?;
@@ -776,7 +786,7 @@ fn harden_existing_state_file_permissions(path: &FsPath) -> Result<()> {
 }
 
 #[cfg(any(unix, windows))]
-fn sqlite_sidecar_path(path: &FsPath, suffix: &str) -> PathBuf {
+pub(crate) fn sqlite_sidecar_path(path: &FsPath, suffix: &str) -> PathBuf {
     let mut sidecar = path.as_os_str().to_os_string();
     sidecar.push(suffix);
     PathBuf::from(sidecar)
@@ -1019,7 +1029,7 @@ mod state_permission_hardening_tests {
 
 /// Loads state from SQLite.
 #[cfg(test)]
-fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
+pub(crate) fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -1032,7 +1042,7 @@ fn load_state(path: &FsPath) -> Result<Option<StateInner>> {
 /// persistence worker prevents a last-connection close between loading and
 /// serving. On Windows, that close can synchronously checkpoint and remove a
 /// large WAL/SHM pair and make startup appear hung in `DeleteFileW`.
-fn load_state_for_boot(
+pub(crate) fn load_state_for_boot(
     path: &FsPath,
 ) -> Result<(Option<StateInner>, Option<rusqlite::Connection>)> {
     if !path.exists() {
@@ -1058,14 +1068,14 @@ include!("persist_sqlite_maintenance_tests.rs");
 #[cfg(test)]
 include!("persist_sqlite_messages_tests.rs");
 
-fn ensure_sqlite_state_schema_for_path(
+pub(crate) fn ensure_sqlite_state_schema_for_path(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<()> {
     ensure_sqlite_state_schema_for_path_with_initialization(connection, path).map(|_| ())
 }
 
-fn ensure_sqlite_state_schema_for_path_with_initialization(
+pub(crate) fn ensure_sqlite_state_schema_for_path_with_initialization(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<bool> {
@@ -1080,7 +1090,7 @@ fn ensure_sqlite_state_schema_for_path_with_initialization(
     finish_sqlite_state_file_setup(path, setup)
 }
 
-fn ensure_sqlite_state_schema_for_load_path(
+pub(crate) fn ensure_sqlite_state_schema_for_load_path(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<Option<PersistedState>> {
@@ -1110,7 +1120,7 @@ fn load_state_from_sqlite_with_connection(
     result
 }
 
-fn load_state_from_sqlite_with_timings(
+pub(crate) fn load_state_from_sqlite_with_timings(
     path: &FsPath,
     defer_delegations: bool,
     timings: &mut BootStateLoadTimings,
@@ -1198,12 +1208,12 @@ thread_local! {
         const { std::cell::Cell::new((0, 0)) };
     // Exercise one expired own-writer admission without sleeping through the
     // production budget. The real FIFO admission still decides the result.
-    static TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION: std::cell::Cell<bool> =
+    pub(crate) static TEST_DELEGATION_INVENTORY_EXPIRE_ADMISSION: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
 }
 
 #[cfg(test)]
-fn take_delegation_startup_payload_work() -> (usize, usize) {
+pub(crate) fn take_delegation_startup_payload_work() -> (usize, usize) {
     DELEGATION_STARTUP_PAYLOAD_WORK.with(|work| work.replace((0, 0)))
 }
 
@@ -1221,7 +1231,7 @@ impl AppState {
     /// admission plus SQLite's cross-connection reservation. SQL stays off
     /// StateInner. Never wait for StateInner while holding either writer lock:
     /// synchronous persistence already acquires them in the other order.
-    fn lock_delegation_inventory_publication<'state, 'sql, 'writer>(
+    pub(crate) fn lock_delegation_inventory_publication<'state, 'sql, 'writer>(
         &'state self,
         connection: &'sql rusqlite::Connection,
         writer: &'writer SqliteStateWriterAdmission,
@@ -1306,7 +1316,7 @@ impl AppState {
     }
 }
 
-fn load_delegation_records_with_fingerprint(
+pub(crate) fn load_delegation_records_with_fingerprint(
     connection: &rusqlite::Connection,
     path: &FsPath,
     cancelled: impl Fn() -> bool,
@@ -1418,7 +1428,10 @@ fn remove_missing_persisted_delegations(
 }
 
 #[cfg(test)]
-fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) -> Result<u64> {
+pub(crate) fn persist_persisted_state_to_sqlite(
+    path: &FsPath,
+    persisted: &PersistedState,
+) -> Result<u64> {
     let metadata = persisted.metadata_only();
     persist_state_parts_to_sqlite(
         path,
@@ -1438,7 +1451,7 @@ fn persist_persisted_state_to_sqlite(path: &FsPath, persisted: &PersistedState) 
     )
 }
 
-fn persist_created_session(
+pub(crate) fn persist_created_session(
     path: &FsPath,
     inner: &StateInner,
     _record: &SessionRecord,
@@ -1450,11 +1463,11 @@ fn persist_created_session(
 // before capturing its predecessor: an earlier background commit can publish
 // that predecessor while we wait, without needing to acquire StateInner.
 #[cfg(test)]
-fn persist_locked_state_to_sqlite(path: &FsPath, inner: &StateInner) -> Result<u64> {
+pub(crate) fn persist_locked_state_to_sqlite(path: &FsPath, inner: &StateInner) -> Result<u64> {
     persist_locked_state_to_sqlite_report(path, inner).map(|(generation, _)| generation)
 }
 
-fn persist_locked_state_to_sqlite_report(
+pub(crate) fn persist_locked_state_to_sqlite_report(
     path: &FsPath,
     inner: &StateInner,
 ) -> Result<(u64, Vec<PersistSessionRejection>)> {
@@ -1652,13 +1665,13 @@ fn persist_state_parts_via_connection(
 /// Body identities at absolute transcript positions after a verified COMMIT.
 /// Weak references pin allocations against address reuse without owning bodies;
 /// an evicted prefix can therefore release both payloads and cached identities.
-struct PersistTranscriptBaseline {
-    start: usize,
-    identities: Vec<std::sync::Weak<Message>>,
-    transcript_valid: bool,
+pub(crate) struct PersistTranscriptBaseline {
+    pub(crate) start: usize,
+    pub(crate) identities: Vec<std::sync::Weak<Message>>,
+    pub(crate) transcript_valid: bool,
     // Highest verified own-row cut for this incarnation. Body invalidation
     // cannot revoke a completed write; rejected/failed writes never advance it.
-    row_stamp: Option<PersistSessionWriteStamp>,
+    pub(crate) row_stamp: Option<PersistSessionWriteStamp>,
 }
 
 /// Thread-local SQLite connection cache for the background persist thread.
@@ -1676,19 +1689,19 @@ struct PersistTranscriptBaseline {
 /// reuses it for every queued write; production does not switch stores at
 /// runtime. The cache's path-change support alone does not establish startup
 /// validation for a different store.
-struct SqlitePersistConnectionCache {
-    path: Option<PathBuf>,
-    connection: Option<rusqlite::Connection>,
-    metadata_units: Option<PersistMetadataUnitCache>,
+pub(crate) struct SqlitePersistConnectionCache {
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) connection: Option<rusqlite::Connection>,
+    pub(crate) metadata_units: Option<PersistMetadataUnitCache>,
     // Adopted only after COMMIT and post-commit integrity verification.
-    transcripts: HashMap<String, PersistTranscriptBaseline>,
+    pub(crate) transcripts: HashMap<String, PersistTranscriptBaseline>,
     // Same-connection data_version sampled inside that committed transaction.
     // Any different predecessor invalidates all sparse transcript assumptions.
-    transcript_data_version: Option<i64>,
+    pub(crate) transcript_data_version: Option<i64>,
 }
 
 impl SqlitePersistConnectionCache {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             path: None,
             connection: None,
@@ -1702,7 +1715,9 @@ impl SqlitePersistConnectionCache {
     /// startup state. Ownership moves into the persistence thread without a
     /// zero-connection interval, so SQLite never performs last-close sidecar
     /// cleanup on the startup thread.
-    fn from_validated_connection(validated: Option<(PathBuf, rusqlite::Connection)>) -> Self {
+    pub(crate) fn from_validated_connection(
+        validated: Option<(PathBuf, rusqlite::Connection)>,
+    ) -> Self {
         match validated {
             Some((path, connection)) => Self {
                 path: Some(path),
@@ -1720,7 +1735,7 @@ impl SqlitePersistConnectionCache {
     /// Runs bounded schema validation only when a fresh connection is opened;
     /// startup-only metadata and legacy-authority validation is a precondition
     /// already established for this path by the current process boot.
-    fn connection_for(&mut self, path: &FsPath) -> Result<&mut rusqlite::Connection> {
+    pub(crate) fn connection_for(&mut self, path: &FsPath) -> Result<&mut rusqlite::Connection> {
         let same_store = self.path.as_deref() == Some(path);
         let matches_cache = same_store && self.connection.is_some();
         if !matches_cache {
@@ -1753,7 +1768,7 @@ impl SqlitePersistConnectionCache {
     // Called after live-tail trimming and dropping the captured delta, with
     // no StateInner guard. Drop dead weak prefixes too, so an imported large
     // transcript does not leave its old identity/control-block window cached.
-    fn release_evicted_transcript_prefixes(&mut self, persisted_ids: &[String]) {
+    pub(crate) fn release_evicted_transcript_prefixes(&mut self, persisted_ids: &[String]) {
         for id in persisted_ids {
             let Some(baseline) = self.transcripts.get_mut(id) else {
                 continue;
@@ -1785,7 +1800,7 @@ impl SqlitePersistConnectionCache {
     /// restart would otherwise repair. The next tick pays the cost
     /// of one open-plus-schema-ensure; the happy path still reuses
     /// one connection per process lifetime.
-    fn invalidate(&mut self) {
+    pub(crate) fn invalidate(&mut self) {
         self.connection = None;
         self.metadata_units = None;
         self.invalidate_transcript_bodies();
@@ -1842,7 +1857,7 @@ impl SqlitePersistConnectionCache {
 ///
 /// Test-only: production writes go through `persist_delta_via_cache_timed`.
 #[cfg(test)]
-fn persist_delta_via_cache(
+pub(crate) fn persist_delta_via_cache(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
@@ -1851,7 +1866,7 @@ fn persist_delta_via_cache(
 }
 
 /// `persist_delta_via_cache`, also recording how long each write phase took.
-fn persist_delta_via_cache_timed(
+pub(crate) fn persist_delta_via_cache_timed(
     cache: &mut SqlitePersistConnectionCache,
     path: &FsPath,
     delta: &PersistDelta,
@@ -1867,7 +1882,7 @@ fn persist_delta_via_cache_timed(
 /// A different connection committed after transcript preparation. The write
 /// must be retried from a fresh baseline without resolving its content fences.
 #[derive(Debug)]
-struct PersistTranscriptPredecessorChanged;
+pub(crate) struct PersistTranscriptPredecessorChanged;
 
 impl std::fmt::Display for PersistTranscriptPredecessorChanged {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1888,7 +1903,7 @@ impl std::error::Error for PersistTranscriptPredecessorChanged {}
 /// refusal. Malformed, noncanonical or misowned mirrors, and every other
 /// validation failure, stay ordinary errors.
 #[derive(Debug)]
-struct PersistCheckpointMirrorLedgerMismatch;
+pub(crate) struct PersistCheckpointMirrorLedgerMismatch;
 
 impl std::fmt::Display for PersistCheckpointMirrorLedgerMismatch {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2218,14 +2233,17 @@ fn write_persist_delta_statements(
 
 /// Persists state from a pre-built `PersistedState` snapshot.
 #[cfg(test)]
-fn persist_state_from_persisted(path: &FsPath, persisted: &PersistedState) -> Result<u64> {
+pub(crate) fn persist_state_from_persisted(
+    path: &FsPath,
+    persisted: &PersistedState,
+) -> Result<u64> {
     persist_persisted_state_to_sqlite(path, persisted)
 }
 
 /// Persists state directly from `StateInner` (used in tests for synchronous
 /// setup of persisted state files).
 #[cfg(test)]
-fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
+pub(crate) fn persist_state(path: &FsPath, inner: &StateInner) -> Result<()> {
     persist_locked_state_to_sqlite(path, inner)?;
     Ok(())
 }

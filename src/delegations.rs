@@ -5,51 +5,54 @@
 // and delegation SSE deltas. It does not remote-forward delegation creation or
 // implement shared-worktree/worker policies yet.
 
-mod delegation_git_boundary;
+use super::*;
+
+#[path = "delegation_git_boundary.rs"]
+pub(crate) mod delegation_git_boundary;
 
 // Keep prompts bounded because they are embedded into child-agent startup input.
 // Keep in sync with `MAX_DELEGATION_PROMPT_BYTES` in
 // `ui/src/delegation-commands.ts`; if this changes, update the parity-pin test
 // in `ui/src/delegation-commands.test.ts`.
-const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_DELEGATION_PROMPT_BYTES: usize = 64 * 1024;
 // Child session names are exposed through redacted delegation summaries; cap
 // caller-supplied titles as metadata, not prompt-sized payloads. Keep in sync
 // with `MAX_DELEGATION_TITLE_CHARS` in `ui/src/delegation-commands.ts`.
-const MAX_DELEGATION_TITLE_CHARS: usize = 200;
+pub(crate) const MAX_DELEGATION_TITLE_CHARS: usize = 200;
 // Explicit model names are metadata echoed in summaries and child cards, not
 // prompt payloads. Keep in sync with `MAX_DELEGATION_MODEL_CHARS` in
 // `ui/src/delegation-commands.ts`.
-const MAX_DELEGATION_MODEL_CHARS: usize = 200;
+pub(crate) const MAX_DELEGATION_MODEL_CHARS: usize = 200;
 // CWD is path metadata; cap it before canonicalization or persistence.
-const MAX_DELEGATION_CWD_CHARS: usize = 4096;
+pub(crate) const MAX_DELEGATION_CWD_CHARS: usize = 4096;
 // Public summaries ride in `/api/state`; full summaries stay behind result reads.
-const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
+pub(crate) const MAX_DELEGATION_PUBLIC_SUMMARY_CHARS: usize = 1000;
 // Synthesized no-packet results can contain a full child transcript; keep the
 // stored result summary bounded before persisting and rebroadcasting it.
-const MAX_DELEGATION_RESULT_SUMMARY_CHARS: usize = 8000;
+pub(crate) const MAX_DELEGATION_RESULT_SUMMARY_CHARS: usize = 8000;
 // Keep parsed ordinary result packets bounded alongside the summary cap.
-const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
+pub(crate) const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
 // Full child output is intentionally separate from the compact result packet.
 // Keep pages small enough to survive MCP/tool-output limits while allowing a
 // caller to reconstruct arbitrarily large UTF-8 output via nextOffsetBytes.
-const DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 4 * 1024;
-const MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 256;
+pub(crate) const DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 4 * 1024;
+pub(crate) const MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 256;
 const MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 8 * 1024;
 // Result packets are expected near the end of long assistant output.
-const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
+pub(crate) const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
 // Bound immediate fan-out; read-only review rounds can use three pairs.
-const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
+pub(crate) const MAX_RUNNING_DELEGATIONS_PER_PARENT: usize = 4;
 const MAX_RUNNING_DELEGATIONS_FOR_READ_ONLY_REVIEWER: usize = 6;
 // Keep nesting shallow until delegation ownership/scheduling is explicit.
 const MAX_DELEGATION_DEPTH: usize = 3;
 // Parent resume prompts should only wait on a small fan-in set.
 const MAX_DELEGATION_WAIT_IDS: usize = 10;
 // The synthesized parent fan-in prompt is persisted and sent to a model.
-const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES: usize = 64 * 1024;
 // Isolated worktrees materialize dirty tracked state through binary patches.
-const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
-const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str = "\n\n[TermAl truncated this compact delegation fan-in prompt. Fetch full child output with `termal_get_session_result` using `outputOffset` and `outputLimit`.]";
-const DELEGATED_CHILD_SESSION_MARKER: &str =
+pub(crate) const MAX_ISOLATED_WORKTREE_PATCH_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const DELEGATION_WAIT_RESUME_TRUNCATED_MARKER: &str = "\n\n[TermAl truncated this compact delegation fan-in prompt. Fetch full child output with `termal_get_session_result` using `outputOffset` and `outputLimit`.]";
+pub(crate) const DELEGATED_CHILD_SESSION_MARKER: &str =
     "You are a delegated child session for TermAl delegation";
 const DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS: &str = r#"
 TermAl reviewer result protocol (TERMAL_STRUCTURED_REVIEW_RESULT_V1):
@@ -69,29 +72,29 @@ Required tool payload:
 {"schemaVersion":1,"status":"completed","summary":"Concise overall assessment.","findings":[{"severity":"Medium","file":"path/to/file","line":1,"message":"Complete finding with impact and fix direction."}],"commandsRun":[{"command":"git status --short","status":"success"}],"filesInspected":["path/to/file"],"notes":[],"suggestedTrackerUpdates":[]}
 "#;
 // Shared conflict text for create/cancel races before child dispatch starts.
-const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
+pub(crate) const DELEGATION_NO_LONGER_STARTABLE_MESSAGE: &str = "delegation is no longer running";
 #[cfg(test)]
-const TEST_FORCE_DELEGATION_START_FAILURE_PROMPT: &str =
+pub(crate) const TEST_FORCE_DELEGATION_START_FAILURE_PROMPT: &str =
     "TERMAL_TEST_FORCE_DELEGATION_START_FAILURE";
 #[cfg(test)]
-const TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT: &str =
+pub(crate) const TEST_CANCEL_DELEGATION_BEFORE_START_PROMPT: &str =
     "TERMAL_TEST_CANCEL_DELEGATION_BEFORE_START";
 
-struct PreparedIsolatedWorktree {
-    child_cwd: String,
-    source_repo_root: String,
-    worktree_root: String,
-    base_revision: Option<String>,
+pub(crate) struct PreparedIsolatedWorktree {
+    pub(crate) child_cwd: String,
+    pub(crate) source_repo_root: String,
+    pub(crate) worktree_root: String,
+    pub(crate) base_revision: Option<String>,
 }
 
-struct IsolatedWorktreeCleanupGuard {
-    armed: bool,
-    source_repo_root: PathBuf,
-    worktree_root: PathBuf,
+pub(crate) struct IsolatedWorktreeCleanupGuard {
+    pub(crate) armed: bool,
+    pub(crate) source_repo_root: PathBuf,
+    pub(crate) worktree_root: PathBuf,
 }
 
 impl IsolatedWorktreeCleanupGuard {
-    fn new(source_repo_root: &FsPath, worktree_root: &FsPath) -> Self {
+    pub(crate) fn new(source_repo_root: &FsPath, worktree_root: &FsPath) -> Self {
         Self {
             armed: true,
             source_repo_root: source_repo_root.to_path_buf(),
@@ -99,7 +102,7 @@ impl IsolatedWorktreeCleanupGuard {
         }
     }
 
-    fn disarm(&mut self) {
+    pub(crate) fn disarm(&mut self) {
         self.armed = false;
     }
 }
@@ -121,7 +124,7 @@ impl Drop for IsolatedWorktreeCleanupGuard {
 }
 
 #[derive(Clone, Debug)]
-enum ParentDelegationCardDelta {
+pub(crate) enum ParentDelegationCardDelta {
     Created {
         session_id: String,
         message_id: String,
@@ -146,7 +149,7 @@ enum ParentDelegationCardDelta {
 }
 
 #[derive(Clone, Debug)]
-enum DelegationChildTranscriptDelta {
+pub(crate) enum DelegationChildTranscriptDelta {
     MessageCreated {
         session_id: String,
         message_id: String,
@@ -172,7 +175,7 @@ enum DelegationChildTranscriptDelta {
 }
 
 #[derive(Clone, Debug)]
-enum DelegationLifecycleDelta {
+pub(crate) enum DelegationLifecycleDelta {
     Updated {
         delegation_id: String,
         status: DelegationStatus,
@@ -202,14 +205,14 @@ enum DelegationLifecycleDelta {
 }
 
 #[derive(Clone, Debug, Default)]
-struct DelegationWaitRefresh {
-    dispatch_parents: Vec<String>,
-    consumed_waits: Vec<ConsumedDelegationWait>,
+pub(crate) struct DelegationWaitRefresh {
+    pub(crate) dispatch_parents: Vec<String>,
+    pub(crate) consumed_waits: Vec<ConsumedDelegationWait>,
     queue_results_by_wait_id: BTreeMap<String, DelegationWaitQueueResult>,
 }
 
 impl DelegationWaitRefresh {
-    fn did_mutate(&self) -> bool {
+    pub(crate) fn did_mutate(&self) -> bool {
         !self.consumed_waits.is_empty()
     }
 
@@ -227,34 +230,34 @@ impl DelegationWaitRefresh {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct DelegationWaitQueueResult {
-    prompt_queued: bool,
-    dispatch_requested: bool,
+pub(crate) struct DelegationWaitQueueResult {
+    pub(crate) prompt_queued: bool,
+    pub(crate) dispatch_requested: bool,
 }
 
 #[derive(Clone, Debug)]
-struct ConsumedDelegationWait {
-    wait: DelegationWaitRecord,
-    reason: DelegationWaitConsumedReason,
+pub(crate) struct ConsumedDelegationWait {
+    pub(crate) wait: DelegationWaitRecord,
+    pub(crate) reason: DelegationWaitConsumedReason,
 }
 
-struct RemovedSessionDelegationReconciliation {
-    lifecycle_deltas: Vec<DelegationLifecycleDelta>,
-    runtimes_to_kill: Vec<KillableRuntime>,
-    codex_thread_ids_to_ignore: Vec<String>,
+pub(crate) struct RemovedSessionDelegationReconciliation {
+    pub(crate) lifecycle_deltas: Vec<DelegationLifecycleDelta>,
+    pub(crate) runtimes_to_kill: Vec<KillableRuntime>,
+    pub(crate) codex_thread_ids_to_ignore: Vec<String>,
 }
 
 #[derive(Default)]
-struct DetachedDelegationChildRuntime {
-    codex_release: Option<CodexDelegationReleaseTicket>,
-    codex_compensation_session: Option<String>,
-    runtime: Option<KillableRuntime>,
-    transcript_deltas: Vec<DelegationChildTranscriptDelta>,
+pub(crate) struct DetachedDelegationChildRuntime {
+    pub(crate) codex_release: Option<CodexDelegationReleaseTicket>,
+    pub(crate) codex_compensation_session: Option<String>,
+    pub(crate) runtime: Option<KillableRuntime>,
+    pub(crate) transcript_deltas: Vec<DelegationChildTranscriptDelta>,
 }
 
 // Pure checks repeated at re-arm admission so an invalid follow-up never
 // clears a terminal result. Payload parsing happens before recovery too.
-fn validate_delegation_followup_child_locked(
+pub(crate) fn validate_delegation_followup_child_locked(
     inner: &StateInner,
     child_id: &str,
     has_attachments: bool,
@@ -284,7 +287,7 @@ fn validate_delegation_followup_child_locked(
 }
 
 impl DetachedDelegationChildRuntime {
-    fn did_mutate(&self) -> bool {
+    pub(crate) fn did_mutate(&self) -> bool {
         self.codex_release.is_some()
             || self.codex_compensation_session.is_some()
             || self.runtime.is_some()
@@ -321,7 +324,7 @@ struct RemovedDelegationChildSession {
 }
 
 impl StateInner {
-    fn rebuild_running_read_only_delegations(&mut self) {
+    pub(crate) fn rebuild_running_read_only_delegations(&mut self) {
         self.running_read_only_delegations = self
             .delegations
             .iter()
@@ -332,11 +335,15 @@ impl StateInner {
             .collect();
     }
 
-    fn sync_running_read_only_delegation_index(&mut self, delegation_index: usize) {
+    pub(crate) fn sync_running_read_only_delegation_index(&mut self, delegation_index: usize) {
         if let Some(delegation) = self.delegations.get(delegation_index) {
-            if !matches!(delegation.status, DelegationStatus::Queued | DelegationStatus::Running) {
+            if !matches!(
+                delegation.status,
+                DelegationStatus::Queued | DelegationStatus::Running
+            ) {
                 if let Some(target) = &delegation.acceptance_evaluation {
-                    self.acceptance_evidence_recovery.remove(&target.attempt_key);
+                    self.acceptance_evidence_recovery
+                        .remove(&target.attempt_key);
                 }
             }
             if running_read_only_delegation_index_entry(delegation, delegation_index).is_some() {
@@ -349,17 +356,20 @@ impl StateInner {
         }
     }
 
-    fn next_delegation_id(&self) -> String {
+    pub(crate) fn next_delegation_id(&self) -> String {
         format!("delegation-{}", Uuid::new_v4())
     }
 
-    fn find_delegation_index(&self, delegation_id: &str) -> Option<usize> {
+    pub(crate) fn find_delegation_index(&self, delegation_id: &str) -> Option<usize> {
         self.delegations
             .iter()
             .position(|record| record.id == delegation_id)
     }
 
-    fn find_delegation_index_by_child_session_id(&self, child_session_id: &str) -> Option<usize> {
+    pub(crate) fn find_delegation_index_by_child_session_id(
+        &self,
+        child_session_id: &str,
+    ) -> Option<usize> {
         #[cfg(test)]
         TEST_DELEGATION_CHILD_SCAN_COUNT.with(|count| count.set(count.get() + 1));
         self.delegations
@@ -367,7 +377,7 @@ impl StateInner {
             .position(|record| record.child_session_id == child_session_id)
     }
 
-    fn indexed_delegation_for_child(&self, child_session_id: &str) -> Option<usize> {
+    pub(crate) fn indexed_delegation_for_child(&self, child_session_id: &str) -> Option<usize> {
         self.delegation_catalog_children
             .lock()
             .expect("catalog child index poisoned")
@@ -384,10 +394,10 @@ impl StateInner {
 
 #[cfg(test)]
 thread_local! {
-    static TEST_DELEGATION_CHILD_SCAN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_DELEGATION_CHILD_SCAN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn running_read_only_delegation_index_entry(
+pub(crate) fn running_read_only_delegation_index_entry(
     delegation: &DelegationRecord,
     index: usize,
 ) -> Option<usize> {
@@ -396,12 +406,12 @@ fn running_read_only_delegation_index_entry(
         .then_some(index)
 }
 
-const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str = "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
-const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude, Codex or Kimi because Cursor, Gemini and OpenCode permission requests do not provide an authenticated MCP tool identity; for those agents pass mode `explorer` with a supported write policy";
+pub(crate) const OPENCODE_READ_ONLY_DELEGATION_ERROR: &str = "OpenCode delegations do not support writePolicy `readOnly`; use `isolatedWorktree` for bounded writable work";
+pub(crate) const ACP_REVIEWER_DELEGATION_ERROR: &str = "reviewer mode requires Claude, Codex or Kimi because Cursor, Gemini and OpenCode permission requests do not provide an authenticated MCP tool identity; for those agents pass mode `explorer` with a supported write policy";
 const ACP_EVALUATOR_DELEGATION_ERROR: &str = "acceptance evaluators require Claude or Codex because ACP permission requests do not provide an authenticated MCP tool identity; pass agent `Claude` or `Codex`";
 const EVALUATOR_DELEGATION_HOST_ONLY_ERROR: &str = "evaluator delegations are created only by an acceptance evaluation request (`termal_evaluate_acceptance` or POST /api/sessions/{id}/acceptance-evaluations), never by a delegation create request";
 
-fn find_parent_delegation_index_locked(
+pub(crate) fn find_parent_delegation_index_locked(
     inner: &StateInner,
     parent_session_id: &str,
     delegation_id: &str,
@@ -426,7 +436,7 @@ fn find_parent_delegation_index_locked(
 }
 
 impl AppState {
-    fn create_read_only_delegation(
+    pub(crate) fn create_read_only_delegation(
         &self,
         parent_session_id: &str,
         request: CreateDelegationRequest,
@@ -437,7 +447,7 @@ impl AppState {
     /// The one creation path. `evaluation` is supplied only by the host's
     /// acceptance-evaluation request; a caller-built request can never carry
     /// one, which is what keeps evaluator mode host-created.
-    fn create_delegation_with_evaluation_target(
+    pub(crate) fn create_delegation_with_evaluation_target(
         &self,
         parent_session_id: &str,
         request: CreateDelegationRequest,
@@ -696,14 +706,10 @@ impl AppState {
             .map(|seed| {
                 let key = if seed.mode == AcceptanceEvaluationMode::IndependentSession {
                     acceptance_evaluation_ordinal_key(&delegation_id, 1)
-                } else { delegation_id.clone() };
-                acceptance_evaluation_attempt_prompt(
-                    prompt,
-                    &key,
-                    1,
-                    None,
-                    seed,
-                )
+                } else {
+                    delegation_id.clone()
+                };
+                acceptance_evaluation_attempt_prompt(prompt, &key, 1, None, seed)
             })
             .unwrap_or_else(|| prompt.to_owned());
         if prompt.len() > MAX_DELEGATION_PROMPT_BYTES {
@@ -741,7 +747,8 @@ impl AppState {
         let acceptance_evaluation = evaluation.map(|seed| {
             let identity = seed.reuse_identity.clone();
             let recovery = seed.evidence_recovery.clone();
-            let ordinal_key = seed.mode == AcceptanceEvaluationMode::IndependentSession && identity.is_some();
+            let ordinal_key =
+                seed.mode == AcceptanceEvaluationMode::IndependentSession && identity.is_some();
             let mut target = seed.into_target(
                 if ordinal_key {
                     acceptance_evaluation_ordinal_key(&delegation_id, 1)
@@ -769,8 +776,13 @@ impl AppState {
                 refused_submissions: Vec::new(),
             });
             if let Some(manifest) = recovery {
-                inner.acceptance_evidence_recovery.insert(target.attempt_key.clone(),
-                    Arc::new(Mutex::new(AcceptanceEvidenceRecovery::new(manifest, target.clone()))));
+                inner.acceptance_evidence_recovery.insert(
+                    target.attempt_key.clone(),
+                    Arc::new(Mutex::new(AcceptanceEvidenceRecovery::new(
+                        manifest,
+                        target.clone(),
+                    ))),
+                );
             }
             target
         });
@@ -912,7 +924,7 @@ impl AppState {
         self.delegation_response_after_turn(&record.id, delivery)
     }
 
-    fn delegation_response_from_state(
+    pub(crate) fn delegation_response_from_state(
         &self,
         delegation_id: &str,
     ) -> Result<DelegationResponse, ApiError> {
@@ -936,7 +948,7 @@ impl AppState {
         })
     }
 
-    fn get_delegation(
+    pub(crate) fn get_delegation(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1007,7 +1019,7 @@ impl AppState {
     /// Each status read uses the same active freshness path as
     /// `get_delegation`, so a parent recovering ids after context compaction
     /// also sees children that became terminal since its last state snapshot.
-    fn list_delegations(
+    pub(crate) fn list_delegations(
         &self,
         parent_session_id: &str,
     ) -> Result<DelegationListResponse, ApiError> {
@@ -1050,7 +1062,7 @@ impl AppState {
         })
     }
 
-    fn get_delegation_result(
+    pub(crate) fn get_delegation_result(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1147,7 +1159,7 @@ impl AppState {
         })
     }
 
-    fn get_delegation_result_output(
+    pub(crate) fn get_delegation_result_output(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1245,7 +1257,7 @@ impl AppState {
         })
     }
 
-    fn create_delegation_wait(
+    pub(crate) fn create_delegation_wait(
         &self,
         parent_session_id: &str,
         request: CreateDelegationWaitRequest,
@@ -1325,7 +1337,7 @@ impl AppState {
         })
     }
 
-    fn cancel_delegation(
+    pub(crate) fn cancel_delegation(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1487,7 +1499,7 @@ impl AppState {
     /// new turn. Fails if the delegation is still running (the caller must wait first) or
     /// if the child session was removed (unresumable). Re-arms the delegation terminal ->
     /// running so the parent can wait on it again for the follow-up result.
-    fn followup_delegation(
+    pub(crate) fn followup_delegation(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1506,7 +1518,7 @@ impl AppState {
         )
     }
 
-    fn followup_delegation_request(
+    pub(crate) fn followup_delegation_request(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1522,7 +1534,7 @@ impl AppState {
         )
     }
 
-    fn followup_delegation_request_with_origin(
+    pub(crate) fn followup_delegation_request_with_origin(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1538,7 +1550,7 @@ impl AppState {
         )
     }
 
-    fn followup_human_delegation_request(
+    pub(crate) fn followup_human_delegation_request(
         &self,
         parent_session_id: &str,
         delegation_id: &str,
@@ -1912,7 +1924,10 @@ impl AppState {
         self.delegation_status_after_followup_turn(parent_session_id, delegation_id, delivery)
     }
 
-    fn refresh_delegation_for_child_session(&self, child_session_id: &str) -> Result<()> {
+    pub(crate) fn refresh_delegation_for_child_session(
+        &self,
+        child_session_id: &str,
+    ) -> Result<()> {
         self.recover_durable_delegation_review_submission(child_session_id)
             .map_err(|err| anyhow!(err.message))?;
         let (revision, lifecycle_delta, detached_child, wait_refresh) = {
@@ -1957,7 +1972,7 @@ impl AppState {
         Ok(())
     }
 
-    fn enqueue_delegation_refresh_locked(
+    pub(crate) fn enqueue_delegation_refresh_locked(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -1982,7 +1997,7 @@ impl AppState {
 
     // Runtime cleanup and provider delivery deliberately happen after the
     // locked caller has enqueued every event for its committed revision.
-    fn publish_delegation_refresh_side_effects(
+    pub(crate) fn publish_delegation_refresh_side_effects(
         &self,
         revision: u64,
         lifecycle_delta: Option<DelegationLifecycleDelta>,
@@ -2107,7 +2122,7 @@ impl AppState {
         );
     }
 
-    fn ensure_read_only_delegation_allows_write_action(
+    pub(crate) fn ensure_read_only_delegation_allows_write_action(
         &self,
         session_id: Option<&str>,
         project_id: Option<&str>,
@@ -2123,7 +2138,7 @@ impl AppState {
         )
     }
 
-    fn ensure_read_only_delegation_allows_approval(
+    pub(crate) fn ensure_read_only_delegation_allows_approval(
         &self,
         session_id: &str,
     ) -> Result<(), ApiError> {
@@ -2286,7 +2301,7 @@ impl AppState {
         Ok(())
     }
 
-    fn ensure_read_only_delegation_allows_session_write_action(
+    pub(crate) fn ensure_read_only_delegation_allows_session_write_action(
         &self,
         session_id: Option<&str>,
         action: &str,
@@ -2309,7 +2324,7 @@ impl AppState {
     }
 
     #[cfg_attr(test, allow(dead_code))]
-    fn mark_delegation_failed_after_start_error(
+    pub(crate) fn mark_delegation_failed_after_start_error(
         &self,
         delegation_id: &str,
         child_session_id: &str,
@@ -2351,7 +2366,7 @@ impl AppState {
         Ok(())
     }
 
-    fn publish_delegation_lifecycle_delta(
+    pub(crate) fn publish_delegation_lifecycle_delta(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -2455,7 +2470,7 @@ impl AppState {
         );
     }
 
-    fn publish_delegation_wait_consumed_deltas(
+    pub(crate) fn publish_delegation_wait_consumed_deltas(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -2501,7 +2516,7 @@ impl AppState {
         );
     }
 
-    fn publish_parent_delegation_card_delta(
+    pub(crate) fn publish_parent_delegation_card_delta(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -2562,7 +2577,7 @@ impl AppState {
         }
     }
 
-    fn publish_delegation_child_transcript_delta(
+    pub(crate) fn publish_delegation_child_transcript_delta(
         &self,
         inner: &StateInner,
         revision: u64,
@@ -2680,7 +2695,11 @@ impl AppState {
         }
     }
 
-    fn dispatch_delegation_wait_resumes(&self, revision: u64, parent_session_ids: Vec<String>) {
+    pub(crate) fn dispatch_delegation_wait_resumes(
+        &self,
+        revision: u64,
+        parent_session_ids: Vec<String>,
+    ) {
         let mut seen = BTreeSet::new();
         for parent_session_id in parent_session_ids {
             if !seen.insert(parent_session_id.clone()) {
@@ -2719,7 +2738,7 @@ impl AppState {
         }
     }
 
-    fn reconcile_delegation_waits_after_boot(&self) -> Result<()> {
+    pub(crate) fn reconcile_delegation_waits_after_boot(&self) -> Result<()> {
         self.inner
             .lock()
             .expect("state mutex poisoned")
@@ -2779,14 +2798,14 @@ impl AppState {
     }
 }
 
-fn build_delegation_prompt(record: &DelegationRecord) -> String {
+pub(crate) fn build_delegation_prompt(record: &DelegationRecord) -> String {
     build_delegation_prompt_on(record, cfg!(windows))
 }
 
 /// [`build_delegation_prompt`] for a host that runs on Windows when `windows`
 /// is set. Only `build_delegation_prompt` passes the real platform, so tests
 /// reach both the Windows and the other branch on any host.
-fn build_delegation_prompt_on(record: &DelegationRecord, windows: bool) -> String {
+pub(crate) fn build_delegation_prompt_on(record: &DelegationRecord, windows: bool) -> String {
     let write_policy = delegation_prompt_write_policy(&record.write_policy);
     // Keep the leading marker, `DelegationRecord::id`, and child-session line in
     // lockstep with startup repair in `state_inner.rs`.
@@ -2869,7 +2888,7 @@ const WINDOWS_CODEX_WRITABLE_SHELL: &str = "Windows Codex writable-child shell: 
 /// native Git or rg output instead. This is guidance, not enforcement: the
 /// child is told to report inspection unavailable when it cannot obtain the
 /// exact text or complete coverage.
-const WINDOWS_CODEX_READ_ONLY_SOURCE_READS: &str = "Windows read-only Codex inspection: use the default shell; do not request bash or change sandbox, policy, or encoding settings. Read source through direct native Git or rg output, one inspection command per call, without piping that output through PowerShell cmdlets. For an index blob use git --no-pager -C <worktree> show :path; for a frozen blob use git --no-pager -C <worktree> show <tree-or-commit>:path. These show the selected Git object, not unstaged working-tree changes. For a current file use git --no-pager -C <worktree> diff --no-index --no-ext-diff --no-textconv --color=never -- NUL <absolute-file>, or rg --encoding utf-8 --line-number --context 12 -e <pattern> -- <absolute-file>. Quote paths and patterns for the default shell. A no-index diff normally exits 1 when it displays the file; rg exits 1 for no match. Inspect stderr and coverage instead of equating these statuses with a read failure. Do not use Get-Content (including -Encoding UTF8), Select-Object, Out-String or other PowerShell pipeline rendering to inspect source whose exact text matters. ConstrainedLanguage may refuse .NET constructors, static methods and Console.OutputEncoding assignments; nonterminating errors can still leave exit code 0, and a swallowed encoding error may be invisible. Re-read affected text with a native form. If exact text or complete coverage cannot be obtained, report inspection unavailable rather than a clean review.";
+pub(crate) const WINDOWS_CODEX_READ_ONLY_SOURCE_READS: &str = "Windows read-only Codex inspection: use the default shell; do not request bash or change sandbox, policy, or encoding settings. Read source through direct native Git or rg output, one inspection command per call, without piping that output through PowerShell cmdlets. For an index blob use git --no-pager -C <worktree> show :path; for a frozen blob use git --no-pager -C <worktree> show <tree-or-commit>:path. These show the selected Git object, not unstaged working-tree changes. For a current file use git --no-pager -C <worktree> diff --no-index --no-ext-diff --no-textconv --color=never -- NUL <absolute-file>, or rg --encoding utf-8 --line-number --context 12 -e <pattern> -- <absolute-file>. Quote paths and patterns for the default shell. A no-index diff normally exits 1 when it displays the file; rg exits 1 for no match. Inspect stderr and coverage instead of equating these statuses with a read failure. Do not use Get-Content (including -Encoding UTF8), Select-Object, Out-String or other PowerShell pipeline rendering to inspect source whose exact text matters. ConstrainedLanguage may refuse .NET constructors, static methods and Console.OutputEncoding assignments; nonterminating errors can still leave exit code 0, and a swallowed encoding error may be invisible. Re-read affected text with a native form. If exact text or complete coverage cannot be obtained, report inspection unavailable rather than a clean review.";
 
 /// Appended to a read-only Kimi child's prompt: what the host's permission
 /// gate allows (kimi_read_only.rs), so the child does not spend its turn on
@@ -2880,7 +2899,7 @@ const KIMI_READ_ONLY_REVIEWER_REFUSALS: &str = "\n- Write, Edit, CronCreate and 
 const KIMI_READ_ONLY_EXPLORER_REFUSALS: &str = "\n- Write, Edit, CronCreate and every other tool that asks permission are refused, except admitted tracker reads.";
 
 impl AppState {
-    fn delegation_control_plane_capability_allowed(
+    pub(crate) fn delegation_control_plane_capability_allowed(
         &self,
         child_session_id: &str,
         capability: DelegationControlPlaneCapability,
@@ -2891,7 +2910,7 @@ impl AppState {
 }
 
 /// Whether `agent` may run a delegation in `mode` under `write_policy`.
-fn validate_delegation_agent_admission(
+pub(crate) fn validate_delegation_agent_admission(
     agent: Agent,
     mode: DelegationMode,
     write_policy: &DelegationWritePolicy,
@@ -2915,7 +2934,7 @@ fn validate_delegation_agent_admission(
 
 /// `delegation_control_plane_capability_allowed` for a caller that already
 /// holds the state lock.
-fn delegation_control_plane_capability_allowed_locked(
+pub(crate) fn delegation_control_plane_capability_allowed_locked(
     inner: &StateInner,
     child_session_id: &str,
     capability: DelegationControlPlaneCapability,
@@ -2936,9 +2955,13 @@ fn delegation_control_plane_capability_allowed_locked(
             acceptance_evaluation_submit_authority_locked(inner, child_session_id).is_ok()
         }
         DelegationControlPlaneCapability::ReadAcceptanceEvidence => {
-            acceptance_evaluation_submit_authority_locked(inner, child_session_id)
-                .is_ok_and(|a| matches!(a.target.submission, AcceptanceEvaluationSubmission::None)
-                    && a.target.attempt_history.as_ref().is_some_and(|h| h.evidence_recovery_enabled))
+            acceptance_evaluation_submit_authority_locked(inner, child_session_id).is_ok_and(|a| {
+                matches!(a.target.submission, AcceptanceEvaluationSubmission::None)
+                    && a.target
+                        .attempt_history
+                        .as_ref()
+                        .is_some_and(|h| h.evidence_recovery_enabled)
+            })
         }
         DelegationControlPlaneCapability::SubmitReviewResult => {
             delegation.child_session_id == child_session_id
@@ -2957,7 +2980,7 @@ fn delegation_control_plane_capability_allowed_locked(
     }
 }
 
-fn configure_delegation_child_prompt_settings(
+pub(crate) fn configure_delegation_child_prompt_settings(
     child_record: &mut SessionRecord,
     mode: DelegationMode,
     write_policy: &DelegationWritePolicy,
@@ -3047,13 +3070,13 @@ fn validate_delegation_wait_parent_locked(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DelegationWaitParentEligibility {
+pub(crate) enum DelegationWaitParentEligibility {
     Eligible,
     Missing,
     Unavailable,
 }
 
-fn delegation_wait_parent_eligibility_locked(
+pub(crate) fn delegation_wait_parent_eligibility_locked(
     inner: &StateInner,
     parent_session_id: &str,
 ) -> DelegationWaitParentEligibility {
@@ -3074,11 +3097,11 @@ fn delegation_wait_parent_eligibility_locked(
 // 3. Drop the lock before dispatching queued parent turns. Dispatch failures are
 //    currently best-effort and logged to stderr; the consumed wait has already
 //    been persisted and announced through `delegationWaitConsumed`.
-fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefresh {
+pub(crate) fn refresh_delegation_waits_locked(inner: &mut StateInner) -> DelegationWaitRefresh {
     refresh_delegation_waits_matching_locked(inner, |_| true)
 }
 
-fn refresh_delegation_waits_for_delegation_locked(
+pub(crate) fn refresh_delegation_waits_for_delegation_locked(
     inner: &mut StateInner,
     delegation_id: &str,
 ) -> DelegationWaitRefresh {
@@ -3101,7 +3124,7 @@ fn refresh_delegation_waits_for_delegation_locked(
 /// explicitly stopped. A stopped parent must not be reactivated later when a
 /// child reaches a terminal state; the child result remains available through
 /// the delegation record for an explicit user-driven follow-up.
-fn consume_delegation_waits_for_stopped_parent_locked(
+pub(crate) fn consume_delegation_waits_for_stopped_parent_locked(
     inner: &mut StateInner,
     parent_session_id: &str,
 ) -> DelegationWaitRefresh {
@@ -3184,7 +3207,7 @@ fn refresh_delegation_waits_matching_locked(
 
 /// The parent prompt of a satisfied wait, and whether it reports a held
 /// child (`attentionRequired`) rather than only terminal ones.
-fn delegation_wait_resume_prompt_locked(
+pub(crate) fn delegation_wait_resume_prompt_locked(
     inner: &StateInner,
     wait: &DelegationWaitRecord,
 ) -> Option<(String, bool)> {
@@ -3249,7 +3272,7 @@ fn delegation_wait_resume_prompt_locked(
     ))
 }
 
-fn queue_delegation_wait_resume_locked(
+pub(crate) fn queue_delegation_wait_resume_locked(
     inner: &mut StateInner,
     parent_session_id: &str,
     prompt: String,
@@ -3290,7 +3313,7 @@ fn queue_delegation_wait_resume_locked(
     }
 }
 
-fn build_delegation_wait_resume_prompt(
+pub(crate) fn build_delegation_wait_resume_prompt(
     wait: &DelegationWaitRecord,
     records: &[&DelegationRecord],
     terminal_records: &[&DelegationRecord],
@@ -3360,7 +3383,7 @@ fn build_delegation_wait_resume_prompt(
     prompt
 }
 
-fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
+pub(crate) fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
     truncate_to_byte_limit_with_marker(
         prompt,
         MAX_DELEGATION_WAIT_RESUME_PROMPT_BYTES,
@@ -3368,7 +3391,7 @@ fn limit_delegation_wait_resume_prompt(prompt: String) -> String {
     )
 }
 
-fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
+pub(crate) fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
     let normalized = delegation
         .result
         .as_ref()
@@ -3478,7 +3501,7 @@ fn delegation_wait_result_section(delegation: &DelegationRecord) -> String {
     section
 }
 
-fn format_delegation_finding(finding: &DelegationFinding) -> String {
+pub(crate) fn format_delegation_finding(finding: &DelegationFinding) -> String {
     let location = match (finding.file.as_deref(), finding.line) {
         (Some(file), Some(line)) => format!(" `{file}:{line}`"),
         (Some(file), None) => format!(" `{file}`"),
@@ -3488,7 +3511,7 @@ fn format_delegation_finding(finding: &DelegationFinding) -> String {
     format!("- {}{} - {}", finding.severity, location, finding.message)
 }
 
-fn delegation_status_label(status: DelegationStatus) -> &'static str {
+pub(crate) fn delegation_status_label(status: DelegationStatus) -> &'static str {
     match status {
         DelegationStatus::Queued => "queued",
         DelegationStatus::Running => "running",
@@ -3534,7 +3557,7 @@ fn delegation_prompt_write_policy(write_policy: &DelegationWritePolicy) -> Strin
 }
 
 // New cards use the same raw-detail, decorate-once boundary as updates.
-fn add_parent_delegation_card_locked(
+pub(crate) fn add_parent_delegation_card_locked(
     inner: &mut StateInner,
     delegation: &DelegationRecord,
 ) -> Option<ParentDelegationCardDelta> {
@@ -3588,7 +3611,7 @@ fn add_parent_delegation_card_locked(
 /// lifecycle updates only own rows whose source is `ParallelAgentSource::Delegation`.
 /// See docs/features/agent-delegation-sessions.md and docs/architecture.md.
 // `detail` is the raw run description; acceptance decoration is applied here exactly once.
-fn update_parent_delegation_card_locked(
+pub(crate) fn update_parent_delegation_card_locked(
     inner: &mut StateInner,
     delegation: &DelegationRecord,
     status: ParallelAgentStatus,
@@ -3648,7 +3671,7 @@ fn update_parent_delegation_card_locked(
 
 // Structured submission is authoritative; an open tracker write remains
 // uncertain and must never be presented as a recorded evaluation.
-fn delegation_submission_recorded(delegation: &DelegationRecord) -> bool {
+pub(crate) fn delegation_submission_recorded(delegation: &DelegationRecord) -> bool {
     match delegation.mode {
         DelegationMode::Reviewer => delegation.submitted_review_result.is_some(),
         DelegationMode::Evaluator => {
@@ -3666,7 +3689,7 @@ fn delegation_submission_recorded(delegation: &DelegationRecord) -> bool {
     }
 }
 
-fn refresh_delegation_from_child_locked(
+pub(crate) fn refresh_delegation_from_child_locked(
     inner: &mut StateInner,
     delegation_index: usize,
 ) -> Option<DelegationLifecycleDelta> {
@@ -3934,7 +3957,7 @@ fn refresh_delegation_from_child_locked(
 /// completion timestamp, flip the record + parent card back to running, and re-track it as
 /// a running read-only delegation. Mirrors the Running branch of the refresh with the
 /// completion fields inverted.
-fn rearm_terminal_delegation_for_followup_locked(
+pub(crate) fn rearm_terminal_delegation_for_followup_locked(
     inner: &mut StateInner,
     delegation_index: usize,
 ) -> Option<DelegationLifecycleDelta> {
@@ -3984,7 +4007,10 @@ fn rearm_terminal_delegation_for_followup_locked(
     })
 }
 
-fn delegation_running_detail_locked(inner: &StateInner, delegation: &DelegationRecord) -> String {
+pub(crate) fn delegation_running_detail_locked(
+    inner: &StateInner,
+    delegation: &DelegationRecord,
+) -> String {
     inner
         .find_session_index(&delegation.child_session_id)
         .and_then(|index| inner.sessions.get(index))
@@ -4043,7 +4069,7 @@ fn delegation_child_cancel_reason_locked(
 }
 
 // `detail` is raw, matching the card writer's single acceptance-decoration boundary.
-fn parent_delegation_card_matches_locked(
+pub(crate) fn parent_delegation_card_matches_locked(
     inner: &StateInner,
     delegation: &DelegationRecord,
     status: ParallelAgentStatus,
@@ -4077,7 +4103,7 @@ fn parent_delegation_card_matches_locked(
     })
 }
 
-fn detach_terminal_delegation_child_runtime_locked(
+pub(crate) fn detach_terminal_delegation_child_runtime_locked(
     inner: &mut StateInner,
     delegation_index: usize,
 ) -> DetachedDelegationChildRuntime {
@@ -4127,7 +4153,7 @@ fn detach_terminal_delegation_child_runtime_locked(
     detached
 }
 
-fn reconcile_delegations_for_removed_session_locked(
+pub(crate) fn reconcile_delegations_for_removed_session_locked(
     inner: &mut StateInner,
     removed_session_id: &str,
 ) -> RemovedSessionDelegationReconciliation {
@@ -4199,7 +4225,7 @@ fn reconcile_delegations_for_removed_session_locked(
     }
 }
 
-fn mark_delegation_failed_locked(
+pub(crate) fn mark_delegation_failed_locked(
     inner: &mut StateInner,
     delegation_index: usize,
     detail: &str,
@@ -4296,7 +4322,7 @@ fn mark_delegation_failed_locked(
     })
 }
 
-fn mark_delegation_canceled_locked(
+pub(crate) fn mark_delegation_canceled_locked(
     inner: &mut StateInner,
     delegation_index: usize,
     reason: Option<String>,
@@ -4358,7 +4384,7 @@ fn mark_delegation_canceled_locked(
     })
 }
 
-fn settle_terminal_delegation_child_locked(
+pub(crate) fn settle_terminal_delegation_child_locked(
     inner: &mut StateInner,
     child_session_id: &str,
     status: SessionStatus,
@@ -4419,7 +4445,7 @@ fn remove_delegation_child_session_locked(
     }
 }
 
-fn detach_delegation_child_runtime_locked(
+pub(crate) fn detach_delegation_child_runtime_locked(
     inner: &mut StateInner,
     child_session_id: &str,
     halted_marker_text: Option<&str>,
@@ -4518,7 +4544,7 @@ fn detach_delegation_child_runtime_locked(
     }
 }
 
-fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecycleDelta {
+pub(crate) fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecycleDelta {
     match delta {
         DelegationLifecycleDelta::Updated {
             delegation_id,
@@ -4569,14 +4595,14 @@ fn strip_parent_card_delta(delta: DelegationLifecycleDelta) -> DelegationLifecyc
     }
 }
 
-fn delegation_is_terminal(status: DelegationStatus) -> bool {
+pub(crate) fn delegation_is_terminal(status: DelegationStatus) -> bool {
     matches!(
         status,
         DelegationStatus::Completed | DelegationStatus::Failed | DelegationStatus::Canceled
     )
 }
 
-fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
+pub(crate) fn validate_delegation_cwd_input(cwd: &str) -> Result<(), ApiError> {
     if cwd.chars().count() > MAX_DELEGATION_CWD_CHARS {
         return Err(ApiError::bad_request(format!(
             "delegation cwd must be at most {MAX_DELEGATION_CWD_CHARS} characters"
@@ -4636,7 +4662,7 @@ fn delegation_codex_sandbox_mode(write_policy: &DelegationWritePolicy) -> CodexS
     }
 }
 
-fn prepare_isolated_delegation_worktree(
+pub(crate) fn prepare_isolated_delegation_worktree(
     source_cwd: &str,
     requested_worktree_path: Option<&str>,
     delegation_id: &str,
@@ -4791,7 +4817,7 @@ fn ensure_isolated_worktree_target_available(worktree_root: &FsPath) -> Result<(
     }
 }
 
-fn create_detached_git_worktree(
+pub(crate) fn create_detached_git_worktree(
     source_repo_root: &FsPath,
     worktree_root: &FsPath,
     revision: &str,
@@ -4833,7 +4859,7 @@ fn create_detached_git_worktree(
     }
 }
 
-fn git_repo_output(
+pub(crate) fn git_repo_output(
     repo_root: &FsPath,
     args: &[&str],
     error_context: &str,
@@ -4905,7 +4931,7 @@ fn validate_isolated_worktree_patch_size(
     validate_isolated_worktree_patch_size_bytes(staged_patch.len(), unstaged_patch.len())
 }
 
-fn validate_isolated_worktree_patch_size_bytes(
+pub(crate) fn validate_isolated_worktree_patch_size_bytes(
     staged_patch_bytes: usize,
     unstaged_patch_bytes: usize,
 ) -> Result<(), ApiError> {
@@ -4945,7 +4971,7 @@ fn validate_isolated_worktree_no_untracked_files(untracked_files: &[u8]) -> Resu
     )))
 }
 
-enum DelegationChildOutcome {
+pub(crate) enum DelegationChildOutcome {
     Running,
     Completed {
         summary: String,
@@ -4962,15 +4988,18 @@ enum DelegationChildOutcome {
     Missing,
 }
 
-struct ParsedDelegationResult {
-    status: DelegationStatus,
-    summary: String,
-    findings: Vec<DelegationFinding>,
-    files_inspected: Vec<String>,
-    notes: Vec<String>,
+pub(crate) struct ParsedDelegationResult {
+    pub(crate) status: DelegationStatus,
+    pub(crate) summary: String,
+    pub(crate) findings: Vec<DelegationFinding>,
+    pub(crate) files_inspected: Vec<String>,
+    pub(crate) notes: Vec<String>,
 }
 
-fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> DelegationChildOutcome {
+pub(crate) fn delegation_child_outcome(
+    inner: &StateInner,
+    child_session_id: &str,
+) -> DelegationChildOutcome {
     let Some(child_index) = inner.find_session_index(child_session_id) else {
         return DelegationChildOutcome::Missing;
     };
@@ -5015,7 +5044,9 @@ fn delegation_child_outcome(inner: &StateInner, child_session_id: &str) -> Deleg
 // Keep result provenance consistent for lifecycle settlement and evaluator
 // presentation. Error trusts only the latest candidate; normal completion can
 // find a packet before trailing runtime text, within the current turn.
-fn delegation_child_result_for_status(child: &SessionRecord) -> Option<DelegationChildOutcome> {
+pub(crate) fn delegation_child_result_for_status(
+    child: &SessionRecord,
+) -> Option<DelegationChildOutcome> {
     match child.session.status {
         SessionStatus::Error => delegation_child_latest_result_outcome(child),
         SessionStatus::Idle => delegation_child_result_outcome(child, true),
@@ -5065,10 +5096,10 @@ fn delegation_child_missing_runtime_summary(child: &SessionRecord) -> String {
     )
 }
 
-struct DelegationWriteScope {
-    title: String,
-    project_id: Option<String>,
-    workdir: String,
+pub(crate) struct DelegationWriteScope {
+    pub(crate) title: String,
+    pub(crate) project_id: Option<String>,
+    pub(crate) workdir: String,
 }
 
 #[derive(Clone, Copy)]
@@ -5087,8 +5118,8 @@ struct LocalProjectWriteScope {
     root_path: String,
 }
 
-struct DelegationWriteBlock {
-    title: Option<String>,
+pub(crate) struct DelegationWriteBlock {
+    pub(crate) title: Option<String>,
 }
 
 fn append_local_project_write_targets(
@@ -5130,7 +5161,7 @@ fn append_local_project_write_targets(
     write_targets.extend(inferred_targets);
 }
 
-fn read_only_session_delegation_block_locked(
+pub(crate) fn read_only_session_delegation_block_locked(
     inner: &StateInner,
     session_id: Option<&str>,
 ) -> Option<DelegationWriteBlock> {
@@ -5161,7 +5192,7 @@ fn read_only_session_delegation_block_locked(
     }
 }
 
-fn delegation_write_scope_matches(
+pub(crate) fn delegation_write_scope_matches(
     scope: &DelegationWriteScope,
     project_id: Option<&str>,
     workdir: Option<&str>,
@@ -5271,7 +5302,10 @@ fn delegation_approval_scope_matches(scope: &DelegationWriteScope, workdir: Opti
     true
 }
 
-fn delegated_child_dispatch_is_blocked_locked(inner: &StateInner, session_index: usize) -> bool {
+pub(crate) fn delegated_child_dispatch_is_blocked_locked(
+    inner: &StateInner,
+    session_index: usize,
+) -> bool {
     let Some(record) = inner.sessions.get(session_index) else {
         return false;
     };
@@ -5287,7 +5321,7 @@ fn delegated_child_dispatch_is_blocked_locked(inner: &StateInner, session_index:
         .is_some_and(|delegation| delegation_is_terminal(delegation.status))
 }
 
-fn latest_assistant_delegation_result(
+pub(crate) fn latest_assistant_delegation_result(
     session: &Session,
     synthesize_plain_output: bool,
 ) -> Option<ParsedDelegationResult> {
@@ -5325,7 +5359,9 @@ fn latest_assistant_delegation_result(
         .and_then(synthesize_delegation_result_from_assistant_output)
 }
 
-fn latest_assistant_message_delegation_result(session: &Session) -> Option<ParsedDelegationResult> {
+pub(crate) fn latest_assistant_message_delegation_result(
+    session: &Session,
+) -> Option<ParsedDelegationResult> {
     // Unlike the idle/completed path, errored children must not scan past the
     // latest assistant candidate: if that latest candidate is non-result text,
     // any earlier result packet is stale relative to the terminal error.
@@ -5382,14 +5418,14 @@ fn assistant_delegation_result_candidate_raw_text(message: &Message) -> Option<&
 /// delegation result, but without the result-summary truncation. Failed and
 /// canceled children use only their latest candidate so an older successful
 /// packet cannot mask newer terminal output.
-fn delegation_child_authoritative_output(
+pub(crate) fn delegation_child_authoritative_output(
     session: &Session,
     status: DelegationStatus,
 ) -> Option<&str> {
     delegation_child_output_before_prompt(session, status, None)
 }
 
-fn delegation_child_output_before_prompt<'a>(
+pub(crate) fn delegation_child_output_before_prompt<'a>(
     session: &'a Session,
     status: DelegationStatus,
     admitted_prompt: Option<&str>,
@@ -5423,16 +5459,16 @@ fn delegation_child_output_before_prompt<'a>(
     latest_assistant_output
 }
 
-fn default_delegation_result_output_page_bytes() -> usize {
+pub(crate) fn default_delegation_result_output_page_bytes() -> usize {
     DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES
 }
 
-struct DelegationResultOutputPage {
-    output: String,
-    next_offset_bytes: Option<usize>,
+pub(crate) struct DelegationResultOutputPage {
+    pub(crate) output: String,
+    pub(crate) next_offset_bytes: Option<usize>,
 }
 
-fn validate_delegation_result_output_page(limit_bytes: usize) -> Result<(), ApiError> {
+pub(crate) fn validate_delegation_result_output_page(limit_bytes: usize) -> Result<(), ApiError> {
     if limit_bytes < MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES {
         return Err(ApiError::bad_request(format!(
             "delegation result output limitBytes must be at least {MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES}"
@@ -5446,7 +5482,7 @@ fn validate_delegation_result_output_page(limit_bytes: usize) -> Result<(), ApiE
     Ok(())
 }
 
-fn delegation_result_output_page(
+pub(crate) fn delegation_result_output_page(
     output: &str,
     offset_bytes: usize,
     limit_bytes: usize,
@@ -5473,7 +5509,7 @@ fn delegation_result_output_page(
     })
 }
 
-fn compact_delegation_public_summary(summary: &str) -> String {
+pub(crate) fn compact_delegation_public_summary(summary: &str) -> String {
     let compact = summary
         .lines()
         .map(str::trim)
@@ -5488,11 +5524,11 @@ fn compact_delegation_public_summary(summary: &str) -> String {
     truncate_chars(&compact, MAX_DELEGATION_PUBLIC_SUMMARY_CHARS)
 }
 
-fn compact_delegation_result_summary(summary: &str) -> String {
+pub(crate) fn compact_delegation_result_summary(summary: &str) -> String {
     truncate_chars(summary, MAX_DELEGATION_RESULT_SUMMARY_CHARS)
 }
 
-fn truncate_chars(value: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_chars(value: &str, max_chars: usize) -> String {
     let mut end = 0;
     for (count, (index, ch)) in value.char_indices().enumerate() {
         if count == max_chars {
@@ -5503,7 +5539,11 @@ fn truncate_chars(value: &str, max_chars: usize) -> String {
     value.to_owned()
 }
 
-fn truncate_to_byte_limit_with_marker(mut value: String, max_bytes: usize, marker: &str) -> String {
+pub(crate) fn truncate_to_byte_limit_with_marker(
+    mut value: String,
+    max_bytes: usize,
+    marker: &str,
+) -> String {
     if value.len() <= max_bytes {
         return value;
     }
@@ -5526,7 +5566,7 @@ fn truncate_to_byte_limit_with_marker(mut value: String, max_bytes: usize, marke
 
 // FileChanges comes from the workspace watcher, not a record of who wrote.
 // Writing delegations retain the legacy changedFiles contract for now.
-fn child_workspace_observed_changes(session: &Session) -> Vec<String> {
+pub(crate) fn child_workspace_observed_changes(session: &Session) -> Vec<String> {
     let mut files = BTreeSet::new();
     for message in &session.messages {
         if let Message::FileChanges { files: entries, .. } = message {
@@ -5540,7 +5580,7 @@ fn child_workspace_observed_changes(session: &Session) -> Vec<String> {
 
 /// Older read-only packets persisted watcher paths as changedFiles. Reclassify
 /// those at the read boundary, accounting for omitted paths without rewriting history.
-fn delegation_result_for_policy<'a>(
+pub(crate) fn delegation_result_for_policy<'a>(
     result: &'a DelegationResult,
     policy: &DelegationWritePolicy,
 ) -> std::borrow::Cow<'a, DelegationResult> {
@@ -5559,7 +5599,7 @@ fn delegation_result_for_policy<'a>(
 
 /// Snapshot observations when the result settles, including structured reviews
 /// and unsuccessful children. Later API reads never pull in post-run writes.
-fn record_delegation_workspace_observations(
+pub(crate) fn record_delegation_workspace_observations(
     inner: &StateInner,
     delegation: &DelegationRecord,
     result: &mut DelegationResult,
@@ -5586,14 +5626,14 @@ fn record_delegation_workspace_observations(
     bound_delegation_workspace_observations(result);
 }
 
-const MAX_DELEGATION_OBSERVED_PATHS: usize = 200;
-const MAX_DELEGATION_OBSERVED_PATH_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_DELEGATION_OBSERVED_PATHS: usize = 200;
+pub(crate) const MAX_DELEGATION_OBSERVED_PATH_BYTES: usize = 16 * 1024;
 
-fn is_zero_count(count: &usize) -> bool {
+pub(crate) fn is_zero_count(count: &usize) -> bool {
     *count == 0
 }
 
-fn bound_delegation_workspace_observations(result: &mut DelegationResult) {
+pub(crate) fn bound_delegation_workspace_observations(result: &mut DelegationResult) {
     let mut bytes = 0;
     let mut retained = 0;
     // Count encoded bytes so even control characters in a filename stay bounded.
@@ -5636,7 +5676,7 @@ fn child_commands_run(session: &Session) -> Vec<DelegationCommandResult> {
         .collect()
 }
 
-fn non_empty_trimmed(value: &str) -> Option<String> {
+pub(crate) fn non_empty_trimmed(value: &str) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
@@ -5709,7 +5749,7 @@ fn delegation_result_summary(result: &DelegationResult) -> DelegationResultSumma
     }
 }
 
-fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummary {
+pub(crate) fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummary {
     DelegationSummary {
         id: record.id.clone(),
         parent_session_id: record.parent_session_id.clone(),
@@ -5736,7 +5776,9 @@ fn delegation_summary_from_record(record: &DelegationRecord) -> DelegationSummar
     }
 }
 
-fn delegation_state_summary_from_record(record: &DelegationRecord) -> DelegationStateSummary {
+pub(crate) fn delegation_state_summary_from_record(
+    record: &DelegationRecord,
+) -> DelegationStateSummary {
     DelegationStateSummary {
         id: record.id.clone(),
         child_session_id: record.child_session_id.clone(),

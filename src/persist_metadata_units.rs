@@ -2,24 +2,24 @@
 // session transaction writes its counters and changed entries, never app_state.
 // The old metadata image is retained only as migration/rollback provenance.
 
-type PersistMetadataUnitKey = (String, String);
-type PersistMetadataUnitValue = (String, String);
-type PersistMetadataUnits = BTreeMap<PersistMetadataUnitKey, PersistMetadataUnitValue>;
+pub(crate) type PersistMetadataUnitKey = (String, String);
+pub(crate) type PersistMetadataUnitValue = (String, String);
+pub(crate) type PersistMetadataUnits = BTreeMap<PersistMetadataUnitKey, PersistMetadataUnitValue>;
 
 include!("persist_metadata_tracking.rs");
 
 #[derive(Clone)]
-struct PersistMetadataCollectionCapture {
-    watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
-    selected: PersistMetadataWatermarks,
-    omitted: BTreeSet<&'static str>,
-    image_stamps: PersistMetadataWatermarks,
+pub(crate) struct PersistMetadataCollectionCapture {
+    pub(crate) watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
+    pub(crate) selected: PersistMetadataWatermarks,
+    pub(crate) omitted: BTreeSet<&'static str>,
+    pub(crate) image_stamps: PersistMetadataWatermarks,
 }
 
 /// Another writer committed metadata after this image was captured, so the
 /// image is refused and nothing of it is written.
 #[derive(Debug)]
-struct PersistMetadataSnapshotStale;
+pub(crate) struct PersistMetadataSnapshotStale;
 
 impl std::fmt::Display for PersistMetadataSnapshotStale {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -32,20 +32,20 @@ impl std::error::Error for PersistMetadataSnapshotStale {}
 // The source's known durable predecessor is distinct from the writer cache.
 // Capturing never samples a newer database beside an older desired image.
 #[derive(Clone, Default)]
-struct PersistMetadataCapture {
-    known: Arc<std::sync::atomic::AtomicU64>,
-    predecessor: u64,
-    applied: Arc<std::sync::atomic::AtomicU64>,
-    collections: Option<PersistMetadataCollectionCapture>,
+pub(crate) struct PersistMetadataCapture {
+    pub(crate) known: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) predecessor: u64,
+    pub(crate) applied: Arc<std::sync::atomic::AtomicU64>,
+    pub(crate) collections: Option<PersistMetadataCollectionCapture>,
 }
 
 impl PersistMetadataCapture {
-    fn omits(&self, field: &str) -> bool {
+    pub(crate) fn omits(&self, field: &str) -> bool {
         self.collections
             .as_ref()
             .is_some_and(|capture| capture.omitted.contains(field))
     }
-    fn new(known: Arc<std::sync::atomic::AtomicU64>) -> Self {
+    pub(crate) fn new(known: Arc<std::sync::atomic::AtomicU64>) -> Self {
         let predecessor = known.load(std::sync::atomic::Ordering::Acquire);
         Self {
             known,
@@ -55,19 +55,19 @@ impl PersistMetadataCapture {
         }
     }
 
-    fn verify(&self, generation: u64) -> Result<()> {
+    pub(crate) fn verify(&self, generation: u64) -> Result<()> {
         if generation != self.predecessor {
             return Err(PersistMetadataSnapshotStale.into());
         }
         Ok(())
     }
 
-    fn committed(&self, generation: u64) {
+    pub(crate) fn committed(&self, generation: u64) {
         self.applied
             .store(generation, std::sync::atomic::Ordering::Release);
     }
 
-    fn adopt(&self, generation: u64, metadata: &PersistedState) {
+    pub(crate) fn adopt(&self, generation: u64, metadata: &PersistedState) {
         let mut watermarks = self.collections.as_ref().map(|capture| {
             capture
                 .watermarks
@@ -109,7 +109,7 @@ impl PersistMetadataCapture {
     }
 }
 
-const SQLITE_METADATA_UNITS_SCHEMA: &str = "
+pub(crate) const SQLITE_METADATA_UNITS_SCHEMA: &str = "
     CREATE TABLE state_metadata_units (
       field_name TEXT NOT NULL,
       item_key TEXT NOT NULL,
@@ -119,17 +119,17 @@ const SQLITE_METADATA_UNITS_SCHEMA: &str = "
     ) WITHOUT ROWID;
 ";
 
-struct PersistMetadataUnitCache {
-    generation: u64,
-    units: PersistMetadataUnits,
+pub(crate) struct PersistMetadataUnitCache {
+    pub(crate) generation: u64,
+    pub(crate) units: PersistMetadataUnits,
     // Derived from the exact encoded ledger unit, never an authority source.
-    checkpoint_index: Option<Arc<PersistCheckpointMirrorIndex>>,
+    pub(crate) checkpoint_index: Option<Arc<PersistCheckpointMirrorIndex>>,
     changed_checkpoint_owners: BTreeSet<String>,
 }
 
 include!("persist_metadata_units_codec.rs");
 
-fn metadata_counter(units: &PersistMetadataUnits, name: &str) -> Result<u64> {
+pub(crate) fn metadata_counter(units: &PersistMetadataUnits, name: &str) -> Result<u64> {
     let Some((kind, encoded)) = units.get(&(name.to_owned(), String::new())) else {
         return Ok(0);
     };
@@ -139,7 +139,7 @@ fn metadata_counter(units: &PersistMetadataUnits, name: &str) -> Result<u64> {
     serde_json::from_str(encoded).context("invalid allocation counter")
 }
 
-fn reserve_metadata_identity(
+pub(crate) fn reserve_metadata_identity(
     units: &mut PersistMetadataUnits,
     name: &str,
     id: &str,
@@ -165,7 +165,7 @@ fn reserve_metadata_identity(
     Ok(())
 }
 
-fn write_metadata_units(
+pub(crate) fn write_metadata_units(
     connection: &rusqlite::Connection,
     mut desired: PersistMetadataUnits,
     cached: Option<&PersistMetadataUnitCache>,
@@ -293,7 +293,7 @@ fn write_metadata_units(
 // All supported storage and semantic floors migrate in one immediate
 // transaction, including the strict metadata-unit and obligation contracts.
 #[cfg(test)]
-fn migrate_metadata_units(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn migrate_metadata_units(connection: &rusqlite::Connection) -> Result<()> {
     prepare_sqlite_obligation_reader_floor(connection, false).map(|_| ())
 }
 fn legacy_metadata_units_to_value(mut units: PersistMetadataUnits) -> Result<Value> {

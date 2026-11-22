@@ -9,7 +9,7 @@ thread_local! {
 
 // Safety metadata is read before ordinary session filtering. A discarded row
 // cannot discard its metadata duty; a present mirror must match it exactly.
-fn validate_sqlite_checkpoint_mirrors(
+pub(crate) fn validate_sqlite_checkpoint_mirrors(
     connection: &rusqlite::Connection,
     ledger: &EngramSessionObligationLedger,
 ) -> Result<()> {
@@ -65,14 +65,14 @@ fn validate_sqlite_obligation_metadata(connection: &rusqlite::Connection) -> Res
 // The existing metadata cache keeps only owner/digest lookups for its exact
 // ledger field. A warm unchanged field shares the index; changed units rebuild
 // it once. This adds no session inventory scan to the writer.
-type PersistCheckpointMirrorIndex = BTreeMap<String, (String, String)>;
+pub(crate) type PersistCheckpointMirrorIndex = BTreeMap<String, (String, String)>;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_CHECKPOINT_WRITE_CUT_WORK: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+    pub(crate) static TEST_CHECKPOINT_WRITE_CUT_WORK: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
 }
 
-fn checkpoint_index_from_units(
+pub(crate) fn checkpoint_index_from_units(
     units: &PersistMetadataUnits,
 ) -> Result<Option<Arc<PersistCheckpointMirrorIndex>>> {
     let field = "engramSessionObligations";
@@ -115,7 +115,7 @@ fn checkpoint_index_from_units(
     Ok(Some(Arc::new(index)))
 }
 
-fn checkpoint_write_cut_index(
+pub(crate) fn checkpoint_write_cut_index(
     previous: &PersistMetadataUnits,
     desired: &PersistMetadataUnits,
     cached: Option<&PersistMetadataUnitCache>,
@@ -495,7 +495,7 @@ fn prepare_sqlite_checkpoint_result_reader_floor(
     Ok(persisted)
 }
 
-fn advance_sqlite_reader_floor(
+pub(crate) fn advance_sqlite_reader_floor(
     connection: &rusqlite::Connection,
     predecessor: &str,
     successor: &str,

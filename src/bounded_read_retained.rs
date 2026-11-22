@@ -3,7 +3,10 @@
 // Split from the cleanup boundary in bounded_read_cleanup.rs.
 
 #[cfg(any(unix, test))]
-trait BoundedReadRetainedIdentity {
+use super::*;
+
+#[cfg(any(unix, test))]
+pub(crate) trait BoundedReadRetainedIdentity {
     fn same_owner(&self, other: &Self) -> bool;
 }
 
@@ -12,7 +15,7 @@ trait BoundedReadRetainedIdentity {
 // neither an unknown outcome nor diagnostic retention pins a numeric PID.
 #[cfg(any(unix, test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum BoundedReadReapState {
+pub(crate) enum BoundedReadReapState {
     Unreaped,
     Reaped,
     Unknown,
@@ -20,11 +23,11 @@ enum BoundedReadReapState {
 
 #[cfg(any(unix, test))]
 impl BoundedReadReapState {
-    fn can_signal(self) -> bool {
+    pub(crate) fn can_signal(self) -> bool {
         self == Self::Unreaped
     }
 
-    fn wait<T>(&mut self, wait: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    pub(crate) fn wait<T>(&mut self, wait: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
         // Mark uncertainty before calling wait: ECHILD and every other error
         // must never leave an apparently unreaped, signalable identity.
         *self = Self::Unknown;
@@ -42,32 +45,37 @@ impl<T> BoundedReadRetainedIdentity for Arc<T> {
 }
 
 #[cfg(any(unix, test))]
-struct RetainedBoundedRead<T> {
-    pid: u32,
-    sequence: u64,
-    detail: String,
-    retained: bool,
-    _owner: T,
+pub(crate) struct RetainedBoundedRead<T> {
+    pub(crate) pid: u32,
+    pub(crate) sequence: u64,
+    pub(crate) detail: String,
+    pub(crate) retained: bool,
+    pub(crate) _owner: T,
 }
 
 #[cfg(any(unix, test))]
-struct BoundedReadRetainedOwners<T> {
-    entries: VecDeque<RetainedBoundedRead<T>>,
-    sequence: u64,
+pub(crate) struct BoundedReadRetainedOwners<T> {
+    pub(crate) entries: VecDeque<RetainedBoundedRead<T>>,
+    pub(crate) sequence: u64,
 }
 
 #[cfg(any(unix, test))]
 impl<T> BoundedReadRetainedOwners<T> {
     const CAPACITY: usize = 32;
 
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             entries: VecDeque::new(),
             sequence: 0,
         }
     }
 
-    fn insert(&mut self, pid: u32, owner: T, detail: String) -> Option<RetainedBoundedRead<T>>
+    pub(crate) fn insert(
+        &mut self,
+        pid: u32,
+        owner: T,
+        detail: String,
+    ) -> Option<RetainedBoundedRead<T>>
     where
         T: BoundedReadRetainedIdentity,
     {
@@ -95,13 +103,13 @@ impl<T> BoundedReadRetainedOwners<T> {
         evicted
     }
 
-    fn remove_reaped_matching(&mut self, pid: u32, matches: impl Fn(&T) -> bool) {
+    pub(crate) fn remove_reaped_matching(&mut self, pid: u32, matches: impl Fn(&T) -> bool) {
         self.entries
             .retain(|entry| entry.pid != pid || !matches(&entry._owner));
     }
 
     #[cfg(test)]
-    fn remove_reaped(&mut self, pid: u32) {
+    pub(crate) fn remove_reaped(&mut self, pid: u32) {
         self.remove_reaped_matching(pid, |_| true);
     }
 }
@@ -130,7 +138,7 @@ fn unresolved_bounded_reads() -> &'static Mutex<BoundedReadRetainedOwners<Retain
 }
 
 #[cfg(unix)]
-fn retain_unresolved_bounded_read(
+pub(crate) fn retain_unresolved_bounded_read(
     process: Arc<SharedChild>,
     reap_state: BoundedReadReapState,
     detail: String,
@@ -163,7 +171,7 @@ fn retain_unresolved_bounded_read(
 }
 
 #[cfg(unix)]
-fn remove_reaped_bounded_read(process: &Arc<SharedChild>) {
+pub(crate) fn remove_reaped_bounded_read(process: &Arc<SharedChild>) {
     unresolved_bounded_reads()
         .lock()
         .expect("read owner mutex poisoned")

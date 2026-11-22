@@ -4,28 +4,28 @@
 // boundaries, writer admission, global metadata/delegations or the differential
 // message-row writer in persist_sqlite_messages.rs.
 
-struct SerializedPersistedMessage {
-    position: usize,
-    message_id: String,
-    value_json: String,
+pub(crate) struct SerializedPersistedMessage {
+    pub(crate) position: usize,
+    pub(crate) message_id: String,
+    pub(crate) value_json: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistSessionRejection {
-    session_id: String,
-    error: String,
+pub(crate) struct PersistSessionRejection {
+    pub(crate) session_id: String,
+    pub(crate) error: String,
 }
 
 impl PersistSessionRejection {
-    fn new(session_id: &str, error: &anyhow::Error) -> Self {
+    pub(crate) fn new(session_id: &str, error: &anyhow::Error) -> Self {
         Self {
             session_id: session_id.to_owned(),
             error: format!("{error:#}"),
         }
     }
 
-    fn bounded_observation(&self) -> Self {
+    pub(crate) fn bounded_observation(&self) -> Self {
         Self {
             session_id: self.session_id.chars().take(128).collect(),
             error: self.error.chars().take(1024).collect(),
@@ -33,26 +33,26 @@ impl PersistSessionRejection {
     }
 }
 
-struct SerializedPersistedSession {
-    session_id: String,
+pub(crate) struct SerializedPersistedSession {
+    pub(crate) session_id: String,
     // Remote-proxy transcript IDs belong to the peer, never our allocators.
-    local_identity_namespace: bool,
-    message_start_index: usize,
+    pub(crate) local_identity_namespace: bool,
+    pub(crate) message_start_index: usize,
     // Logical coverage is independent of the sparse upsert list.
-    truncate_to: Option<usize>,
-    snapshot: MessageSequence,
-    prompt_history_value_json: Option<String>,
-    value_json: String,
-    messages: Vec<SerializedPersistedMessage>,
+    pub(crate) truncate_to: Option<usize>,
+    pub(crate) snapshot: MessageSequence,
+    pub(crate) prompt_history_value_json: Option<String>,
+    pub(crate) value_json: String,
+    pub(crate) messages: Vec<SerializedPersistedMessage>,
 }
 
 #[cfg(test)]
 thread_local! {
-    static PERSIST_MESSAGE_SERIALIZE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce(&PersistedSessionRecord)>>> =
+    pub(crate) static PERSIST_MESSAGE_SERIALIZE_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce(&PersistedSessionRecord)>>> =
         std::cell::RefCell::new(None);
 }
 
-fn serialize_persisted_session(
+pub(crate) fn serialize_persisted_session(
     record: &PersistedSessionRecord,
 ) -> Result<SerializedPersistedSession> {
     serialize_persisted_session_since(record, None)
@@ -200,7 +200,7 @@ fn serialize_persisted_sessions_with_isolation(
     serialized_sessions
 }
 
-fn write_serialized_persisted_session(
+pub(crate) fn write_serialized_persisted_session(
     tx: &rusqlite::Transaction<'_>,
     session: &SerializedPersistedSession,
 ) -> Result<()> {

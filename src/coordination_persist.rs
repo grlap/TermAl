@@ -12,17 +12,19 @@ cursors, messages, delivery and executor records are preserved. Other unsupporte
 schemas are rejected, never copied from `termal.sqlite`.
 */
 
-fn resolve_coordination_persistence_path(persistence_path: &FsPath) -> PathBuf {
+use super::*;
+
+pub(crate) fn resolve_coordination_persistence_path(persistence_path: &FsPath) -> PathBuf {
     persistence_path.with_file_name("coordination.sqlite")
 }
 
-const COORDINATION_DIRECT_PROMPT_PREDECESSOR: &str = "7-review-custody-index-1";
-const COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR: &str = "8-direct-prompt-1";
-const COORDINATION_REMOTE_VERIFICATION_PREDECESSOR: &str =
+pub(crate) const COORDINATION_DIRECT_PROMPT_PREDECESSOR: &str = "7-review-custody-index-1";
+pub(crate) const COORDINATION_TEST_REQUEST_CUSTODY_PREDECESSOR: &str = "8-direct-prompt-1";
+pub(crate) const COORDINATION_REMOTE_VERIFICATION_PREDECESSOR: &str =
     "8-direct-prompt-1-test-request-custody-1";
-const COORDINATION_CAUSAL_PENDING_PREDECESSOR: &str =
+pub(crate) const COORDINATION_CAUSAL_PENDING_PREDECESSOR: &str =
     "8-direct-prompt-1-test-request-custody-1-remote-verification-1";
-const COORDINATION_SQLITE_SCHEMA_VERSION: &str =
+pub(crate) const COORDINATION_SQLITE_SCHEMA_VERSION: &str =
     "8-direct-prompt-1-test-request-custody-1-remote-verification-1-causal-pending-1";
 
 include!("coordination_test_request_custody.rs");
@@ -31,13 +33,13 @@ include!("coordination_causal_pending.rs");
 
 // Built only by boot-time schema admission, before the mailbox connection mutex
 // exists. The covering key range keeps orphaned archive reads off message bodies.
-const MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL: &str = "
+pub(crate) const MAILBOX_REVIEW_CUSTODY_INDEX_SCHEMA_SQL: &str = "
     CREATE INDEX IF NOT EXISTS mailbox_messages_topic_key_sender
       ON mailbox_messages(topic, idempotency_key, sender_session_id);
 ";
 
 // Latest explicit declaration per receipt: durable audit, never restart proof.
-const MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL: &str = "
+pub(crate) const MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL: &str = "
     CREATE TABLE mailbox_continuation_declarations (
       session_id TEXT NOT NULL,
       mailbox_id TEXT NOT NULL,
@@ -51,12 +53,13 @@ const MAILBOX_CONTINUATION_DECLARATIONS_SCHEMA_SQL: &str = "
 ";
 
 #[cfg(test)]
-type CoordinationUpgradeCommitHook = Box<dyn FnOnce(&rusqlite::Connection) -> Result<()>>;
+pub(crate) type CoordinationUpgradeCommitHook =
+    Box<dyn FnOnce(&rusqlite::Connection) -> Result<()>>;
 
 #[cfg(test)]
 thread_local! {
-    static TEST_COORDINATION_BEFORE_UPGRADE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
-    static TEST_COORDINATION_UPGRADE_BEFORE_COMMIT: std::cell::RefCell<Option<CoordinationUpgradeCommitHook>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_COORDINATION_BEFORE_UPGRADE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_COORDINATION_UPGRADE_BEFORE_COMMIT: std::cell::RefCell<Option<CoordinationUpgradeCommitHook>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -65,7 +68,7 @@ mod coordination_schema_work_tests;
 
 // Version 2 adds durable read receipts without rewriting any mailbox cursor or
 // message. Unacknowledged reads from version 1 must be repeated after upgrade.
-const MAILBOX_READ_PAGES_SCHEMA_SQL: &str = "
+pub(crate) const MAILBOX_READ_PAGES_SCHEMA_SQL: &str = "
     CREATE TABLE mailbox_read_pages (
       receipt TEXT PRIMARY KEY,
       mailbox_id TEXT NOT NULL,
@@ -86,7 +89,7 @@ const MAILBOX_READ_PAGES_SCHEMA_SQL: &str = "
 // explicit migration or reset decision.
 // Frozen historical v1 definition: never edit this when adding later versions.
 // Its normalized SHA-256 is independently pinned by a compatibility test.
-const COORDINATION_SCHEMA_V1_SQL: &str = "
+pub(crate) const COORDINATION_SCHEMA_V1_SQL: &str = "
     CREATE TABLE meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -192,14 +195,14 @@ const COORDINATION_SCHEMA_V1_SQL: &str = "
 ";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CoordinationSchemaObject {
+pub(crate) struct CoordinationSchemaObject {
     object_type: String,
-    name: String,
-    table_name: String,
-    sql: Option<String>,
+    pub(crate) name: String,
+    pub(crate) table_name: String,
+    pub(crate) sql: Option<String>,
 }
 
-fn coordination_schema_objects(
+pub(crate) fn coordination_schema_objects(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<CoordinationSchemaObject>> {
     let mut statement = connection
@@ -231,7 +234,7 @@ fn expected_coordination_schema_objects() -> Result<Vec<CoordinationSchemaObject
     expected_coordination_schema_objects_for_version(COORDINATION_SQLITE_SCHEMA_VERSION)
 }
 
-fn expected_coordination_schema_objects_for_version(
+pub(crate) fn expected_coordination_schema_objects_for_version(
     version: &str,
 ) -> Result<Vec<CoordinationSchemaObject>> {
     #[cfg(test)]
@@ -400,11 +403,13 @@ fn reject_unsupported_coordination_schema(detail: impl std::fmt::Display) -> any
     )
 }
 
-fn validate_current_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn validate_current_coordination_schema(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     validate_coordination_schema_version(connection, COORDINATION_SQLITE_SCHEMA_VERSION)
 }
 
-fn validate_coordination_schema_version(
+pub(crate) fn validate_coordination_schema_version(
     connection: &rusqlite::Connection,
     version: &str,
 ) -> Result<()> {
@@ -517,7 +522,7 @@ fn validate_coordination_schema_contents(
     Ok(())
 }
 
-fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Result<()> {
     #[cfg(test)]
     let _ensure = coordination_schema_work_tests::span("ensure", None);
     // Current stores need only the current canonical layout. Keep the complete
@@ -732,7 +737,7 @@ fn ensure_sqlite_coordination_schema(connection: &rusqlite::Connection) -> Resul
         .context("failed to commit current coordination schema initialization")
 }
 
-fn ensure_sqlite_coordination_schema_for_path(
+pub(crate) fn ensure_sqlite_coordination_schema_for_path(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<()> {
@@ -763,7 +768,9 @@ fn ensure_sqlite_coordination_schema_for_path(
     finish_sqlite_state_file_setup(path, setup)
 }
 
-fn bootstrap_coordination_database(coordination_path: &FsPath) -> Result<rusqlite::Connection> {
+pub(crate) fn bootstrap_coordination_database(
+    coordination_path: &FsPath,
+) -> Result<rusqlite::Connection> {
     if let Some(parent) = coordination_path.parent() {
         create_local_state_directory(parent)?;
     }

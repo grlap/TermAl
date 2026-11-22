@@ -1,6 +1,6 @@
 // One-way coordination extension. Pending membership is written by the original
 // send transaction; only this upgrade discovers pre-extension in-flight sends.
-const MAILBOX_CAUSAL_PENDING_SCHEMA_SQL: &str = "
+pub(crate) const MAILBOX_CAUSAL_PENDING_SCHEMA_SQL: &str = "
     ALTER TABLE mailbox_messages ADD COLUMN test_request_pending_json TEXT;
     ALTER TABLE mailbox_messages ADD COLUMN test_request_pending_order INTEGER;
     ALTER TABLE mailbox_relay_intents ADD COLUMN test_request_pending_json TEXT;

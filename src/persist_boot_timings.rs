@@ -1,7 +1,7 @@
 // Fixed-label boot measurements. Nested session phases are aggregated across
 // rows so startup never prints session IDs, paths or persisted payloads.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum BootStateLoadPhase {
+pub(crate) enum BootStateLoadPhase {
     Open,
     SchemaMetadata,
     Sessions,
@@ -16,7 +16,7 @@ enum BootStateLoadPhase {
 }
 
 impl BootStateLoadPhase {
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Open => "open",
             Self::SchemaMetadata => "schema_metadata",
@@ -33,30 +33,30 @@ impl BootStateLoadPhase {
     }
 }
 
-struct BootStateLoadTimings {
-    enabled: bool,
-    measurements: BTreeMap<BootStateLoadPhase, BootStateLoadMeasurement>,
+pub(crate) struct BootStateLoadTimings {
+    pub(crate) enabled: bool,
+    pub(crate) measurements: BTreeMap<BootStateLoadPhase, BootStateLoadMeasurement>,
 }
 
 #[derive(Default)]
-struct BootStateLoadMeasurement {
-    elapsed: std::time::Duration,
-    calls: usize,
+pub(crate) struct BootStateLoadMeasurement {
+    pub(crate) elapsed: std::time::Duration,
+    pub(crate) calls: usize,
 }
 
 impl BootStateLoadTimings {
-    fn new(enabled: bool) -> Self {
+    pub(crate) fn new(enabled: bool) -> Self {
         Self {
             enabled,
             measurements: BTreeMap::new(),
         }
     }
 
-    fn start(&self) -> Option<std::time::Instant> {
+    pub(crate) fn start(&self) -> Option<std::time::Instant> {
         self.enabled.then(std::time::Instant::now)
     }
 
-    fn finish(&mut self, phase: BootStateLoadPhase, started: Option<std::time::Instant>) {
+    pub(crate) fn finish(&mut self, phase: BootStateLoadPhase, started: Option<std::time::Instant>) {
         if let Some(started) = started {
             let elapsed = started.elapsed();
             let measurement = self.measurements.entry(phase).or_default();
@@ -65,7 +65,7 @@ impl BootStateLoadTimings {
         }
     }
 
-    fn scoped(&mut self, phase: BootStateLoadPhase) -> BootStateLoadTiming<'_> {
+    pub(crate) fn scoped(&mut self, phase: BootStateLoadPhase) -> BootStateLoadTiming<'_> {
         let started = self.start();
         BootStateLoadTiming {
             timings: self,
@@ -74,7 +74,7 @@ impl BootStateLoadTimings {
         }
     }
 
-    fn log(&self) {
+    pub(crate) fn log(&self) {
         // sessions_total includes decode, tails and histories; the remaining
         // phases are disjoint from that aggregate. Deferred delegation work
         // is outside state_load and emits no inline-loading measurement.
@@ -90,10 +90,10 @@ impl BootStateLoadTimings {
 }
 
 // Scope exit records both successful and failed attempts before errors escape.
-struct BootStateLoadTiming<'a> {
-    timings: &'a mut BootStateLoadTimings,
-    phase: BootStateLoadPhase,
-    started: Option<std::time::Instant>,
+pub(crate) struct BootStateLoadTiming<'a> {
+    pub(crate) timings: &'a mut BootStateLoadTimings,
+    pub(crate) phase: BootStateLoadPhase,
+    pub(crate) started: Option<std::time::Instant>,
 }
 
 impl Drop for BootStateLoadTiming<'_> {

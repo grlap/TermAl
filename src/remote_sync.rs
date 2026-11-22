@@ -19,10 +19,13 @@
 // Extracted from remote.rs into its own `include!()` fragment so remote.rs
 // stays focused on SSH + HTTP transport and terminal stream forwarding.
 
-mod remote_summary_compat;
+use super::*;
+
+#[path = "remote_summary_compat.rs"]
+pub(crate) mod remote_summary_compat;
 
 /// Returns the originating remote revision for a delta event.
-fn delta_event_revision(event: &DeltaEvent) -> u64 {
+pub(crate) fn delta_event_revision(event: &DeltaEvent) -> u64 {
     match event {
         DeltaEvent::SessionCreated { revision, .. }
         | DeltaEvent::MessageCreated { revision, .. }
@@ -54,7 +57,7 @@ fn delta_event_revision(event: &DeltaEvent) -> u64 {
     }
 }
 
-fn remote_delta_session_transcript_metadata(
+pub(crate) fn remote_delta_session_transcript_metadata(
     event: &DeltaEvent,
 ) -> Option<(&str, u32, Option<u64>)> {
     match event {
@@ -104,15 +107,15 @@ fn remote_delta_session_transcript_metadata(
     }
 }
 
-struct RemoteSyncRollback {
-    next_session_number: usize,
-    sessions: SessionSequence,
-    orchestrator_instances: Vec<OrchestratorInstance>,
-    removed_session_ids: Vec<String>,
+pub(crate) struct RemoteSyncRollback {
+    pub(crate) next_session_number: usize,
+    pub(crate) sessions: SessionSequence,
+    pub(crate) orchestrator_instances: Vec<OrchestratorInstance>,
+    pub(crate) removed_session_ids: Vec<String>,
 }
 
 impl RemoteSyncRollback {
-    fn capture(inner: &StateInner) -> Self {
+    pub(crate) fn capture(inner: &StateInner) -> Self {
         Self {
             next_session_number: inner.next_session_number,
             sessions: inner.sessions.clone(),
@@ -121,7 +124,7 @@ impl RemoteSyncRollback {
         }
     }
 
-    fn restore(self, inner: &mut StateInner) {
+    pub(crate) fn restore(self, inner: &mut StateInner) {
         inner.next_session_number = self.next_session_number;
         inner.sessions = self.sessions;
         inner.orchestrator_instances = self.orchestrator_instances.into();
@@ -466,12 +469,12 @@ impl RemoteProxyChangeView {
 /// immediately following a remote `lagged` marker, matching the browser-side
 /// recovery contract.
 #[derive(Clone, Copy)]
-enum RemoteSnapshotApplyMode {
+pub(crate) enum RemoteSnapshotApplyMode {
     GateBySnapshotRevision,
     ForceAfterLaggedEvent,
 }
 
-fn apply_remote_state_if_newer_locked(
+pub(crate) fn apply_remote_state_if_newer_locked(
     inner: &mut StateInner,
     remote_id: &str,
     remote_state: &StateResponse,
@@ -496,7 +499,7 @@ fn apply_remote_state_if_newer_locked(
     true
 }
 
-fn note_remote_applied_state_snapshot_revision(
+pub(crate) fn note_remote_applied_state_snapshot_revision(
     inner: &mut StateInner,
     remote_id: &str,
     remote_state: &StateResponse,
@@ -505,7 +508,7 @@ fn note_remote_applied_state_snapshot_revision(
 }
 
 /// Applies remote session to record.
-fn apply_remote_session_to_record(
+pub(crate) fn apply_remote_session_to_record(
     record: &mut SessionRecord,
     remote_id: &str,
     local_project_id: Option<String>,
@@ -577,7 +580,7 @@ fn apply_remote_session_to_record(
 /// Applies a transcript-free remote session summary to a local proxy record
 /// while retaining any targeted transcript, prompt-history, and queued-prompt
 /// data already materialized for that proxy.
-fn apply_remote_session_summary_to_record(
+pub(crate) fn apply_remote_session_summary_to_record(
     record: &mut SessionRecord,
     remote_id: &str,
     local_project_id: Option<String>,
@@ -674,7 +677,7 @@ fn remote_mutation_stamp_allows_cached_transcript(
 }
 
 /// Upserts remote proxy session record.
-fn upsert_remote_proxy_session_record(
+pub(crate) fn upsert_remote_proxy_session_record(
     inner: &mut StateInner,
     remote_id: &str,
     remote_session: &Session,
@@ -693,7 +696,9 @@ fn upsert_remote_proxy_session_record(
     }
 
     let number = inner.next_session_number;
-    inner.next_session_number = inner.next_session_number.checked_add(1)
+    inner.next_session_number = inner
+        .next_session_number
+        .checked_add(1)
         .expect("session identity space exhausted");
     let local_session_id = format!("session-{number}");
     let session = localize_remote_session(
@@ -702,12 +707,7 @@ fn upsert_remote_proxy_session_record(
         local_project_id,
         remote_session,
     );
-    push_remote_proxy_session_record(
-        inner,
-        remote_id,
-        &remote_session.id,
-        session,
-    );
+    push_remote_proxy_session_record(inner, remote_id, &remote_session.id, session);
     local_session_id
 }
 
@@ -817,7 +817,7 @@ fn push_remote_proxy_session_record(
 
 /// Ensures a remote proxy session record exists locally, optionally refreshing
 /// the existing record from the response payload.
-fn ensure_remote_proxy_session_record(
+pub(crate) fn ensure_remote_proxy_session_record(
     inner: &mut StateInner,
     remote_id: &str,
     remote_session: &Session,
@@ -867,7 +867,9 @@ fn upsert_remote_proxy_session_summary_record(
     }
 
     let number = inner.next_session_number;
-    inner.next_session_number = inner.next_session_number.checked_add(1)
+    inner.next_session_number = inner
+        .next_session_number
+        .checked_add(1)
         .expect("session identity space exhausted");
     let local_session_id = format!("session-{number}");
     let session = localize_remote_session_summary(
@@ -876,16 +878,11 @@ fn upsert_remote_proxy_session_summary_record(
         local_project_id,
         remote_session,
     );
-    push_remote_proxy_session_record(
-        inner,
-        remote_id,
-        &remote_session.id,
-        session,
-    );
+    push_remote_proxy_session_record(inner, remote_id, &remote_session.id, session);
     local_session_id
 }
 
-fn ensure_remote_proxy_session_summary_record(
+pub(crate) fn ensure_remote_proxy_session_summary_record(
     inner: &mut StateInner,
     remote_id: &str,
     remote_session: &StateSessionSummary,
@@ -919,7 +916,7 @@ fn ensure_remote_proxy_session_summary_record(
     )
 }
 
-fn localize_remote_session(
+pub(crate) fn localize_remote_session(
     remote_id: &str,
     local_session_id: &str,
     local_project_id: Option<String>,
@@ -970,7 +967,7 @@ fn localize_remote_session(
     session
 }
 
-fn localize_remote_session_summary(
+pub(crate) fn localize_remote_session_summary(
     remote_id: &str,
     local_session_id: &str,
     local_project_id: Option<String>,
@@ -1068,7 +1065,7 @@ pub(crate) fn localize_remote_conversation_marker(
 /// Builds the `RemoteProjectId -> LocalProjectId` map for one remote
 /// host. The typed keys/values make id-kind mixups compile-detectable
 /// at every caller that threads this map into localization helpers.
-fn remote_project_id_map(
+pub(crate) fn remote_project_id_map(
     inner: &StateInner,
     remote_id: &str,
 ) -> HashMap<RemoteProjectId, LocalProjectId> {
@@ -1092,7 +1089,7 @@ fn remote_project_id_map(
 /// traffics in typed `RemoteProjectId` / `LocalProjectId` so a
 /// downstream caller cannot accidentally pass the returned local id
 /// where a remote id is expected.
-fn local_project_id_for_remote_project(
+pub(crate) fn local_project_id_for_remote_project(
     local_project_ids_by_remote_project_id: &HashMap<RemoteProjectId, LocalProjectId>,
     remote_project_id: Option<&str>,
 ) -> Option<LocalProjectId> {
@@ -1325,7 +1322,7 @@ fn localize_remote_orchestrator_instance(
     })
 }
 
-fn ensure_remote_orchestrator_instance(
+pub(crate) fn ensure_remote_orchestrator_instance(
     inner: &mut StateInner,
     remote_id: &str,
     remote_orchestrator: &OrchestratorInstance,
@@ -1367,7 +1364,7 @@ fn ensure_remote_orchestrator_instance(
 /// through so `localize_remote_orchestrator_instance` keeps its
 /// compile-time guarantees; the caller must build the map via
 /// `remote_project_id_map` to inherit the typed keys/values.
-fn sync_remote_orchestrators_inner(
+pub(crate) fn sync_remote_orchestrators_inner(
     inner: &mut StateInner,
     remote_id: &str,
     remote_orchestrators: &[OrchestratorInstance],
@@ -1423,7 +1420,7 @@ fn sync_remote_orchestrators_inner(
 }
 
 /// Processes remote event stream.
-fn process_remote_event_stream(
+pub(crate) fn process_remote_event_stream(
     state: &AppState,
     remote: &RemoteConfig,
     connection: &RemoteConnection,
@@ -1448,7 +1445,7 @@ fn process_remote_event_stream(
 /// caller-owned scratch state so tests can drive partial streams and keep the
 /// same lagged-recovery state across parser invocations.
 #[cfg(test)]
-fn process_remote_event_stream_reader<R: BufRead>(
+pub(crate) fn process_remote_event_stream_reader<R: BufRead>(
     state: &AppState,
     remote_id: &str,
     reader: R,
@@ -1461,7 +1458,7 @@ fn process_remote_event_stream_reader<R: BufRead>(
     )
 }
 
-fn process_remote_event_stream_reader_with_authority<R: BufRead>(
+pub(crate) fn process_remote_event_stream_reader_with_authority<R: BufRead>(
     state: &AppState,
     remote_id: &str,
     bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,
@@ -1516,14 +1513,14 @@ fn process_remote_event_stream_reader_with_authority<R: BufRead>(
 }
 
 #[derive(Default)]
-struct RemoteEventStreamRecovery {
+pub(crate) struct RemoteEventStreamRecovery {
     force_next_state_after_lagged: bool,
     lagged_recovery_baseline_revision: u64,
 }
 
 /// Dispatches remote event.
 #[cfg(test)]
-fn dispatch_remote_event(
+pub(crate) fn dispatch_remote_event(
     state: &AppState,
     remote_id: &str,
     event_name: &str,
@@ -1534,7 +1531,7 @@ fn dispatch_remote_event(
 }
 
 #[cfg(test)]
-fn dispatch_remote_event_with_recovery(
+pub(crate) fn dispatch_remote_event_with_recovery(
     state: &AppState,
     remote_id: &str,
     event_name: &str,
@@ -1546,7 +1543,7 @@ fn dispatch_remote_event_with_recovery(
     )
 }
 
-fn dispatch_remote_event_with_recovery_and_authority(
+pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
     state: &AppState,
     remote_id: &str,
     bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,
@@ -1739,7 +1736,7 @@ fn dispatch_remote_event_with_recovery_and_authority(
 }
 
 #[derive(Debug)]
-struct RemoteOutputLimitTerminal;
+pub(crate) struct RemoteOutputLimitTerminal;
 
 impl std::fmt::Display for RemoteOutputLimitTerminal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1749,21 +1746,50 @@ impl std::fmt::Display for RemoteOutputLimitTerminal {
 impl std::error::Error for RemoteOutputLimitTerminal {}
 
 impl RemoteRegistry {
-    fn transport_statuses(&self) -> Vec<RemoteTransportStatus> {
+    pub(crate) fn transport_statuses(&self) -> Vec<RemoteTransportStatus> {
         let configs = self.configs.lock().expect("remote configs poisoned");
-        let connections = self.connections.lock().expect("remote connections poisoned");
+        let connections = self
+            .connections
+            .lock()
+            .expect("remote connections poisoned");
         let mut statuses = Vec::new();
-        for remote in configs.values().filter(|remote| remote.transport == RemoteTransport::Ssh) {
-            let status = connections.get(&remote.id).map(|connection| connection.event_stream_status.load(Ordering::SeqCst)).unwrap_or(REMOTE_STREAM_PENDING);
-            if remote.enabled && status == REMOTE_STREAM_LIVE { continue; }
+        for remote in configs
+            .values()
+            .filter(|remote| remote.transport == RemoteTransport::Ssh)
+        {
+            let status = connections
+                .get(&remote.id)
+                .map(|connection| connection.event_stream_status.load(Ordering::SeqCst))
+                .unwrap_or(REMOTE_STREAM_PENDING);
+            if remote.enabled && status == REMOTE_STREAM_LIVE {
+                continue;
+            }
             let (code, detail, recovery_action) = if !remote.enabled {
-                ("remote_disabled", "Remote live updates are disabled; displayed data may be stale.", "enable_remote")
+                (
+                    "remote_disabled",
+                    "Remote live updates are disabled; displayed data may be stale.",
+                    "enable_remote",
+                )
             } else if status == REMOTE_STREAM_OUTPUT_LIMIT {
-                ("output_limit_exceeded", "Remote live updates exceeded the output limit; displayed data may be stale.", "disable_then_enable_remote")
+                (
+                    "output_limit_exceeded",
+                    "Remote live updates exceeded the output limit; displayed data may be stale.",
+                    "disable_then_enable_remote",
+                )
             } else {
-                ("remote_resync_pending", "Waiting for authoritative remote state; displayed data may be stale.", "wait_for_full_state")
+                (
+                    "remote_resync_pending",
+                    "Waiting for authoritative remote state; displayed data may be stale.",
+                    "wait_for_full_state",
+                )
             };
-            statuses.push(RemoteTransportStatus { remote_id: remote.id.clone(), code: code.to_owned(), stale: true, detail: detail.to_owned(), recovery_action: recovery_action.to_owned() });
+            statuses.push(RemoteTransportStatus {
+                remote_id: remote.id.clone(),
+                code: code.to_owned(),
+                stale: true,
+                detail: detail.to_owned(),
+                recovery_action: recovery_action.to_owned(),
+            });
         }
         statuses.sort_by(|a, b| a.remote_id.cmp(&b.remote_id));
         statuses
@@ -1771,11 +1797,17 @@ impl RemoteRegistry {
 }
 
 impl AppState {
-    fn latch_remote_output_limit(&self, remote: &RemoteConfig, connection: &RemoteConnection) -> Result<()> {
+    pub(crate) fn latch_remote_output_limit(
+        &self,
+        remote: &RemoteConfig,
+        connection: &RemoteConnection,
+    ) -> Result<()> {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         self.ensure_remote_apply_authority_locked(&inner, remote, Some(connection))
             .map_err(|error| anyhow!(error.message))?;
-        connection.event_stream_status.store(REMOTE_STREAM_OUTPUT_LIMIT, Ordering::SeqCst);
+        connection
+            .event_stream_status
+            .store(REMOTE_STREAM_OUTPUT_LIMIT, Ordering::SeqCst);
         connection.invalidate_state_continuity();
         self.clear_remote_applied_revision_locked(&mut inner, &remote.id);
         self.clear_remote_sse_fallback_resync(&remote.id);
@@ -1784,7 +1816,7 @@ impl AppState {
     }
 }
 
-fn resync_remote_state_snapshot_with_authority(
+pub(crate) fn resync_remote_state_snapshot_with_authority(
     state: &AppState,
     remote_id: &str,
     bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,

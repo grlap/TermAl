@@ -3,7 +3,10 @@
 // Extracted from bounded_read_process.rs; the worker remains the sole waiter.
 
 #[cfg(any(unix, test))]
-fn admit_bounded_read_group<T>(
+use super::*;
+
+#[cfg(any(unix, test))]
+pub(crate) fn admit_bounded_read_group<T>(
     process_id: u32,
     admission: Result<T>,
     retain: impl FnOnce(String),
@@ -21,7 +24,7 @@ fn admit_bounded_read_group<T>(
 }
 
 #[cfg(any(unix, test))]
-trait BoundedReadGroupIo {
+pub(crate) trait BoundedReadGroupIo {
     type Status;
 
     fn signal_before_reap(&mut self) -> io::Result<()>;
@@ -36,7 +39,7 @@ trait BoundedReadGroupIo {
 }
 
 #[cfg(any(unix, test))]
-fn finish_bounded_read_group<I: BoundedReadGroupIo>(ops: &mut I) -> Result<I::Status> {
+pub(crate) fn finish_bounded_read_group<I: BoundedReadGroupIo>(ops: &mut I) -> Result<I::Status> {
     // Only this first syscall can send a non-zero signal. Neither EPERM
     // (including Darwin's zombie-only result) nor ESRCH is confirmation.
     let signal_error = ops.signal_before_reap().err();
@@ -160,12 +163,12 @@ fn unresolved_read_group<I: BoundedReadGroupIo>(
 }
 
 #[cfg(unix)]
-struct UnixBoundedReadGroup<'a> {
-    process: &'a Arc<SharedChild>,
-    reaped: &'a mut bool,
-    reap_state: BoundedReadReapState,
-    pgid: libc::pid_t,
-    probe_deadline: std::time::Instant,
+pub(crate) struct UnixBoundedReadGroup<'a> {
+    pub(crate) process: &'a Arc<SharedChild>,
+    pub(crate) reaped: &'a mut bool,
+    pub(crate) reap_state: BoundedReadReapState,
+    pub(crate) pgid: libc::pid_t,
+    pub(crate) probe_deadline: std::time::Instant,
 }
 
 #[cfg(unix)]
@@ -176,7 +179,9 @@ impl BoundedReadGroupIo for UnixBoundedReadGroup<'_> {
         // SharedChild::spawn and WNOWAIT preserve the leader's PID until
         // this worker's reap. Never add a wait thread at this boundary.
         if *self.reaped || !self.reap_state.can_signal() {
-            return Err(io::Error::other("refusing group signal after leader wait attempt"));
+            return Err(io::Error::other(
+                "refusing group signal after leader wait attempt",
+            ));
         }
         if unsafe { libc::killpg(self.pgid, libc::SIGKILL) } == -1 {
             Err(io::Error::last_os_error())

@@ -21,8 +21,10 @@
 // taking the wait it names; the rest is new, derived from the doubled
 // load-sensitive limits.
 
+use super::*;
+
 /// The serial recovery waits a follow-up may make before its admission.
-fn termal_delegation_followup_recovery_allowance() -> Duration {
+pub(crate) fn termal_delegation_followup_recovery_allowance() -> Duration {
     CODEX_CHILD_RELEASE_WAIT_TIMEOUT
         + CODEX_THREAD_RECONCILIATION_REPLY_TIMEOUT * 2
         + CODEX_CHILD_RESULT_FENCE_TIMEOUT
@@ -32,7 +34,7 @@ fn termal_delegation_followup_recovery_allowance() -> Duration {
 /// What delivering a turn inline may spend: a spawn, a follow-up and a mailbox
 /// send that wakes an idle target deliver a turn before they answer. The
 /// allowance covers actual provider preparation and the review-freeze fence.
-fn termal_delegation_turn_delivery_budget() -> Duration {
+pub(crate) fn termal_delegation_turn_delivery_budget() -> Duration {
     REVIEW_FREEZE_TIMEOUT
 }
 
@@ -45,12 +47,12 @@ macro_rules! delegation_long_calls {
         /// The one list the bridge's allowances and Codex's tool timeout both
         /// come from.
         #[derive(Clone, Copy, Debug)]
-        enum DelegationLongCall {
+        pub(crate) enum DelegationLongCall {
             $($(#[$attribute])* $variant,)*
         }
 
         impl DelegationLongCall {
-            const ALL: &'static [Self] = &[$(Self::$variant,)*];
+            pub(crate) const ALL: &'static [Self] = &[$(Self::$variant,)*];
         }
     };
 }
@@ -82,7 +84,7 @@ delegation_long_calls! {
 impl DelegationLongCall {
     /// What the call may spend beyond an ordinary request, where delivering a
     /// turn inline may spend `turn_delivery`.
-    fn budget(self, turn_delivery: Duration) -> Duration {
+    pub(crate) fn budget(self, turn_delivery: Duration) -> Duration {
         match self {
             Self::Spawn => turn_delivery,
             Self::EvaluationRequest => {
@@ -91,7 +93,9 @@ impl DelegationLongCall {
                     + turn_delivery
             }
             Self::EvaluationSubmit => acceptance_evaluation_submit_budget(),
-            Self::EvidenceRead => acceptance_evaluation_evidence_budget() + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT,
+            Self::EvidenceRead => {
+                acceptance_evaluation_evidence_budget() + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT
+            }
             // A call admitted just before a shared phase expires retains its
             // full minimum window. Keep the client alive for that overrun.
             Self::SourceRootNaming => ENGRAM_SOURCE_ROOT_NAMING_BUDGET + ENGRAM_MIN_CALL_TIMEOUT,
@@ -111,14 +115,14 @@ impl DelegationLongCall {
 /// How much longer than the bridge's own wait Codex waits on a TermAl
 /// delegation tool call, so the bridge's answer, a timeout included, still
 /// reaches it.
-const TERMAL_DELEGATION_MCP_CODEX_TOOL_MARGIN: Duration = Duration::from_secs(5);
+pub(crate) const TERMAL_DELEGATION_MCP_CODEX_TOOL_MARGIN: Duration = Duration::from_secs(5);
 
 /// The longest a `termal_wait_delegations` call on one delegation with the
 /// default wait may take: the wait, which never sleeps past its deadline,
 /// then its last status read, which may start at the deadline, then the
 /// result read when that read finds the delegation finished. Each further
 /// delegation a wait names adds a status read and a result read.
-fn termal_delegation_default_wait_span() -> Duration {
+pub(crate) fn termal_delegation_default_wait_span() -> Duration {
     Duration::from_millis(TERMAL_DELEGATION_MCP_DEFAULT_WAIT_TIMEOUT_MS)
         + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT * 2
 }
@@ -126,7 +130,7 @@ fn termal_delegation_default_wait_span() -> Duration {
 /// How long a `termal_wait_delegations` round sleeps before the next: its
 /// poll interval, but never past the wait's deadline, so the wait's span is
 /// its timeout plus the reads after it (`termal_delegation_default_wait_span`).
-fn termal_delegation_wait_poll_sleep(
+pub(crate) fn termal_delegation_wait_poll_sleep(
     poll_interval: Duration,
     deadline: std::time::Instant,
     now: std::time::Instant,
@@ -146,7 +150,7 @@ fn termal_delegation_wait_poll_sleep(
 /// bridge first reads the caller's classification or resolves a prompt for,
 /// can be cut by Codex and still run, as can a longer wait or one naming more
 /// delegations.
-fn termal_delegation_mcp_codex_tool_timeout() -> Duration {
+pub(crate) fn termal_delegation_mcp_codex_tool_timeout() -> Duration {
     let turn_delivery = termal_delegation_turn_delivery_budget();
     let longest_allowance = DelegationLongCall::ALL
         .iter()
@@ -161,7 +165,7 @@ fn termal_delegation_mcp_codex_tool_timeout() -> Duration {
 
 /// Codex's tool timeout for the longest long-call allowance and the span of a
 /// default wait: whichever is longer, and the margin.
-fn termal_delegation_codex_tool_timeout_for(
+pub(crate) fn termal_delegation_codex_tool_timeout_for(
     longest_allowance: Duration,
     wait_span: Duration,
 ) -> Duration {
@@ -170,7 +174,7 @@ fn termal_delegation_codex_tool_timeout_for(
 
 /// `termal_delegation_mcp_codex_tool_timeout` in whole seconds, rounded up, as
 /// Codex's config and the wait tool's description state it.
-fn termal_delegation_mcp_codex_tool_timeout_secs() -> u64 {
+pub(crate) fn termal_delegation_mcp_codex_tool_timeout_secs() -> u64 {
     termal_delegation_mcp_codex_tool_timeout()
         .as_secs_f64()
         .ceil() as u64
@@ -182,13 +186,13 @@ fn termal_delegation_mcp_codex_tool_timeout_secs() -> u64 {
 /// rendering of the whole chain (`{:#}`, as the coordination CLI prints)
 /// shows the failure once.
 #[derive(Debug)]
-struct TermalDelegationUnknownOutcome {
-    message: String,
+pub(crate) struct TermalDelegationUnknownOutcome {
+    pub(crate) message: String,
     /// The wait that ran out, for a transport failure. Production shows only
     /// `message`, which embeds the failure; the tests read this to prove
     /// which wait a call was given.
     #[cfg_attr(not(test), allow(dead_code))]
-    transport_timeout: Option<Duration>,
+    pub(crate) transport_timeout: Option<Duration>,
 }
 
 impl std::fmt::Display for TermalDelegationUnknownOutcome {
@@ -204,7 +208,7 @@ impl std::error::Error for TermalDelegationUnknownOutcome {}
 /// with a body the bridge could not read. A refusal the server answered
 /// (`TermalDelegationApiError`) is a known outcome unless the central mailbox
 /// relay explicitly reports that its already-started operation is uncertain.
-fn termal_delegation_outcome_is_unknown(err: &anyhow::Error) -> bool {
+pub(crate) fn termal_delegation_outcome_is_unknown(err: &anyhow::Error) -> bool {
     err.downcast_ref::<TermalDelegationTransportError>()
         .is_some()
         || err
@@ -222,7 +226,10 @@ fn termal_delegation_outcome_is_unknown(err: &anyhow::Error) -> bool {
 }
 
 /// `message`, which embeds `err`, as a `TermalDelegationUnknownOutcome`.
-fn termal_delegation_unknown_outcome(err: &anyhow::Error, message: String) -> anyhow::Error {
+pub(crate) fn termal_delegation_unknown_outcome(
+    err: &anyhow::Error,
+    message: String,
+) -> anyhow::Error {
     TermalDelegationUnknownOutcome {
         message,
         transport_timeout: err
@@ -236,25 +243,31 @@ impl TermalDelegationMcpBridge {
     /// How long the bridge waits on `call`, its allowance: the call's budget,
     /// what it may spend beyond an ordinary request, plus the normal request
     /// timeout.
-    fn allowance(&self, call: DelegationLongCall) -> Duration {
+    pub(crate) fn allowance(&self, call: DelegationLongCall) -> Duration {
         call.budget(self.turn_delivery_budget) + self.request_timeout
     }
 
     /// A single-attempt POST for `call`, waited on for its allowance; a
     /// transport error names that wait.
-    fn post_long_call(&self, call: DelegationLongCall, path: &str, body: &Value) -> Result<Value> {
+    pub(crate) fn post_long_call(
+        &self,
+        call: DelegationLongCall,
+        path: &str,
+        body: &Value,
+    ) -> Result<Value> {
         self.post_long_call_with_sender(call, path, body, |request| request.send())
     }
 
     // Keep request construction and response classification together while
     // allowing a scripted transport clock to check issued-stage overruns.
-    fn post_long_call_with_sender(
+    pub(crate) fn post_long_call_with_sender(
         &self,
         call: DelegationLongCall,
         path: &str,
         body: &Value,
-        send: impl FnOnce(reqwest::blocking::RequestBuilder)
-            -> reqwest::Result<reqwest::blocking::Response>,
+        send: impl FnOnce(
+            reqwest::blocking::RequestBuilder,
+        ) -> reqwest::Result<reqwest::blocking::Response>,
     ) -> Result<Value> {
         let allowance = self.allowance(call);
         self.decode_response_for_request_within(
@@ -262,10 +275,12 @@ impl TermalDelegationMcpBridge {
             path,
             allowance,
             Some(body),
-            send(self.client
-                .post(self.url(path))
-                .timeout(allowance)
-                .json(body)),
+            send(
+                self.client
+                    .post(self.url(path))
+                    .timeout(allowance)
+                    .json(body),
+            ),
         )
     }
 
@@ -273,12 +288,12 @@ impl TermalDelegationMcpBridge {
     /// withholds a response waits its own request timeout, not a production
     /// wake budget.
     #[cfg(test)]
-    fn with_turn_delivery_budget(mut self, budget: Duration) -> Self {
+    pub(crate) fn with_turn_delivery_budget(mut self, budget: Duration) -> Self {
         self.turn_delivery_budget = budget;
         self
     }
 
-    fn post_json_with_safe_replay_within(
+    pub(crate) fn post_json_with_safe_replay_within(
         &self,
         path: &str,
         body: &Value,
@@ -296,7 +311,7 @@ impl TermalDelegationMcpBridge {
     /// `decode_response` for a call sent with its own allowance, `timeout`, so
     /// a transport error names the wait that ran out rather than the ordinary
     /// request timeout.
-    fn decode_response_within(
+    pub(crate) fn decode_response_within(
         &self,
         method: &'static str,
         path: &str,
@@ -365,6 +380,11 @@ impl TermalDelegationMcpBridge {
                     .map(str::to_owned)
             })
             .unwrap_or(text);
-        Err(TermalDelegationApiError { status, message, output_limit }.into())
+        Err(TermalDelegationApiError {
+            status,
+            message,
+            output_limit,
+        }
+        .into())
     }
 }

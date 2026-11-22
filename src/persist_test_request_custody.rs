@@ -3,11 +3,11 @@
 
 #[cfg(test)]
 thread_local! {
-    static TEST_REQUEST_CUSTODY_FLOOR_FAULT: std::cell::Cell<Option<&'static str>> =
+    pub(crate) static TEST_REQUEST_CUSTODY_FLOOR_FAULT: std::cell::Cell<Option<&'static str>> =
         const { std::cell::Cell::new(None) };
 }
 
-fn test_request_custody_floor_fault(phase: &'static str) -> Result<()> {
+pub(crate) fn test_request_custody_floor_fault(phase: &'static str) -> Result<()> {
     #[cfg(test)]
     if TEST_REQUEST_CUSTODY_FLOOR_FAULT.with(|fault| fault.get()) == Some(phase) {
         bail!("injected test-request custody migration failure at {phase}");

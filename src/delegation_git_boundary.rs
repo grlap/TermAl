@@ -6,7 +6,7 @@ use std::{fs, io, path::Path as FsPath};
 
 use super::{identity_open, normalize_path_best_effort, review_freeze_is_reparse};
 
-pub(super) fn is_valid(directory: &FsPath, marker_is_dir: bool) -> io::Result<bool> {
+pub(crate) fn is_valid(directory: &FsPath, marker_is_dir: bool) -> io::Result<bool> {
     let marker = directory.join(".git");
     let git_dir = if marker_is_dir {
         marker.clone()
@@ -57,7 +57,7 @@ pub(super) fn is_valid(directory: &FsPath, marker_is_dir: bool) -> io::Result<bo
         && fs::metadata(common_dir.join("refs"))?.is_dir())
 }
 
-pub(super) fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
+pub(crate) fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
     use std::io::Read as _;
     let inspected = fs::symlink_metadata(path)?;
     if !inspected.is_file()

@@ -1,6 +1,6 @@
 // Add columns through the existing coordination migration transaction. The
 // historical table definitions remain frozen for schema admission and import.
-const MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL: &str = "
+pub(crate) const MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL: &str = "
     ALTER TABLE mailbox_messages ADD COLUMN test_request_json TEXT;
     ALTER TABLE mailbox_messages ADD COLUMN test_request_scope_json TEXT;
     ALTER TABLE mailbox_relay_intents ADD COLUMN test_request_json TEXT;
@@ -11,7 +11,7 @@ const MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL: &str = "
 // remove this extension before claiming an older exact schema. Never let a
 // downgrade helper discard custody to make that old-reader control pass.
 #[cfg(test)]
-fn remove_empty_test_request_custody_columns_for_test(connection: &rusqlite::Connection) {
+pub(crate) fn remove_empty_test_request_custody_columns_for_test(connection: &rusqlite::Connection) {
     remove_empty_test_request_settlement_columns_for_test(connection);
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
         let retained: u64 = connection.query_row(

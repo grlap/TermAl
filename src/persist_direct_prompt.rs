@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 thread_local! {
-    static TEST_DIRECT_PROMPT_FLOOR_FAULT: std::cell::Cell<Option<&'static str>> =
+    pub(crate) static TEST_DIRECT_PROMPT_FLOOR_FAULT: std::cell::Cell<Option<&'static str>> =
         const { std::cell::Cell::new(None) };
 }
 

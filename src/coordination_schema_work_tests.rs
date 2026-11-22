@@ -17,13 +17,13 @@ thread_local! {
     static SAMPLES: RefCell<Option<Vec<Sample>>> = const { RefCell::new(None) };
 }
 
-pub(super) struct Span {
+pub(crate) struct Span {
     phase: &'static str,
     version: Option<String>,
     started: Instant,
 }
 
-pub(super) fn span(phase: &'static str, version: Option<&str>) -> Option<Span> {
+pub(crate) fn span(phase: &'static str, version: Option<&str>) -> Option<Span> {
     SAMPLES.with(|samples| {
         samples.borrow().as_ref()?;
         Some(Span {

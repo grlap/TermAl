@@ -65,7 +65,7 @@ const METADATA_UNIT_CHECKPOINT_FIELDS: &[&str] = &[
     "codex",
 ];
 
-const METADATA_UNIT_FIELDS: &[&str] = &[
+pub(crate) const METADATA_UNIT_FIELDS: &[&str] = &[
     "federation",
     "preferences",
     "revision",
@@ -97,7 +97,7 @@ const METADATA_UNIT_FIELDS: &[&str] = &[
     "codex",
 ];
 
-fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUnits> {
+pub(crate) fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUnits> {
     // Project each field independently. There is no serialized global document
     // on the write path; collection members become independent durable rows.
     let mut units = BTreeMap::new();
@@ -178,7 +178,7 @@ fn project_metadata_units(metadata: &PersistedState) -> Result<PersistMetadataUn
     Ok(units)
 }
 
-fn metadata_value_to_units(value: Value) -> Result<PersistMetadataUnits> {
+pub(crate) fn metadata_value_to_units(value: Value) -> Result<PersistMetadataUnits> {
     let Value::Object(fields) = value else {
         return Err(anyhow!("persisted metadata must be an object"));
     };
@@ -220,7 +220,7 @@ fn metadata_value_to_units(value: Value) -> Result<PersistMetadataUnits> {
     Ok(units)
 }
 
-fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetadataUnits> {
+pub(crate) fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetadataUnits> {
     let units = read_metadata_units_unchecked(connection)?;
     if units.is_empty() && metadata_units_are_uninitialized(connection)? {
         return Ok(units);
@@ -230,11 +230,11 @@ fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetad
     Ok(units)
 }
 
-fn validate_metadata_unit_inventory(units: &PersistMetadataUnits) -> Result<()> {
+pub(crate) fn validate_metadata_unit_inventory(units: &PersistMetadataUnits) -> Result<()> {
     validate_metadata_unit_inventory_for_fields(units, METADATA_UNIT_FIELDS)
 }
 
-fn validate_metadata_unit_inventory_for_floor(
+pub(crate) fn validate_metadata_unit_inventory_for_floor(
     units: &PersistMetadataUnits,
     requires_obligations: bool,
 ) -> Result<()> {
@@ -307,7 +307,7 @@ fn metadata_units_are_uninitialized(connection: &rusqlite::Connection) -> Result
     Ok(!has_provenance && first_normalized_state_authority_table_with_rows(connection)?.is_none())
 }
 
-fn read_metadata_units_unchecked(
+pub(crate) fn read_metadata_units_unchecked(
     connection: &rusqlite::Connection,
 ) -> Result<PersistMetadataUnits> {
     let mut statement = connection.prepare(
@@ -324,7 +324,7 @@ fn read_metadata_units_unchecked(
         .context("failed to read normalized metadata units")
 }
 
-fn metadata_units_to_value(units: &PersistMetadataUnits) -> Result<Value> {
+pub(crate) fn metadata_units_to_value(units: &PersistMetadataUnits) -> Result<Value> {
     let mut fields = serde_json::Map::new();
     let mut counts = BTreeMap::new();
     for ((field, key), (kind, encoded)) in units {
@@ -390,7 +390,7 @@ fn metadata_units_to_value(units: &PersistMetadataUnits) -> Result<Value> {
     Ok(Value::Object(fields))
 }
 
-fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Result<String> {
+pub(crate) fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Result<String> {
     let version: Option<String> = connection
         .query_row(
             "SELECT value FROM meta WHERE key='schema_version'",
@@ -431,7 +431,7 @@ fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Resu
     }
 }
 
-fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Option<String>> {
+pub(crate) fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Option<String>> {
     let version = persisted_metadata_storage_version(connection)?;
     if version == "2-metadata-units-1" {
         let units = read_metadata_units_unchecked(connection)?;
@@ -486,7 +486,7 @@ fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Opt
     )?)?))
 }
 
-fn read_persisted_metadata_field(
+pub(crate) fn read_persisted_metadata_field(
     connection: &rusqlite::Connection,
     field: &str,
 ) -> Result<Option<Value>> {
@@ -533,7 +533,7 @@ fn read_persisted_metadata_field(
         .and_then(|fields| fields.remove(field)))
 }
 
-fn metadata_unit_generation(connection: &rusqlite::Connection) -> Result<u64> {
+pub(crate) fn metadata_unit_generation(connection: &rusqlite::Connection) -> Result<u64> {
     let encoded: Option<String> = connection
         .query_row(
             "SELECT value FROM meta WHERE key='metadata_units_generation'",
@@ -549,7 +549,7 @@ fn metadata_unit_generation(connection: &rusqlite::Connection) -> Result<u64> {
 
 // Caller holds a read/write transaction so multi-field fence proofs share one
 // committed cut. Only required collections are decoded, never app_state.
-fn read_metadata_for_fence(
+pub(crate) fn read_metadata_for_fence(
     connection: &rusqlite::Connection,
     fields: &[&str],
 ) -> Result<Option<PersistedState>> {

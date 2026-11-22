@@ -154,7 +154,7 @@ impl std::fmt::Display for PersistTranscriptIdentityConflict {
 }
 impl std::error::Error for PersistTranscriptIdentityConflict {}
 
-fn write_serialized_persisted_messages(
+pub(crate) fn write_serialized_persisted_messages(
     tx: &rusqlite::Transaction<'_>,
     session: &SerializedPersistedSession,
 ) -> Result<()> {

@@ -2,7 +2,7 @@
 // Shared with the metadata-unit rollback tests: sqlite3 CLI directives are
 // not SQL and must be removed before executing the same script via rusqlite.
 #[cfg(test)]
-fn metadata_units_rollback_sql() -> String {
+pub(crate) fn metadata_units_rollback_sql() -> String {
     include_str!("../scripts/state-metadata-units-rollback.sql")
         .lines()
         .filter(|line| !line.starts_with('.'))

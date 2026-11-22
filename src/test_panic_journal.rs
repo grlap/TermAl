@@ -55,7 +55,10 @@ const TEST_PANIC_JOURNAL_ENV: &str = "TERMAL_TEST_PANIC_JOURNAL";
     ),
     unsafe(link_section = ".init_array")
 )]
-#[cfg_attr(target_vendor = "apple", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[cfg_attr(
+    target_vendor = "apple",
+    unsafe(link_section = "__DATA,__mod_init_func")
+)]
 static TEST_PANIC_JOURNAL_AT_LOAD: extern "C" fn() = install_test_panic_journal_at_load;
 
 /// Runs once at load, before main. It reads the variable and, when it is

@@ -153,7 +153,7 @@ fn reject_unversioned_native_test_custody(
     Ok(())
 }
 
-fn validate_native_test_predecessor_inventory(
+pub(crate) fn validate_native_test_predecessor_inventory(
     units: &PersistMetadataUnits,
     activated: bool,
 ) -> Result<()> {

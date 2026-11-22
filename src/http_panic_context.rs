@@ -1,8 +1,10 @@
+use super::*;
+
 /// Small diagnostic facts only; never a URL, query, body, grant or authority.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-struct HttpPanicContext {
-    route: String,
-    session: String,
+pub(crate) struct HttpPanicContext {
+    pub(crate) route: String,
+    pub(crate) session: String,
 }
 
 impl Default for HttpPanicContext {
@@ -23,7 +25,7 @@ fn capped_http_diagnostic(value: &str) -> String {
 }
 
 impl HttpPanicContext {
-    fn from_request(request: &axum::extract::Request) -> Self {
+    pub(crate) fn from_request(request: &axum::extract::Request) -> Self {
         let Some(route) = request.extensions().get::<axum::extract::MatchedPath>() else {
             return Self::default();
         };
@@ -52,7 +54,7 @@ impl HttpPanicContext {
 }
 
 #[derive(Default)]
-struct HttpConnectionDiagnostic {
+pub(crate) struct HttpConnectionDiagnostic {
     next_response: u64,
     buffered: Option<(u64, HttpPanicContext)>,
     ambiguous: bool,
@@ -60,11 +62,11 @@ struct HttpConnectionDiagnostic {
 
 tokio::task_local! {
     // Each spawned connection owns one bounded slot. No task/thread registry.
-    static HTTP_CONNECTION_DIAGNOSTIC: std::cell::RefCell<HttpConnectionDiagnostic>;
-    static HTTP_REQUEST_DIAGNOSTIC: HttpPanicContext;
+    pub(crate) static HTTP_CONNECTION_DIAGNOSTIC: std::cell::RefCell<HttpConnectionDiagnostic>;
+    pub(crate) static HTTP_REQUEST_DIAGNOSTIC: HttpPanicContext;
 }
 
-fn current_http_panic_context() -> HttpPanicContext {
+pub(crate) fn current_http_panic_context() -> HttpPanicContext {
     HTTP_REQUEST_DIAGNOSTIC
         .try_with(Clone::clone)
         .ok()
@@ -83,7 +85,7 @@ fn current_http_panic_context() -> HttpPanicContext {
         })
 }
 
-fn begin_http_response_diagnostic() -> Option<u64> {
+pub(crate) fn begin_http_response_diagnostic() -> Option<u64> {
     HTTP_CONNECTION_DIAGNOSTIC
         .try_with(|slot| {
             let mut slot = slot.try_borrow_mut().ok()?;
@@ -98,7 +100,7 @@ fn begin_http_response_diagnostic() -> Option<u64> {
         .flatten()
 }
 
-fn claim_http_write_diagnostic(owner: Option<u64>, context: &HttpPanicContext) {
+pub(crate) fn claim_http_write_diagnostic(owner: Option<u64>, context: &HttpPanicContext) {
     let _ = HTTP_CONNECTION_DIAGNOSTIC.try_with(|slot| {
         if let Ok(mut slot) = slot.try_borrow_mut() {
             let Some(owner) = owner else {
@@ -115,7 +117,7 @@ fn claim_http_write_diagnostic(owner: Option<u64>, context: &HttpPanicContext) {
     });
 }
 
-fn clear_http_write_diagnostic() {
+pub(crate) fn clear_http_write_diagnostic() {
     let _ = HTTP_CONNECTION_DIAGNOSTIC.try_with(|slot| {
         if let Ok(mut slot) = slot.try_borrow_mut() {
             slot.buffered = None;
@@ -186,7 +188,7 @@ impl<T: tokio::io::AsyncWrite + Unpin> tokio::io::AsyncWrite for HttpDiagnosticI
 /// connection-future scoping hook. Reuse axum's accept/error handling and watch
 /// completion guards; SSE signalling and the post-serve persist drain stay in
 /// run_server. No connection registry, second listener or shutdown deadline.
-async fn serve_http_with_panic_context(
+pub(crate) async fn serve_http_with_panic_context(
     mut listener: TcpListener,
     router: Router,
     shutdown: impl std::future::Future<Output = ()>,
@@ -215,7 +217,7 @@ async fn serve_http_with_panic_context(
     Ok(())
 }
 
-async fn scoped_http_connection<I>(
+pub(crate) async fn scoped_http_connection<I>(
     io: I,
     router: Router,
     shutdown: tokio::sync::watch::Receiver<bool>,
@@ -259,11 +261,11 @@ async fn run_http_connection<I>(
     }
 }
 
-const HOST_PANIC_TRACE_FRAMES: usize = 32;
+pub(crate) const HOST_PANIC_TRACE_FRAMES: usize = 32;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "capture", rename_all = "camelCase")]
-enum HostPanicTrace {
+pub(crate) enum HostPanicTrace {
     WindowsStack {
         count: u16,
         addresses: [u64; HOST_PANIC_TRACE_FRAMES],
@@ -272,7 +274,7 @@ enum HostPanicTrace {
     Unavailable,
 }
 
-fn capture_host_panic_trace() -> HostPanicTrace {
+pub(crate) fn capture_host_panic_trace() -> HostPanicTrace {
     #[cfg(windows)]
     {
         let mut frames = [std::ptr::null_mut(); HOST_PANIC_TRACE_FRAMES];

@@ -1,6 +1,6 @@
 // Extends the ORIGINAL send owner through the existing boot-time transaction.
 // Older readers refuse this floor before loading or rewriting any custody.
-const MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL: &str = "
+pub(crate) const MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL: &str = "
     ALTER TABLE mailbox_messages ADD COLUMN test_request_settlement_json TEXT;
     ALTER TABLE mailbox_relay_intents ADD COLUMN test_request_settlement_json TEXT;
 ";

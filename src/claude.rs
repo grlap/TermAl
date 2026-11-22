@@ -13,47 +13,49 @@
 // across agents (error summarization, preview text, command language
 // inference, prompt-image parsing, etc.).
 
+use super::*;
+
 /// Tracks Claude turn state.
 #[derive(Default)]
-struct ClaudeTurnState {
-    approval_keys_this_turn: HashSet<String>,
+pub(crate) struct ClaudeTurnState {
+    pub(crate) approval_keys_this_turn: HashSet<String>,
     /// Bounds automatic AskUserQuestion self-resolution in a headless turn.
     /// Fresh request ids bypass ordinary dedupe, so without this counter a
     /// re-asking model could loop forever while appending audit cards.
-    unattended_questions_self_resolved_this_turn: usize,
-    parallel_agent_group_key: Option<String>,
-    parallel_agent_order: Vec<String>,
-    parallel_agents: HashMap<String, ParallelAgentProgress>,
-    pending_tools: HashMap<String, ClaudeToolUse>,
+    pub(crate) unattended_questions_self_resolved_this_turn: usize,
+    pub(crate) parallel_agent_group_key: Option<String>,
+    pub(crate) parallel_agent_order: Vec<String>,
+    pub(crate) parallel_agents: HashMap<String, ParallelAgentProgress>,
+    pub(crate) pending_tools: HashMap<String, ClaudeToolUse>,
     /// Whether this attempt emitted transcript content, reached a tool /
     /// approval boundary, or produced a protocol event not explicitly proven
     /// effect-free. Transient API retries are allowed only while this is false,
     /// so replay cannot duplicate a partially executed turn or hidden hook.
-    replay_became_unsafe: bool,
-    streamed_assistant_text: String,
-    saw_text_delta: bool,
+    pub(crate) replay_became_unsafe: bool,
+    pub(crate) streamed_assistant_text: String,
+    pub(crate) saw_text_delta: bool,
 }
 
 /// Represents Claude tool use.
-struct ClaudeToolUse {
-    command: Option<String>,
-    description: Option<String>,
-    file_path: Option<String>,
-    name: String,
-    subagent_type: Option<String>,
+pub(crate) struct ClaudeToolUse {
+    pub(crate) command: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) file_path: Option<String>,
+    pub(crate) name: String,
+    pub(crate) subagent_type: Option<String>,
     /// A Bash call's `run_in_background`: its result marks the launch, not
     /// the command's end.
-    run_in_background: bool,
+    pub(crate) run_in_background: bool,
 }
 
 /// Represents the Claude tool permission request payload.
-struct ClaudeToolPermissionRequest {
-    detail: String,
-    permission_mode_for_session: Option<String>,
-    request_id: String,
-    title: String,
-    tool_name: String,
-    tool_input: Value,
+pub(crate) struct ClaudeToolPermissionRequest {
+    pub(crate) detail: String,
+    pub(crate) permission_mode_for_session: Option<String>,
+    pub(crate) request_id: String,
+    pub(crate) title: String,
+    pub(crate) tool_name: String,
+    pub(crate) tool_input: Value,
 }
 
 /// Denial for `AskUserQuestion` on sessions that are genuinely
@@ -72,7 +74,7 @@ const CLAUDE_UNATTENDED_QUESTION_DENIAL: &str = "TermAl denied AskUserQuestion b
 /// Told to Claude when the user skips an AskUserQuestion card. The matching
 /// tool-result error is an expected denial outcome, not a second transcript
 /// error after the resolved question card.
-const CLAUDE_USER_DECLINED_QUESTION_MESSAGE: &str =
+pub(crate) const CLAUDE_USER_DECLINED_QUESTION_MESSAGE: &str =
     "The user declined to answer these questions. Decide using your best judgment and continue.";
 
 /// Title of the resolved transcript card recorded when TermAl self-resolves
@@ -87,7 +89,7 @@ const CLAUDE_SELF_RESOLVED_QUESTION_DETAIL: &str = "TermAl asked Claude to decid
 
 /// A headless turn may ask a small number of self-resolved questions, but the
 /// fourth attempt fails the turn instead of looping forever.
-const MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN: usize = 3;
+pub(crate) const MAX_CLAUDE_UNATTENDED_QUESTIONS_PER_TURN: usize = 3;
 
 /// Reserves one unattended self-resolution slot for this turn. This is
 /// called after transport-specific request-id dedupe, so replaying the same
@@ -131,7 +133,11 @@ fn claude_question_is_unattended(
 impl AppState {
     /// Resolve the exact tool capability before consulting current authority.
     /// Result-submission authority must never grant another control-plane tool.
-    fn claude_control_plane_request_allowed(&self, session_id: &str, message: &Value) -> bool {
+    pub(crate) fn claude_control_plane_request_allowed(
+        &self,
+        session_id: &str,
+        message: &Value,
+    ) -> bool {
         parse_claude_tool_permission_request(message)
             .and_then(|request| {
                 delegation_control_plane_capability_for_claude_tool_name(&request.tool_name)
@@ -143,7 +149,11 @@ impl AppState {
 
     /// What the host itself admits for this exact permission request, from
     /// the session's current delegation authority.
-    fn claude_host_admission(&self, session_id: &str, message: &Value) -> ClaudeHostAdmission {
+    pub(crate) fn claude_host_admission(
+        &self,
+        session_id: &str,
+        message: &Value,
+    ) -> ClaudeHostAdmission {
         ClaudeHostAdmission {
             control_plane: self.claude_control_plane_request_allowed(session_id, message),
             tracker_reads: {
@@ -159,24 +169,24 @@ impl AppState {
 /// What the host admits for one permission request on its own authority,
 /// whatever the session's approval mode would otherwise answer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ClaudeHostAdmission {
+pub(crate) struct ClaudeHostAdmission {
     /// The request names a TermAl control-plane tool and the session holds
     /// that exact capability (`claude_control_plane_request_allowed`).
-    control_plane: bool,
+    pub(crate) control_plane: bool,
     /// The session is a read-only child that may read the tracker
     /// (`read_only_child_tracker_reads_allowed_locked`). Which calls are reads
     /// is decided per request by `engram_mcp_tool_call_only_reads`.
-    tracker_reads: bool,
+    pub(crate) tracker_reads: bool,
     /// What runs this runtime's Bash tool, decided once at spawn
     /// (`claude_bash_tool_shell`). Unproven unless the runtime's reader says
     /// otherwise.
-    bash_tool_shell: ClaudeBashToolShell,
+    pub(crate) bash_tool_shell: ClaudeBashToolShell,
 }
 
 /// What TermAl knows about the shell Claude Code runs its Bash tool in,
 /// decided once at spawn from the environment handed to the process.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum ClaudeBashToolShell {
+pub(crate) enum ClaudeBashToolShell {
     /// Not proven to be bash: a shell-changing setting is in the spawned
     /// environment, or the runtime was not started by TermAl's launch path.
     /// The read-only checker stays strict.
@@ -202,7 +212,7 @@ impl From<bool> for ClaudeHostAdmission {
 /// delegation-child identity read together with `approval_mode` under one
 /// state lock (see `claude_control_request_context`). `host_admission` is for
 /// this exact message, resolved by `claude_host_admission`.
-fn classify_claude_control_request(
+pub(crate) fn classify_claude_control_request(
     message: &Value,
     state: &mut ClaudeTurnState,
     approval_mode: ClaudeApprovalMode,
@@ -513,7 +523,7 @@ fn parse_claude_ask_user_question_list(raw_questions: &[Value]) -> Result<Vec<Us
 
 /// Said when a read-only child that may read the tracker asks for a tracker
 /// call that is not one of the reads, so that it can adapt in one step.
-const CLAUDE_READ_ONLY_TRACKER_DENIAL: &str = "TermAl denied this tracker request because this \
+pub(crate) const CLAUDE_READ_ONLY_TRACKER_DENIAL: &str = "TermAl denied this tracker request because this \
      Claude delegation is read-only. It may only read the tracker: `next` with `peek: true`, \
      `ls`, `search`, `show`, and `memories` without a context generation, each with no argument \
      other than the ones that read takes. Every other tracker call writes and belongs to the \
@@ -552,7 +562,7 @@ fn read_only_claude_permission_decision(
     }
 }
 
-use claude_read_only_tool_permission::{
+pub(crate) use claude_read_only_tool_permission::{
     ClaudeBashExecutor, claude_tool_permission_request_is_read_only,
 };
 
@@ -567,12 +577,12 @@ mod claude_read_only_tool_permission {
     /// module can make one: a construction anywhere else does not compile, so
     /// no other caller can select `ClaudeBashQuotedSeparators::KeptForBash`.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub(super) struct ClaudeBashExecutor(());
+    pub(crate) struct ClaudeBashExecutor(());
 
     // Read-only Claude reviewer children need unattended review commands, but the
     // parser is intentionally conservative: unsupported shell syntax denies by
     // default, and only simple stderr-to-dev-null redirection is tolerated.
-    pub(super) fn claude_tool_permission_request_is_read_only(
+    pub(crate) fn claude_tool_permission_request_is_read_only(
         request: &ClaudeToolPermissionRequest,
         cwd: &str,
         bash_tool_shell: ClaudeBashToolShell,
@@ -698,7 +708,7 @@ enum ClaudeBashQuotedSeparators {
 /// The read-only check for a command whose shell is not proven to be bash: a
 /// quoted separator is refused. Every caller but the Claude Bash permission
 /// adapter uses this.
-fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
+pub(crate) fn claude_bash_command_is_read_only(command: &str, cwd: &str) -> bool {
     claude_bash_command_is_read_only_with(command, cwd, ClaudeBashQuotedSeparators::Refused)
 }
 
@@ -712,7 +722,7 @@ fn claude_bash_command_is_read_only_with(
 
 /// Writable command observations have no enforced no-fetch environment. Keep
 /// their carried-check exemptions separate from guarded reviewer permissions.
-fn claude_bash_command_preserves_carried_checks(command: &str, cwd: &str) -> bool {
+pub(crate) fn claude_bash_command_preserves_carried_checks(command: &str, cwd: &str) -> bool {
     claude_bash_command_is_read_only_with_git_policy(
         command,
         cwd,
@@ -1101,7 +1111,7 @@ fn claude_git_log_separators_are_grep_patterns(arguments: &[&str]) -> bool {
 
 /// The index in `tokens` (`git` first) of git's subcommand, past the leading
 /// options git's own check accepts; `None` for any other leading option.
-fn claude_git_subcommand_index(tokens: &[&str]) -> Option<usize> {
+pub(crate) fn claude_git_subcommand_index(tokens: &[&str]) -> Option<usize> {
     let mut index = 1;
     while let Some(option) = tokens.get(index).copied() {
         match option {
@@ -1318,7 +1328,7 @@ fn claude_expand_bash_loop_variable(command: &str, variable: &str, value: &str) 
 /// the exact repo and `.git/config` a plain `git ...` would, so it adds no exec-sink
 /// surface over what is already allowed. `cwd` is expected pre-normalized by the
 /// caller (see `spawn_claude_runtime`), and the target is normalized here the same way.
-fn claude_cd_segment_targets_cwd(segment: &str, cwd: &str) -> bool {
+pub(crate) fn claude_cd_segment_targets_cwd(segment: &str, cwd: &str) -> bool {
     let Some(tokens) = claude_bash_segment_tokens(segment) else {
         return false;
     };
@@ -1349,7 +1359,7 @@ fn claude_cd_segment_targets_cwd(segment: &str, cwd: &str) -> bool {
 }
 
 #[derive(Clone, Copy)]
-enum ClaudeLocalPathStyle {
+pub(crate) enum ClaudeLocalPathStyle {
     Posix,
     Windows,
 }
@@ -1358,7 +1368,7 @@ enum ClaudeLocalPathStyle {
 /// insensitive to one trailing separator and, on Windows only, separator spelling
 /// and case. POSIX backslashes are preserved. Used only to decide whether a `cd`
 /// target is the delegation's own `cwd`; it never touches the filesystem.
-fn claude_local_dir_match_key(path: &str, style: ClaudeLocalPathStyle) -> String {
+pub(crate) fn claude_local_dir_match_key(path: &str, style: ClaudeLocalPathStyle) -> String {
     let unified: String = path
         .chars()
         .map(|character| {
@@ -1383,12 +1393,12 @@ fn claude_local_dir_match_key(path: &str, style: ClaudeLocalPathStyle) -> String
 /// `cd <other-repo> && 'git' status` skip the cd-guard while the approval still runs git
 /// against the other repo. A segment that fails to tokenize is not treated as
 /// git here; the per-segment loop denies it regardless, so the command still fails closed.
-fn claude_segment_invokes_git(segment: &str) -> bool {
+pub(crate) fn claude_segment_invokes_git(segment: &str) -> bool {
     claude_bash_segment_tokens(segment)
         .is_some_and(|tokens| tokens.first().map(String::as_str) == Some("git"))
 }
 
-fn claude_bash_command_has_background_separator(command: &str) -> bool {
+pub(crate) fn claude_bash_command_has_background_separator(command: &str) -> bool {
     let mut quote: Option<char> = None;
     let mut characters = command.chars().peekable();
 
@@ -1433,7 +1443,7 @@ fn claude_bash_command_has_background_separator(command: &str) -> bool {
 /// are here so reviewers can fingerprint a diff (`git diff … | sha256sum`) to prove
 /// content identity — a common, entirely read-only review technique. `cmp`
 /// compares two files for the same reason; it has no option that writes a file.
-const CLAUDE_READ_ONLY_BASH_COMMANDS: &[&str] = &[
+pub(crate) const CLAUDE_READ_ONLY_BASH_COMMANDS: &[&str] = &[
     "cat",
     "cksum",
     "cmp",
@@ -1452,10 +1462,13 @@ const CLAUDE_READ_ONLY_BASH_COMMANDS: &[&str] = &[
 ];
 
 /// Commands allowed only with the arguments their own checks below accept.
-const CLAUDE_OPTION_CHECKED_BASH_COMMANDS: &[&str] =
+pub(crate) const CLAUDE_OPTION_CHECKED_BASH_COMMANDS: &[&str] =
     &["date", "rg", "find", "sed", "git", "engram"];
 
-fn claude_bash_tokens_are_read_only(tokens: &[&str], engram_review_root: Option<&str>) -> bool {
+pub(crate) fn claude_bash_tokens_are_read_only(
+    tokens: &[&str],
+    engram_review_root: Option<&str>,
+) -> bool {
     let Some(command) = tokens.first().copied() else {
         return false;
     };
@@ -1507,7 +1520,7 @@ fn claude_engram_source_is_read_only(tokens: &[&str], cwd: &str) -> bool {
     root.is_dir() && root.starts_with(review_root)
 }
 
-fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
+pub(crate) fn claude_bash_segment_tokens(segment: &str) -> Option<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
@@ -1814,7 +1827,7 @@ where
     false
 }
 
-fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
+pub(crate) fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
     // Skip a conservative allow-list of leading git global options (e.g.
     // `git --no-pager log`) before reading the subcommand. Unknown leading
     // options fail closed, so this never widens the allowed subcommand set.
@@ -1934,7 +1947,7 @@ fn claude_git_tokens_are_read_only(tokens: &[&str]) -> bool {
 /// git would expand to `option`. Git accepts unambiguous long-option
 /// abbreviations (`--ext` -> `--ext-diff`, `--textc` -> `--textconv`), so an
 /// exact-match deny-list is unsound; every abbreviation must fail closed too.
-fn claude_git_long_option_abbreviates(token: &str, option: &str) -> bool {
+pub(crate) fn claude_git_long_option_abbreviates(token: &str, option: &str) -> bool {
     if !token.starts_with("--") {
         return false;
     }
@@ -2032,7 +2045,7 @@ fn parse_claude_tool_permission_request(message: &Value) -> Option<ClaudeToolPer
 }
 
 /// Records Claude assistant text delta.
-fn record_claude_assistant_text_delta(
+pub(crate) fn record_claude_assistant_text_delta(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
     text: &str,
@@ -2054,7 +2067,7 @@ fn record_claude_assistant_text_delta(
 }
 
 /// Records Claude completed assistant text.
-fn record_claude_completed_assistant_text(
+pub(crate) fn record_claude_completed_assistant_text(
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
     text: &str,
@@ -2088,7 +2101,7 @@ fn record_claude_completed_assistant_text(
 }
 
 /// Finishes Claude assistant text stream.
-fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
+pub(crate) fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
     state: &mut ClaudeTurnState,
     recorder: &mut R,
 ) -> Result<()> {
@@ -2099,7 +2112,7 @@ fn finish_claude_assistant_text_stream<R: TurnRecorder + ?Sized>(
 }
 
 /// Clears Claude turn-local state.
-fn clear_claude_turn_state(state: &mut ClaudeTurnState) {
+pub(crate) fn clear_claude_turn_state(state: &mut ClaudeTurnState) {
     state.approval_keys_this_turn.clear();
     state.unattended_questions_self_resolved_this_turn = 0;
     state.parallel_agent_group_key = None;
@@ -2121,7 +2134,7 @@ const CLAUDE_SUBAGENT_PENDING_TOOL_LIMIT: usize = 256;
 /// but keeps their pending tool calls: a background subagent's call may end
 /// after the root turn that launched it, and its result must still find the
 /// call it answers.
-fn clear_claude_subagent_turn_state(state: &mut ClaudeTurnState) {
+pub(crate) fn clear_claude_subagent_turn_state(state: &mut ClaudeTurnState) {
     let mut pending = std::mem::take(&mut state.pending_tools);
     clear_claude_turn_state(state);
     if pending.len() > CLAUDE_SUBAGENT_PENDING_TOOL_LIMIT {
@@ -2131,7 +2144,7 @@ fn clear_claude_subagent_turn_state(state: &mut ClaudeTurnState) {
 }
 
 /// Resets Claude turn-local parser and recorder state.
-fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
+pub(crate) fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
     state: &mut ClaudeTurnState,
     recorder: &mut R,
 ) -> Result<()> {
@@ -2143,7 +2156,10 @@ fn reset_claude_turn_state<R: TurnRecorder + ?Sized>(
 /// Returns whether a system envelope is proven not to represent prompt work.
 /// `before_process_init` says the runtime has not yet reported its first
 /// `init`.
-fn claude_system_event_is_effect_free(message: &Value, before_process_init: bool) -> bool {
+pub(crate) fn claude_system_event_is_effect_free(
+    message: &Value,
+    before_process_init: bool,
+) -> bool {
     match message.get("subtype").and_then(Value::as_str) {
         Some("init") => true,
         // Live Claude Code 2.1.220 stream capture emits this status immediately
@@ -2184,7 +2200,7 @@ fn claude_user_event_is_prompt_echo(message: &Value) -> bool {
 }
 
 /// Handles Claude event.
-fn handle_claude_event(
+pub(crate) fn handle_claude_event(
     message: &Value,
     session_id: &mut Option<String>,
     state: &mut ClaudeTurnState,
@@ -2311,13 +2327,16 @@ fn handle_claude_event(
 }
 
 /// Registers Claude tool use.
-fn register_claude_tool_use(
+pub(crate) fn register_claude_tool_use(
     content: &Value,
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,
 ) -> Result<()> {
-    recorder.native_tool_start(content.get("id").and_then(Value::as_str),
-        content.get("name").and_then(Value::as_str) == Some("Bash"), content)?;
+    recorder.native_tool_start(
+        content.get("id").and_then(Value::as_str),
+        content.get("name").and_then(Value::as_str) == Some("Bash"),
+        content,
+    )?;
     let Some(tool_id) = content.get("id").and_then(Value::as_str) else {
         return Ok(());
     };
@@ -2401,7 +2420,7 @@ fn register_claude_tool_use(
     Ok(())
 }
 /// Handles Claude tool result.
-fn handle_claude_tool_result(
+pub(crate) fn handle_claude_tool_result(
     message: &Value,
     state: &mut ClaudeTurnState,
     recorder: &mut dyn TurnRecorder,

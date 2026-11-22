@@ -4,7 +4,7 @@
 // delegation loading, schema maintenance or persistence transactions.
 
 #[cfg(test)]
-fn load_session_records_from_sqlite(
+pub(crate) fn load_session_records_from_sqlite(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<Vec<PersistedSessionRecord>> {
@@ -12,7 +12,7 @@ fn load_session_records_from_sqlite(
 }
 
 #[cfg(test)]
-fn load_session_records_from_sqlite_with_skipped(
+pub(crate) fn load_session_records_from_sqlite_with_skipped(
     connection: &rusqlite::Connection,
     path: &FsPath,
 ) -> Result<(Vec<PersistedSessionRecord>, BTreeSet<String>, usize)> {
@@ -183,7 +183,7 @@ fn load_persisted_prompt_history(
     Ok(missing_history_with_messages)
 }
 
-fn load_persisted_session_tail(
+pub(crate) fn load_persisted_session_tail(
     connection: &rusqlite::Connection,
     path: &FsPath,
     record: &mut PersistedSessionRecord,
@@ -308,7 +308,7 @@ fn load_persisted_session_tail(
     Ok(())
 }
 
-fn persisted_message_position(
+pub(crate) fn persisted_message_position(
     path: &FsPath,
     session_id: &str,
     message_id: &str,
@@ -317,7 +317,7 @@ fn persisted_message_position(
     persisted_message_position_with_connection(&connection, session_id, message_id)
 }
 
-fn persisted_message_position_with_connection(
+pub(crate) fn persisted_message_position_with_connection(
     connection: &rusqlite::Connection,
     session_id: &str,
     message_id: &str,
@@ -340,7 +340,7 @@ fn persisted_message_position_with_connection(
 }
 
 #[cfg(test)]
-fn load_persisted_message_range(
+pub(crate) fn load_persisted_message_range(
     path: &FsPath,
     session_id: &str,
     start_index: usize,
@@ -353,7 +353,7 @@ fn load_persisted_message_range(
     load_persisted_message_range_with_connection(&connection, session_id, start_index, end_index)
 }
 
-fn load_persisted_message_range_with_connection(
+pub(crate) fn load_persisted_message_range_with_connection(
     connection: &rusqlite::Connection,
     session_id: &str,
     start_index: usize,

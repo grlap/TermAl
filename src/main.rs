@@ -3,7 +3,7 @@ Backend composition guide
 main.rs owns three top-level concerns:
   1. selecting the process mode
   2. assembling the HTTP router
-  3. stitching the backend together through include! fragments
+  3. declaring the backend's modules and re-exporting their items
 High-level flow:
 CLI args
   -> run()
@@ -20,7 +20,7 @@ src/orchestrators.rs, and the Telegram relay fragments named below.
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-// Every `eprintln!` in the crate, include! fragments and child modules alike,
+// Every `eprintln!` in the crate, in every module,
 // goes through the host console log (host_log.rs): in server mode each line
 // gets a UTC timestamp and recurring diagnostics are rate limited per kind.
 macro_rules! eprintln {
@@ -1096,7 +1096,9 @@ mod federation_mailbox_routes;
 use federation_mailbox_routes::*;
 mod federation_native_binding_proof;
 use federation_native_binding_proof::*;
-include!("federation_mailbox_references.rs");
+#[macro_use]
+mod federation_mailbox_references;
+use federation_mailbox_references::*;
 mod federation_mailbox_reference_routes;
 use federation_mailbox_reference_routes::*;
 mod federation_mailbox_store;
@@ -1261,7 +1263,8 @@ mod remote_codex_proxies;
 mod remote_session_proxies;
 #[cfg(test)]
 use remote_session_proxies::*;
-include!("remote_sync.rs");
+mod remote_sync;
+use remote_sync::*;
 #[cfg(test)]
 mod test_temp_paths;
 #[cfg(test)]
@@ -1271,7 +1274,8 @@ mod test_temp_root;
 #[cfg(test)]
 use test_temp_root::*;
 #[cfg(test)]
-include!("test_panic_journal.rs");
+mod test_panic_journal;
+
 mod state;
 use state::*;
 mod state_lock_observer;
@@ -1407,7 +1411,8 @@ mod delegation_mcp_source_root;
 use delegation_mcp_source_root::*;
 mod delegation_mcp_named_root_release;
 use delegation_mcp_named_root_release::*;
-include!("delegation_mcp_timeouts.rs");
+mod delegation_mcp_timeouts;
+use delegation_mcp_timeouts::*;
 mod delegation_mcp_durability_pending;
 use delegation_mcp_durability_pending::*;
 mod delegation_mcp_review_freeze;
@@ -1450,8 +1455,12 @@ use engram_named_root_capacity::*;
 mod engram_named_root_test_transport;
 #[cfg(test)]
 use engram_named_root_test_transport::*;
-include!("bounded_read_cleanup.rs");
-include!("bounded_read_retained.rs");
+mod bounded_read_cleanup;
+#[cfg(any(unix, test))]
+use bounded_read_cleanup::*;
+mod bounded_read_retained;
+#[cfg(any(unix, test))]
+use bounded_read_retained::*;
 mod bounded_read_process;
 use bounded_read_process::*;
 mod review_freeze_process;
@@ -1562,7 +1571,14 @@ use test_run_phase_trace::*;
 mod test_run_history_probe;
 #[cfg(test)]
 use test_run_history_probe::*;
-include!("test_run_history_store.rs");
+mod test_run_history_store;
+#[cfg(test)]
+use test_run_history_store::{
+    SkipContractGuardForTiming, TEST_HISTORY_INDEX_MAINTENANCE, contract_guard_skipped,
+};
+use test_run_history_store::{
+    TestRunCompactedStore, TestRunLifecycleKey, TestRunObservationStore, TestRunRegistrationStore,
+};
 mod test_run_observations;
 use test_run_observations::*;
 mod test_run_overview;
@@ -1617,7 +1633,10 @@ mod engram_retry_schedule;
 
 mod provider_capacity_retry;
 use provider_capacity_retry::*;
-include!("message_sequence.rs");
+mod message_sequence;
+use message_sequence::SharedSequence;
+type MessageSequence = SharedSequence<Message>;
+type SessionSequence = SharedSequence<SessionRecord>;
 mod messages;
 use messages::*;
 mod workspace_watch;
@@ -1630,7 +1649,8 @@ mod codex_validation;
 use codex_validation::*;
 mod persisted_state;
 use persisted_state::*;
-include!("persist.rs");
+mod persist;
+use persist::*;
 mod persist_fence;
 use persist_fence::*;
 mod persist_tick_timings;
@@ -1639,7 +1659,8 @@ mod persist_observer;
 use persist_observer::*;
 mod host_lifecycle;
 use host_lifecycle::*;
-include!("coordination_persist.rs");
+mod coordination_persist;
+use coordination_persist::*;
 mod mailboxes;
 use mailboxes::*;
 mod mailbox_status_text;
@@ -1778,7 +1799,8 @@ mod session_restart_recovery;
 use session_restart_recovery::*;
 mod state_inner;
 use state_inner::*;
-include!("delegations.rs");
+mod delegations;
+use delegations::*;
 mod delegation_inventory;
 use delegation_inventory::*;
 mod delegation_worker;
@@ -1795,7 +1817,8 @@ mod delegation_followup_admission;
 use delegation_followup_admission::*;
 mod delegation_result_parser;
 use delegation_result_parser::*;
-include!("ids.rs");
+mod ids;
+use ids::*;
 mod app_boot;
 use app_boot::*;
 mod server_instance_lock;
@@ -1821,7 +1844,8 @@ mod turns;
 use turns::*;
 mod recorders;
 use recorders::*;
-include!("claude.rs");
+mod claude;
+use claude::*;
 mod claude_read_only_git;
 use claude_read_only_git::*;
 mod claude_read_only_refusal;
@@ -1832,7 +1856,8 @@ mod api;
 use api::*;
 mod http_write_chunks;
 use http_write_chunks::*;
-include!("http_panic_context.rs");
+mod http_panic_context;
+use http_panic_context::*;
 mod api_git;
 use api_git::*;
 mod api_files;

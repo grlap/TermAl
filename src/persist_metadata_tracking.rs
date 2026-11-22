@@ -8,7 +8,7 @@ mod persist_metadata_tracking {
     use std::sync::Arc;
 
     #[derive(Clone)]
-    pub(super) struct PersistMetadataStamp {
+    pub(crate) struct PersistMetadataStamp {
         identity: Arc<()>,
         generation: u64,
     }
@@ -20,19 +20,19 @@ mod persist_metadata_tracking {
     }
     impl Eq for PersistMetadataStamp {}
 
-    pub(super) type PersistMetadataWatermarks = BTreeMap<&'static str, PersistMetadataStamp>;
+    pub(crate) type PersistMetadataWatermarks = BTreeMap<&'static str, PersistMetadataStamp>;
 
-    pub(super) struct PersistTracked<T> {
+    pub(crate) struct PersistTracked<T> {
         value: T,
         stamp: PersistMetadataStamp,
     }
 
     impl<T> PersistTracked<T> {
-        pub(super) fn stamp(&self) -> PersistMetadataStamp {
+        pub(crate) fn stamp(&self) -> PersistMetadataStamp {
             self.stamp.clone()
         }
 
-        pub(super) fn snapshot_clone(&self) -> Self
+        pub(crate) fn snapshot_clone(&self) -> Self
         where
             T: Clone,
         {
@@ -146,4 +146,4 @@ mod persist_metadata_tracking {
     }
 }
 
-use persist_metadata_tracking::{PersistMetadataStamp, PersistMetadataWatermarks, PersistTracked};
+pub(crate) use persist_metadata_tracking::{PersistMetadataStamp, PersistMetadataWatermarks, PersistTracked};

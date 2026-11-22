@@ -38,6 +38,8 @@
 // for either, which is ergonomic but weakens the type-level contract at
 // call sites that currently rely on `&str` conventions.
 
+use super::*;
+
 macro_rules! define_typed_id {
     ($name:ident, $doc:expr) => {
         #[doc = $doc]
@@ -51,15 +53,15 @@ macro_rules! define_typed_id {
         #[allow(dead_code)]
         #[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
         #[serde(transparent)]
-        struct $name(String);
+        pub(crate) struct $name(pub(crate) String);
 
         #[allow(dead_code)]
         impl $name {
-            fn as_str(&self) -> &str {
+            pub(crate) fn as_str(&self) -> &str {
                 &self.0
             }
 
-            fn into_inner(self) -> String {
+            pub(crate) fn into_inner(self) -> String {
                 self.0
             }
         }
