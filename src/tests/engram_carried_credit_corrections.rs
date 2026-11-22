@@ -1,6 +1,8 @@
 // Ordinary location/identity correction witnesses. Existing EO rows and
 // bounded windows are the owners; no removed diagnostic object is modeled.
 
+use super::*;
+
 fn start_at(turn: &EOCheckedTurn, key: &str, command: &str, cwd: Option<&str>) {
     turn.state.note_engram_command_started(
         &turn.session_id,

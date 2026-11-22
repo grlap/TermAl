@@ -2,17 +2,14 @@
 // authority publication boundary. Reuses production naming fixtures.
 use super::*;
 
-mod reclamation {
-    include!("engram_named_root_reclamation.rs");
-}
+#[path = "engram_named_root_reclamation.rs"]
+mod reclamation;
 
-mod naming_supersede {
-    include!("engram_named_root_naming_supersede.rs");
-}
+#[path = "engram_named_root_naming_supersede.rs"]
+mod naming_supersede;
 
-mod naming_supersede_bounds {
-    include!("engram_named_root_naming_supersede_bounds.rs");
-}
+#[path = "engram_named_root_naming_supersede_bounds.rs"]
+mod naming_supersede_bounds;
 
 #[test]
 fn source_root_authority_read_separates_root_owner_from_current_service_ownership() {

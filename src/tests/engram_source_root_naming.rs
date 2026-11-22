@@ -68,13 +68,11 @@ fn optional_maintenance_defers_instead_of_consuming_mandatory_naming_control() {
     );
 }
 
-mod durability_pending {
-    include!("durability_pending_naming.rs");
-}
+#[path = "durability_pending_naming.rs"]
+mod durability_pending;
 
-mod authority {
-    include!("engram_root_authority.rs");
-}
+#[path = "engram_root_authority.rs"]
+mod authority;
 
 #[path = "engram_authority_manual_write.rs"]
 mod manual_write;

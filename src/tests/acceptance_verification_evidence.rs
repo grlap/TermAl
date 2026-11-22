@@ -112,18 +112,34 @@ fn read(
 
 #[test]
 fn evaluation_preparation_uses_private_rows_for_source_markers_without_exposing_identity() {
+    let current = shared_source::identity();
+    let mut older = current.clone();
+    older.changes[0].blob = Some("f".repeat(40));
+    verify_private_source_markers(current, older);
+}
+
+#[test]
+fn bound_evaluation_distinguishes_complete_git_deltas_at_the_same_commit() {
+    let current: EngramSourceId = serde_json::from_value(json!({
+        "commit": "a".repeat(40), "tree": "b".repeat(40),
+        "git_delta": { "sha256": "c".repeat(64), "dirty": false, "gitlinks": [] },
+    }))
+    .unwrap();
+    let mut older = current.clone();
+    older.git_delta.as_mut().unwrap().sha256 = "d".repeat(64);
+    verify_private_source_markers(current, older);
+}
+
+fn verify_private_source_markers(current: EngramSourceId, older: EngramSourceId) {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     source::make_workdir_a_worktree(&root);
-    let current = shared_source::identity();
     let captured = current.clone();
     shared_source::install_owner(&state, &project, move |_| Some(captured.clone()));
     super::super::delegation_support::install_delegation_codex_runtime(
         &state,
         "private-evidence-runtime",
     );
-    let mut older = current.clone();
-    older.changes[0].blob = Some("f".repeat(40));
     let (mut show, full, closure) = evidence_selection::canonical_binding_receipts();
     show["status"]["work"]["evaluation_mode"] = json!("independent_session");
     let transport = Arc::new(VerificationPages {
@@ -166,7 +182,7 @@ fn evaluation_preparation_uses_private_rows_for_source_markers_without_exposing_
             lines
                 .iter()
                 .all(|line| line.contains("context only") != matches),
-            "only the full dirty-blob identity can distinguish the same displayed commit"
+            "only the complete source identity can distinguish rows at the same commit"
         );
     }
     assert!(!brief.contains("private-path.txt") && !brief.contains("\"source_id\""));

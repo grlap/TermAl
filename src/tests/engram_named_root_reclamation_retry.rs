@@ -1,9 +1,8 @@
 // Pins retry progress independently of a retained diagnostic from an earlier read.
 use super::*;
 
-mod scheduling {
-    include!("engram_named_root_reclamation_scheduling.rs");
-}
+#[path = "engram_named_root_reclamation_scheduling.rs"]
+mod scheduling;
 
 struct ColdStartRootReader {
     process: ProcessEngramControlTransport,

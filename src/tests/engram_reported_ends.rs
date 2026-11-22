@@ -21,10 +21,8 @@
 // New file: nothing was moved into it.
 use super::*;
 
-mod claim_deferral {
-    use super::*;
-    include!("engram_reported_claim_deferral.rs");
-}
+#[path = "engram_reported_claim_deferral.rs"]
+mod claim_deferral;
 
 #[path = "engram_reported_declared_waits.rs"]
 mod declared_waits;

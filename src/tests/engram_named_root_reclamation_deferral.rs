@@ -4,6 +4,8 @@
 // Reuses the settled-root fixture; does not own cooldown length, read limits,
 // pass spacing or canonical read semantics.
 
+use super::*;
+
 /// The per-root share of one pass's budget, from the pass's own constants.
 fn per_root_share() -> Duration {
     ENGRAM_ROOT_RECLAMATION_BUDGET / ENGRAM_ROOT_RECLAMATION_READ_LIMIT as u32

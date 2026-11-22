@@ -652,7 +652,5 @@ async fn telegram_document_route_returns_typed_error_envelopes() {
 
 // Additional admission-race and real handler-wire coverage stays in this test
 // module so the telegram_documents filter selects every document API test.
-mod safety {
-    use super::*;
-    include!("telegram_document_safety.rs");
-}
+#[path = "telegram_document_safety.rs"]
+mod safety;

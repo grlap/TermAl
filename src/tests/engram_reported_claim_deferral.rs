@@ -1,6 +1,8 @@
 // A late terminal remains attached to its original work/claim/fence.
 // Changing focus never copies that fact into another ordinary trace.
 
+use super::*;
+
 pub(super) fn held_snapshot(
     bindings: &[&EngramControlWorkBinding],
     focused: &EngramControlWorkBinding,

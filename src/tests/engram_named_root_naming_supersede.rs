@@ -15,15 +15,11 @@
 use super::reclamation::{request_fixture_name, root_fixture};
 use super::*;
 
-mod rejections {
-    use super::*;
-    include!("engram_named_root_naming_supersede_rejections.rs");
-}
+#[path = "engram_named_root_naming_supersede_rejections.rs"]
+mod rejections;
 
-mod renewed {
-    use super::*;
-    include!("engram_named_root_naming_supersede_renewed.rs");
-}
+#[path = "engram_named_root_naming_supersede_renewed.rs"]
+mod renewed;
 
 /// Another owner (such as the automatic reclamation pass) replaces this
 /// work's authority image once, at the naming's owner check.

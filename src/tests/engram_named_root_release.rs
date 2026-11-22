@@ -8,9 +8,8 @@
 // New module.
 use super::*;
 
-mod durability_pending {
-    include!("durability_pending_release.rs");
-}
+#[path = "durability_pending_release.rs"]
+mod durability_pending;
 
 /// A retained root with no canonical run association: no journal exists for
 /// its claim. `named_by` is its naming session.

@@ -1,9 +1,8 @@
 // A late committed release is not permission to free its slot before ACK.
 use super::*;
 
-mod restart {
-    include!("durability_pending_release_restart.rs");
-}
+#[path = "durability_pending_release_restart.rs"]
+mod restart;
 
 #[tokio::test]
 async fn durability_pending_release_retains_its_audit_and_reserved_slot_on_unchanged_retry() {

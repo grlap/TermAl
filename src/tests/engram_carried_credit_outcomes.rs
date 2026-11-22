@@ -2,10 +2,8 @@
 // Artifact custody and explicit native verification have separate owners.
 use super::*;
 
-mod credit_corrections {
-    use super::*;
-    include!("engram_carried_credit_corrections.rs");
-}
+#[path = "engram_carried_credit_corrections.rs"]
+mod credit_corrections;
 
 #[test]
 fn ordinary_claim_changes_never_relabel_the_original_carried_launch() {

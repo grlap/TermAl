@@ -1,6 +1,8 @@
 // Owns completion of the actual asynchronous settlement, plus its stale-selection
 // interleave. Content durability and provider handoff remain separate fences.
 
+use super::*;
+
 pub(super) fn observe_settlement_completion() -> mpsc::Receiver<()> {
     let (tx, rx) = mpsc::channel();
     TEST_QUEUED_PROMPT_SETTLEMENT.with(|slot| {

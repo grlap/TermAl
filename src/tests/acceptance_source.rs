@@ -36,8 +36,13 @@ pub(super) fn install_owner(
         let root = FsPath::new(&args[2]);
         let value = match source(root) {
             Some(source) => {
+                let status = if source.is_clean() {
+                    "clean"
+                } else {
+                    "not_clean"
+                };
                 let mut envelope =
-                    crate::tests::engram_source_command::source_envelope(root, "not_clean");
+                    crate::tests::engram_source_command::source_envelope(root, status);
                 envelope["source"] = json!(format!("git-commit:{}", source.commit));
                 envelope["tree"] = json!(source.tree);
                 envelope["source_id"] = serde_json::to_value(source).unwrap();
@@ -606,10 +611,46 @@ fn evaluator_markers_compare_the_complete_private_identity_and_never_display_lab
     );
     assert!(!mismatch.contains("private-path.txt"));
     evidence.verification.as_mut().unwrap().source_basis = None;
+    let unavailable = acceptance_brief_off_source_marker(&evidence, task.judged_source());
     assert!(
-        acceptance_brief_off_source_marker(&evidence, task.judged_source())
-            .contains("context only"),
+        unavailable.contains("context only"),
         "a window summary cannot provide a complete comparison identity"
+    );
+    assert_ne!(
+        unavailable, mismatch,
+        "an absent comparison identity must be distinguishable from a proven source mismatch"
+    );
+    assert!(
+        unavailable.contains("unavailable") && !unavailable.contains("differs"),
+        "the summary-only record does not establish a mismatch"
+    );
+    assert!(
+        mismatch.contains("differs") && !mismatch.contains("unavailable"),
+        "both complete identities were available and differed"
+    );
+
+    let mut per_file = identity();
+    per_file.changes.clear();
+    let compact = serde_json::from_value(json!({
+        "commit": per_file.commit, "tree": per_file.tree,
+        "git_delta": { "sha256": "d".repeat(64), "dirty": false, "gitlinks": [] },
+    }))
+    .unwrap();
+    task.judged_source_basis = Some(AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
+        workspace_id: None,
+        source_id: compact,
+    }));
+    evidence.verification.as_mut().unwrap().source_basis =
+        Some(AcceptanceSourceBasis::Shared(AcceptanceSharedSourceBasis {
+            workspace_id: None,
+            source_id: per_file,
+        }));
+    let incomparable = acceptance_brief_off_source_marker(&evidence, task.judged_source());
+    assert!(
+        incomparable.contains("context only")
+            && incomparable.contains("incomparable")
+            && !incomparable.contains("differs"),
+        "different formats cannot establish a source mismatch: {incomparable}"
     );
 }
 

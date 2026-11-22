@@ -2,6 +2,8 @@
 // Owns deterministic open races, local-session admission and response wire
 // checks. Uses its parent module's fixtures/fake sender; never sends to Telegram.
 
+use super::*;
+
 fn refused_after_replacement(replace: impl FnOnce(&FsPath, &FsPath)) {
     let fixture = connected_telegram_document_fixture();
     let outside = TestTempRoot::create("telegram-doc-race-outside");

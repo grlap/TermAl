@@ -846,9 +846,8 @@ fn named_root_reclamation_published_undelivered_notice_survives_compacted_restar
     assert!(restored.engram_named_root_journal.is_empty());
 }
 
-mod history_scale {
-    include!("engram_named_root_history_scale.rs");
-}
+#[path = "engram_named_root_history_scale.rs"]
+mod history_scale;
 
 #[test]
 fn named_root_reclamation_published_notice_of_removed_session_is_retained_without_pins() {

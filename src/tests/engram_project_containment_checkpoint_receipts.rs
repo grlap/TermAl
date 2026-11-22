@@ -2,10 +2,8 @@
 //! Historical checkpoint producers and their accounting are physically gone.
 use super::*;
 
-mod settlement_selection {
-    use super::*;
-    include!("engram_selected_resume_settlement.rs");
-}
+#[path = "engram_selected_resume_settlement.rs"]
+mod settlement_selection;
 
 fn ordinary_receipt_fixture(
     queued: bool,

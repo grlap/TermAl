@@ -226,10 +226,14 @@ pub(crate) fn acceptance_attempt_source_label(
 
 impl AcceptanceSourceBasis {
     pub(crate) fn same_source(&self, other: &Self) -> bool {
+        self.compare_source(other) == Some(true)
+    }
+
+    pub(crate) fn compare_source(&self, other: &Self) -> Option<bool> {
         match (self, other) {
-            (Self::Legacy(a), Self::Legacy(b)) => a.fingerprint == b.fingerprint,
-            (Self::Shared(a), Self::Shared(b)) => a.source_id == b.source_id,
-            _ => false,
+            (Self::Legacy(a), Self::Legacy(b)) => Some(a.fingerprint == b.fingerprint),
+            (Self::Shared(a), Self::Shared(b)) => a.source_id.compare(&b.source_id),
+            _ => None,
         }
     }
 }

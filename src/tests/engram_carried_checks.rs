@@ -462,10 +462,8 @@ mod test_run_restart_evidence;
 #[path = "engram_carried_retirement.rs"]
 mod retirement;
 
-mod credit_outcomes {
-    use super::*;
-    include!("engram_carried_credit_outcomes.rs");
-}
+#[path = "engram_carried_credit_outcomes.rs"]
+mod credit_outcomes;
 
 // What overlaps a launch and how its refusal names it, a child module so
 // this file does not grow further.

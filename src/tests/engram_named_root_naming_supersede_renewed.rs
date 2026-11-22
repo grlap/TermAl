@@ -4,6 +4,8 @@
 // Also covers successor naming through an original reporter whose live
 // association has changed, without rewriting the retained event or reader.
 
+use super::*;
+
 fn substituted_reporter_naming(clear: bool) {
     for reporter_unbound in [false, true] {
         for superseded in [false, true] {

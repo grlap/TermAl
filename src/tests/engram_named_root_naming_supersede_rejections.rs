@@ -3,6 +3,8 @@
 // Does not own canonical authority or the producer's transition semantics.
 // Split from the naming supersession fixtures for the guard regression matrix.
 
+use super::*;
+
 #[test]
 fn kept_naming_rejects_selection_and_journal_changes_during_its_proof_read() {
     for fault in ["replace", "remove", "journal"] {

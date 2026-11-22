@@ -2,50 +2,38 @@
 // Fixtures retain the original run association after the naming session moves on.
 use super::*;
 
-mod recovery {
-    include!("engram_named_root_reclamation_recovery.rs");
-}
+#[path = "engram_named_root_reclamation_recovery.rs"]
+mod recovery;
 
-mod safety {
-    include!("engram_named_root_reclamation_safety.rs");
-}
+#[path = "engram_named_root_reclamation_safety.rs"]
+mod safety;
 
-mod reader_authority {
-    include!("engram_named_root_reclamation_readers.rs");
-}
+#[path = "engram_named_root_reclamation_readers.rs"]
+mod reader_authority;
 
-mod eligibility {
-    include!("engram_named_root_reclamation_eligibility.rs");
-}
+#[path = "engram_named_root_reclamation_eligibility.rs"]
+mod eligibility;
 
-mod recovery_lock {
-    include!("engram_root_recovery_lock.rs");
-}
+#[path = "engram_root_recovery_lock.rs"]
+mod recovery_lock;
 
-mod scheduler {
-    include!("engram_named_root_reclamation_scheduler.rs");
-}
+#[path = "engram_named_root_reclamation_scheduler.rs"]
+mod scheduler;
 
-mod retry {
-    include!("engram_named_root_reclamation_retry.rs");
-}
+#[path = "engram_named_root_reclamation_retry.rs"]
+mod retry;
 
-mod deferral {
-    use super::*;
-    include!("engram_named_root_reclamation_deferral.rs");
-}
+#[path = "engram_named_root_reclamation_deferral.rs"]
+mod deferral;
 
-mod release {
-    include!("engram_named_root_release.rs");
-}
+#[path = "engram_named_root_release.rs"]
+mod release;
 
-mod capacity {
-    include!("engram_named_root_capacity.rs");
-}
+#[path = "engram_named_root_capacity.rs"]
+mod capacity;
 
-mod completion_clear {
-    include!("engram_named_root_completion_clear.rs");
-}
+#[path = "engram_named_root_completion_clear.rs"]
+mod completion_clear;
 
 // Compose the existing EO state/work-service owner with a real Git worktree.
 pub(super) fn root_fixture(label: &str) -> (EOCheckedTurn, PathBuf) {

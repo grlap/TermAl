@@ -1116,12 +1116,17 @@ pub(crate) fn acceptance_brief_off_source_marker(
         return String::new();
     };
     if let Some(judged_basis) = judged.basis {
-        if !verification
-            .source_basis
-            .as_ref()
-            .is_some_and(|ran| ran.same_source(judged_basis))
-        {
-            return " [context only: its complete source identity differs or is unavailable; not citable for a bound criterion]".to_owned();
+        let Some(ran_basis) = verification.source_basis.as_ref() else {
+            return " [context only: its complete source identity is unavailable in this evidence view; not citable for a bound criterion]".to_owned();
+        };
+        match ran_basis.compare_source(judged_basis) {
+            Some(true) => {}
+            Some(false) => {
+                return " [context only: its complete source identity differs from the judged source; not citable for a bound criterion]".to_owned();
+            }
+            None => {
+                return " [context only: the recorded and judged source identity formats are incomparable; not citable for a bound criterion]".to_owned();
+            }
         }
         if let (AcceptanceSourceBasis::Shared(judged), Some(tree)) =
             (judged_basis, verification.applicability_tree.as_deref())
