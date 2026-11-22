@@ -1,0 +1,34 @@
+{
+  "id": "01a2020a-a654-75c2-b3ea-96042a4b7acf",
+  "external_ref": null,
+  "title": "Stale include!() comments in the five files w-b3c1 changes: correct them after it lands",
+  "outcome": "Follow-up to w-54bc72cb22b2 (Greg's request, 3ad04090 #36: comments that still describe the include!() assembly). Five files carry such a comment and were left out of that item's candidate a4727fba, on the coordinator's condition (30a7a691 #54) that it touch no file w-b3c1's candidate changes, so that w-b3c1's re-cut can adopt its review pair: src/main.rs (lines 14-17: 'The crate still compiles as one module … and the Telegram relay fragments named below'), src/codex_discovery.rs:13 and src/persisted_state.rs:16 ('Extracted from state.rs into its own `include!()` fragment'), src/persist.rs:24-25 ('The crate still compiles as one `include!()`-assembled module, so no visibility changes are required'; persist.rs is a module that itself still includes 17 persist_*.rs files, and the comment should say that) and src/tests/mod.rs:8 ('include!-based refactors'). Once w-b3c1 has landed, the same comment-only correction is made to these five on the then-current master. The prepared wording is in the scratch script .tmp/include-to-mod/comments.cjs (the five skipped edits) and has to be checked against the files as w-b3c1 leaves them. Scheduled by the coordinator after w-b3c1.",
+  "acceptance": [
+    "In src/main.rs, src/codex_discovery.rs, src/persist.rs, src/persisted_state.rs and src/tests/mod.rs no comment describes a file that is now a module as an include!() fragment, or the crate as one module assembled by include!(), or says that no visibility changes are required; the comment in src/persist.rs stays true to the files persist.rs still includes.",
+    "The header comments of src/instructions.rs and src/review.rs say that what other files use is imported at the crate root, not re-exported, which matches the private glob imports in src/main.rs.",
+    "Each corrected comment keeps what was historically correct in it: which file the code was extracted from and why.",
+    "The change touches comment text only: with comments removed, every changed file is token-for-token identical to its base.",
+    "The independent review pair has no outstanding in-scope finding of Medium or higher, and on the exact landed input the comment-only token check, rustfmt --check and cargo check pass with no warning the base does not have."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "comments",
+    "greg-directed",
+    "include-to-mod",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

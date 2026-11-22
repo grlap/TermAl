@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-resume-after-memory-fix-2026-11-22",
+    "revision_id": "50a6eab1954e4f4aa6c2d1cba7725cb0",
+    "previous": null,
+    "body_sha256": "5129d33a0e0c6b04cda4eec487dc3383d837dae60cd4601bc2198b9fffecff76",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a14b91-88d1-70d0-8cb7-b3c1cd1bcea1",
+      "work_ref": "w-b3c1cd1bcea1"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T06:53:43.215943300Z"
+    }
+  },
+  "body": "Greg's decision (2026-11-22 ~06:53Z, relayed verbatim by Engram::Asistant, TermAl mailbox 588693a8 #2521): „po poprawce pamieci mozemy wszystko wznowic” (\"after the memory fix we can resume everything\").\nMeaning for the TermAl coordinator: the hold on TermAl work (\"prace Engram i Termal sa chwilowo wstrzymane\", 2026-11-21) LIFTS once the memory fix w-b3c1cd1bcea1 has landed and is installed, together with the one agreed restart if needed, which Greg performs at the moment the coordinators propose.\nResume order proposed to Greg (Fable2 #2520):\n(a) federation: w-e42f6b850a2d (record drop reasons), w-15752bc88638 (auto-recovery; carry candidate 0d7db98c), then the cause fix;\n(b) w-e2972bb21221 (state-lock holds);\n(c) w-4483f709da27 (orphaned delegation processes);\n(d) w-d2982d6f0d3f (Engram not reaching a loaded Codex thread);\n(e) the in-module include! fragments (88; item to be filed);\n(f) disk sweeps w-b92d241c0154 and w-a0803adfb50c;\n(g) the older queue (Wave A/B, w-7e4f and the rest).\nBefore then, only Greg's explicit exceptions run: the include! work (Fable52), the memory fix (Opus3), checks, Comovo and Legal."
+}

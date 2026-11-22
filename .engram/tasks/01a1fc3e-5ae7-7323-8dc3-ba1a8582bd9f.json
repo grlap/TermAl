@@ -26,12 +26,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The process open-file limit policy is an ordinary Rust module (slice 0 of the include! migration, same commit bd01930c155bd15641a6615b37bd87215db02444 as host_log), landed on origin master as the first of the three commits the fast-forward to ebc30de9 carried, pushed 2026-11-22T06:38:30Z by the integration owner on Greg's own word. Review pair S0-PAIR-BD01930C without findings; full gates on bd01930c passed on Linux (test-5db67132) and Windows (test-aef36eb2); the 26 nofile tests passed in the registered run test-3d35b1a9-e25d-4d15-a6c3-beacb5ca7c4b; post-landing evaluation passed all three criteria.",
+    "completed_at": "2026-11-22T06:45:33.965780900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

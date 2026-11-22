@@ -1,0 +1,30 @@
+{
+  "id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "external_ref": null,
+  "title": "include! → mod: the fragments that modules still include (43 in 16 product files, 45 in 19 test files)",
+  "outcome": "After the migration (master ebc30de9) src/main.rs includes no file, but 88 include!() of .rs files remain inside modules: 43 in 16 product files (persist.rs 17; workspace_watch, test_run_observations, engram_unadmitted_lifecycle and coordination_persist 3 each; persist_metadata_units, engram_unadmitted_closing and delegation_mcp 2 each; test_runs_api, test_run_waits, git, engram_source_roots, engram_named_root_reclamation, declared_run_observer, acceptance_source and acceptance_evidence_selection 1 each) and 45 in 19 files under src/tests. These are fragments of a module, not of the crate root: each shares its parent's private scope, so converting one means deciding what the parent and child see of each other (child module with `use super::*;` and visibility on what the parent reads, or leaving it a fragment where the shared private scope is the point, as with test fragments that reach a fixture's private state). `cargo fmt --check` does not reach an included file, which is the standing cost of leaving them. The conversion tool scripts/include-to-mod.mjs converts fragments of src/main.rs only; its header says it is removed with the last fragment, so this item also decides the tool's fate: extend it to nested fragments, or remove it and convert by hand. Filed on the coordinator's instruction (30a7a691 #54), unscheduled; he schedules it once Greg's pause lifts. Criteria are to be worded when it is scheduled.",
+  "acceptance": [
+    "include! → mod: the fragments that modules still include (43 in 16 product files, 45 in 19 test files) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

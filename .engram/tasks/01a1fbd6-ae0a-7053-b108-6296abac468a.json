@@ -27,12 +27,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Host console logging is an ordinary Rust module (slice 0 of the include! migration, commit bd01930c155bd15641a6615b37bd87215db02444), landed on origin master as the first of the three commits the fast-forward to ebc30de9 carried, pushed 2026-11-22T06:38:30Z by the integration owner on Greg's own word. Review pair S0-PAIR-BD01930C without findings; full gates on bd01930c passed on Linux (test-5db67132) and Windows (test-aef36eb2); the seven host_log tests passed in the registered run test-0f0f7fce-4bf6-417f-a949-e617fc5877e7; post-landing evaluation passed all three criteria.",
+    "completed_at": "2026-11-22T06:45:28.511895400Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

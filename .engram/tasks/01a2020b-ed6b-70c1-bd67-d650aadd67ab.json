@@ -1,0 +1,32 @@
+{
+  "id": "01a2020b-ed6b-70c1-bd67-d650aadd67ab",
+  "external_ref": null,
+  "title": "Docs still describe the include!() assembly after the migration: architecture.md, host-architecture.md, rust-type-safety-plan.md",
+  "outcome": "Found by Fable52 during w-54bc72cb22b2 (mailbox 30a7a691 #55). After the include! migration landed (master ebc30de9), these docs still describe the old include!-assembled build: docs/architecture.md lines about 1592, 1748 and 1762 (\"still compiled as one crate-level module through `include!`\", \"Include-split backend\"); docs/features/host-architecture.md lines about 99, 391, 419-420, 1199 and 1871 (\"`src/main.rs` builds the backend from 150 `include!()` fragments\"); docs/rust-type-safety-plan.md about line 195 (\"module privacy cannot…\"). architecture.md is plainly stale. host-architecture.md and the type-safety plan argue from the include build, so they need reasoning updates, not word swaps. It's a Markdown-only change, so it lands with the doc link check under the commit rule, and both reviewers still review it.",
+  "acceptance": [
+    "No doc in docs/ describes the current backend as assembled from include!() fragments in src/main.rs or as one flat crate-level module; statements about historical state are marked as historical.",
+    "Arguments in docs/features/host-architecture.md and docs/rust-type-safety-plan.md that relied on the include build are updated to the module layout, including what module privacy now allows.",
+    "The independent review pair has no outstanding in-scope finding of Medium or higher, and the doc link check passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "docs",
+    "greg-directed",
+    "include-to-mod",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
