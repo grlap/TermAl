@@ -1,0 +1,28 @@
+{
+  "id": "01a20518-d79c-7051-9222-c85210f5b55b",
+  "external_ref": null,
+  "title": "The full gate's node-helper-tests stage does not run scripts/include-to-mod.test.mjs, so no FULL covers the conversion tool's tests",
+  "outcome": "The full gate's node-helper-tests stage does not run scripts/include-to-mod.test.mjs, so no FULL covers the conversion tool's tests",
+  "acceptance": [
+    "The full gate's node-helper-tests stage runs scripts/include-to-mod.test.mjs while that file exists, shown by a full or focused launcher run listing its tests; or the tool and its test have been removed, which closes the item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "include-to-mod",
+    "launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

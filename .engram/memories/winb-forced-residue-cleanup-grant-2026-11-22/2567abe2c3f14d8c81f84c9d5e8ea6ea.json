@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-forced-residue-cleanup-grant-2026-11-22",
+    "revision_id": "2567abe2c3f14d8c81f84c9d5e8ea6ea",
+    "previous": "db66ab5678c543d5bfdb267788690554",
+    "body_sha256": "8c73d24b3d3aefddf384aca1cf7ad70916930e07803d415f7b4c25c9cde58ee2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T22:28:08.104791900Z"
+    }
+  },
+  "body": "Greg's STANDING authorization for forced cleanup removal on Windows B (2026-11-22 ~22:25Z, relayed verbatim by Engram::Asistant, TermAl mailbox 588693a8 #2565): „tak, koniecznie!” (\"yes, absolutely!\"), answering Fable2's question #2564. That question asked whether the Codex runner on Windows B may remove the residue of the launcher's private test userprofile with `Remove-Item -LiteralPath <path> -Recurse -Force`. This satisfies AGENTS.md \"Cleanup deletions\" (\"Forced removal requires Greg's recorded authorization for that exact case\") for that case, and ONLY within the four limits of #2564:\n(1) literal in-repository paths under .tmp/j/ or the short temp dirs .tmp/i* on Windows B;\n(2) only AFTER the non-forced form (Remove-Item -LiteralPath -Recurse -Confirm:$false without -Force) has failed;\n(3) only after the same guards: the run is terminal with its outcome recovered, retention has ended, no link escapes the path, and nothing live uses it;\n(4) a record of each removal (paths, time, free space) on the disk-sweep item w-b92d241c0154.\nIt grants nothing else: no other host, no other path, no ACL or attribute changes outside that removal, and no forced git worktree remove.\n\nFIRST USE BLOCKED (Win2 runner, relay #67, 2026-11-22 22:27Z). Codex's own exec tool rejected the forced `Remove-Item ... -Recurse -Force` command before it launched, with \"rejected: blocked by policy\". No shell started, and nothing was removed. Under the cleanup rule a policy refusal stops the removal: no other form, tool, session or escalation. So Greg's grant is valid but cannot be exercised through the Codex runner's current tool policy. Residues stay (Windows B, recorded on w-b92d241c0154). Options, if they ever matter: Greg deletes them by hand, or the tool policy is changed, which is a configuration change and needs Greg."
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a20551-33ce-7e33-94e2-2f9db62028e0",
+  "external_ref": null,
+  "title": "Nondeterministic federation fixture: placement_refuses_enrolled fails in Pair::new when the onboarding probe hits a transport error at 0 ms (controlTaskDropped)",
+  "outcome": "Nondeterministic federation fixture: placement_refuses_enrolled fails in Pair::new when the onboarding probe hits a transport error at 0 ms (controlTaskDropped)",
+  "acceptance": [
+    "The cause is identified from source and the preserved run: why the fixture's onboarding probe can fail on transport at 0 ms with controlTaskDropped, and whether it is a fixture race or a product race.",
+    "The defect is fixed where it lives (fixture or product), with a behaviour test that reproduces the ordering deterministically, with no wall-clock thresholds and no retries."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "federation",
+    "nondeterministic",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

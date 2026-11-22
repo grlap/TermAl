@@ -23,12 +23,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "22 of the 27 test fragment files of slice A are now what `rustfmt --edition 2024` prints (the other 5 already were), with no hand edit and no wiring change, so the wiring that follows can pass cargo fmt. Landed on master in the batch commit fe5f485f; rustfmt equality was reproduced independently on Linux, test names are unchanged, both full gates passed on that exact commit and the evaluation passed all four criteria.",
+    "completed_at": "2026-11-22T21:09:07.388267900Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

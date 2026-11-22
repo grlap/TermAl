@@ -25,12 +25,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "scripts/include-to-mod.mjs now plans, converts and verifies fragments that a module file other than src/main.rs includes at its top level: `#[path]` mounting in the parent, one glob to hand the names on, `pub(super)` where a main.rs fragment gets `pub(crate)`, refusal of text that would change meaning as a child module, and the same two verify proofs. 34 fixture tests added, 85 pass on the landed commit. Nothing under src is converted by this change. Landed on master in the batch commit fe5f485f; the evaluation passed all six criteria. Four fixture-only review findings are left unfixed on the coordinator's ruling; each later slice re-checks its units for those patterns.",
+    "completed_at": "2026-11-22T21:09:12.266526600Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

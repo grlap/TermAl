@@ -1,0 +1,29 @@
+{
+  "id": "01a2057b-821d-7ff1-b471-56f386fdd7d3",
+  "external_ref": null,
+  "title": "A registered run's verification record settles, but no settlement notice reaches the requesting session, which keeps waiting",
+  "outcome": "A registered run's verification record settles, but no settlement notice reaches the requesting session, which keeps waiting",
+  "acceptance": [
+    "When a registered run's verification record settles (passed or failed), the requesting session receives a settlement notice naming the record, covered by a behaviour test of the notice path for a failed run.",
+    "A session can read a run's settled state through a documented read-only route (for example the launcher's summary) that reports the record id and outcome."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "host-recording",
+    "notifications",
+    "test-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
