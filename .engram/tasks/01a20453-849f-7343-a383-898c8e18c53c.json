@@ -4,8 +4,8 @@
   "title": "Nested include! slice A, formatting only: rustfmt the 27 test fragments before they become modules",
   "outcome": "Slice A of w-05336c2d00a3 turns 27 `mod name { include!(\"f.rs\"); }` blocks under src/tests into `#[path = \"f.rs\"] mod name;` declarations. `cargo fmt` does not reach an included file, and 22 of the 27 fragment files are not rustfmt-clean, so the wiring would fail `cargo fmt --all -- --check`. This candidate formats those files with rustfmt alone, and changes nothing else, so that the wiring candidate that follows is only wiring. The 27 blocks and fragments are listed in a note on this item.",
   "acceptance": [
-    "The candidate changes only files under src/tests that slice A's wiring brings within `cargo fmt`'s reach: the fragment files of the listed blocks and the module files those fragments declare.",
-    "For every path the candidate changes, `git show PARENT:path | rustfmt --edition 2024` prints exactly the candidate's content of that path, where PARENT is the candidate's parent commit; the rustfmt version is recorded with the check.",
+    "This item's contribution to the candidate commit changes only files under src/tests that slice A's wiring brings within `cargo fmt`'s reach: the fragment files of the listed blocks and the module files those fragments declare; every other path the commit changes belongs to another item, whose contribution is recorded with it.",
+    "For every path of this item's contribution, `git show PARENT:path | rustfmt --edition 2024` prints exactly the candidate's content of that path, where PARENT is the candidate's parent commit; the rustfmt version is recorded with the check.",
     "The set of test names printed by `cargo test --bin termal -- --list` is the same on the candidate as on its parent, on one host.",
     "No test reads or pins source text for this change."
   ],

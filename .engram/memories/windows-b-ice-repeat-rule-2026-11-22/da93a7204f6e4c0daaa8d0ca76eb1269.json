@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "windows-b-ice-repeat-rule-2026-11-22",
+    "revision_id": "da93a7204f6e4c0daaa8d0ca76eb1269",
+    "previous": null,
+    "body_sha256": "cd472c35ba0a21b0b03431faeb58e78bd4f8b8429a3fa4206c976434d8ac28c1",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T19:35:50.009167300Z"
+    }
+  },
+  "body": "Greg's decision on Windows B compiler crashes (2026-11-22 ~19:35Z, relayed verbatim by Engram::Asistant, TermAl mailbox 588693a8 #2553): „Window B ma problemy. Trzeba powtarzać”. Rule, as the coordinator applies it (record on w-adfaa5aaacac):\n(1) A rustc ICE or environment crash on Windows B, failing before any test result, is NOT a failure of the change. Repeat the run on the IDENTICAL input in a fresh root with a fresh target, record each attempt on w-adfaa5aaacac (run id, input, query, rustc version), and continue.\n(2) A TEST failure is never repeated; it is investigated under the failed-gate rule.\n(3) Two consecutive ICEs on the same input are reported to the TermAl coordinator before any third attempt.\n(4) No toolchain change and no host restart without Greg's instruction.\nWindows B rustc is 1.100.0 (0ef1bc386); Central is 1.99.1."
+}

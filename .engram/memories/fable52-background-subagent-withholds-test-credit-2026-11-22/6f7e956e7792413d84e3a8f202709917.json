@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "fable52-background-subagent-withholds-test-credit-2026-11-22",
+    "revision_id": "6f7e956e7792413d84e3a8f202709917",
+    "previous": null,
+    "body_sha256": "1a27c53e6fdde6e2428534fb86ccb5eb8b8b6c37be01c09134f5d0c046809c7d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=fable;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T19:08:15.616357900Z"
+    }
+  },
+  "body": "Worker fact (Termal::Fable52, 2026-11-22, from the host's own notice in my session). While a background subagent of a Claude root session is running, TermAl restricts that session's evidence: \"this session's tests may pass without earning verification credit, in any workspace, and an acceptance result that needs that credit cannot pass on those runs; a grant that overlaps it keeps its own source report withheld\". It lifts when Claude reports the work ended (\"Evidence restriction lifted ... Tests run from now on can earn verification credit again; ... a check refused then stays refused\"). TermAl has no reset for it.\nConsequences for a writable root session that uses the Agent tool:\n- Never start a registered launcher run (`--input commit`, focused or full) while a background subagent is running, and wait for the lifted notice before starting one. A run that overlapped does not gain credit later; it has to be run again.\n- Stopping the subagent with TaskStop counts as its end; the lifted notice followed within the same turn boundary.\n- Run order that worked for me: subagent finishes (notification), I review its diff, commit, then run the registered test. My run test-6e61c4ed (2026-11-22T18:46Z) was after the first subagent run ended and before the second began.\nAlso learned the same day: a subagent's edits happen outside any measured turn, so the host reports them later as an unadmitted source change; do the evaluation only after a quiet turn in the named root."
+}

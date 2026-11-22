@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the seven-file launcher fixture repair on origin/master at exact 3089bfaf, with no installed executable change. Nested Node launcher tests select the fixture owner and exercise the current compact source envelope. Central and Windows B 566/0/1, DL560 547/0/16 with all 13 affected cases passing. Registered Central full test-69ddade9 passed all six stages, including node-helper-tests 566/0/1, with clean identical request/before/after source_ids. Independent review adopted on byte-identical contribution, zero Medium+ with two optional Lows. Independent pre- and post-landing evaluations passed 3/3; latest evaluation e4dc07391440413d89425818bd7bde53 is fresh at this source. Both exact author refs removed and confirmed absent; Windows B runner released for cleanup. Archived the original gate JSON artifacts for the independently tracked bound-verification issue, whose admission outcome is separate from this item's unbound judgment criteria.",
+    "completed_at": "2026-11-22T19:00:42.150714600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

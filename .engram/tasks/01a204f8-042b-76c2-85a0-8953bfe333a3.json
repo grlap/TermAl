@@ -1,0 +1,28 @@
+{
+  "id": "01a204f8-042b-76c2-85a0-8953bfe333a3",
+  "external_ref": null,
+  "title": "Project digest cold-window read: skip it on the dirty-worktree branch, and take selection and progress from one state",
+  "outcome": "Project digest cold-window read: skip it on the dirty-worktree branch, and take selection and progress from one state",
+  "acceptance": [
+    "The digest skips the cold-window read when it will use the Git summary, and the chosen session's progress comes from the same state observation as its selection, so a concurrent hydration cannot give fallback text for that build; both covered by behaviour tests without timing thresholds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "follow-up",
+    "memory",
+    "project-digest"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -5,7 +5,7 @@
   "outcome": "Migration left an unused `use super::*;` warning in the review_freeze_cli integration test (test_temp_paths.rs)",
   "acceptance": [
     "cargo test --test review_freeze_cli --no-run reports no unused-import warning for src/test_temp_paths.rs, and cargo check --bin termal and cargo test --bin termal --no-run add no warning over their current baseline.",
-    "The change touches only the wiring of test_temp_paths.rs (its import line or the integration test's include site); no expression, name or behaviour changes."
+    "This item's contribution to the candidate commit touches only the wiring of test_temp_paths.rs (its import line or the integration test's include site), with no expression, name or behaviour change; every other path the commit changes belongs to another item, whose contribution is recorded with it."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

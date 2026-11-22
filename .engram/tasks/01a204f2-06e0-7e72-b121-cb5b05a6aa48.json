@@ -1,0 +1,28 @@
+{
+  "id": "01a204f2-06e0-7e72-b121-cb5b05a6aa48",
+  "external_ref": null,
+  "title": "Explicit evaluator reuse under a cold finished nested parent: a failed persistence acknowledgement can leave the old verdict on the parent's card",
+  "outcome": "Explicit evaluator reuse under a cold finished nested parent: a failed persistence acknowledgement can leave the old verdict on the parent's card",
+  "acceptance": [
+    "When an explicit evaluator reuse under a cold finished nested parent fails its persistence acknowledgement, the parent's card ends showing the outcome actually recorded (or is shown unchanged with evidence that nothing changed), covered by a behaviour test on the reuse path without timing thresholds."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "follow-up",
+    "memory"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
