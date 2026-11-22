@@ -205,10 +205,9 @@ in Engram::Advisor's session, recorded verbatim):
 - Outside the standing rule's three conditions above, the
   candidate-commits bullet, the test refs for remote runs bullet, the author
   test refs bullet and the task-sync data-branch bullet, a commit or push
-  needs Greg's own word in the acting session. Outside this standing rule,
-  the candidate-commits bullet, the test refs for remote runs bullet, the
-  author test refs bullet and the task-sync data-branch bullet, a word
-  relayed by another session never carries a commit or push.
+  needs the developer's explicit approval. Where the developer's explicit
+  approval is required, another agent may relay it verbatim with its
+  source. The relay carries only the approval and scope actually stated.
   This rule grants no restart, deploy or global-configuration authority; those
   acts are Greg's and need his explicit word. The moment of a TermAl
   restart is the agents' decision (Greg, 2026-10-02: 'Wolę aby agenci
