@@ -21,12 +21,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The three sentences in docs/architecture.md and docs/features/host-architecture.md now say a private item is usable in its own module and that module's descendant modules. Landed on master as 5e1bb8f6; the post-landing evaluation passed both criteria.",
+    "completed_at": "2026-11-22T17:17:20.595123700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

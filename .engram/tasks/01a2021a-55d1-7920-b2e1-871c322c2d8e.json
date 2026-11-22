@@ -21,12 +21,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The reviewer lens files no longer describe main.rs as a single large file: .claude/reviewers/architecture.md lines 76-77 and .claude/reviewers/rust.md line 56 now describe the module declarations and glob imports as the known tradeoff. Landed on master as 5e1bb8f6; the fresh post-landing evaluation passed both criteria.",
+    "completed_at": "2026-11-22T17:20:03.836561100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

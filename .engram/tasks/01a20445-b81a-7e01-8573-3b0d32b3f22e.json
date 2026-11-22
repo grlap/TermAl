@@ -1,0 +1,29 @@
+{
+  "id": "01a20445-b81a-7e01-8573-3b0d32b3f22e",
+  "external_ref": null,
+  "title": "A testRequest whose authorized_test_ref names a non-test/ ref is refused only as \"malformed test request target\", without saying why",
+  "outcome": "A testRequest whose authorized_test_ref names a non-test/ ref is refused only as \"malformed test request target\", without saying why",
+  "acceptance": [
+    "A testRequest refused because an authorized_test_ref's ref_name is not under refs/heads/test/ names the field and the rule in its refusal (for example that a landing-gate test ref must be refs/heads/test/<item>-<commit8>, and that author-test refs are evidence only), covered by a behavioural test of the refusal text's content.",
+    "Requests that are valid today are accepted unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "mailbox",
+    "test-request"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
