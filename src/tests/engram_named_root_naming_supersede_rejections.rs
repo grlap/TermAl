@@ -17,72 +17,127 @@ fn kept_naming_rejects_selection_and_journal_changes_during_its_proof_read() {
         let rival = Arc::new(Mutex::new(None));
         let observed_rival = rival.clone();
         let fired = std::sync::atomic::AtomicBool::new(false);
-        claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-            Some(Arc::new(move |phase| {
-                if phase != "before_kept_naming_proof"
-                    || fired.swap(true, std::sync::atomic::Ordering::SeqCst)
-                {
-                    return;
-                }
-                {
-                    let mut inner = state.inner.lock().unwrap();
-                    if fault == "journal" {
-                        let journal = inner.engram_named_root_journal.iter_mut()
-                            .find(|journal| journal.store == hook_store
-                                && journal.claim_id == hook_binding.claim_id).unwrap();
-                        journal.obsolete = !journal.obsolete;
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+            if phase != "before_kept_naming_proof"
+                || fired.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            {
+                let mut inner = state.inner.lock().unwrap();
+                if fault == "journal" {
+                    let journal = inner
+                        .engram_named_root_journal
+                        .iter_mut()
+                        .find(|journal| {
+                            journal.store == hook_store && journal.claim_id == hook_binding.claim_id
+                        })
+                        .unwrap();
+                    journal.obsolete = !journal.obsolete;
+                } else {
+                    let replacement = if fault == "replace" {
+                        let mut selected = engram_work_source_root_for_work(
+                            &inner.engram_work_source_roots,
+                            &hook_store,
+                            &hook_binding.work_id,
+                        )
+                        .unwrap()
+                        .clone();
+                        selected.generation += 50;
+                        Some(selected)
                     } else {
-                        let replacement = if fault == "replace" {
-                            let mut selected = engram_work_source_root_for_work(
-                                &inner.engram_work_source_roots, &hook_store, &hook_binding.work_id,
-                            ).unwrap().clone();
-                            selected.generation += 50;
-                            Some(selected)
-                        } else {
-                            None
-                        };
-                        engram_set_work_source_root(
-                            &mut inner.engram_work_source_roots, &hook_store,
-                            &hook_binding.work_id, replacement,
-                        ).unwrap();
-                    }
+                        None
+                    };
+                    engram_set_work_source_root(
+                        &mut inner.engram_work_source_roots,
+                        &hook_store,
+                        &hook_binding.work_id,
+                        replacement,
+                    )
+                    .unwrap();
                 }
-                let owner = state.prepare_engram_authority(
-                    &hook_store, &hook_binding, DEADLOCK_GUARD,
-                ).unwrap();
-                *observed_rival.lock().unwrap() = Some(owner);
-            }));
+            }
+            let owner = state
+                .prepare_engram_authority(&hook_store, &hook_binding, DEADLOCK_GUARD)
+                .unwrap();
+            *observed_rival.lock().unwrap() = Some(owner);
+        }));
         let result = request_fixture_name(&claimed, Some(&tree));
-        claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_engram_authority_ack_boundary = None;
         let error = result.expect_err("a kept proof must not adopt a changed local baseline");
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert!(error.message.starts_with("naming authority changed during canonical recovery"),
-            "{fault}: {}", error.message);
-        let rival = rival.lock().unwrap().take().expect("the pre-read boundary was reached");
+        assert!(
+            error
+                .message
+                .starts_with("naming authority changed during canonical recovery"),
+            "{fault}: {}",
+            error.message
+        );
+        let rival = rival
+            .lock()
+            .unwrap()
+            .take()
+            .expect("the pre-read boundary was reached");
         let inner = claimed.state.inner.lock().unwrap();
-        let current_owner = inner.engram_work_naming_history.iter()
+        let current_owner = inner
+            .engram_work_naming_history
+            .iter()
             .find(|history| history.store == store && history.work_id == binding.work_id)
-            .unwrap().transition.as_ref().unwrap();
-        assert_eq!(current_owner.id, rival.id, "refusal must not supersede the rival again");
+            .unwrap()
+            .transition
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            current_owner.id, rival.id,
+            "refusal must not supersede the rival again"
+        );
         assert_eq!(current_owner.version, rival.version);
         let selected = engram_work_source_root_for_work(
-            &inner.engram_work_source_roots, &store, &binding.work_id,
+            &inner.engram_work_source_roots,
+            &store,
+            &binding.work_id,
         );
         match fault {
             "replace" => assert_eq!(selected.unwrap().generation, named.generation + 50),
             "remove" => assert!(selected.is_none()),
             "journal" => {
                 assert_eq!(selected.unwrap().generation, named.generation);
-                assert!(engram_root_journal(
-                    &inner.engram_named_root_journal, &store, &binding.claim_id,
-                ).unwrap().obsolete);
+                assert!(
+                    engram_root_journal(
+                        &inner.engram_named_root_journal,
+                        &store,
+                        &binding.claim_id,
+                    )
+                    .unwrap()
+                    .obsolete
+                );
             }
             _ => unreachable!(),
         }
         drop(inner);
-        assert_eq!(claimed.record(|record| record.engram.pending_source_root_line.clone()), previous_line);
-        assert_eq!(claimed.transport.requests().iter()
-            .filter(|request| request.request["operation"] == "named_root_bind").count(), 1);
+        assert_eq!(
+            claimed.record(|record| record.engram.pending_source_root_line.clone()),
+            previous_line
+        );
+        assert_eq!(
+            claimed
+                .transport
+                .requests()
+                .iter()
+                .filter(|request| request.request["operation"] == "named_root_bind")
+                .count(),
+            1
+        );
     }
 }
 
@@ -258,13 +313,17 @@ fn naming_context_rejection(fault: &'static str, window: &'static str) {
     let error = result.expect_err("changed context must not install the requested selection");
     if window != "selection" && (fault == "connection" || fault == "selection") {
         assert!(
-            error.message.starts_with("naming authority changed during canonical recovery"),
+            error
+                .message
+                .starts_with("naming authority changed during canonical recovery"),
             "{window}/{fault}: the returned-lock helper must refuse before installation: {}",
             error.message
         );
     } else if window == "selection" && (fault == "selection" || fault == "pending") {
         assert!(
-            error.message.starts_with("named-root selection changed before installation"),
+            error
+                .message
+                .starts_with("named-root selection changed before installation"),
             "{window}/{fault}: installation must reject the changed original selection or intent: {}",
             error.message
         );

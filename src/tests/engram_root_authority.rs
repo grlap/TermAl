@@ -14,10 +14,18 @@ mod naming_supersede_bounds {
     include!("engram_named_root_naming_supersede_bounds.rs");
 }
 
-
 #[test]
 fn source_root_authority_read_separates_root_owner_from_current_service_ownership() {
-    for mode in ["root-owner", "historical-routing", "claim", "historical-queue", "turn", "runtime", "store", "connection"] {
+    for mode in [
+        "root-owner",
+        "historical-routing",
+        "claim",
+        "historical-queue",
+        "turn",
+        "runtime",
+        "store",
+        "connection",
+    ] {
         let label = format!("ordinary-owner-{mode}");
         let claimed = EOCheckedTurn::start(&label, true);
         let store = naming_store(&claimed);
@@ -26,41 +34,85 @@ fn source_root_authority_read_separates_root_owner_from_current_service_ownershi
         let session = claimed.session_id.clone();
         let owner_store = store.clone();
         let owner_binding = binding.clone();
-        TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| *hook.borrow_mut() = Some(Box::new(move || {
-            if mode == "root-owner" {
-                host.prepare_engram_authority(&owner_store, &owner_binding, DEADLOCK_GUARD).unwrap();
-            } else if mode == "store" {
-                change_engram_settings(&host, |settings| settings.authority_store_key.as_mut().unwrap().project_id.push_str("-successor"));
-            } else if mode == "connection" {
-                change_engram_settings(&host, |settings| settings.binary_path = Some("successor-engram.exe".into()));
-            }
-            let mut inner = host.inner.lock().unwrap();
-            let index = inner.find_session_index(&session).unwrap();
-            let record = &mut inner.sessions[index];
-            record.engram.named_root = Some(EngramNamedRootState::Bound {
-                workspace_id: "successor-source".into(), generation: 99, named_at: "2026-10-02T00:00:00Z".into(),
-            });
-            match mode {
-                "historical-routing" => { record.engram.historical_control.insert("engramRoutingToken".into(), json!("successor-token")); }
-                "historical-queue" => { record.engram.historical_control.insert("engramDispatchGeneration".into(), json!(99)); }
-                "claim" => record.engram.work_binding.as_mut().unwrap().claim_id.push_str("-successor"),
-                "turn" => record.active_turn_generation += 1,
-                "runtime" => record.runtime = SessionRuntime::None,
-                _ => {}
-            }
-        })));
+        TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move || {
+                if mode == "root-owner" {
+                    host.prepare_engram_authority(&owner_store, &owner_binding, DEADLOCK_GUARD)
+                        .unwrap();
+                } else if mode == "store" {
+                    change_engram_settings(&host, |settings| {
+                        settings
+                            .authority_store_key
+                            .as_mut()
+                            .unwrap()
+                            .project_id
+                            .push_str("-successor")
+                    });
+                } else if mode == "connection" {
+                    change_engram_settings(&host, |settings| {
+                        settings.binary_path = Some("successor-engram.exe".into())
+                    });
+                }
+                let mut inner = host.inner.lock().unwrap();
+                let index = inner.find_session_index(&session).unwrap();
+                let record = &mut inner.sessions[index];
+                record.engram.named_root = Some(EngramNamedRootState::Bound {
+                    workspace_id: "successor-source".into(),
+                    generation: 99,
+                    named_at: "2026-10-02T00:00:00Z".into(),
+                });
+                match mode {
+                    "historical-routing" => {
+                        record
+                            .engram
+                            .historical_control
+                            .insert("engramRoutingToken".into(), json!("successor-token"));
+                    }
+                    "historical-queue" => {
+                        record
+                            .engram
+                            .historical_control
+                            .insert("engramDispatchGeneration".into(), json!(99));
+                    }
+                    "claim" => record
+                        .engram
+                        .work_binding
+                        .as_mut()
+                        .unwrap()
+                        .claim_id
+                        .push_str("-successor"),
+                    "turn" => record.active_turn_generation += 1,
+                    "runtime" => record.runtime = SessionRuntime::None,
+                    _ => {}
+                }
+            }))
+        });
         let (target, mut fence) = {
             let inner = claimed.state.inner.lock().unwrap();
-            (AppState::engram_source_root_target_locked(&inner, &claimed.session_id).unwrap().unwrap(),
-                EngramRootReadFence::capture(&inner))
+            (
+                AppState::engram_source_root_target_locked(&inner, &claimed.session_id)
+                    .unwrap()
+                    .unwrap(),
+                EngramRootReadFence::capture(&inner),
+            )
         };
-        assert!(target.runtime_snapshot.is_some(), "the stale-runtime case needs a real runtime to replace");
+        assert!(
+            target.runtime_snapshot.is_some(),
+            "the stale-runtime case needs a real runtime to replace"
+        );
         fence.generation = u64::MAX;
-        let result = claimed.state.reconcile_engram_named_root_route_classified_until(
-            &claimed.session_id, Some(&binding), Some(EngramNamedRootState::None),
-            &fence, Some(&target.connection),
-            claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
-            None, Some(&target.runtime_snapshot));
+        let result = claimed
+            .state
+            .reconcile_engram_named_root_route_classified_until(
+                &claimed.session_id,
+                Some(&binding),
+                Some(EngramNamedRootState::None),
+                &fence,
+                Some(&target.connection),
+                claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+                None,
+                Some(&target.runtime_snapshot),
+            );
         let result_kind = match &result {
             Ok(EngramRootReconcileOutcome::Confirmed { .. }) => "confirmed",
             Ok(EngramRootReconcileOutcome::NoClaim) => "no claim",
@@ -70,80 +122,160 @@ fn source_root_authority_read_separates_root_owner_from_current_service_ownershi
             Err(EngramRootReconcileFailure::EvidenceWithheld(_)) => "evidence failure",
         };
         match mode {
-            "root-owner" => assert!(matches!(&result,
+            "root-owner" => assert!(
+                matches!(&result,
                 Ok(EngramRootReconcileOutcome::EvidenceWithheld {
                     guard: Some(_), reason: EngramRootEvidenceUncertainty::CanonicalHistory(error),
                 }) if error.message == "named-root response belongs to a superseded work owner"),
-                "{mode}: the stale root owner must withhold canonical history: {result_kind}"),
-            "claim" | "runtime" => assert!(matches!(&result,
+                "{mode}: the stale root owner must withhold canonical history: {result_kind}"
+            ),
+            "claim" | "runtime" => assert!(
+                matches!(&result,
                 Err(EngramRootReconcileFailure::AdmissionInvalid(error))
                     if error.code.as_deref() == Some("control_binding_unavailable")
                         && error.message == "canonical source reply belongs to invalid admission authority"),
-                "{mode}: stale runtime or claim must reject the reply: {result_kind}"),
-            "store" | "connection" => assert!(matches!(&result,
+                "{mode}: stale runtime or claim must reject the reply: {result_kind}"
+            ),
+            "store" | "connection" => assert!(
+                matches!(&result,
                 Err(EngramRootReconcileFailure::AdmissionInvalid(error))
                     if error.code.as_deref() == Some("control_binding_unavailable")
                         && error.message == "named-root canonical read belongs to an earlier authority connection"),
-                "{mode}: stale service authority must reject the read: {result_kind}"),
-            "historical-routing" | "historical-queue" | "turn" => assert!(matches!(result,
-                Ok(EngramRootReconcileOutcome::Confirmed { .. })),
-                "{mode}: current authority must still publish: {result_kind}"),
+                "{mode}: stale service authority must reject the read: {result_kind}"
+            ),
+            "historical-routing" | "historical-queue" | "turn" => assert!(
+                matches!(result, Ok(EngramRootReconcileOutcome::Confirmed { .. })),
+                "{mode}: current authority must still publish: {result_kind}"
+            ),
             _ => unreachable!(),
         }
         if !matches!(mode, "historical-routing" | "historical-queue" | "turn") {
-            assert!(matches!(claimed.record_mut(|record| record.engram.named_root.clone()),
+            assert!(
+                matches!(claimed.record_mut(|record| record.engram.named_root.clone()),
                 Some(EngramNamedRootState::Bound { workspace_id, .. }) if workspace_id == "successor-source"),
-                "{mode}: stale reply cannot overwrite its successor");
+                "{mode}: stale reply cannot overwrite its successor"
+            );
         }
-        let restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
-        assert_eq!(engram_authority_work_unresolved(&restored, &store, &binding.work_id),
-            !matches!(mode, "historical-routing" | "historical-queue" | "turn"), "{mode}");
+        let restored = load_state(claimed.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            engram_authority_work_unresolved(&restored, &store, &binding.work_id),
+            !matches!(mode, "historical-routing" | "historical-queue" | "turn"),
+            "{mode}"
+        );
         assert_ordinary_turn_has_no_native_requests(&claimed);
     }
 }
 
 #[test]
 fn source_root_authority_read_withholds_auxiliary_failures_unknown_and_legacy_history() {
-    for mode in ["credentials", "unsupported", "malformed", "legacy", "unknown", "recovered-read"] {
+    for mode in [
+        "credentials",
+        "unsupported",
+        "malformed",
+        "legacy",
+        "unknown",
+        "recovered-read",
+    ] {
         let label = format!("ordinary-withheld-{mode}");
         let claimed = EOCheckedTurn::idle(&label, true);
         let store = naming_store(&claimed);
         let binding = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
         if mode == "legacy" {
-            engram_record_naming_history(&mut claimed.state.inner.lock().unwrap(), &store, &binding.work_id, 8);
+            engram_record_naming_history(
+                &mut claimed.state.inner.lock().unwrap(),
+                &store,
+                &binding.work_id,
+                8,
+            );
         } else if matches!(mode, "credentials" | "unsupported" | "malformed") {
             *claimed.transport.named_roots.lock().unwrap() = None;
             let reply = match mode {
                 "credentials" => Err(EngramTransportError::remote(EngramControlErrorBody {
-                    code: "control_session_token_mismatch".into(), message: "auxiliary source read unavailable".into(),
+                    code: "control_session_token_mismatch".into(),
+                    message: "auxiliary source read unavailable".into(),
                 })),
                 "unsupported" => Err(EngramTransportError::remote(EngramControlErrorBody {
-                    code: "unknown_control_operation".into(), message: "source reader unsupported".into(),
+                    code: "unknown_control_operation".into(),
+                    message: "source reader unsupported".into(),
                 })),
                 _ => Ok(json!({"result":{"unexpected":true}})),
             };
-            claimed.transport.responses.lock().unwrap().push_back(ScriptedEngramControlResponse::Reply(reply));
+            claimed
+                .transport
+                .responses
+                .lock()
+                .unwrap()
+                .push_back(ScriptedEngramControlResponse::Reply(reply));
         } else if mode == "recovered-read" {
-            claimed.transport.named_roots.lock().unwrap().as_mut().unwrap().root_read_failures.insert(binding.claim_id.clone());
-            assert!(current_authority_read(&claimed.state, &claimed.session_id, Some(&binding), None, u64::MAX,
-                claimed.state.engram_budget_clock().now() + Duration::from_secs(2)).is_err());
-            claimed.transport.named_roots.lock().unwrap().as_mut().unwrap().root_read_failures.remove(&binding.claim_id);
+            claimed
+                .transport
+                .named_roots
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .root_read_failures
+                .insert(binding.claim_id.clone());
+            assert!(
+                current_authority_read(
+                    &claimed.state,
+                    &claimed.session_id,
+                    Some(&binding),
+                    None,
+                    u64::MAX,
+                    claimed.state.engram_budget_clock().now() + Duration::from_secs(2)
+                )
+                .is_err()
+            );
+            claimed
+                .transport
+                .named_roots
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .root_read_failures
+                .remove(&binding.claim_id);
         }
-        let result = current_authority_read(&claimed.state, &claimed.session_id, Some(&binding),
-            (mode == "unknown").then_some(EngramNamedRootState::Unknown), u64::MAX,
-            claimed.state.engram_budget_clock().now() + Duration::from_secs(2));
-        assert_eq!(result.is_ok(), matches!(mode, "unknown" | "recovered-read"), "{mode}: {result:?}");
+        let result = current_authority_read(
+            &claimed.state,
+            &claimed.session_id,
+            Some(&binding),
+            (mode == "unknown").then_some(EngramNamedRootState::Unknown),
+            u64::MAX,
+            claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+        );
+        assert_eq!(
+            result.is_ok(),
+            matches!(mode, "unknown" | "recovered-read"),
+            "{mode}: {result:?}"
+        );
         let withheld = mode != "recovered-read";
-        assert_eq!(claimed.state.engram_root_capture(&claimed.session_id) == EngramRootCapture::Unconfirmed, withheld);
-        let restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
-        assert_eq!(engram_authority_work_unresolved(&restored, &store, &binding.work_id), withheld, "{mode}");
+        assert_eq!(
+            claimed.state.engram_root_capture(&claimed.session_id)
+                == EngramRootCapture::Unconfirmed,
+            withheld
+        );
+        let restored = load_state(claimed.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            engram_authority_work_unresolved(&restored, &store, &binding.work_id),
+            withheld,
+            "{mode}"
+        );
         assert_ordinary_turn_has_no_native_requests(&claimed);
     }
 }
 
 #[test]
 fn source_root_authority_read_distinguishes_prepared_and_candidate_durability_failure() {
-    for mode in [EngramAuthorityPhase::Prepared, EngramAuthorityPhase::Candidate] {
+    for mode in [
+        EngramAuthorityPhase::Prepared,
+        EngramAuthorityPhase::Candidate,
+    ] {
         let claimed = EOCheckedTurn::idle("ordinary-authority-writer-failure", true);
         let store = naming_store(&claimed);
         let binding = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
@@ -154,25 +286,63 @@ fn source_root_authority_read_distinguishes_prepared_and_candidate_durability_fa
         let session = claimed.session_id.clone();
         let worker_binding = binding.clone();
         let task = std::thread::spawn(move || {
-            current_authority_read(&worker, &session, Some(&worker_binding), None, u64::MAX,
-                worker.engram_budget_clock().now() + Duration::from_secs(2))
+            current_authority_read(
+                &worker,
+                &session,
+                Some(&worker_binding),
+                None,
+                u64::MAX,
+                worker.engram_budget_clock().now() + Duration::from_secs(2),
+            )
         });
         let mut batch = PersistFenceBatch::default();
         let mut cache = SqlitePersistConnectionCache::new();
         receive_naming_authority_fence(&rx, &mut batch, &task);
         if mode == EngramAuthorityPhase::Candidate {
             let prepared = collect_persist_delta_from_shared_state(&state.inner, 0);
-            persist_delta_with_fences(&mut cache, state.persistence_path.as_path(), &prepared, &mut batch).unwrap();
+            persist_delta_with_fences(
+                &mut cache,
+                state.persistence_path.as_path(),
+                &prepared,
+                &mut batch,
+            )
+            .unwrap();
             receive_naming_authority_fence(&rx, &mut batch, &task);
         }
-        assert_eq!(state.inner.lock().unwrap().engram_work_naming_history[0].transition.as_ref().unwrap().phase, mode);
-        assert!(state.inner.inner.try_lock().is_ok(), "acknowledgement waits off StateInner");
-        batch.fail(PersistFenceError::WriteFailed("controlled authority boundary failure".into()));
+        assert_eq!(
+            state.inner.lock().unwrap().engram_work_naming_history[0]
+                .transition
+                .as_ref()
+                .unwrap()
+                .phase,
+            mode
+        );
+        assert!(
+            state.inner.inner.try_lock().is_ok(),
+            "acknowledgement waits off StateInner"
+        );
+        batch.fail(PersistFenceError::WriteFailed(
+            "controlled authority boundary failure".into(),
+        ));
         assert!(task.join().unwrap().is_err());
-        assert_eq!(claimed.transport.requests().iter().filter(|request| request.request["operation"] == "named_root_read").count(),
-            usize::from(mode == EngramAuthorityPhase::Candidate));
-        assert!(engram_authority_work_unresolved(&state.inner.lock().unwrap(), &store, &binding.work_id));
-        assert_eq!(claimed.state.engram_root_capture(&claimed.session_id), EngramRootCapture::Unconfirmed);
+        assert_eq!(
+            claimed
+                .transport
+                .requests()
+                .iter()
+                .filter(|request| request.request["operation"] == "named_root_read")
+                .count(),
+            usize::from(mode == EngramAuthorityPhase::Candidate)
+        );
+        assert!(engram_authority_work_unresolved(
+            &state.inner.lock().unwrap(),
+            &store,
+            &binding.work_id
+        ));
+        assert_eq!(
+            claimed.state.engram_root_capture(&claimed.session_id),
+            EngramRootCapture::Unconfirmed
+        );
         assert_ordinary_turn_has_no_native_requests(&claimed);
     }
 }
@@ -191,45 +361,78 @@ fn unclaimed_ordinary_opening_keeps_claimed_authority_absent(unknown: bool) {
     let claimed = EOCheckedTurn::idle("ordinary-no-claim-authority", false);
     claimed.transport.set_current_work_binding(None);
     if unknown {
-        claimed.record_mut(|record| { record.engram.historical_control.insert("engramSessionStatus".into(),
-            json!({"phase":"ready","named_root":{"state":"future_variant"}})); });
+        claimed.record_mut(|record| {
+            record.engram.historical_control.insert(
+                "engramSessionStatus".into(),
+                json!({"phase":"ready","named_root":{"state":"future_variant"}}),
+            );
+        });
     }
     let history = claimed.record_mut(|record| record.engram.historical_control.clone());
     for _ in 0..2 {
-        let prompt = claimed.begin_prompt("An ordinary unclaimed turn requires no grant.").prompt;
+        let prompt = claimed
+            .begin_prompt("An ordinary unclaimed turn requires no grant.")
+            .prompt;
         assert!(!prompt.contains("unconfirmed"), "{prompt}");
-        assert_eq!(claimed.state.engram_root_capture(&claimed.session_id), EngramRootCapture::Unnamed);
+        assert_eq!(
+            claimed.state.engram_root_capture(&claimed.session_id),
+            EngramRootCapture::Unnamed
+        );
         claimed.record_mut(|record| {
             assert!(record.engram.work_binding.is_none());
             assert!(record.engram.observed_opening().is_none());
             assert!(record.engram.unadmitted_active_turn.is_some());
             assert_eq!(record.engram.historical_control, history);
         });
-        let restored = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+        let restored = load_state(claimed.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
         assert!(restored.engram_work_naming_history.is_empty());
         assert!(restored.engram_named_root_journal.is_empty());
         claimed.end();
     }
-    assert!(!claimed.transport.requests().iter().any(|request| request.request["operation"] == "named_root_read"));
+    assert!(
+        !claimed
+            .transport
+            .requests()
+            .iter()
+            .any(|request| request.request["operation"] == "named_root_read")
+    );
     assert_ordinary_turn_has_no_native_requests(&claimed);
 }
 
 // Select current metadata and call the canonical owner directly. This helper
 // creates no control session, grant, admission or acknowledgement.
 fn current_authority_read(
-    state: &AppState, session: &str, binding: Option<&EngramControlWorkBinding>,
-    projection: Option<EngramNamedRootState>, generation: u64, deadline: std::time::Instant,
+    state: &AppState,
+    session: &str,
+    binding: Option<&EngramControlWorkBinding>,
+    projection: Option<EngramNamedRootState>,
+    generation: u64,
+    deadline: std::time::Instant,
 ) -> Result<(), EngramTransportError> {
     let (target, mut fence) = {
         let inner = state.inner.lock().unwrap();
-        (AppState::engram_source_root_target_locked(&inner, session)
-            .map_err(EngramTransportError::local_state)?
-            .ok_or_else(|| EngramTransportError::local_state("ordinary root reader unavailable"))?,
-            EngramRootReadFence::capture(&inner))
+        (
+            AppState::engram_source_root_target_locked(&inner, session)
+                .map_err(EngramTransportError::local_state)?
+                .ok_or_else(|| {
+                    EngramTransportError::local_state("ordinary root reader unavailable")
+                })?,
+            EngramRootReadFence::capture(&inner),
+        )
     };
     fence.generation = generation;
-    state.reconcile_engram_named_root_with_route_classified_until(session, binding, projection,
-        &fence, Some(&target.connection), deadline).map_err(EngramRootReconcileFailure::into_transport)
+    state
+        .reconcile_engram_named_root_with_route_classified_until(
+            session,
+            binding,
+            projection,
+            &fence,
+            Some(&target.connection),
+            deadline,
+        )
+        .map_err(EngramRootReconcileFailure::into_transport)
 }
 #[test]
 fn source_root_authority_invalid_held_association_cannot_poison_a_later_name() {
@@ -316,13 +519,7 @@ fn source_root_authority_shared_staging_and_cleanup_require_retained_association
     let label = "shared-intent-association";
     let claimed = EOCheckedTurn::idle(label, true);
     let worktree = naming_worktree(&claimed.root);
-    request_naming(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![naming_claim(label)],
-    )
-    .unwrap();
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
     let mut inner = claimed.state.inner.lock().unwrap();
     let original = inner.engram_named_root_journal[0].clone();
     let mut event = original.confirmed.as_ref().unwrap().0.clone();
@@ -404,8 +601,13 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
             control: claimed.transport.clone(),
             calls: Mutex::new(Vec::new()),
         });
-        claimed.state.install_test_engram_transport(recorder.clone());
-        let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+        claimed
+            .state
+            .install_test_engram_transport(recorder.clone());
+        let target = AppState::engram_source_root_target_locked(
+            &claimed.state.inner.lock().unwrap(),
+            &claimed.session_id,
+        )
         .unwrap()
         .unwrap();
         let rpc = target.settings.call_timeout();
@@ -419,15 +621,20 @@ fn source_root_authority_fixture_setup_ack_deadline_distinguishes_expiry_from_ow
         let task = std::thread::spawn(move || {
             let mut target = target;
             if mode != "standalone-expiry" {
-                target.test_root_setup_deadline = Some(worker.engram_budget_clock().now() +
-                    if success { rpc * 2 } else { rpc });
+                target.test_root_setup_deadline =
+                    Some(worker.engram_budget_clock().now() + if success { rpc * 2 } else { rpc });
             }
             let deadline = target.root_operation_deadline(worker.engram_budget_clock().now());
             let binding = target.work_binding.as_ref().unwrap();
             let store = target.settings.authority_store_key.as_ref().unwrap();
             let owner = worker.prepare_engram_authority_until(store, binding, deadline)?;
             let proof = worker.read_engram_authority_fact_until(&target, binding, deadline)?;
-            AppState::learn_engram_authority_locked(&mut worker.inner.lock().unwrap(), store, &owner, &proof)?;
+            AppState::learn_engram_authority_locked(
+                &mut worker.inner.lock().unwrap(),
+                store,
+                &owner,
+                &proof,
+            )?;
             worker.publish_engram_authority_until(store, &owner, deadline)
         });
         let mut batch = PersistFenceBatch::default();
@@ -572,17 +779,18 @@ fn source_root_authority_review_delayed_manual_writer_expires_without_owner_supe
     let claimed = EOCheckedTurn::idle(label, true);
     let clock = claimed.state.engram_budget_clock();
     let store = naming_store(&claimed);
-    let (binding,) = claimed.record_mut(|record| {
-        (
-            record.engram.work_binding.clone().unwrap(),
-                    )
-    });
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let (binding,) = claimed.record_mut(|record| (record.engram.work_binding.clone().unwrap(),));
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let rpc_budget = target.settings.call_timeout();
-    assert!(target.test_root_setup_deadline.is_none(),
-        "standalone authority reads use their explicit operation deadline");
+    assert!(
+        target.test_root_setup_deadline.is_none(),
+        "standalone authority reads use their explicit operation deadline"
+    );
     let writer = sqlite_state_write_lock(claimed.state.persistence_path.as_path());
     let held = lock_sqlite_state_writer(&writer);
     let ticket = sqlite_state_writer_issued_tickets(&writer) + 1;
@@ -591,14 +799,16 @@ fn source_root_authority_review_delayed_manual_writer_expires_without_owner_supe
     let worker_binding = binding.clone();
     let task = std::thread::spawn(move || {
         let fence = EngramRootReadFence::capture(&state.inner.lock().unwrap());
-        state.reconcile_engram_named_root_with_route_classified_until(
-            &session,
-            Some(&worker_binding),
-            Some(EngramNamedRootState::None),
-            &fence,
-            None,
-            state.engram_budget_clock().now() + rpc_budget,
-        ).map_err(EngramRootReconcileFailure::into_transport)
+        state
+            .reconcile_engram_named_root_with_route_classified_until(
+                &session,
+                Some(&worker_binding),
+                Some(EngramNamedRootState::None),
+                &fence,
+                None,
+                state.engram_budget_clock().now() + rpc_budget,
+            )
+            .map_err(EngramRootReconcileFailure::into_transport)
     });
     wait_for_sqlite_state_writer_issued_tickets(&writer, ticket);
     let owner = claimed
@@ -701,9 +911,10 @@ fn authority_review_restart_recovers(prepared_only: bool) {
         if prepared_only {
             return Ok::<_, ApiError>(());
         }
-        let target = AppState::engram_source_root_target_locked(&worker.inner.lock().unwrap(), &session)
-        .unwrap()
-        .unwrap();
+        let target =
+            AppState::engram_source_root_target_locked(&worker.inner.lock().unwrap(), &session)
+                .unwrap()
+                .unwrap();
         let proof = worker
             .read_engram_authority_fact_until(&target, &worker_binding, deadline)
             .inspect_err(|error| eprintln!("restart read failed: {error:?}"))?;
@@ -771,7 +982,9 @@ fn authority_review_restart_recovers(prepared_only: bool) {
     // fixture's clock goes with the restored state, as its transport does,
     // chosen before anything snapshots the restored state's clock.
     claimed.state.select_test_engram_budget_clock(clock.clone());
-    claimed.state.install_test_engram_transport(claimed.transport.clone());
+    claimed
+        .state
+        .install_test_engram_transport(claimed.transport.clone());
     // The restored state must still run on the fixture's scripted clock.
     clock.advance(Duration::from_millis(1));
     assert_eq!(
@@ -929,11 +1142,7 @@ fn authority_review_first_contact(case: &str) {
     let label = "authority-first-contact";
     let claimed = EOCheckedTurn::idle(label, true);
     let store = naming_store(&claimed);
-    let (binding,) = claimed.record_mut(|record| {
-        (
-            record.engram.work_binding.clone().unwrap(),
-                    )
-    });
+    let (binding,) = claimed.record_mut(|record| (record.engram.work_binding.clone().unwrap(),));
     let before = engram_work_naming_token(
         &claimed.state.inner.lock().unwrap(),
         &store,
@@ -974,13 +1183,15 @@ fn authority_review_first_contact(case: &str) {
         .unwrap()
         .root_reads
         .insert(binding.claim_id.clone(), proof);
-    current_authority_read(&claimed.state,
-            &claimed.session_id,
-            Some(&binding),
-            Some(EngramNamedRootState::None),
-            u64::MAX,
-            claimed.state.engram_budget_clock().now() + Duration::from_secs(2))
-        .unwrap();
+    current_authority_read(
+        &claimed.state,
+        &claimed.session_id,
+        Some(&binding),
+        Some(EngramNamedRootState::None),
+        u64::MAX,
+        claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    )
+    .unwrap();
     let inner = claimed.state.inner.lock().unwrap();
     assert!(
         !engram_work_naming_is_current(&inner, &store, &before),
@@ -1014,7 +1225,10 @@ fn source_root_authority_review_failed_prior_run_is_recoverable_after_claim_chan
     request_naming(&claimed, label, Some(&tree), vec![naming_claim(label)]).unwrap();
     let store = naming_store(&claimed);
     let first = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     claimed
@@ -1056,13 +1270,15 @@ fn source_root_authority_review_failed_prior_run_is_recoverable_after_claim_chan
     claimed
         .transport
         .enable_named_roots(&claimed.session_id, &successor);
-    current_authority_read(&claimed.state,
-            &claimed.session_id,
-            Some(&successor),
-            Some(EngramNamedRootState::None),
-            u64::MAX,
-            claimed.state.engram_budget_clock().now() + Duration::from_secs(2))
-        .unwrap();
+    current_authority_read(
+        &claimed.state,
+        &claimed.session_id,
+        Some(&successor),
+        Some(EngramNamedRootState::None),
+        u64::MAX,
+        claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    )
+    .unwrap();
     let inner = claimed.state.inner.lock().unwrap();
     assert!(
         !engram_authority_work_unresolved(&inner, &store, &first.work_id),
@@ -1087,7 +1303,10 @@ fn source_root_authority_review_no_event_cannot_erase_unexplained_positive_legac
         &store,
         &binding.work_id,
     );
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let no_event = claimed
@@ -1169,8 +1388,15 @@ fn source_root_authority_review_admitted_retirement_waits_for_connected_ack() {
     proof["run"]["state"] = json!("open");
     proof["latest_event"]["kind"] = json!("ended");
     proof["latest_event"]["event"] = json!(sha256_hex(b"retirement-ended-event"));
-    let next_position = claimed.transport.named_roots.lock().unwrap().as_ref().unwrap()
-        .run_cuts[&journal.read_binding.as_ref().unwrap().run_id] + 1;
+    let next_position = claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .run_cuts[&journal.read_binding.as_ref().unwrap().run_id]
+        + 1;
     proof["latest_event"]["position"]["position"] = json!(next_position);
     proof["read_cut"]["position"] = json!(next_position);
     claimed
@@ -1182,23 +1408,21 @@ fn source_root_authority_review_admitted_retirement_waits_for_connected_ack() {
         .unwrap()
         .root_reads
         .insert(journal.claim_id.clone(), proof);
-    let (binding,) = claimed.record_mut(|record| {
-        (
-            record.engram.work_binding.clone().unwrap(),
-                    )
-    });
+    let (binding,) = claimed.record_mut(|record| (record.engram.work_binding.clone().unwrap(),));
     let mut state = claimed.state.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     state.persist_tx = tx;
     let worker = state.clone();
     let session = claimed.session_id.clone();
     let task = std::thread::spawn(move || {
-        current_authority_read(&worker,
+        current_authority_read(
+            &worker,
             &session,
             Some(&binding),
             Some(EngramNamedRootState::None),
             u64::MAX,
-            worker.engram_budget_clock().now() + Duration::from_secs(2))
+            worker.engram_budget_clock().now() + Duration::from_secs(2),
+        )
     });
     let mut batch = PersistFenceBatch::default();
     receive_naming_authority_fence(&rx, &mut batch, &task);
@@ -1281,9 +1505,10 @@ fn authority_review_staging_writer_lock(cleanup: bool) {
             drop(inner);
             // Staging itself no longer writes. Drive its production owner
             // path to the same real SQLite admission witness off-lock.
-            let target = AppState::engram_source_root_target_locked(&state.inner.lock().unwrap(), &session)
-            .unwrap()
-            .unwrap();
+            let target =
+                AppState::engram_source_root_target_locked(&state.inner.lock().unwrap(), &session)
+                    .unwrap()
+                    .unwrap();
             state
                 .send_engram_root_event(&target, &event, Duration::from_secs(2))
                 .unwrap();
@@ -1370,7 +1595,10 @@ fn source_root_authority_renewed_claim_settles_the_same_canonical_run() {
         .state
         .prepare_engram_authority(&store, &renewed, Duration::from_secs(2))
         .unwrap();
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let proof = claimed
@@ -1421,7 +1649,10 @@ fn connected_authority_candidate_ack(supersede: bool) {
         .state
         .prepare_engram_authority(&store, &binding, Duration::from_secs(2))
         .unwrap();
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let proof = claimed
@@ -1623,11 +1854,7 @@ fn connected_authority_settlement_failure(entry: &'static str) {
         .unwrap();
     }
     let store = naming_store(&claimed);
-    let (binding,) = claimed.record_mut(|record| {
-        (
-            record.engram.work_binding.clone().unwrap(),
-                    )
-    });
+    let (binding,) = claimed.record_mut(|record| (record.engram.work_binding.clone().unwrap(),));
     let intent = {
         let mut inner = claimed.state.inner.lock().unwrap();
         if entry == "cleanup" {
@@ -1689,16 +1916,18 @@ fn connected_authority_settlement_failure(entry: &'static str) {
     let session = claimed.session_id.clone();
     let work = binding.work_id.clone();
     let task = std::thread::spawn(move || match entry {
-        "reconcile" => current_authority_read(&worker_state,
-                &session,
-                Some(&binding),
-                Some(EngramNamedRootState::UnboundByRelease {
-                    last_generation: 7,
-                    released_at_position: 100,
-                }),
-                u64::MAX,
-            worker_state.engram_budget_clock().now() + Duration::from_secs(2))
-            .map_err(|error| error.to_string()),
+        "reconcile" => current_authority_read(
+            &worker_state,
+            &session,
+            Some(&binding),
+            Some(EngramNamedRootState::UnboundByRelease {
+                last_generation: 7,
+                released_at_position: 100,
+            }),
+            u64::MAX,
+            worker_state.engram_budget_clock().now() + Duration::from_secs(2),
+        )
+        .map_err(|error| error.to_string()),
         "replay" => worker_state
             .retire_engram_root_replay(&intent.unwrap(), &real_receipt, None)
             .map_err(|error| error.message),
@@ -1816,13 +2045,7 @@ fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
     let label = "authority-cross-claim-history";
     let mut claimed = EOCheckedTurn::idle(label, true);
     let worktree = naming_worktree(&claimed.root);
-    request_naming(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![naming_claim(label)],
-    )
-    .unwrap();
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
     replace_naming_session(&mut claimed, label);
     let store = naming_store(&claimed);
     let old = claimed
@@ -1937,7 +2160,9 @@ fn source_root_authority_foreign_generation_cannot_hide_a_later_claim_name() {
         assert!(
             acceptance_evaluation_root_changed_locked(
                 &inner,
-                &seed.clone().into_target("old-request".to_owned(), &claimed.session_id)
+                &seed
+                    .clone()
+                    .into_target("old-request".to_owned(), &claimed.session_id)
             ),
             "first submission keeps the original naming token"
         );
@@ -1956,13 +2181,7 @@ fn source_root_authority_removed_reader_requires_a_durable_pre_io_guard() {
     let label = "authority-connected-reader";
     let mut claimed = EOCheckedTurn::idle(label, true);
     let worktree = naming_worktree(&claimed.root);
-    request_naming(
-        &claimed,
-        label,
-        Some(&worktree),
-        vec![naming_claim(label)],
-    )
-    .unwrap();
+    request_naming(&claimed, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
     replace_naming_session(&mut claimed, label);
     let journal = claimed
         .state
@@ -2108,9 +2327,15 @@ struct AuthorityTimeoutRecorder {
 }
 
 impl EngramControlTransport for AuthorityTimeoutRecorder {
-    fn read_observation_policy(&self, connection: &EngramConnectionConfig,
-        store: &EngramAuthorityStoreKey, timeout: Duration, host_workdir: &FsPath) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
-        self.control.read_observation_policy(connection, store, timeout, host_workdir)
+    fn read_observation_policy(
+        &self,
+        connection: &EngramConnectionConfig,
+        store: &EngramAuthorityStoreKey,
+        timeout: Duration,
+        host_workdir: &FsPath,
+    ) -> Result<EngramObservationPolicyBasis, EngramTransportError> {
+        self.control
+            .read_observation_policy(connection, store, timeout, host_workdir)
     }
     fn read_work_binding(
         &self,
@@ -2154,13 +2379,14 @@ fn source_root_authority_review_writer_wait_uses_total_headroom_and_preserves_rp
         control: claimed.transport.clone(),
         calls: Mutex::new(Vec::new()),
     });
-    claimed.state.install_test_engram_transport(recorder.clone());
-    let (binding,) = claimed.record_mut(|record| {
-        (
-            record.engram.work_binding.clone().unwrap(),
-                    )
-    });
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    claimed
+        .state
+        .install_test_engram_transport(recorder.clone());
+    let (binding,) = claimed.record_mut(|record| (record.engram.work_binding.clone().unwrap(),));
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let rpc = target.settings.call_timeout();
@@ -2171,12 +2397,14 @@ fn source_root_authority_review_writer_wait_uses_total_headroom_and_preserves_rp
     let session = claimed.session_id.clone();
     let work = binding.work_id.clone();
     let task = std::thread::spawn(move || {
-        let result = current_authority_read(&worker,
+        let result = current_authority_read(
+            &worker,
             &session,
             Some(&binding),
             Some(EngramNamedRootState::None),
             u64::MAX,
-            worker.engram_budget_clock().now() + rpc * 3);
+            worker.engram_budget_clock().now() + rpc * 3,
+        );
         eprintln!("funded writer worker result: {result:?}");
         result
     });
@@ -2210,7 +2438,10 @@ fn source_root_authority_review_expired_setup_deadline_does_not_fall_back_to_sta
     // from std::time::Instant::now(), and checks the target's expiry against
     // them, so the target must measure time on the same real clock.
     let claimed = EOCheckedTurn::idle_real(label, true);
-    let mut target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let mut target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let now = std::time::Instant::now();
@@ -2236,18 +2467,16 @@ fn source_root_authority_review_no_event_keeps_potentially_executable_pending_wr
     let label = "authority-no-event-pending-write";
     let claimed = EOCheckedTurn::idle(label, true);
     let store = naming_store(&claimed);
-    let (binding,) = claimed.record_mut(|record| {
-        (
-            record.engram.work_binding.clone().unwrap(),
-                    )
-    });
-    current_authority_read(&claimed.state,
-            &claimed.session_id,
-            Some(&binding),
-            Some(EngramNamedRootState::None),
-            u64::MAX,
-            claimed.state.engram_budget_clock().now() + Duration::from_secs(2))
-        .unwrap();
+    let (binding,) = claimed.record_mut(|record| (record.engram.work_binding.clone().unwrap(),));
+    current_authority_read(
+        &claimed.state,
+        &claimed.session_id,
+        Some(&binding),
+        Some(EngramNamedRootState::None),
+        u64::MAX,
+        claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    )
+    .unwrap();
     let event = EngramNamedRootEvent {
         root: EngramWorkSourceRoot {
             store: store.clone(),
@@ -2274,27 +2503,21 @@ fn source_root_authority_review_no_event_keeps_potentially_executable_pending_wr
         )
         .unwrap();
     let original = serde_json::to_value(event.request().unwrap()).unwrap();
-    current_authority_read(&claimed.state,
-            &claimed.session_id,
-            Some(&binding),
-            Some(EngramNamedRootState::None),
-            u64::MAX,
-            claimed.state.engram_budget_clock().now() + Duration::from_secs(2))
-        .unwrap();
+    current_authority_read(
+        &claimed.state,
+        &claimed.session_id,
+        Some(&binding),
+        Some(EngramNamedRootState::None),
+        u64::MAX,
+        claimed.state.engram_budget_clock().now() + Duration::from_secs(2),
+    )
+    .unwrap();
     let inner = claimed.state.inner.lock().unwrap();
     let journal =
         engram_root_journal(&inner.engram_named_root_journal, &store, &binding.claim_id).unwrap();
     assert_eq!(journal.pending.as_ref(), Some(&event));
     assert_eq!(
-        serde_json::to_value(
-            journal
-                .pending
-                .as_ref()
-                .unwrap()
-                .request()
-                .unwrap()
-        )
-        .unwrap(),
+        serde_json::to_value(journal.pending.as_ref().unwrap().request().unwrap()).unwrap(),
         original
     );
     assert!(!journal.reconciliation.as_ref().unwrap().settled);
@@ -2381,7 +2604,10 @@ fn source_root_authority_review_stopped_production_writer_refuses_staging_and_cl
                         Some(&binding),
                     )
                     .unwrap();
-                let target = AppState::engram_source_root_target_locked(&state.inner.lock().unwrap(), &session)
+                let target = AppState::engram_source_root_target_locked(
+                    &state.inner.lock().unwrap(),
+                    &session,
+                )
                 .unwrap()
                 .unwrap();
                 let error = state
@@ -2437,7 +2663,10 @@ fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publi
         let clock = claimed.state.engram_budget_clock();
         let store = naming_store(&claimed);
         let binding = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
-        let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+        let target = AppState::engram_source_root_target_locked(
+            &claimed.state.inner.lock().unwrap(),
+            &claimed.session_id,
+        )
         .unwrap()
         .unwrap();
         let total = target.settings.call_timeout();
@@ -2449,11 +2678,8 @@ fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publi
         let worker_store = store.clone();
         let worker_binding = binding.clone();
         let task = std::thread::spawn(move || {
-            let owner = worker.prepare_engram_authority_until(
-                &worker_store,
-                &worker_binding,
-                deadline,
-            )?;
+            let owner =
+                worker.prepare_engram_authority_until(&worker_store, &worker_binding, deadline)?;
             let proof =
                 worker.read_engram_authority_fact_until(&target, &worker_binding, deadline)?;
             AppState::learn_engram_authority_locked(
@@ -2479,8 +2705,8 @@ fn source_root_authority_review_one_total_deadline_covers_prepare_read_and_publi
         )
         .unwrap();
         receive_naming_authority_fence(&rx, &mut batch, &task);
-        let original_candidate_deadline = batch.pending.len() == 1
-            && batch.pending[0].completion.deadline == deadline;
+        let original_candidate_deadline =
+            batch.pending.len() == 1 && batch.pending[0].completion.deadline == deadline;
         if !original_candidate_deadline {
             // Settle the worker before reporting a deadline-regression failure.
             batch.fail(PersistFenceError::WriteFailed(
@@ -2547,7 +2773,10 @@ fn source_root_authority_review_prepared_ack_deadline_explains_no_candidate_fenc
     let clock = claimed.state.engram_budget_clock();
     let store = naming_store(&claimed);
     let binding = claimed.record_mut(|record| record.engram.work_binding.clone().unwrap());
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
     .unwrap()
     .unwrap();
     let total = target.settings.call_timeout();
@@ -2639,16 +2868,32 @@ fn source_root_notice_recomposition_and_acknowledgement_keep_exact_ordinary_owne
     let notice = EngramSourceRootNotice {
         id: "first-notice".into(),
         kind: EngramSourceRootNoticeKind::AuthorityRecovery {
-            store: naming_store(&claimed), work_id: binding.work_id,
+            store: naming_store(&claimed),
+            work_id: binding.work_id,
             line: "[TermAl] current ordinary authority is unconfirmed".into(),
         },
     };
-    claimed.record_mut(|record| record.engram.set_pending_source_root_line("[TermAl] ordinary naming line".into()));
-    let mut dispatch = match claimed.state.dispatch_turn(&claimed.session_id, SendMessageRequest {
-        text: format!("User quotation: {}", notice.line()), expanded_text: None,
-        attachments: Vec::new(), source_session_id: None, source_mailbox: None,
-    }).unwrap() {
-        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+    claimed.record_mut(|record| {
+        record
+            .engram
+            .set_pending_source_root_line("[TermAl] ordinary naming line".into())
+    });
+    let mut dispatch = match claimed
+        .state
+        .dispatch_turn(
+            &claimed.session_id,
+            SendMessageRequest {
+                text: format!("User quotation: {}", notice.line()),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .unwrap()
+    {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
         DispatchTurnResult::Queued => panic!("idle ordinary fixture"),
     };
     let base = match &dispatch {
@@ -2660,52 +2905,108 @@ fn source_root_notice_recomposition_and_acknowledgement_keep_exact_ordinary_owne
         refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[notice.clone()], None);
         refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[notice.clone()], None);
     });
-    let TurnDispatch::PersistentCodex { command, .. } = &dispatch else { panic!("Codex fixture") };
+    let TurnDispatch::PersistentCodex { command, .. } = &dispatch else {
+        panic!("Codex fixture")
+    };
     assert_eq!(command.prompt, format!("{}\n\n{base}", notice.line()));
-    let successor = EngramSourceRootNotice { id: "replacement-notice".into(), ..notice.clone() };
+    let successor = EngramSourceRootNotice {
+        id: "replacement-notice".into(),
+        ..notice.clone()
+    };
     claimed.record_mut(|record| {
         record.engram.source_root_notices = vec![successor.clone()];
         acknowledge_engram_source_root_notices_locked(record, &[notice]);
-        assert_eq!(record.engram.source_root_notices, vec![successor.clone()],
-            "equal prose is not equal delivery identity");
+        assert_eq!(
+            record.engram.source_root_notices,
+            vec![successor.clone()],
+            "equal prose is not equal delivery identity"
+        );
         acknowledge_engram_source_root_notices_locked(record, &[successor.clone()]);
         assert!(record.engram.source_root_notices.is_empty());
         refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[], None);
     });
-    let TurnDispatch::PersistentCodex { command, .. } = &dispatch else { panic!("Codex fixture") };
-    assert_eq!(command.prompt, base, "recomposition preserves the user quotation and naming line");
+    let TurnDispatch::PersistentCodex { command, .. } = &dispatch else {
+        panic!("Codex fixture")
+    };
+    assert_eq!(
+        command.prompt, base,
+        "recomposition preserves the user quotation and naming line"
+    );
     claimed.record_mut(|record| {
         record.active_turn_generation += 1;
-        let next = EngramSourceRootNotice { id: "next-opening".into(), ..successor.clone() };
+        let next = EngramSourceRootNotice {
+            id: "next-opening".into(),
+            ..successor.clone()
+        };
         record.engram.source_root_notices = vec![next.clone()];
         acknowledge_engram_source_root_notices_locked(record, &[successor]);
         refresh_engram_source_root_prompt_locked(record, &mut dispatch, &[next.clone()], None);
         assert_eq!(record.engram.source_root_notices, vec![next]);
-        assert!(record.engram.pending_source_root_line.as_deref().unwrap().contains("ordinary naming line"));
+        assert!(
+            record
+                .engram
+                .pending_source_root_line
+                .as_deref()
+                .unwrap()
+                .contains("ordinary naming line")
+        );
     });
-    let TurnDispatch::PersistentCodex { command, .. } = &dispatch else { panic!("Codex fixture") };
-    assert_eq!(command.prompt, base, "an old dispatch cannot compose a new ordinary generation");
+    let TurnDispatch::PersistentCodex { command, .. } = &dispatch else {
+        panic!("Codex fixture")
+    };
+    assert_eq!(
+        command.prompt, base,
+        "an old dispatch cannot compose a new ordinary generation"
+    );
     assert_ordinary_turn_has_no_native_requests(&claimed);
 }
 
 #[test]
 fn source_root_ordinary_notice_failed_provider_send_is_not_delivery() {
     let claimed = EOCheckedTurn::idle("ordinary-notice-send-failed", true);
-    claimed.record_mut(|record| record.engram.set_pending_source_root_line("[TermAl] ordinary naming line".into()));
-    let dispatch = match claimed.state.dispatch_turn(&claimed.session_id, SendMessageRequest {
-        text: "Delivery will fail.".into(), expanded_text: None, attachments: Vec::new(),
-        source_session_id: None, source_mailbox: None,
-    }).unwrap() {
-        DispatchTurnResult::Dispatched(dispatch) | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
+    claimed.record_mut(|record| {
+        record
+            .engram
+            .set_pending_source_root_line("[TermAl] ordinary naming line".into())
+    });
+    let dispatch = match claimed
+        .state
+        .dispatch_turn(
+            &claimed.session_id,
+            SendMessageRequest {
+                text: "Delivery will fail.".into(),
+                expanded_text: None,
+                attachments: Vec::new(),
+                source_session_id: None,
+                source_mailbox: None,
+            },
+        )
+        .unwrap()
+    {
+        DispatchTurnResult::Dispatched(dispatch)
+        | DispatchTurnResult::DispatchedAfterQueue(dispatch) => dispatch,
         DispatchTurnResult::Queued => panic!("idle ordinary fixture"),
     };
     let generation = dispatch.active_turn_generation();
     let (_, disconnected) = mpsc::channel();
-    drop(std::mem::replace(&mut *claimed._runtime_rx.lock().unwrap(), disconnected));
+    drop(std::mem::replace(
+        &mut *claimed._runtime_rx.lock().unwrap(),
+        disconnected,
+    ));
     assert!(deliver_turn_dispatch(&claimed.state, dispatch).is_err());
     claimed.record(|record| {
-        assert!(record.engram.pending_source_root_line.as_deref().unwrap().contains("ordinary naming line"));
-        assert_eq!(record.active_turn_generation, generation, "no notice-triggered replacement turn");
+        assert!(
+            record
+                .engram
+                .pending_source_root_line
+                .as_deref()
+                .unwrap()
+                .contains("ordinary naming line")
+        );
+        assert_eq!(
+            record.active_turn_generation, generation,
+            "no notice-triggered replacement turn"
+        );
     });
     assert_ordinary_turn_has_no_native_requests(&claimed);
 }

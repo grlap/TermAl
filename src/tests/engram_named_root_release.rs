@@ -14,7 +14,12 @@ mod durability_pending {
 
 /// A retained root with no canonical run association: no journal exists for
 /// its claim. `named_by` is its naming session.
-fn orphan_of(entry: &EngramWorkSourceRoot, label: &str, named_by: &str, offset: u64) -> EngramWorkSourceRoot {
+fn orphan_of(
+    entry: &EngramWorkSourceRoot,
+    label: &str,
+    named_by: &str,
+    offset: u64,
+) -> EngramWorkSourceRoot {
     let mut orphan = entry.clone();
     orphan.work_id = format!("orphan-work-{label}");
     orphan.claim_id = format!("orphan-claim-{label}");
@@ -25,11 +30,23 @@ fn orphan_of(entry: &EngramWorkSourceRoot, label: &str, named_by: &str, offset: 
 }
 
 fn retain(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) {
-    claimed.state.inner.lock().unwrap().engram_work_source_roots.push(root.clone());
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .push(root.clone());
 }
 
 fn retained(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) -> bool {
-    claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(root)
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .contains(root)
 }
 
 fn release_request(root: &EngramWorkSourceRoot, reason: &str) -> EngramNamedRootReleaseRequest {
@@ -68,7 +85,10 @@ fn audit(claimed: &EOCheckedTurn) -> Vec<EngramNamedRootReleaseAudit> {
     engram_named_root_release_audit(&claimed.state.inner.lock().unwrap())
 }
 
-fn row_for<'a>(rows: &'a [EngramNamedRootStatusRow], root: &EngramWorkSourceRoot) -> &'a EngramNamedRootStatusRow {
+fn row_for<'a>(
+    rows: &'a [EngramNamedRootStatusRow],
+    root: &EngramWorkSourceRoot,
+) -> &'a EngramNamedRootStatusRow {
     rows.iter()
         .find(|row| row.work_id == root.work_id && row.claim_id == root.claim_id)
         .unwrap_or_else(|| panic!("no status row for {}: {rows:#?}", root.short_ref))
@@ -85,8 +105,14 @@ fn each_retained_root_shows_its_naming_session_association_reclamation_and_lifec
 
     let settled = row_for(&rows, &entry);
     assert_eq!(settled.naming_session, claimed.session_id);
-    assert!(settled.naming_session_state.starts_with("present"), "{settled:#?}");
-    assert_eq!(settled.claim_binding, "none", "the session moved on to another claim");
+    assert!(
+        settled.naming_session_state.starts_with("present"),
+        "{settled:#?}"
+    );
+    assert_eq!(
+        settled.claim_binding, "none",
+        "the session moved on to another claim"
+    );
     assert!(settled.association.contains("run binding"), "{settled:#?}");
     assert!(!settled.reclamation.is_empty(), "{settled:#?}");
     assert!(!settled.lifecycle.is_empty(), "{settled:#?}");
@@ -95,11 +121,19 @@ fn each_retained_root_shows_its_naming_session_association_reclamation_and_lifec
     assert_eq!(stale.naming_session, "session-gone");
     assert_eq!(stale.naming_session_state, "gone");
     assert_eq!(stale.claim_binding, "none");
-    assert!(stale.association.contains("no retained canonical run association"), "{stale:#?}");
+    assert!(
+        stale
+            .association
+            .contains("no retained canonical run association"),
+        "{stale:#?}"
+    );
     // No canonical reader is needed: the disposition pass releases a root
     // without an association whose naming session is gone.
     assert!(stale.reclamation.starts_with("disposition"), "{stale:#?}");
-    assert!(stale.reclamation.contains("naming session is gone"), "{stale:#?}");
+    assert!(
+        stale.reclamation.contains("naming session is gone"),
+        "{stale:#?}"
+    );
     assert_eq!(stale.lifecycle, "unknown (not read)");
 
     // The read-only view serves the same rows.
@@ -110,22 +144,50 @@ fn each_retained_root_shows_its_naming_session_association_reclamation_and_lifec
 fn the_capacity_refusal_lists_each_roots_status_row() {
     let (claimed, entry) = settled_root("release-capacity", "live");
     for number in 1..ENGRAM_WORK_SOURCE_ROOT_LIMIT {
-        let orphan = orphan_of(&entry, &format!("capacity-{number}"), "session-gone", 100 + number as u64);
+        let orphan = orphan_of(
+            &entry,
+            &format!("capacity-{number}"),
+            "session-gone",
+            100 + number as u64,
+        );
         retain(&claimed, &orphan);
     }
     assert_eq!(
-        claimed.state.inner.lock().unwrap().engram_work_source_roots.len(),
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .len(),
         ENGRAM_WORK_SOURCE_ROOT_LIMIT
     );
     let refusal = claimed.state.engram_root_capacity_refusal();
-    assert!(refusal.message.contains("naming session session-gone (gone)"), "{}", refusal.message);
     assert!(
-        refusal.message.contains(&format!("naming session {} (present", claimed.session_id)),
+        refusal
+            .message
+            .contains("naming session session-gone (gone)"),
         "{}",
         refusal.message
     );
-    for field in ["claim binding: ", "association: ", "reclamation: ", "lifecycle: "] {
-        assert!(refusal.message.contains(field), "{field}: {}", refusal.message);
+    assert!(
+        refusal
+            .message
+            .contains(&format!("naming session {} (present", claimed.session_id)),
+        "{}",
+        refusal.message
+    );
+    for field in [
+        "claim binding: ",
+        "association: ",
+        "reclamation: ",
+        "lifecycle: ",
+    ] {
+        assert!(
+            refusal.message.contains(field),
+            "{field}: {}",
+            refusal.message
+        );
     }
 }
 
@@ -137,9 +199,16 @@ fn a_release_never_touches_a_root_whose_claim_is_live() {
     let entry = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let error = claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "not needed"))
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "not needed"),
+        )
         .expect_err("a live claim's root is never released");
-    assert!(error.message.contains("current binding"), "{}", error.message);
+    assert!(
+        error.message.contains("current binding"),
+        "{}",
+        error.message
+    );
     assert!(retained(&claimed, &entry));
     assert!(audit(&claimed).is_empty());
 }
@@ -149,7 +218,10 @@ fn a_completed_items_root_is_released_through_its_canonical_proof_and_audited() 
     let (claimed, entry) = settled_root("release-completed", "completed");
     let response = claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"))
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "item completed"),
+        )
         .expect("a completed item's root is released");
     assert!(response.released);
     assert_eq!(response.route, "canonical");
@@ -185,7 +257,10 @@ fn an_unassociated_root_whose_naming_session_is_gone_is_released_only_with_a_rea
     assert!(response.released);
     assert_eq!(response.route, "operator");
     assert!(!retained(&claimed, &orphan));
-    assert!(retained(&claimed, &entry), "only the exact selection is released");
+    assert!(
+        retained(&claimed, &entry),
+        "only the exact selection is released"
+    );
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].route, "operator");
@@ -208,7 +283,11 @@ fn a_release_the_writer_cannot_confirm_keeps_its_slot_reserved() {
         .release_engram_named_root(Some("session-operator"), release_request(&orphan, "stale"));
     TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(true));
     let error = result.expect_err("an unconfirmed release is not reported released");
-    assert!(error.message.contains("slot stays reserved"), "{}", error.message);
+    assert!(
+        error.message.contains("slot stays reserved"),
+        "{}",
+        error.message
+    );
     let inner = claimed.state.inner.lock().unwrap();
     assert!(!inner.engram_work_source_roots.contains(&orphan));
     assert_eq!(
@@ -253,7 +332,11 @@ fn an_unassociated_root_of_a_naming_session_kept_aside_at_restore_is_refused() {
         .state
         .release_engram_named_root(Some("session-operator"), release_request(&orphan, "stale"))
         .expect_err("its session's binding and activity cannot be read");
-    assert!(error.message.contains("kept aside at restore"), "{}", error.message);
+    assert!(
+        error.message.contains("kept aside at restore"),
+        "{}",
+        error.message
+    );
     assert!(retained(&claimed, &orphan));
     assert!(audit(&claimed).is_empty());
 }
@@ -301,7 +384,10 @@ fn a_confirmed_release_is_acknowledged_frees_its_slot_and_persists_its_audit() {
         serde_json::to_value(PersistedState::metadata_from_inner(&inner)).unwrap(),
     )
     .unwrap();
-    assert!(engram_named_root_release_in_metadata(&records[0], &metadata));
+    assert!(engram_named_root_release_in_metadata(
+        &records[0],
+        &metadata
+    ));
 }
 
 #[test]
@@ -334,7 +420,11 @@ fn an_unassociated_root_of_a_busy_naming_session_is_refused() {
             .state
             .release_engram_named_root(Some("session-operator"), release_request(&orphan, "stale"))
             .expect_err("a busy naming session may yet act on the root");
-        assert!(error.message.contains("is busy"), "{busy}: {}", error.message);
+        assert!(
+            error.message.contains("is busy"),
+            "{busy}: {}",
+            error.message
+        );
         assert!(
             !error.message.contains("termal_name_source_root"),
             "{busy}: the refusal claims no path that cannot free it: {}",
@@ -353,7 +443,9 @@ fn an_unassociated_root_with_a_pending_naming_event_is_refused() {
     {
         let mut inner = claimed.state.inner.lock().unwrap();
         let mut journal = engram_root_journal(
-            &inner.engram_named_root_journal, &entry.store, &entry.claim_id,
+            &inner.engram_named_root_journal,
+            &entry.store,
+            &entry.claim_id,
         )
         .expect("the settled root has a claim journal")
         .clone();
@@ -405,7 +497,12 @@ fn the_release_audit_keeps_only_its_newest_records() {
     }
     let records = engram_named_root_release_audit(&inner);
     assert_eq!(records.len(), ENGRAM_NAMED_ROOT_RELEASE_AUDIT_LIMIT);
-    assert!(records.iter().all(|record| Some(&record.id) != first.as_ref()), "the oldest went");
+    assert!(
+        records
+            .iter()
+            .all(|record| Some(&record.id) != first.as_ref()),
+        "the oldest went"
+    );
     assert_eq!(
         records.last().unwrap().reason,
         format!("reason {}", ENGRAM_NAMED_ROOT_RELEASE_AUDIT_LIMIT)
@@ -461,7 +558,9 @@ fn an_unconfirmed_release_survives_the_audit_rollover() {
     let records = engram_named_root_release_audit(&inner);
     assert_eq!(records.len(), ENGRAM_NAMED_ROOT_RELEASE_AUDIT_LIMIT);
     assert!(
-        records.iter().any(|record| record.id == pending.id && !record.acknowledged),
+        records
+            .iter()
+            .any(|record| record.id == pending.id && !record.acknowledged),
         "the pending release is kept"
     );
 }
@@ -477,9 +576,10 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
     // step, so nothing was retired and the intent is withdrawn.
     let (claimed, entry) = settled_root("release-canonical-prepare-fails", "completed");
     TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(false));
-    let result = claimed
-        .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
     TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(true));
     result.expect_err("a retirement that could not start is not reported released");
     assert!(retained(&claimed, &entry), "nothing was retired");
@@ -491,23 +591,43 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
     let clock = claimed.state.engram_budget_clock();
     let expired = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_expired = expired.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "before_publication"
-                && !hook_expired.swap(true, std::sync::atomic::Ordering::SeqCst)
-            {
-                clock.advance(ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET + Duration::from_secs(1));
-            }
-        }));
-    let result = claimed
+    claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(expired.load(std::sync::atomic::Ordering::SeqCst), "the publication was reached");
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_publication"
+            && !hook_expired.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            clock.advance(ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET + Duration::from_secs(1));
+        }
+    }));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        expired.load(std::sync::atomic::Ordering::SeqCst),
+        "the publication was reached"
+    );
     result.expect_err("an unpublished retirement is not reported released");
-    assert!(!retained(&claimed, &entry), "the retirement removed the root");
+    assert!(
+        !retained(&claimed, &entry),
+        "the retirement removed the root"
+    );
     let records = audit(&claimed);
-    assert_eq!(records.len(), 1, "the operator's intent is kept: {records:#?}");
+    assert_eq!(
+        records.len(),
+        1,
+        "the operator's intent is kept: {records:#?}"
+    );
     assert_eq!(records[0].route, "canonical");
     assert_eq!(records[0].reason, "item completed");
     assert!(!records[0].acknowledged);
@@ -531,14 +651,19 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
         let mut foreign = pending.clone();
         foreign.id = "restored-foreign".to_owned();
         foreign.authority_owner = Some("another-authority-owner".to_owned());
-        assert!(pending.authority_owner.is_some(), "the release recorded its own transition");
+        assert!(
+            pending.authority_owner.is_some(),
+            "the release recorded its own transition"
+        );
         persisted
             .engram_work_source_roots
             .push(retained_intent.selection.clone());
         persisted
             .engram_named_root_release_audit
             .extend([operator, retained_intent, foreign]);
-        let restored = persisted.into_inner().expect("the persisted state restores");
+        let restored = persisted
+            .into_inner()
+            .expect("the persisted state restores");
         let restored_record = |id: &str| {
             restored
                 .engram_named_root_release_audit
@@ -547,11 +672,15 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
                 .cloned()
         };
         assert!(
-            !restored_record(&pending.id).expect("the canonical record is kept").acknowledged,
+            !restored_record(&pending.id)
+                .expect("the canonical record is kept")
+                .acknowledged,
             "an unpublished canonical release stays pending across a restart"
         );
         assert!(
-            restored_record("restored-operator").expect("the operator record is kept").acknowledged,
+            restored_record("restored-operator")
+                .expect("the operator record is kept")
+                .acknowledged,
             "a committed operator release comes back done"
         );
         assert!(
@@ -580,7 +709,10 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
 
     let response = claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"))
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "item completed"),
+        )
         .expect("the retry resumes the recorded intent");
     assert_eq!(response.route, "canonical");
     let records = audit(&claimed);
@@ -591,8 +723,10 @@ fn a_canonical_release_whose_authority_commit_fails_keeps_its_intent_for_the_ret
     assert_eq!(capacity + 1, reserved, "the retirement's slot is free");
     let emitted = take_engram_root_reclamation_emitted();
     assert!(
-        emitted.iter().any(|line| line.starts_with("engram> named-root release route=canonical")
-            && line.contains("reason=\"item completed\"")),
+        emitted.iter().any(
+            |line| line.starts_with("engram> named-root release route=canonical")
+                && line.contains("reason=\"item completed\"")
+        ),
         "the resumed release writes its audit line: {emitted:#?}"
     );
 }
@@ -608,40 +742,67 @@ fn a_canonical_release_does_not_credit_a_retirement_another_owner_made() {
     let raced = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_raced = raced.clone();
     let hook_entry = entry.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "before_owner_check"
-                && !hook_raced.swap(true, std::sync::atomic::Ordering::SeqCst)
-            {
-                let deadline = other.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_BUDGET;
-                assert!(
-                    other
-                        .recover_one_engram_root_until(
-                            &hook_entry,
-                            &EngramRootReclamationRoute::Unfocused,
-                            deadline,
-                        )
-                        .expect("the other owner retires the root"),
-                    "the other owner retired and published it"
-                );
-            }
-        }));
-    let result = claimed
+    claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(raced.load(std::sync::atomic::Ordering::SeqCst), "the other owner ran");
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_owner_check"
+            && !hook_raced.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let deadline = other.engram_budget_clock().now() + ENGRAM_ROOT_RECLAMATION_BUDGET;
+            assert!(
+                other
+                    .recover_one_engram_root_until(
+                        &hook_entry,
+                        &EngramRootReclamationRoute::Unfocused,
+                        deadline,
+                    )
+                    .expect("the other owner retires the root"),
+                "the other owner retired and published it"
+            );
+        }
+    }));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        raced.load(std::sync::atomic::Ordering::SeqCst),
+        "the other owner ran"
+    );
     let error = result.expect_err("a retirement this release did not make is not its release");
     assert!(error.message.contains("another owner"), "{}", error.message);
-    assert!(!retained(&claimed, &entry), "the other owner's retirement stands");
-    assert!(audit(&claimed).is_empty(), "no audit credits the operator: {:#?}", audit(&claimed));
+    assert!(
+        !retained(&claimed, &entry),
+        "the other owner's retirement stands"
+    );
+    assert!(
+        audit(&claimed).is_empty(),
+        "no audit credits the operator: {:#?}",
+        audit(&claimed)
+    );
 
     // The identical request afterwards finds nothing of its own to resume.
     let error = claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"))
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "item completed"),
+        )
         .expect_err("nothing to resume");
-    assert!(error.message.contains("no longer retained"), "{}", error.message);
+    assert!(
+        error.message.contains("no longer retained"),
+        "{}",
+        error.message
+    );
     assert!(audit(&claimed).is_empty());
 }
 
@@ -652,13 +813,17 @@ fn a_canonical_release_whose_audit_is_unconfirmed_resumes_on_retry() {
     // identical request resumes the audit's confirmation.
     let (claimed, entry) = settled_root("release-canonical-retry", "completed");
     TEST_ENGRAM_NAMED_ROOT_RELEASE_UNCONFIRMED.with(|unconfirmed| unconfirmed.set(true));
-    let result = claimed
-        .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
     TEST_ENGRAM_NAMED_ROOT_RELEASE_UNCONFIRMED.with(|unconfirmed| unconfirmed.set(false));
     let error = result.expect_err("an unconfirmed audit is not reported released");
     assert!(error.message.contains("unconfirmed"), "{}", error.message);
-    assert!(!retained(&claimed, &entry), "the canonical retirement itself happened");
+    assert!(
+        !retained(&claimed, &entry),
+        "the canonical retirement itself happened"
+    );
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].route, "canonical");
@@ -666,7 +831,10 @@ fn a_canonical_release_whose_audit_is_unconfirmed_resumes_on_retry() {
 
     let response = claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"))
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "item completed"),
+        )
         .expect("the retry confirms the audit");
     assert_eq!(response.route, "canonical");
     let records = audit(&claimed);

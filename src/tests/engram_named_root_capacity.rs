@@ -13,19 +13,42 @@
 use super::*;
 
 fn retain(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) {
-    claimed.state.inner.lock().unwrap().engram_work_source_roots.push(root.clone());
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .push(root.clone());
 }
 
 fn retained(claimed: &EOCheckedTurn, root: &EngramWorkSourceRoot) -> bool {
-    claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(root)
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_work_source_roots
+        .contains(root)
 }
 
 fn audit(claimed: &EOCheckedTurn) -> Vec<EngramNamedRootReleaseAudit> {
-    claimed.state.inner.lock().unwrap().engram_named_root_release_audit.clone()
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_named_root_release_audit
+        .clone()
 }
 
 /// A retained root with no canonical run association, named by `named_by`.
-fn legacy_of(entry: &EngramWorkSourceRoot, label: &str, named_by: &str, offset: u64) -> EngramWorkSourceRoot {
+fn legacy_of(
+    entry: &EngramWorkSourceRoot,
+    label: &str,
+    named_by: &str,
+    offset: u64,
+) -> EngramWorkSourceRoot {
     let mut legacy = entry.clone();
     legacy.work_id = format!("legacy-work-{label}");
     legacy.claim_id = format!("legacy-claim-{label}");
@@ -49,22 +72,46 @@ fn release_request(root: &EngramWorkSourceRoot, reason: &str) -> EngramNamedRoot
 }
 
 fn set_session_in_turn(claimed: &EOCheckedTurn, in_turn: bool) {
-    if in_turn { claimed.begin("Continue ordinary work."); } else { claimed.end(); }
+    if in_turn {
+        claimed.begin("Continue ordinary work.");
+    } else {
+        claimed.end();
+    }
 }
 
 /// The canonical read the fixture serves for `entry`'s claim.
 fn served_read(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> Value {
-    claimed.transport.named_roots.lock().unwrap().as_ref().unwrap()
-        .root_reads.get(&entry.claim_id).cloned().expect("a served read")
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .root_reads
+        .get(&entry.claim_id)
+        .cloned()
+        .expect("a served read")
 }
 
 fn serve_read(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, read: Value) {
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.insert(entry.claim_id.clone(), read);
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .insert(entry.claim_id.clone(), read);
 }
 
 /// The live proof of `entry` with `claim` as Engram's claim block.
-fn proof_with_claim(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot, claim: Value) -> EngramNamedRootReadResponse {
+fn proof_with_claim(
+    claimed: &EOCheckedTurn,
+    entry: &EngramWorkSourceRoot,
+    claim: Value,
+) -> EngramNamedRootReadResponse {
     let mut read = served_read(claimed, entry);
     read["claim"] = claim;
     serde_json::from_value(read).expect("a valid read")
@@ -84,7 +131,11 @@ fn a_released_or_completed_claim_retires_its_root() {
     let now = chrono::Utc::now();
     let later = now + chrono::Duration::hours(1);
     for state in ["released", "completed"] {
-        let proof = proof_with_claim(&claimed, &entry, claim_block(state, entry.claim_fence, later));
+        let proof = proof_with_claim(
+            &claimed,
+            &entry,
+            claim_block(state, entry.claim_fence, later),
+        );
         assert!(
             engram_root_claim_retirement_reason(&entry, &proof, now, true, false).is_some(),
             "a {state} claim's root is retired"
@@ -102,7 +153,11 @@ fn a_claim_recovered_under_a_later_fence_keeps_its_root() {
     let proof = proof_with_claim(
         &claimed,
         &entry,
-        claim_block("active", entry.claim_fence + 1, now + chrono::Duration::hours(1)),
+        claim_block(
+            "active",
+            entry.claim_fence + 1,
+            now + chrono::Duration::hours(1),
+        ),
     );
     assert!(engram_root_claim_retirement_reason(&entry, &proof, now, true, false).is_none());
     assert!(engram_root_claim_retirement_reason(&entry, &proof, now, false, false).is_none());
@@ -115,7 +170,11 @@ fn a_held_claims_lapse_never_retires_its_root() {
     let lapsed = proof_with_claim(
         &claimed,
         &entry,
-        claim_block("active", entry.claim_fence + 1, now - chrono::Duration::hours(3)),
+        claim_block(
+            "active",
+            entry.claim_fence + 1,
+            now - chrono::Duration::hours(3),
+        ),
     );
     for present in [true, false] {
         assert!(
@@ -126,7 +185,11 @@ fn a_held_claims_lapse_never_retires_its_root() {
     let released = proof_with_claim(
         &claimed,
         &entry,
-        claim_block("released", entry.claim_fence, now + chrono::Duration::hours(1)),
+        claim_block(
+            "released",
+            entry.claim_fence,
+            now + chrono::Duration::hours(1),
+        ),
     );
     assert!(
         engram_root_claim_retirement_reason(&entry, &released, now, true, true).is_some(),
@@ -169,7 +232,10 @@ fn the_automatic_pass_keeps_a_bound_root_whose_claim_was_recovered_after_a_long_
         .state
         .recover_one_engram_root_until(&entry, &route, deadline)
         .expect("the canonical read succeeds");
-    assert!(!retired, "a bound root is never retired for its claim's lapse or fence");
+    assert!(
+        !retired,
+        "a bound root is never retired for its claim's lapse or fence"
+    );
     assert!(retained(&claimed, &entry));
 }
 
@@ -183,9 +249,15 @@ fn a_root_whose_naming_session_was_kept_aside_survives_a_long_claim_lapse() {
     kept.named_by_session = "session-kept-aside".to_owned();
     {
         let mut inner = claimed.state.inner.lock().unwrap();
-        let index = inner.engram_work_source_roots.iter().position(|root| *root == entry).unwrap();
+        let index = inner
+            .engram_work_source_roots
+            .iter()
+            .position(|root| *root == entry)
+            .unwrap();
         inner.engram_work_source_roots[index] = kept.clone();
-        inner.quarantined_persisted_session_ids.insert("session-kept-aside".to_owned());
+        inner
+            .quarantined_persisted_session_ids
+            .insert("session-kept-aside".to_owned());
     }
     let mut read = served_read(&claimed, &kept);
     read["claim"] = claim_block(
@@ -199,11 +271,18 @@ fn a_root_whose_naming_session_was_kept_aside_survives_a_long_claim_lapse() {
         .state
         .recover_one_engram_root_until(&kept, &EngramRootReclamationRoute::Unfocused, deadline)
         .expect("the canonical read succeeds");
-    assert!(!retired, "a kept-aside naming session's root is not retired for a lapse");
+    assert!(
+        !retired,
+        "a kept-aside naming session's root is not retired for a lapse"
+    );
     assert!(retained(&claimed, &kept));
     let inner = claimed.state.inner.lock().unwrap();
-    let journal = engram_root_journal(&inner.engram_named_root_journal, &kept.store, &kept.claim_id)
-        .expect("its claim journal stays");
+    let journal = engram_root_journal(
+        &inner.engram_named_root_journal,
+        &kept.store,
+        &kept.claim_id,
+    )
+    .expect("its claim journal stays");
     assert!(!journal.obsolete, "{journal:#?}");
 }
 
@@ -214,7 +293,11 @@ fn a_lapsed_claim_keeps_its_root_for_two_hours_while_its_naming_session_is_prese
     let recent = proof_with_claim(
         &claimed,
         &entry,
-        claim_block("active", entry.claim_fence, now - chrono::Duration::minutes(30)),
+        claim_block(
+            "active",
+            entry.claim_fence,
+            now - chrono::Duration::minutes(30),
+        ),
     );
     assert!(
         engram_root_claim_retirement_reason(&entry, &recent, now, true, false).is_none(),
@@ -227,13 +310,20 @@ fn a_lapsed_claim_keeps_its_root_for_two_hours_while_its_naming_session_is_prese
     let old = proof_with_claim(
         &claimed,
         &entry,
-        claim_block("active", entry.claim_fence, now - chrono::Duration::hours(3)),
+        claim_block(
+            "active",
+            entry.claim_fence,
+            now - chrono::Duration::hours(3),
+        ),
     );
     assert!(
         engram_root_claim_retirement_reason(&entry, &old, now, true, false).is_some(),
         "a lapse older than the grace retires the root"
     );
-    assert_eq!(ENGRAM_ROOT_CLAIM_LAPSE_GRACE, Duration::from_secs(2 * 60 * 60));
+    assert_eq!(
+        ENGRAM_ROOT_CLAIM_LAPSE_GRACE,
+        Duration::from_secs(2 * 60 * 60)
+    );
 }
 
 #[test]
@@ -243,13 +333,19 @@ fn a_live_claim_or_a_read_without_a_claim_block_keeps_its_root() {
     let live = proof_with_claim(
         &claimed,
         &entry,
-        claim_block("active", entry.claim_fence, now + chrono::Duration::hours(1)),
+        claim_block(
+            "active",
+            entry.claim_fence,
+            now + chrono::Duration::hours(1),
+        ),
     );
     assert!(engram_root_claim_retirement_reason(&entry, &live, now, false, false).is_none());
     let older_engram: EngramNamedRootReadResponse =
         serde_json::from_value(served_read(&claimed, &entry)).unwrap();
     assert!(older_engram.claim.is_none());
-    assert!(engram_root_claim_retirement_reason(&entry, &older_engram, now, false, false).is_none());
+    assert!(
+        engram_root_claim_retirement_reason(&entry, &older_engram, now, false, false).is_none()
+    );
 }
 
 #[test]
@@ -284,13 +380,25 @@ fn assert_closed_claim_journal_compacts(
     retirement: EngramRootRetirement,
 ) {
     let mut inner = claimed.state.inner.lock().unwrap();
-    let journal = engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id)
-        .expect("the journal is kept until the next compaction");
-    assert!(journal.obsolete, "the closed claim's journal is retired: {journal:#?}");
+    let journal = engram_root_journal(
+        &inner.engram_named_root_journal,
+        &root.store,
+        &root.claim_id,
+    )
+    .expect("the journal is kept until the next compaction");
+    assert!(
+        journal.obsolete,
+        "the closed claim's journal is retired: {journal:#?}"
+    );
     assert_eq!(journal.retirement, Some(retirement));
     engram_compact_root_journal(&mut inner);
     assert!(
-        engram_root_journal(&inner.engram_named_root_journal, &root.store, &root.claim_id).is_none(),
+        engram_root_journal(
+            &inner.engram_named_root_journal,
+            &root.store,
+            &root.claim_id
+        )
+        .is_none(),
         "compaction drops the closed claim's journal"
     );
 }
@@ -302,10 +410,14 @@ fn a_claim_refused_roots_disposal_retires_its_claim_journal() {
         let mut inner = claimed.state.inner.lock().unwrap();
         engram_named_root_record_refused_claim_locked(&mut inner, &entry.store, &entry.claim_id);
     }
-    claimed.state.run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|root| {
-        panic!("a refused claim needs no tracker read: {}", root.short_ref)
-    });
-    assert!(!retained(&claimed, &entry), "Engram no longer counts its claim as its run's");
+    claimed.state.run_engram_named_root_disposition_pass(
+        claimed.state.engram_budget_clock().now(),
+        &|root| panic!("a refused claim needs no tracker read: {}", root.short_ref),
+    );
+    assert!(
+        !retained(&claimed, &entry),
+        "Engram no longer counts its claim as its run's"
+    );
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].route, "automatic");
@@ -322,7 +434,10 @@ fn only_the_claim_not_current_refusal_closes_a_claim() {
         "named_root_read_refused: the run belongs to another project",
         "claim reader timed out",
     ] {
-        assert!(!engram_named_root_read_refusal_closes_claim(other), "{other}");
+        assert!(
+            !engram_named_root_read_refusal_closes_claim(other),
+            "{other}"
+        );
     }
     assert!(ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT.contains("does not belong"));
 }
@@ -337,34 +452,63 @@ fn a_legacy_root_is_disposed_of_only_by_a_recorded_rule() {
     retain(&claimed, &present);
     retain(&claimed, &gone);
     let inner = claimed.state.inner.lock().unwrap();
-    assert!(engram_named_root_automatic_disposition(&inner, &present, false, None, false).is_some(),
-        "its root path is gone");
-    assert!(engram_named_root_automatic_disposition(&inner, &present, true, Some("completed"), false).is_some(),
-        "its item is completed");
-    assert!(engram_named_root_automatic_disposition(&inner, &present, true, Some("cancelled"), false).is_some(),
-        "its item is cancelled");
-    assert!(engram_named_root_automatic_disposition(&inner, &gone, true, None, false).is_some(),
-        "its naming session is gone and no session holds its claim");
-    assert!(engram_named_root_automatic_disposition(&inner, &present, true, Some("open"), false).is_none(),
-        "an open item's legacy root with a present naming session and an existing path stays");
-    assert!(engram_named_root_automatic_disposition(&inner, &entry, true, None, true).is_some(),
-        "Engram refused its claim as no longer its run's");
+    assert!(
+        engram_named_root_automatic_disposition(&inner, &present, false, None, false).is_some(),
+        "its root path is gone"
+    );
+    assert!(
+        engram_named_root_automatic_disposition(&inner, &present, true, Some("completed"), false)
+            .is_some(),
+        "its item is completed"
+    );
+    assert!(
+        engram_named_root_automatic_disposition(&inner, &present, true, Some("cancelled"), false)
+            .is_some(),
+        "its item is cancelled"
+    );
+    assert!(
+        engram_named_root_automatic_disposition(&inner, &gone, true, None, false).is_some(),
+        "its naming session is gone and no session holds its claim"
+    );
+    assert!(
+        engram_named_root_automatic_disposition(&inner, &present, true, Some("open"), false)
+            .is_none(),
+        "an open item's legacy root with a present naming session and an existing path stays"
+    );
+    assert!(
+        engram_named_root_automatic_disposition(&inner, &entry, true, None, true).is_some(),
+        "Engram refused its claim as no longer its run's"
+    );
 }
 
 #[test]
 fn the_disposition_pass_releases_a_legacy_root_whose_path_is_gone_and_records_it() {
     let (claimed, entry) = settled_root("capacity-legacy-pass", "completed");
     let mut legacy = legacy_of(&entry, "pass", &claimed.session_id, 100);
-    legacy.root = claimed.root.join("worktree-removed-long-ago").to_string_lossy().into_owned();
+    legacy.root = claimed
+        .root
+        .join("worktree-removed-long-ago")
+        .to_string_lossy()
+        .into_owned();
     retain(&claimed, &legacy);
-    claimed.state.run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|_| None);
+    claimed
+        .state
+        .run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|_| {
+            None
+        });
     assert!(!retained(&claimed, &legacy), "the legacy root is released");
-    assert!(retained(&claimed, &entry), "the canonical root is not this pass's to dispose of");
+    assert!(
+        retained(&claimed, &entry),
+        "the canonical root is not this pass's to dispose of"
+    );
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].selection, legacy);
     assert_eq!(records[0].route, "automatic");
-    assert!(records[0].reason.contains("no longer exists"), "{records:#?}");
+    assert!(
+        records[0].reason.contains("no longer exists"),
+        "{records:#?}"
+    );
     assert!(records[0].acknowledged, "the writer confirmed it");
 }
 
@@ -392,7 +536,10 @@ fn a_naming_session_releases_its_own_root_while_in_a_turn() {
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].route, "own");
-    assert_eq!(records[0].requested_by.as_deref(), Some(claimed.session_id.as_str()));
+    assert_eq!(
+        records[0].requested_by.as_deref(),
+        Some(claimed.session_id.as_str())
+    );
 }
 
 #[test]
@@ -410,7 +557,11 @@ fn another_session_cannot_release_a_root_as_its_own() {
         .release_own_engram_named_root(&claimed.session_id, request())
         .expect_err("only the naming session releases its own root");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("naming session"), "{}", error.message);
+    assert!(
+        error.message.contains("naming session"),
+        "{}",
+        error.message
+    );
     let unknown = claimed
         .state
         .release_own_engram_named_root("session-unknown", request())
@@ -437,12 +588,20 @@ fn a_root_whose_claim_is_bound_is_never_released_as_ones_own() {
         )
         .expect_err("a bound claim's root goes by clearing its name, not a release");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    for expected in ["termal_name_source_root", "work set to", entry.short_ref.as_str(), "omit path"] {
+    for expected in [
+        "termal_name_source_root",
+        "work set to",
+        entry.short_ref.as_str(),
+        "omit path",
+    ] {
         assert!(error.message.contains(expected), "{}", error.message);
     }
     let operator_error = claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "not mine"))
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "not mine"),
+        )
         .expect_err("another session's live claim keeps the original refusal");
     assert_eq!(operator_error.status, StatusCode::CONFLICT);
     assert_eq!(
@@ -462,24 +621,43 @@ fn a_root_whose_claim_is_bound_is_never_released_as_ones_own() {
 #[test]
 fn a_release_waits_for_a_running_pass_then_applies() {
     let (claimed, entry) = settled_root("capacity-flight-wait", "completed");
-    claimed.state.inner.lock().unwrap().engram_root_reclamation.flight = Some("running-pass".to_owned());
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .engram_root_reclamation
+        .flight = Some("running-pass".to_owned());
     let waited = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_waited = waited.clone();
     let state = claimed.state.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "named_root_release_waiting_for_flight"
-                && !hook_waited.swap(true, std::sync::atomic::Ordering::SeqCst)
-            {
-                // The pass finishes while the release waits.
-                state.inner.lock().unwrap().engram_root_reclamation.flight = None;
-            }
-        }));
-    let response = claimed
+    claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(waited.load(std::sync::atomic::Ordering::SeqCst), "the release waited for the pass");
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "named_root_release_waiting_for_flight"
+            && !hook_waited.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // The pass finishes while the release waits.
+            state.inner.lock().unwrap().engram_root_reclamation.flight = None;
+        }
+    }));
+    let response = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        waited.load(std::sync::atomic::Ordering::SeqCst),
+        "the release waited for the pass"
+    );
     assert!(response.expect("applied after the pass").released);
     assert!(!retained(&claimed, &entry));
 }
@@ -487,21 +665,41 @@ fn a_release_waits_for_a_running_pass_then_applies() {
 #[test]
 fn a_release_that_outwaits_a_running_pass_answers_that_nothing_was_applied() {
     let (claimed, entry) = settled_root("capacity-flight-busy", "completed");
-    claimed.state.inner.lock().unwrap().engram_root_reclamation.flight = Some("running-pass".to_owned());
-    let clock = claimed.state.engram_budget_clock();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "named_root_release_waiting_for_flight" {
-                clock.advance(ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT + Duration::from_secs(1));
-            }
-        }));
-    let result = claimed
+    claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+        .inner
+        .lock()
+        .unwrap()
+        .engram_root_reclamation
+        .flight = Some("running-pass".to_owned());
+    let clock = claimed.state.engram_budget_clock();
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "named_root_release_waiting_for_flight" {
+            clock.advance(ENGRAM_NAMED_ROOT_RELEASE_FLIGHT_WAIT + Duration::from_secs(1));
+        }
+    }));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
     let error = result.expect_err("the pass outlasted the wait");
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("nothing was applied"), "{}", error.message);
+    assert!(
+        error.message.contains("nothing was applied"),
+        "{}",
+        error.message
+    );
     assert!(retained(&claimed, &entry));
     assert!(audit(&claimed).is_empty());
 }
@@ -510,9 +708,10 @@ fn a_release_that_outwaits_a_running_pass_answers_that_nothing_was_applied() {
 fn a_release_failing_before_its_removal_is_a_definitive_conflict_not_a_500() {
     let (claimed, entry) = settled_root("capacity-writer-stopped", "completed");
     TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(false));
-    let result = claimed
-        .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
     TEST_ENGRAM_AUTHORITY_MANUAL_WRITER.with(|allowed| allowed.set(true));
     let error = result.expect_err("a stopped writer applies nothing");
     assert_eq!(error.status, StatusCode::CONFLICT, "{}", error.message);
@@ -527,22 +726,39 @@ fn a_release_has_its_own_authority_budget_beyond_the_passes() {
     let clock = claimed.state.engram_budget_clock();
     let slowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_slowed = slowed.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "before_publication"
-                && !hook_slowed.swap(true, std::sync::atomic::Ordering::SeqCst)
-            {
-                // A busy writer: longer than the pass's budget, within the release's.
-                clock.advance(ENGRAM_ROOT_RECLAMATION_BUDGET + Duration::from_secs(1));
-            }
-        }));
-    let result = claimed
+    claimed
         .state
-        .release_engram_named_root(Some("session-operator"), release_request(&entry, "item completed"));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_publication"
+            && !hook_slowed.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            // A busy writer: longer than the pass's budget, within the release's.
+            clock.advance(ENGRAM_ROOT_RECLAMATION_BUDGET + Duration::from_secs(1));
+        }
+    }));
+    let result = claimed.state.release_engram_named_root(
+        Some("session-operator"),
+        release_request(&entry, "item completed"),
+    );
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
     assert!(slowed.load(std::sync::atomic::Ordering::SeqCst));
-    assert!(ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET > ENGRAM_ROOT_RECLAMATION_BUDGET + Duration::from_secs(1));
-    assert!(result.expect("the release's budget covers a busy writer").released);
+    assert!(
+        ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET
+            > ENGRAM_ROOT_RECLAMATION_BUDGET + Duration::from_secs(1)
+    );
+    assert!(
+        result
+            .expect("the release's budget covers a busy writer")
+            .released
+    );
     assert!(!retained(&claimed, &entry));
 }
 
@@ -551,7 +767,14 @@ fn a_release_body_error_names_every_missing_field() {
     let missing = engram_named_root_release_missing_fields(&json!({"projectId": "p"}));
     assert_eq!(
         missing,
-        ["databasePath", "workId", "claimId", "generation", "root", "reason"],
+        [
+            "databasePath",
+            "workId",
+            "claimId",
+            "generation",
+            "root",
+            "reason"
+        ],
     );
     let wrong_type = engram_named_root_release_missing_fields(&json!({
         "projectId": "p", "databasePath": "d", "workId": "w", "claimId": "c",
@@ -568,7 +791,8 @@ struct ScriptedItemLifecycle;
 
 impl ScriptedItemLifecycle {
     fn install(read: impl Fn(&EngramWorkSourceRoot) -> Option<String> + 'static) -> Self {
-        TEST_ENGRAM_NAMED_ROOT_ITEM_LIFECYCLE.with(|hook| *hook.borrow_mut() = Some(Box::new(read)));
+        TEST_ENGRAM_NAMED_ROOT_ITEM_LIFECYCLE
+            .with(|hook| *hook.borrow_mut() = Some(Box::new(read)));
         Self
     }
 }
@@ -583,24 +807,45 @@ impl Drop for ScriptedItemLifecycle {
 fn the_scheduler_runs_a_disposition_pass_for_a_table_of_legacy_roots_alone() {
     let (claimed, entry) = settled_root("capacity-legacy-only", "completed");
     let mut gone = legacy_of(&entry, "only", &claimed.session_id, 100);
-    gone.root = claimed.root.join("worktree-removed-only").to_string_lossy().into_owned();
+    gone.root = claimed
+        .root
+        .join("worktree-removed-only")
+        .to_string_lossy()
+        .into_owned();
     {
         let mut inner = claimed.state.inner.lock().unwrap();
         inner.engram_work_source_roots.clear();
         inner.engram_work_source_roots.push(gone.clone());
     }
     let (done_tx, done_rx) = std::sync::mpsc::channel();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "after_reclamation_pass" {
-                let _ = done_tx.send(());
-            }
-        }));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "after_reclamation_pass" {
+            let _ = done_tx.send(());
+        }
+    }));
     let scheduled = claimed.state.schedule_engram_root_reclamation(true);
-    assert_eq!(scheduled, "a bounded reclamation pass was scheduled", "no canonical read is needed");
-    done_rx.recv_timeout(Duration::from_secs(30)).expect("the pass ran");
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(!retained(&claimed, &gone), "the legacy root is released without any canonical read");
+    assert_eq!(
+        scheduled, "a bounded reclamation pass was scheduled",
+        "no canonical read is needed"
+    );
+    done_rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the pass ran");
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        !retained(&claimed, &gone),
+        "the legacy root is released without any canonical read"
+    );
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].route, "automatic");
@@ -620,18 +865,38 @@ fn the_reclamation_pass_reads_a_legacy_roots_item_lifecycle() {
     retain(&claimed, &open);
     let completed_work = completed.work_id.clone();
     let _lifecycle = ScriptedItemLifecycle::install(move |root| {
-        Some(if root.work_id == completed_work { "completed" } else { "open" }.to_owned())
+        Some(
+            if root.work_id == completed_work {
+                "completed"
+            } else {
+                "open"
+            }
+            .to_owned(),
+        )
     });
     claimed.state.run_engram_root_reclamation_pass(Vec::new());
-    assert!(!retained(&claimed, &completed), "a completed item's legacy root is released");
-    assert!(retained(&claimed, &open), "an open item's legacy root stays");
+    assert!(
+        !retained(&claimed, &completed),
+        "a completed item's legacy root is released"
+    );
+    assert!(
+        retained(&claimed, &open),
+        "an open item's legacy root stays"
+    );
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].selection, completed);
     assert!(records[0].reason.contains("completed"), "{records:#?}");
     assert!(
-        claimed.state.inner.lock().unwrap().engram_root_reclamation.disposition_cooldowns
-            .iter().any(|(cooling, _)| *cooling == open),
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_root_reclamation
+            .disposition_cooldowns
+            .iter()
+            .any(|(cooling, _)| *cooling == open),
         "the kept root is left alone for a while"
     );
 }
@@ -653,10 +918,14 @@ fn a_root_no_disposition_may_touch_costs_no_tracker_read() {
         !engram_named_root_disposition_due_locked(&claimed.state.inner.lock().unwrap(), now),
         "a blocked root alone makes no pass due"
     );
-    claimed.state.run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|root| {
-        panic!("no tracker read for a blocked root: {}", root.short_ref)
-    });
-    assert!(retained(&claimed, &kept_aside), "a root whose naming session was kept aside stays");
+    claimed.state.run_engram_named_root_disposition_pass(
+        claimed.state.engram_budget_clock().now(),
+        &|root| panic!("no tracker read for a blocked root: {}", root.short_ref),
+    );
+    assert!(
+        retained(&claimed, &kept_aside),
+        "a root whose naming session was kept aside stays"
+    );
     assert!(audit(&claimed).is_empty());
 }
 
@@ -678,23 +947,43 @@ fn the_item_lifecycle_is_read_through_the_work_host_reader() {
     let mut named = template.clone();
     named.store = store;
     named.work_id = "fixture-work-id".to_owned();
-    assert_eq!(state.read_engram_named_root_item_lifecycle(&named).as_deref(), Some("open"));
+    assert_eq!(
+        state
+            .read_engram_named_root_item_lifecycle(&named)
+            .as_deref(),
+        Some("open")
+    );
     let args = fs::read_to_string(root.join("work-read-args.txt")).expect("the reader ran");
     let args = args.lines().collect::<Vec<_>>();
-    assert!(args.contains(&"show") && args.contains(&"fixture-work-id") && args.contains(&"--json"), "{args:?}");
+    assert!(
+        args.contains(&"show") && args.contains(&"fixture-work-id") && args.contains(&"--json"),
+        "{args:?}"
+    );
     let mut elsewhere = named.clone();
     elsewhere.store.project_id = "a-store-no-project-establishes".to_owned();
-    assert_eq!(state.read_engram_named_root_item_lifecycle(&elsewhere), None, "no reader, no answer");
+    assert_eq!(
+        state.read_engram_named_root_item_lifecycle(&elsewhere),
+        None,
+        "no reader, no answer"
+    );
 }
 
 #[test]
 fn a_later_pass_confirms_an_automatic_release_whose_confirmation_failed() {
     let (claimed, entry) = settled_root("capacity-pending-automatic", "completed");
     let mut gone = legacy_of(&entry, "pending", &claimed.session_id, 100);
-    gone.root = claimed.root.join("worktree-removed-pending").to_string_lossy().into_owned();
+    gone.root = claimed
+        .root
+        .join("worktree-removed-pending")
+        .to_string_lossy()
+        .into_owned();
     retain(&claimed, &gone);
     TEST_ENGRAM_NAMED_ROOT_RELEASE_UNCONFIRMED.with(|unconfirmed| unconfirmed.set(true));
-    claimed.state.run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|_| None);
+    claimed
+        .state
+        .run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|_| {
+            None
+        });
     TEST_ENGRAM_NAMED_ROOT_RELEASE_UNCONFIRMED.with(|unconfirmed| unconfirmed.set(false));
     assert!(!retained(&claimed, &gone));
     let records = audit(&claimed);
@@ -713,9 +1002,19 @@ fn a_later_pass_confirms_an_automatic_release_whose_confirmation_failed() {
         "a pending release makes a pass due"
     );
 
-    claimed.state.run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|_| None);
+    claimed
+        .state
+        .run_engram_named_root_disposition_pass(claimed.state.engram_budget_clock().now(), &|_| {
+            None
+        });
     let records = audit(&claimed);
     assert_eq!(records.len(), 1, "{records:#?}");
-    assert!(records[0].acknowledged, "a later pass confirmed it without a restart");
-    assert_eq!(engram_named_root_unacknowledged_releases(&claimed.state.inner.lock().unwrap()), 0);
+    assert!(
+        records[0].acknowledged,
+        "a later pass confirmed it without a restart"
+    );
+    assert_eq!(
+        engram_named_root_unacknowledged_releases(&claimed.state.inner.lock().unwrap()),
+        0
+    );
 }

@@ -12,8 +12,8 @@
 // Split out of engram_named_root_naming_supersede.rs. The original
 // fail-first witness remains in Git history; both modules now exercise
 // the bounded retry implementation.
+use super::reclamation::{request_fixture_name, root_fixture};
 use super::*;
-use super::reclamation::{root_fixture, request_fixture_name};
 
 /// Another owner (such as the automatic reclamation pass) replaces this
 /// work's authority image.
@@ -35,7 +35,9 @@ fn named_any(claimed: &EOCheckedTurn, label: &str) -> bool {
         .unwrap()
         .engram_work_source_roots
         .iter()
-        .any(|entry| entry.work_id == test_control_work_binding(&format!("eo-check-{label}"), 1).work_id)
+        .any(|entry| {
+            entry.work_id == test_control_work_binding(&format!("eo-check-{label}"), 1).work_id
+        })
 }
 
 /// Another owner replaces this work's authority image at EVERY owner check;
@@ -44,13 +46,17 @@ fn supersede_every_owner_check(claimed: &EOCheckedTurn) -> Arc<std::sync::atomic
     let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let hook_checks = checks.clone();
     let state = claimed.state.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "before_owner_check" {
-                hook_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                supersede(&mut state.inner.lock().unwrap());
-            }
-        }));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_owner_check" {
+            hook_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            supersede(&mut state.inner.lock().unwrap());
+        }
+    }));
     checks
 }
 
@@ -61,7 +67,12 @@ fn a_naming_superseded_at_every_attempt_refuses_after_its_bounded_retries() {
     let checks = supersede_every_owner_check(&claimed);
 
     let named = request_fixture_name(&claimed, Some(&tree));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
 
     let error = named.expect_err("a naming superseded at every attempt does not complete");
     let attempts = 1 + ENGRAM_NAMING_SUPERSEDED_RETRIES;
@@ -74,7 +85,9 @@ fn a_naming_superseded_at_every_attempt_refuses_after_its_bounded_retries() {
     // identical request can help, since the claim and binding never moved.
     assert!(
         error.message.contains("superseded authority image")
-            && error.message.contains(&format!("each of {attempts} attempts"))
+            && error
+                .message
+                .contains(&format!("each of {attempts} attempts"))
             && error.message.contains("nothing was named")
             && error.message.contains("can be retried")
             && !error.message.contains("cannot help"),
@@ -91,52 +104,95 @@ fn a_refused_naming_guard_keeps_the_previous_held_association() {
     let requested = test_control_work_binding("naming-requested-other-claim", 1);
     claimed.transport.register_named_root_run(&requested);
     claimed.transport.replace_held_claims([Ok(EngramHeldClaims {
-        items: [&original, &requested].into_iter().map(|binding| EngramHeldClaim {
-            work_id: binding.work_id.clone(),
-            short_ref: binding.work_id.clone(),
-            claim_id: binding.claim_id.clone(),
-            claim_fence: binding.claim_fence,
-            focused: binding == &requested,
-            control_binding: Some(binding.clone()),
-        }).collect(),
+        items: [&original, &requested]
+            .into_iter()
+            .map(|binding| EngramHeldClaim {
+                work_id: binding.work_id.clone(),
+                short_ref: binding.work_id.clone(),
+                claim_id: binding.claim_id.clone(),
+                claim_fence: binding.claim_fence,
+                focused: binding == &requested,
+                control_binding: Some(binding.clone()),
+            })
+            .collect(),
         omitted: 0,
     })]);
     {
         let inner = claimed.state.inner.lock().unwrap();
-        claimed.state.persist_session_internal_locked(&inner, &claimed.session_id).unwrap();
+        claimed
+            .state
+            .persist_session_internal_locked(&inner, &claimed.session_id)
+            .unwrap();
     }
     let persisted_session = || {
-        let loaded = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
+        let loaded = load_state(claimed.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
         let record = &loaded.sessions[loaded.find_session_index(&claimed.session_id).unwrap()];
-        assert!(record.engram.work_binding.is_none(),
-            "ordinary associations are not restored as durable authority");
-        assert!(loaded.engram_work_source_roots.iter()
-            .all(|root| root.claim_id != requested.claim_id));
-        assert!(loaded.engram_named_root_journal.iter()
-            .filter(|journal| journal.claim_id == requested.claim_id)
-            .all(|journal| journal.confirmed.is_none() && journal.pending.is_none()));
+        assert!(
+            record.engram.work_binding.is_none(),
+            "ordinary associations are not restored as durable authority"
+        );
+        assert!(
+            loaded
+                .engram_work_source_roots
+                .iter()
+                .all(|root| root.claim_id != requested.claim_id)
+        );
+        assert!(
+            loaded
+                .engram_named_root_journal
+                .iter()
+                .filter(|journal| journal.claim_id == requested.claim_id)
+                .all(|journal| journal.confirmed.is_none() && journal.pending.is_none())
+        );
         serde_json::to_value(PersistedSessionRecord::from_record(record)).unwrap()
     };
     let before = persisted_session();
     let checks = supersede_every_owner_check(&claimed);
-    let error = claimed.state.name_engram_source_root(&claimed.session_id, EngramSourceRootRequest {
-        work: requested.work_id.clone(),
-        path: Some(Some(tree.to_string_lossy().into_owned())),
-    }).expect_err("an unacknowledged guard cannot select the requested claim");
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(error.message.contains("superseded authority image")
-        && error.message.contains("can be retried")
-        && !error.message.contains("cannot help"), "{}", error.message);
-    assert_eq!(checks.load(std::sync::atomic::Ordering::SeqCst),
-        1 + ENGRAM_NAMING_SUPERSEDED_RETRIES);
+    let error = claimed
+        .state
+        .name_engram_source_root(
+            &claimed.session_id,
+            EngramSourceRootRequest {
+                work: requested.work_id.clone(),
+                path: Some(Some(tree.to_string_lossy().into_owned())),
+            },
+        )
+        .expect_err("an unacknowledged guard cannot select the requested claim");
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        error.message.contains("superseded authority image")
+            && error.message.contains("can be retried")
+            && !error.message.contains("cannot help"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        checks.load(std::sync::atomic::Ordering::SeqCst),
+        1 + ENGRAM_NAMING_SUPERSEDED_RETRIES
+    );
     claimed.record(|record| {
         assert_eq!(record.engram.work_binding.as_ref(), Some(&original));
         assert!(record.engram.source_root_bind_owner.is_none());
     });
-    assert_eq!(persisted_session(), before,
-        "refused naming leaves the original SQLite session image unchanged");
-    assert!(claimed.transport.requests().iter()
-        .all(|request| request.request["operation"] != "named_root_bind"));
+    assert_eq!(
+        persisted_session(),
+        before,
+        "refused naming leaves the original SQLite session image unchanged"
+    );
+    assert!(
+        claimed
+            .transport
+            .requests()
+            .iter()
+            .all(|request| request.request["operation"] != "named_root_bind")
+    );
     assert_ordinary_turn_has_no_native_requests(&claimed);
 }
 
@@ -151,16 +207,20 @@ fn supersede_at_the_guard_while(
     let hook_checks = checks.clone();
     let state = claimed.state.clone();
     let session_id = claimed.session_id.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "before_owner_check" {
-                hook_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let mut inner = state.inner.lock().unwrap();
-                supersede(&mut inner);
-                let index = inner.find_session_index(&session_id).unwrap();
-                change(&mut inner.sessions[index].engram.work_binding);
-            }
-        }));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_owner_check" {
+            hook_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut inner = state.inner.lock().unwrap();
+            supersede(&mut inner);
+            let index = inner.find_session_index(&session_id).unwrap();
+            change(&mut inner.sessions[index].engram.work_binding);
+        }
+    }));
     checks
 }
 
@@ -180,7 +240,12 @@ fn a_naming_whose_claim_changed_while_superseded_refuses_at_once_and_says_retryi
         let checks = supersede_at_the_guard_while(&claimed, change);
 
         let named = request_fixture_name(&claimed, Some(&tree));
-        claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_engram_authority_ack_boundary = None;
 
         let error = named.expect_err("a naming whose claim moved does not complete");
         assert_eq!(
@@ -211,28 +276,37 @@ fn a_naming_whose_claim_run_changed_while_its_event_was_superseded_refuses_at_on
     let event_checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let hook_checks = event_checks.clone();
     let state = claimed.state.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase != "before_owner_check" {
-                return;
-            }
-            let mut inner = state.inner.lock().unwrap();
-            let Some(index) = inner
-                .engram_named_root_journal
-                .iter()
-                .position(|journal| journal.pending.is_some())
-            else {
-                return;
-            };
-            hook_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            supersede(&mut inner);
-            if let Some(binding) = inner.engram_named_root_journal[index].read_binding.as_mut() {
-                binding.claim_fence += 1;
-            }
-        }));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase != "before_owner_check" {
+            return;
+        }
+        let mut inner = state.inner.lock().unwrap();
+        let Some(index) = inner
+            .engram_named_root_journal
+            .iter()
+            .position(|journal| journal.pending.is_some())
+        else {
+            return;
+        };
+        hook_checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        supersede(&mut inner);
+        if let Some(binding) = inner.engram_named_root_journal[index].read_binding.as_mut() {
+            binding.claim_fence += 1;
+        }
+    }));
 
     let named = request_fixture_name(&claimed, Some(&tree));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
 
     let error = named.expect_err("a naming whose run association moved does not complete");
     assert_eq!(

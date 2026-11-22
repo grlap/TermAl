@@ -51,7 +51,9 @@ impl RecoveryWorkMeasure {
             let actual = self.count(phase);
             if actual > expected {
                 return Err(RecoveryWorkViolation::RowVisits(
-                    phase.to_owned(), expected, actual,
+                    phase.to_owned(),
+                    expected,
+                    actual,
                 ));
             }
         }
@@ -60,15 +62,21 @@ impl RecoveryWorkMeasure {
             let expected = usize::from(active);
             if actual > expected {
                 return Err(RecoveryWorkViolation::RowVisits(
-                    phase.to_owned(), expected, actual,
+                    phase.to_owned(),
+                    expected,
+                    actual,
                 ));
             }
         }
         if active
             && [
-                "reader_capture_session", "reader_index_session",
-                "reader_select_session", "recovery_candidate",
-            ].iter().any(|phase| self.count(phase) == 0)
+                "reader_capture_session",
+                "reader_index_session",
+                "reader_select_session",
+                "recovery_candidate",
+            ]
+            .iter()
+            .any(|phase| self.count(phase) == 0)
         {
             return Err(RecoveryWorkViolation::MissingObservation);
         }
@@ -93,9 +101,10 @@ impl RecoveryWorkFixture {
             let mut inner = claimed.state.inner.lock().unwrap();
             let journal = inner.engram_named_root_journal[0].clone();
             let binding = journal.read_binding.as_ref().unwrap().clone();
-            let image = claimed.state.prepare_engram_authority_image_locked(
-                &mut inner, &store, &binding,
-            ).unwrap();
+            let image = claimed
+                .state
+                .prepare_engram_authority_image_locked(&mut inner, &store, &binding)
+                .unwrap();
             let owner = image.history.transition.unwrap();
             let index = inner.find_session_index(&claimed.session_id).unwrap();
             let reporter = inner.sessions[index].clone();
@@ -148,7 +157,11 @@ impl RecoveryWorkFixture {
             }
             owner
         };
-        Self { claimed, store, owner }
+        Self {
+            claimed,
+            store,
+            owner,
+        }
     }
 
     fn observe(&self, action: impl FnOnce()) -> RecoveryWorkMeasure {
@@ -163,8 +176,10 @@ impl RecoveryWorkFixture {
             }
             let mut work = observed.borrow_mut();
             *work.rows.entry(phase.to_owned()).or_default() += 1;
-            if (phase.starts_with("reader_index_") || phase == "reader_select_session"
-                || phase == "recovery_candidate" || phase == "recovery_preference")
+            if (phase.starts_with("reader_index_")
+                || phase == "reader_select_session"
+                || phase == "recovery_candidate"
+                || phase == "recovery_preference")
                 && !state.inner.is_not_held_by_current_thread_for_test()
             {
                 work.planning_rows_under_state += 1;
@@ -177,12 +192,21 @@ impl RecoveryWorkFixture {
 
     fn measure(&self, unresolved: bool) -> RecoveryWorkMeasure {
         let requests_before = self.claimed.transport.requests().len();
-        let journals_before = self.claimed.state.inner.lock().unwrap()
-            .engram_named_root_journal.clone();
+        let journals_before = self
+            .claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_named_root_journal
+            .clone();
         {
             let mut inner = self.claimed.state.inner.lock().unwrap();
-            let history = inner.engram_work_naming_history.iter_mut()
-                .find(|history| history.work_id == self.owner.binding.work_id).unwrap();
+            let history = inner
+                .engram_work_naming_history
+                .iter_mut()
+                .find(|history| history.work_id == self.owner.binding.work_id)
+                .unwrap();
             history.unresolved_runs.clear();
             if unresolved {
                 history.unresolved_runs.push(self.owner.binding.clone());
@@ -192,21 +216,38 @@ impl RecoveryWorkFixture {
         // Exclude fixture preparation; count actual row visits in the
         // foreground batch, including its journal settlement passes.
         let work = self.observe(|| {
-            self.claimed.state.recover_engram_authority_batch_until(
-                &self.store, &self.owner, clock.now() + DEADLOCK_GUARD, true, None,
-            ).unwrap();
+            self.claimed
+                .state
+                .recover_engram_authority_batch_until(
+                    &self.store,
+                    &self.owner,
+                    clock.now() + DEADLOCK_GUARD,
+                    true,
+                    None,
+                )
+                .unwrap();
         });
         let inner = self.claimed.state.inner.lock().unwrap();
-        assert_eq!(inner.engram_named_root_journal, journals_before,
-            "candidate scans must not settle unrelated or executable intents");
-        let history = inner.engram_work_naming_history.iter()
-            .find(|history| history.work_id == self.owner.binding.work_id).unwrap();
-        assert!(history.unresolved_runs.is_empty(), "the exact completed run was read");
+        assert_eq!(
+            inner.engram_named_root_journal, journals_before,
+            "candidate scans must not settle unrelated or executable intents"
+        );
+        let history = inner
+            .engram_work_naming_history
+            .iter()
+            .find(|history| history.work_id == self.owner.binding.work_id)
+            .unwrap();
+        assert!(
+            history.unresolved_runs.is_empty(),
+            "the exact completed run was read"
+        );
         assert_eq!(history.transition.as_ref().unwrap(), &self.owner);
         drop(inner);
-        assert_eq!(self.claimed.transport.requests().len() - requests_before,
+        assert_eq!(
+            self.claimed.transport.requests().len() - requests_before,
             usize::from(unresolved),
-            "one canonical read per retained run, none for an empty batch");
+            "one canonical read per retained run, none for an empty batch"
+        );
         work
     }
 }
@@ -215,18 +256,35 @@ impl RecoveryWorkFixture {
 fn root_recovery_empty_batch_does_not_hold_state_for_retained_inventory() {
     let fixture = RecoveryWorkFixture::new(4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT);
     let measure = fixture.measure(false);
-    assert_eq!(measure.check(4096, 1, 0, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT, false), Ok(()),
-        "empty recovery must not visit retained inventories: {measure:?}");
+    assert_eq!(
+        measure.check(4096, 1, 0, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT, false),
+        Ok(()),
+        "empty recovery must not visit retained inventories: {measure:?}"
+    );
 }
 
 #[test]
 fn root_recovery_active_batch_holds_stay_bounded_as_sessions_and_journals_grow() {
-    for (sessions, journals) in [(64, 1), (1024, 1), (4096, 1), (4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT)] {
+    for (sessions, journals) in [
+        (64, 1),
+        (1024, 1),
+        (4096, 1),
+        (4096, ENGRAM_NAMED_ROOT_JOURNAL_LIMIT),
+    ] {
         let fixture = RecoveryWorkFixture::new(sessions, journals);
         let measure = fixture.measure(true);
         let inner = fixture.claimed.state.inner.lock().unwrap();
-        assert_eq!(measure.check(sessions, inner.projects.len(), inner.delegations.len(), journals, true), Ok(()),
-            "recovery work must stay linear at {sessions} sessions and {journals} journals: {measure:?}");
+        assert_eq!(
+            measure.check(
+                sessions,
+                inner.projects.len(),
+                inner.delegations.len(),
+                journals,
+                true
+            ),
+            Ok(()),
+            "recovery work must stay linear at {sessions} sessions and {journals} journals: {measure:?}"
+        );
     }
 }
 
@@ -237,11 +295,20 @@ fn root_recovery_work_oracle_rejects_reader_planning_under_state_lock() {
     // StateInner, reproducing the lock-scope regression without a pause.
     let measure = fixture.observe(|| {
         let inner = fixture.claimed.state.inner.lock().unwrap();
-        assert!(engram_root_recovery_reader_target_locked(
-            &inner, &fixture.store, Some(&fixture.claimed.session_id)).is_some());
+        assert!(
+            engram_root_recovery_reader_target_locked(
+                &inner,
+                &fixture.store,
+                Some(&fixture.claimed.session_id)
+            )
+            .is_some()
+        );
     });
     assert!(measure.count("reader_index_session") >= 64);
-    assert_eq!(measure.check(64, 1, 0, 1, true), Err(RecoveryWorkViolation::PlanningUnderState));
+    assert_eq!(
+        measure.check(64, 1, 0, 1, true),
+        Err(RecoveryWorkViolation::PlanningUnderState)
+    );
 }
 
 #[test]
@@ -254,8 +321,14 @@ fn root_recovery_work_oracle_rejects_repeated_inventory_capture() {
             assert_eq!(snapshot.sessions.len(), 64);
         }
     });
-    assert_eq!(measure.check(64, 1, 0, 1, true),
-        Err(RecoveryWorkViolation::RowVisits("reader_capture_session".to_owned(), 64, 128)));
+    assert_eq!(
+        measure.check(64, 1, 0, 1, true),
+        Err(RecoveryWorkViolation::RowVisits(
+            "reader_capture_session".to_owned(),
+            64,
+            128
+        ))
+    );
 }
 
 #[test]
@@ -264,11 +337,21 @@ fn root_recovery_revalidates_owner_and_reader_after_unlocked_selection() {
         let fixture = RecoveryWorkFixture::new(64, 1);
         {
             let mut inner = fixture.claimed.state.inner.lock().unwrap();
-            inner.engram_work_naming_history.iter_mut()
-                .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
+            inner
+                .engram_work_naming_history
+                .iter_mut()
+                .find(|history| history.work_id == fixture.owner.binding.work_id)
+                .unwrap()
                 .unresolved_runs = vec![fixture.owner.binding.clone()];
         }
-        let journals = fixture.claimed.state.inner.lock().unwrap().engram_named_root_journal.clone();
+        let journals = fixture
+            .claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_named_root_journal
+            .clone();
         let before = fixture.claimed.transport.requests().len();
         let state = fixture.claimed.state.clone();
         let session = fixture.claimed.session_id.clone();
@@ -276,14 +359,22 @@ fn root_recovery_revalidates_owner_and_reader_after_unlocked_selection() {
         let visited = std::rc::Rc::new(std::cell::Cell::new(false));
         let observed = visited.clone();
         let _probe = super::scheduler::PlanningProbe::install(move |phase, _| {
-            if phase != "recovery_selected" { return; }
+            if phase != "recovery_selected" {
+                return;
+            }
             assert!(state.inner.is_not_held_by_current_thread_for_test());
             observed.set(true);
             let mut inner = state.inner.lock().unwrap();
             if replace_owner {
-                inner.engram_work_naming_history.iter_mut()
-                    .find(|history| history.work_id == work).unwrap()
-                    .transition.as_mut().unwrap().version += 1;
+                inner
+                    .engram_work_naming_history
+                    .iter_mut()
+                    .find(|history| history.work_id == work)
+                    .unwrap()
+                    .transition
+                    .as_mut()
+                    .unwrap()
+                    .version += 1;
             } else {
                 let index = inner.find_session_index(&session).unwrap();
                 inner.sessions[index].session.project_id = None;
@@ -291,21 +382,39 @@ fn root_recovery_revalidates_owner_and_reader_after_unlocked_selection() {
         });
         let clock = fixture.claimed.state.engram_budget_clock();
         let result = fixture.claimed.state.recover_engram_authority_batch_until(
-            &fixture.store, &fixture.owner, clock.now() + DEADLOCK_GUARD, true, None,
+            &fixture.store,
+            &fixture.owner,
+            clock.now() + DEADLOCK_GUARD,
+            true,
+            None,
         );
         assert!(visited.get(), "the candidate was chosen outside the lock");
         if replace_owner {
-            assert!(result.unwrap_err().message.contains("superseded during reader selection"));
+            assert!(
+                result
+                    .unwrap_err()
+                    .message
+                    .contains("superseded during reader selection")
+            );
         } else {
             result.unwrap();
         }
-        assert_eq!(fixture.claimed.transport.requests().len(), before,
-            "neither a superseded owner nor a projectless candidate may read");
+        assert_eq!(
+            fixture.claimed.transport.requests().len(),
+            before,
+            "neither a superseded owner nor a projectless candidate may read"
+        );
         let inner = fixture.claimed.state.inner.lock().unwrap();
         assert_eq!(inner.engram_named_root_journal, journals);
-        assert_eq!(inner.engram_work_naming_history.iter()
-            .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
-            .unresolved_runs, vec![fixture.owner.binding.clone()]);
+        assert_eq!(
+            inner
+                .engram_work_naming_history
+                .iter()
+                .find(|history| history.work_id == fixture.owner.binding.work_id)
+                .unwrap()
+                .unresolved_runs,
+            vec![fixture.owner.binding.clone()]
+        );
     }
 }
 
@@ -315,16 +424,25 @@ fn root_recovery_revalidates_abandoned_reporter_after_unlocked_selection() {
     let missing = "session-returning-recovery-reporter";
     let journals = {
         let mut inner = fixture.claimed.state.inner.lock().unwrap();
-        inner.engram_named_root_journal[0].pending.as_mut().unwrap().reporter = missing.to_owned();
-        inner.engram_work_naming_history.iter_mut()
-            .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
+        inner.engram_named_root_journal[0]
+            .pending
+            .as_mut()
+            .unwrap()
+            .reporter = missing.to_owned();
+        inner
+            .engram_work_naming_history
+            .iter_mut()
+            .find(|history| history.work_id == fixture.owner.binding.work_id)
+            .unwrap()
             .unresolved_runs = vec![fixture.owner.binding.clone()];
         inner.engram_named_root_journal.clone()
     };
     let state = fixture.claimed.state.clone();
     let session = fixture.claimed.session_id.clone();
     let _probe = super::scheduler::PlanningProbe::install(move |phase, _| {
-        if phase != "recovery_selected" { return; }
+        if phase != "recovery_selected" {
+            return;
+        }
         assert!(state.inner.is_not_held_by_current_thread_for_test());
         let mut inner = state.inner.lock().unwrap();
         let index = inner.find_session_index(&session).unwrap();
@@ -334,12 +452,29 @@ fn root_recovery_revalidates_abandoned_reporter_after_unlocked_selection() {
     });
     let before = fixture.claimed.transport.requests().len();
     let clock = fixture.claimed.state.engram_budget_clock();
-    fixture.claimed.state.recover_engram_authority_batch_until(
-        &fixture.store, &fixture.owner, clock.now() + DEADLOCK_GUARD, true, None,
-    ).unwrap();
+    fixture
+        .claimed
+        .state
+        .recover_engram_authority_batch_until(
+            &fixture.store,
+            &fixture.owner,
+            clock.now() + DEADLOCK_GUARD,
+            true,
+            None,
+        )
+        .unwrap();
     assert_eq!(fixture.claimed.transport.requests().len(), before + 1);
-    assert_eq!(fixture.claimed.state.inner.lock().unwrap().engram_named_root_journal, journals,
-        "a currently available reporter retains its executable intent");
+    assert_eq!(
+        fixture
+            .claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_named_root_journal,
+        journals,
+        "a currently available reporter retains its executable intent"
+    );
 }
 
 #[test]
@@ -353,7 +488,8 @@ fn root_recovery_skips_projectless_readers_without_reactivating_historical_exclu
             let index = inner.find_session_index(&excluded).unwrap();
             let original = inner.sessions[index].clone();
             let target = AppState::engram_source_root_target_locked(&inner, &excluded)
-                .unwrap().unwrap();
+                .unwrap()
+                .unwrap();
             let token = "historical-reader-token".to_owned();
             let grant = "retained-root-reader-grant".to_owned();
             let request = json!({
@@ -382,24 +518,40 @@ fn root_recovery_skips_projectless_readers_without_reactivating_historical_exclu
             };
             inner.engram_session_obligations = serde_json::from_value(json!({
                 "schemaVersion":1, "entries":[debt.clone()], "checkpointOperations":[]
-            })).unwrap();
+            }))
+            .unwrap();
             let mut successor = original.clone();
             successor.session.id = healthy.clone();
-            successor.engram.historical_control.insert("engramRoutingToken".into(), json!("healthy-historical-token"));
+            successor.engram.historical_control.insert(
+                "engramRoutingToken".into(),
+                json!("healthy-historical-token"),
+            );
             inner.sessions = vec![original, successor].into();
             assert_eq!(inner.sessions[0].session.id, excluded);
-            inner.engram_work_source_roots.iter_mut().find(|root| {
-                root.store == fixture.store && root.claim_id == fixture.owner.binding.claim_id
-            }).unwrap().named_by_session = if preferred {
+            inner
+                .engram_work_source_roots
+                .iter_mut()
+                .find(|root| {
+                    root.store == fixture.store && root.claim_id == fixture.owner.binding.claim_id
+                })
+                .unwrap()
+                .named_by_session = if preferred {
                 excluded.clone()
             } else {
                 "session-absent-root-namer".to_owned()
             };
-            inner.engram_work_naming_history.iter_mut()
-                .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
+            inner
+                .engram_work_naming_history
+                .iter_mut()
+                .find(|history| history.work_id == fixture.owner.binding.work_id)
+                .unwrap()
                 .unresolved_runs = vec![fixture.owner.binding.clone()];
-            assert!(AppState::engram_source_root_target_locked(&inner, &excluded).unwrap().is_some(),
-                "historical control debt has no ordinary exclusion authority");
+            assert!(
+                AppState::engram_source_root_target_locked(&inner, &excluded)
+                    .unwrap()
+                    .is_some(),
+                "historical control debt has no ordinary exclusion authority"
+            );
             let excluded_index = inner.find_session_index(&excluded).unwrap();
             inner.sessions[excluded_index].session.project_id = None;
             if all_excluded {
@@ -416,46 +568,99 @@ fn root_recovery_skips_projectless_readers_without_reactivating_historical_exclu
                     "idempotency_key":"successor-root-reader-checkpoint"
                 });
                 let mut saved = serde_json::to_value(&inner.engram_session_obligations).unwrap();
-                saved["entries"].as_array_mut().unwrap().push(serde_json::to_value(successor_debt).unwrap());
+                saved["entries"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(serde_json::to_value(successor_debt).unwrap());
                 inner.engram_session_obligations = serde_json::from_value(saved).unwrap();
                 let healthy_index = inner.find_session_index(&healthy).unwrap();
                 inner.sessions[healthy_index].session.project_id = None;
             }
-            assert_eq!(inner.engram_session_obligations.entries.len(), 1 + usize::from(all_excluded));
-            assert!(AppState::engram_source_root_target_locked(&inner, &excluded)
-                .unwrap().is_none());
-            assert_eq!(AppState::engram_source_root_target_locked(&inner, &healthy)
-                .unwrap().is_none(), all_excluded);
+            assert_eq!(
+                inner.engram_session_obligations.entries.len(),
+                1 + usize::from(all_excluded)
+            );
+            assert!(
+                AppState::engram_source_root_target_locked(&inner, &excluded)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(
+                AppState::engram_source_root_target_locked(&inner, &healthy)
+                    .unwrap()
+                    .is_none(),
+                all_excluded
+            );
             let reporter = inner.engram_named_root_journal[0].pending.as_ref().unwrap();
             assert!(!AppState::engram_root_reporter_available(&inner, reporter));
             if all_excluded {
-                assert!(engram_root_recovery_reader_target_locked(
-                    &inner, &fixture.store, Some(&excluded)).is_none());
+                assert!(
+                    engram_root_recovery_reader_target_locked(
+                        &inner,
+                        &fixture.store,
+                        Some(&excluded)
+                    )
+                    .is_none()
+                );
             }
-            (serde_json::to_value(&inner.engram_session_obligations).unwrap(),
-                inner.sessions[1].engram.work_binding.clone().unwrap())
+            (
+                serde_json::to_value(&inner.engram_session_obligations).unwrap(),
+                inner.sessions[1].engram.work_binding.clone().unwrap(),
+            )
         };
-        fixture.claimed.transport.enable_named_roots(&healthy, &binding);
+        fixture
+            .claimed
+            .transport
+            .enable_named_roots(&healthy, &binding);
         let before = fixture.claimed.transport.requests().len();
         let clock = fixture.claimed.state.engram_budget_clock();
-        fixture.claimed.state.recover_engram_authority_batch_until(
-            &fixture.store, &fixture.owner, clock.now() + DEADLOCK_GUARD, true, None,
-        ).unwrap();
+        fixture
+            .claimed
+            .state
+            .recover_engram_authority_batch_until(
+                &fixture.store,
+                &fixture.owner,
+                clock.now() + DEADLOCK_GUARD,
+                true,
+                None,
+            )
+            .unwrap();
         let requests = fixture.claimed.transport.requests();
-        assert_eq!(requests.len() - before, usize::from(!all_excluded),
-            "only a healthy reader can perform the canonical recovery read");
-        assert!(requests[before..].iter().all(|request| {
-            request.connection.session_id == healthy
-                && request.request["operation"] == "named_root_read"
-        }), "an excluded preferred/first reader must never perform an RPC");
+        assert_eq!(
+            requests.len() - before,
+            usize::from(!all_excluded),
+            "only a healthy reader can perform the canonical recovery read"
+        );
+        assert!(
+            requests[before..].iter().all(|request| {
+                request.connection.session_id == healthy
+                    && request.request["operation"] == "named_root_read"
+            }),
+            "an excluded preferred/first reader must never perform an RPC"
+        );
         let inner = fixture.claimed.state.inner.lock().unwrap();
-        assert_eq!(serde_json::to_value(&inner.engram_session_obligations).unwrap(), ledger);
-        assert_eq!(inner.engram_session_obligations.entries.len(), 1 + usize::from(all_excluded));
-        assert_eq!(inner.engram_work_naming_history.iter()
-            .find(|history| history.work_id == fixture.owner.binding.work_id).unwrap()
-            .unresolved_runs.is_empty(), !all_excluded,
-            "only the healthy successor resolves the retained run");
-        assert!(matches!(fixture.claimed._runtime_rx.lock().unwrap().try_recv(),
-            Err(std::sync::mpsc::TryRecvError::Empty)));
+        assert_eq!(
+            serde_json::to_value(&inner.engram_session_obligations).unwrap(),
+            ledger
+        );
+        assert_eq!(
+            inner.engram_session_obligations.entries.len(),
+            1 + usize::from(all_excluded)
+        );
+        assert_eq!(
+            inner
+                .engram_work_naming_history
+                .iter()
+                .find(|history| history.work_id == fixture.owner.binding.work_id)
+                .unwrap()
+                .unresolved_runs
+                .is_empty(),
+            !all_excluded,
+            "only the healthy successor resolves the retained run"
+        );
+        assert!(matches!(
+            fixture.claimed._runtime_rx.lock().unwrap().try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
     }
 }

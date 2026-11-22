@@ -4,11 +4,6 @@ use std::{fs, process::Command};
 
 #[allow(dead_code)]
 mod temp {
-    use std::{
-        fs, io,
-        path::{Path as FsPath, PathBuf},
-        time::Duration,
-    };
     include!("../src/test_temp_paths.rs");
     pub(super) struct Fixture(pub PathBuf);
     impl Fixture {

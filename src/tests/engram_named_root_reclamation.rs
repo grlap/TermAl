@@ -47,25 +47,37 @@ mod completion_clear {
     include!("engram_named_root_completion_clear.rs");
 }
 
-
 // Compose the existing EO state/work-service owner with a real Git worktree.
 pub(super) fn root_fixture(label: &str) -> (EOCheckedTurn, PathBuf) {
     let turn = EOCheckedTurn::idle(label, true);
     let path = turn.root.join(".worktrees").join("retained-root");
-    run_git_test_command(&turn.root, &[
-        "worktree", "add", "--quiet", "-b", "retained-root", path.to_str().unwrap(),
-    ]);
+    run_git_test_command(
+        &turn.root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "retained-root",
+            path.to_str().unwrap(),
+        ],
+    );
     (turn, path)
 }
 
-pub(super) fn request_fixture_name(turn: &EOCheckedTurn, path: Option<&FsPath>)
-    -> Result<EngramSourceRootResponse, ApiError>
-{
+pub(super) fn request_fixture_name(
+    turn: &EOCheckedTurn,
+    path: Option<&FsPath>,
+) -> Result<EngramSourceRootResponse, ApiError> {
     let work = turn.record(|record| record.engram.work_binding.as_ref().unwrap().work_id.clone());
     assert_ordinary_turn_has_no_native_requests(turn);
-    let result = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work, path: path.map(|path| Some(path.to_string_lossy().into_owned())),
-    });
+    let result = turn.state.name_engram_source_root(
+        &turn.session_id,
+        EngramSourceRootRequest {
+            work,
+            path: path.map(|path| Some(path.to_string_lossy().into_owned())),
+        },
+    );
     assert_ordinary_turn_has_no_native_requests(turn);
     result
 }
@@ -97,10 +109,18 @@ fn settled_root(label: &str, proof_kind: &str) -> (EOCheckedTurn, EngramWorkSour
     let (entry, journal) = {
         let inner = claimed.state.inner.lock().unwrap();
         let entry = inner.engram_work_source_roots[0].clone();
-        assert!(!engram_authority_work_unresolved(&inner, &entry.store, &entry.work_id));
+        assert!(!engram_authority_work_unresolved(
+            &inner,
+            &entry.store,
+            &entry.work_id
+        ));
         let journal = engram_root_journal(
-            &inner.engram_named_root_journal, &entry.store, &entry.claim_id,
-        ).unwrap().clone();
+            &inner.engram_named_root_journal,
+            &entry.store,
+            &entry.claim_id,
+        )
+        .unwrap()
+        .clone();
         assert!(journal.pending.is_none());
         assert!(journal.read_binding.is_some());
         (entry, journal)
@@ -124,11 +144,20 @@ fn settled_root(label: &str, proof_kind: &str) -> (EOCheckedTurn, EngramWorkSour
         _ => unreachable!(),
     }
     if proof_kind != "unknown" {
-        serde_json::from_value::<EngramNamedRootReadResponse>(proof.clone()).unwrap()
-            .validate_authority(&entry.store, journal.read_binding.as_ref().unwrap()).unwrap();
+        serde_json::from_value::<EngramNamedRootReadResponse>(proof.clone())
+            .unwrap()
+            .validate_authority(&entry.store, journal.read_binding.as_ref().unwrap())
+            .unwrap();
     }
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.insert(entry.claim_id.clone(), proof);
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .insert(entry.claim_id.clone(), proof);
     let mut successor = journal.read_binding.unwrap();
     successor.work_id.push_str("-next");
     successor.claim_id.push_str("-next");
@@ -138,8 +167,13 @@ fn settled_root(label: &str, proof_kind: &str) -> (EOCheckedTurn, EngramWorkSour
         record.engram.work_binding = Some(successor.clone());
         record.engram.named_root = Some(EngramNamedRootState::None);
     });
-    claimed.transport.enable_named_roots(&claimed.session_id, &successor);
-    claimed.transport.replace_held_claims([Ok(EngramHeldClaims { items: Vec::new(), omitted: 0 })]);
+    claimed
+        .transport
+        .enable_named_roots(&claimed.session_id, &successor);
+    claimed.transport.replace_held_claims([Ok(EngramHeldClaims {
+        items: Vec::new(),
+        omitted: 0,
+    })]);
     (claimed, entry)
 }
 
@@ -157,54 +191,100 @@ fn recovery_frees_capacity(proof_kind: &str) {
         }
         assert_eq!(inner.engram_work_source_roots.len(), 64);
     }
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     let mut inner = claimed.state.inner.lock().unwrap();
-    assert!(engram_work_source_root_for_claim(&inner.engram_work_source_roots,
-        &entry.store, &entry.work_id, &entry.claim_id).is_none(),
-        "a canonically ended old claim must not retain a capacity slot after focus moved");
-    assert_eq!(inner.engram_work_source_roots.len(), 63,
-        "unknown associations must survive; only the proven old entry retires");
+    assert!(
+        engram_work_source_root_for_claim(
+            &inner.engram_work_source_roots,
+            &entry.store,
+            &entry.work_id,
+            &entry.claim_id
+        )
+        .is_none(),
+        "a canonically ended old claim must not retain a capacity slot after focus moved"
+    );
+    assert_eq!(
+        inner.engram_work_source_roots.len(),
+        63,
+        "unknown associations must survive; only the proven old entry retires"
+    );
     let mut replacement = entry.clone();
     replacement.work_id = "new-work-after-reclamation".to_owned();
     replacement.claim_id = "new-claim-after-reclamation".to_owned();
     replacement.generation += 1;
-    engram_set_work_source_root(&mut inner.engram_work_source_roots,
-        &entry.store, &replacement.work_id.clone(), Some(replacement)).unwrap();
+    engram_set_work_source_root(
+        &mut inner.engram_work_source_roots,
+        &entry.store,
+        &replacement.work_id.clone(),
+        Some(replacement),
+    )
+    .unwrap();
     assert_eq!(inner.engram_work_source_roots.len(), 64);
 }
 
 /// A settled root, whose session's focus has moved, with its run still live.
-fn live_unfocused_root(label: &str) -> (EOCheckedTurn, EngramWorkSourceRoot, EngramAuthorityTransition) {
+fn live_unfocused_root(
+    label: &str,
+) -> (
+    EOCheckedTurn,
+    EngramWorkSourceRoot,
+    EngramAuthorityTransition,
+) {
     let (claimed, entry) = settled_root(label, "live");
     let owner = authority_owner(&claimed, &entry);
     assert_eq!(owner.phase, EngramAuthorityPhase::Published);
     (claimed, entry, owner)
 }
 
-fn authority_owner(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> EngramAuthorityTransition {
+fn authority_owner(
+    claimed: &EOCheckedTurn,
+    entry: &EngramWorkSourceRoot,
+) -> EngramAuthorityTransition {
     let inner = claimed.state.inner.lock().unwrap();
-    inner.engram_work_naming_history.iter()
-        .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap()
-        .transition.clone().unwrap()
+    inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+        .unwrap()
+        .transition
+        .clone()
+        .unwrap()
 }
 
-fn unresolved_reason(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> Option<EngramUnconfirmedRootReason> {
+fn unresolved_reason(
+    claimed: &EOCheckedTurn,
+    entry: &EngramWorkSourceRoot,
+) -> Option<EngramUnconfirmedRootReason> {
     let inner = claimed.state.inner.lock().unwrap();
     engram_authority_work_unresolved_reason(&inner, &entry.store, &entry.work_id)
 }
 
 fn root_reads(claimed: &EOCheckedTurn) -> usize {
-    claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_read").count()
+    claimed
+        .transport
+        .requests()
+        .iter()
+        .filter(|request| request.request["operation"] == "named_root_read")
+        .count()
 }
 
 /// The next publication at `phase` finds its budget spent, as a slow writer
 /// leaves it, on the fixture's scripted clock. Time isn't measured.
-fn refuse_next_publication(claimed: &EOCheckedTurn, phase: &'static str) -> Arc<std::sync::atomic::AtomicBool> {
+fn refuse_next_publication(
+    claimed: &EOCheckedTurn,
+    phase: &'static str,
+) -> Arc<std::sync::atomic::AtomicBool> {
     let clock = claimed.state.engram_budget_clock();
     let refused = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let observed = refused.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |at| {
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |at| {
         if at == phase && !observed.swap(true, std::sync::atomic::Ordering::SeqCst) {
             clock.advance(ENGRAM_MIN_CALL_TIMEOUT + Duration::from_millis(1));
         }
@@ -218,9 +298,18 @@ fn refuse_next_publication(claimed: &EOCheckedTurn, phase: &'static str) -> Arc<
 fn a_maintenance_pass_reads_a_settled_root_and_leaves_its_authority_alone() {
     let (claimed, entry, owner) = live_unfocused_root("root-settled-read");
     let reads = root_reads(&claimed);
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert!(root_reads(&claimed) > reads, "the lifecycle read still happens");
-    assert_eq!(authority_owner(&claimed, &entry), owner, "no owner was prepared for nothing");
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert!(
+        root_reads(&claimed) > reads,
+        "the lifecycle read still happens"
+    );
+    assert_eq!(
+        authority_owner(&claimed, &entry),
+        owner,
+        "no owner was prepared for nothing"
+    );
     assert_eq!(unresolved_reason(&claimed, &entry), None);
 }
 
@@ -230,8 +319,13 @@ fn a_maintenance_pass_reads_a_settled_root_and_leaves_its_authority_alone() {
 fn a_maintenance_pass_cannot_strand_a_settled_root_when_a_publication_is_refused() {
     let (claimed, entry, owner) = live_unfocused_root("root-settled-refused");
     let refused = refuse_next_publication(&claimed, "before_publication");
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert!(!refused.load(std::sync::atomic::Ordering::SeqCst), "nothing was left to publish");
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert!(
+        !refused.load(std::sync::atomic::Ordering::SeqCst),
+        "nothing was left to publish"
+    );
     assert_eq!(authority_owner(&claimed, &entry), owner);
     assert_eq!(unresolved_reason(&claimed, &entry), None);
 }
@@ -247,14 +341,30 @@ fn another_sessions_maintenance_pass_leaves_a_settled_root_published() {
             inner.sessions[index].session.workdir.clone(),
             inner.sessions[index].session.project_id.clone(),
         );
-        inner.create_session(Agent::Codex, Some("Other session".to_owned()), workdir, project, None)
-            .session.id
+        inner
+            .create_session(
+                Agent::Codex,
+                Some("Other session".to_owned()),
+                workdir,
+                project,
+                None,
+            )
+            .session
+            .id
     };
     let refused = refuse_next_publication(&claimed, "before_publication");
     let reads = root_reads(&claimed);
-    claimed.state.recover_engram_authority_runs(&other, Duration::from_secs(2));
-    assert!(root_reads(&claimed) > reads, "the other session did read it");
-    assert!(!refused.load(std::sync::atomic::Ordering::SeqCst), "nothing was left to publish");
+    claimed
+        .state
+        .recover_engram_authority_runs(&other, Duration::from_secs(2));
+    assert!(
+        root_reads(&claimed) > reads,
+        "the other session did read it"
+    );
+    assert!(
+        !refused.load(std::sync::atomic::Ordering::SeqCst),
+        "nothing was left to publish"
+    );
     assert_eq!(authority_owner(&claimed, &entry), owner);
     assert_eq!(unresolved_reason(&claimed, &entry), None);
 }
@@ -263,9 +373,21 @@ fn another_sessions_maintenance_pass_leaves_a_settled_root_published() {
 #[test]
 fn an_unanswered_read_leaves_a_settled_root_published() {
     let (claimed, entry, owner) = live_unfocused_root("root-settled-unanswered");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_read_errors.insert(entry.claim_id.clone(), json!({"code": "store_busy", "message": "try later"}));
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .insert(
+            entry.claim_id.clone(),
+            json!({"code": "store_busy", "message": "try later"}),
+        );
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     assert_eq!(authority_owner(&claimed, &entry), owner);
     assert_eq!(unresolved_reason(&claimed, &entry), None);
 }
@@ -275,21 +397,49 @@ fn an_unanswered_read_leaves_a_settled_root_published() {
 #[test]
 fn an_interrupted_publication_is_finished_by_the_next_background_pass() {
     let (claimed, entry, _) = live_unfocused_root("root-candidate-background");
-    let owner = claimed.state.prepare_engram_authority(&entry.store,
-        &authority_owner(&claimed, &entry).binding, Duration::from_secs(2)).unwrap();
+    let owner = claimed
+        .state
+        .prepare_engram_authority(
+            &entry.store,
+            &authority_owner(&claimed, &entry).binding,
+            Duration::from_secs(2),
+        )
+        .unwrap();
     let refused = refuse_next_publication(&claimed, "before_publication");
-    assert!(claimed.state.publish_engram_authority(&entry.store, &owner, Duration::from_secs(2)).is_err());
+    assert!(
+        claimed
+            .state
+            .publish_engram_authority(&entry.store, &owner, Duration::from_secs(2))
+            .is_err()
+    );
     assert!(refused.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Candidate);
-    assert!(unresolved_reason(&claimed, &entry).is_some(), "while it's unfinished, evidence stays withheld");
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Candidate
+    );
+    assert!(
+        unresolved_reason(&claimed, &entry).is_some(),
+        "while it's unfinished, evidence stays withheld"
+    );
     {
         let inner = claimed.state.inner.lock().unwrap();
-        let history = inner.engram_work_naming_history.iter()
-            .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap();
-        assert!(engram_history_needs_recovery_locked(&inner, history), "a turn opening asks for the pass");
+        let history = inner
+            .engram_work_naming_history
+            .iter()
+            .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+            .unwrap();
+        assert!(
+            engram_history_needs_recovery_locked(&inner, history),
+            "a turn opening asks for the pass"
+        );
     }
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Published);
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Published
+    );
     assert_eq!(unresolved_reason(&claimed, &entry), None);
 }
 
@@ -303,26 +453,53 @@ fn a_same_path_naming_clears_a_candidate_its_opening_pass_could_not_finish() {
     request_fixture_name(&claimed, Some(&tree)).unwrap();
     let entry = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
-    let owner = claimed.state.prepare_engram_authority(&entry.store, &binding, Duration::from_secs(2)).unwrap();
+    let owner = claimed
+        .state
+        .prepare_engram_authority(&entry.store, &binding, Duration::from_secs(2))
+        .unwrap();
     let refused = refuse_next_publication(&claimed, "before_publication");
-    assert!(claimed.state.publish_engram_authority(&entry.store, &owner, Duration::from_secs(2)).is_err());
+    assert!(
+        claimed
+            .state
+            .publish_engram_authority(&entry.store, &owner, Duration::from_secs(2))
+            .is_err()
+    );
     assert!(refused.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Candidate);
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Candidate
+    );
     let opening_refused = refuse_next_publication(&claimed, "before_recovery_publication");
 
     // Naming defers its unfunded optional maintenance. Exercise the actual
     // preceding opening owner explicitly, so its fault cannot instead expire
     // the mandatory recovery in the naming request below.
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     assert!(opening_refused.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Candidate);
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Candidate
+    );
     assert!(unresolved_reason(&claimed, &entry).is_some());
 
     let named = request_fixture_name(&claimed, Some(&tree));
 
-    assert!(opening_refused.load(std::sync::atomic::Ordering::SeqCst), "the opening pass reached publication");
-    assert_eq!(named.map(|reply| reply.generation).map_err(|error| error.message), Ok(entry.generation));
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Published);
+    assert!(
+        opening_refused.load(std::sync::atomic::Ordering::SeqCst),
+        "the opening pass reached publication"
+    );
+    assert_eq!(
+        named
+            .map(|reply| reply.generation)
+            .map_err(|error| error.message),
+        Ok(entry.generation)
+    );
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Published
+    );
     assert_eq!(unresolved_reason(&claimed, &entry), None);
 }
 
@@ -339,7 +516,13 @@ pub(super) fn during_owners_read(action: impl FnOnce() + 'static) {
 }
 
 /// A live root its idle owner has in focus, confirmed.
-fn live_idle_root(label: &str) -> (EOCheckedTurn, EngramWorkSourceRoot, EngramAuthorityTransition) {
+fn live_idle_root(
+    label: &str,
+) -> (
+    EOCheckedTurn,
+    EngramWorkSourceRoot,
+    EngramAuthorityTransition,
+) {
     let (claimed, entry, owner) = live_unfocused_root(label);
     claimed.record_mut(|record| {
         record.engram.work_binding = Some(owner.binding.clone());
@@ -350,9 +533,14 @@ fn live_idle_root(label: &str) -> (EOCheckedTurn, EngramWorkSourceRoot, EngramAu
         });
         record.session.status = SessionStatus::Idle;
     });
-    claimed.transport.enable_named_roots(&claimed.session_id, &owner.binding);
+    claimed
+        .transport
+        .enable_named_roots(&claimed.session_id, &owner.binding);
     let capture = root_capture(&claimed);
-    assert!(matches!(capture, Ok(EngramRootCapture::Recorded { .. })), "confirmed first: {capture:?}");
+    assert!(
+        matches!(capture, Ok(EngramRootCapture::Recorded { .. })),
+        "confirmed first: {capture:?}"
+    );
     (claimed, entry, owner)
 }
 
@@ -367,11 +555,22 @@ fn strand_a_publication(
     entry: &EngramWorkSourceRoot,
     owner: &EngramAuthorityTransition,
 ) -> EngramAuthorityTransition {
-    let stranded = claimed.state.prepare_engram_authority(&entry.store, &owner.binding, Duration::from_secs(2)).unwrap();
+    let stranded = claimed
+        .state
+        .prepare_engram_authority(&entry.store, &owner.binding, Duration::from_secs(2))
+        .unwrap();
     let refused = refuse_next_publication(claimed, "before_publication");
-    assert!(claimed.state.publish_engram_authority(&entry.store, &stranded, Duration::from_secs(2)).is_err());
+    assert!(
+        claimed
+            .state
+            .publish_engram_authority(&entry.store, &stranded, Duration::from_secs(2))
+            .is_err()
+    );
     assert!(refused.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(authority_owner(claimed, entry).phase, EngramAuthorityPhase::Candidate);
+    assert_eq!(
+        authority_owner(claimed, entry).phase,
+        EngramAuthorityPhase::Candidate
+    );
     stranded
 }
 
@@ -381,13 +580,28 @@ fn strand_a_publication(
 fn an_interrupted_publication_is_finished_without_an_answered_read() {
     let (claimed, entry, owner) = live_unfocused_root("root-candidate-unanswered");
     let stranded = strand_a_publication(&claimed, &entry, &owner);
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_read_errors.insert(entry.claim_id.clone(), json!({"code": "store_busy", "message": "try later"}));
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .insert(
+            entry.claim_id.clone(),
+            json!({"code": "store_busy", "message": "try later"}),
+        );
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     assert_eq!(unresolved_reason(&claimed, &entry), None);
     let finished = authority_owner(&claimed, &entry);
     assert_eq!(finished.phase, EngramAuthorityPhase::Published);
-    assert_eq!((finished.id, finished.version), (stranded.id, stranded.version));
+    assert_eq!(
+        (finished.id, finished.version),
+        (stranded.id, stranded.version)
+    );
 }
 
 /// The owner's run and the root's differ, so the pass meets the work twice. Whichever
@@ -400,8 +614,11 @@ fn a_publication_on_another_run_is_finished_once(label: &str, root_first: bool) 
     later.claim_id.push_str("-later");
     let planted = {
         let mut inner = claimed.state.inner.lock().unwrap();
-        let history = inner.engram_work_naming_history.iter_mut()
-            .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap();
+        let history = inner
+            .engram_work_naming_history
+            .iter_mut()
+            .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+            .unwrap();
         history.owner_version += 1;
         let planted = EngramAuthorityTransition {
             id: Uuid::new_v4().to_string(),
@@ -411,17 +628,39 @@ fn a_publication_on_another_run_is_finished_once(label: &str, root_first: bool) 
         };
         history.transition = Some(planted.clone());
         // The pass starts just after the run named here, in a fair rotation.
-        let last = if root_first { later.claim_id.clone() } else { entry.claim_id.clone() };
-        inner.engram_authority_read_cursor.insert(entry.store.clone(), last);
+        let last = if root_first {
+            later.claim_id.clone()
+        } else {
+            entry.claim_id.clone()
+        };
+        inner
+            .engram_authority_read_cursor
+            .insert(entry.store.clone(), last);
         planted
     };
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_read_errors.insert(entry.claim_id.clone(), json!({"code": "store_busy", "message": "try later"}));
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .insert(
+            entry.claim_id.clone(),
+            json!({"code": "store_busy", "message": "try later"}),
+        );
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     assert_eq!(unresolved_reason(&claimed, &entry), None);
     let finished = authority_owner(&claimed, &entry);
     assert_eq!(finished.phase, EngramAuthorityPhase::Published);
-    assert_eq!((finished.id, finished.version), (planted.id, planted.version), "no new owner");
+    assert_eq!(
+        (finished.id, finished.version),
+        (planted.id, planted.version),
+        "no new owner"
+    );
 }
 
 #[test]
@@ -441,10 +680,17 @@ fn a_candidate_on_a_retired_run_is_finished_without_another_read() {
     let (claimed, entry, owner) = live_unfocused_root("root-candidate-retired");
     let planted = {
         let mut inner = claimed.state.inner.lock().unwrap();
-        let history = inner.engram_work_naming_history.iter_mut()
-            .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap();
-        history.retire_recovery_run(&owner.binding, EngramNamedRootReadRefusal::RunUnknown,
-            &entry.store, "fixture refusal");
+        let history = inner
+            .engram_work_naming_history
+            .iter_mut()
+            .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+            .unwrap();
+        history.retire_recovery_run(
+            &owner.binding,
+            EngramNamedRootReadRefusal::RunUnknown,
+            &entry.store,
+            "fixture refusal",
+        );
         history.owner_version += 1;
         let planted = EngramAuthorityTransition {
             id: Uuid::new_v4().to_string(),
@@ -456,11 +702,17 @@ fn a_candidate_on_a_retired_run_is_finished_without_another_read() {
         planted
     };
     let reads = root_reads(&claimed);
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     assert_eq!(root_reads(&claimed), reads, "a retired run isn't read");
     let finished = authority_owner(&claimed, &entry);
     assert_eq!(finished.phase, EngramAuthorityPhase::Published);
-    assert_eq!((finished.id, finished.version), (planted.id, planted.version), "no new owner");
+    assert_eq!(
+        (finished.id, finished.version),
+        (planted.id, planted.version),
+        "no new owner"
+    );
 }
 
 /// An answer that contradicts acknowledged history isn't nothing learned: the same
@@ -469,11 +721,28 @@ fn a_candidate_on_a_retired_run_is_finished_without_another_read() {
 #[test]
 fn a_read_contradicting_acknowledged_history_keeps_withholding() {
     let (claimed, entry, owner) = live_unfocused_root("root-settled-contradiction");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.get_mut(&entry.claim_id).unwrap()["latest_event"]["event"] = json!("another-event");
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert_eq!(unresolved_reason(&claimed, &entry), Some(EngramUnconfirmedRootReason::WorkRunsUnresolved));
-    assert_ne!(authority_owner(&claimed, &entry).id, owner.id, "an owner settles it");
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap()["latest_event"]["event"] = json!("another-event");
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert_eq!(
+        unresolved_reason(&claimed, &entry),
+        Some(EngramUnconfirmedRootReason::WorkRunsUnresolved)
+    );
+    assert_ne!(
+        authority_owner(&claimed, &entry).id,
+        owner.id,
+        "an owner settles it"
+    );
 }
 
 /// A turn opening on a stranded publication doesn't wait for it: it stays honestly
@@ -483,18 +752,32 @@ fn a_read_contradicting_acknowledged_history_keeps_withholding() {
 fn a_turn_opening_on_an_interrupted_publication_stays_unconfirmed_and_the_next_opens_confirmed() {
     let (claimed, entry, owner) = live_idle_root("root-candidate-opening");
     strand_a_publication(&claimed, &entry, &owner);
-    let opening = |claimed: &EOCheckedTurn| runtime_observation_opening_root(
-        &claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().provenance;
+    let opening = |claimed: &EOCheckedTurn| {
+        runtime_observation_opening_root(&claimed.state.inner.lock().unwrap(), &claimed.session_id)
+            .unwrap()
+            .provenance
+    };
     assert_eq!(opening(&claimed), EngramRootCapture::Unconfirmed);
     TEST_ENGRAM_RETAINED_RUN_READS_ENABLED.with(|enabled| enabled.set(true));
-    claimed.state.engram_host().turn_starting(&claimed.session_id);
+    claimed
+        .state
+        .engram_host()
+        .turn_starting(&claimed.session_id);
     TEST_ENGRAM_RETAINED_RUN_READS_ENABLED.with(|enabled| enabled.set(false));
-    for read in TEST_ENGRAM_RETAINED_RUN_READS.with(|reads| std::mem::take(&mut *reads.borrow_mut())) {
+    for read in
+        TEST_ENGRAM_RETAINED_RUN_READS.with(|reads| std::mem::take(&mut *reads.borrow_mut()))
+    {
         read.join().expect("the background pass finished");
     }
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Published);
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Published
+    );
     let next = opening(&claimed);
-    assert!(matches!(next, EngramRootCapture::Recorded { .. }), "{next:?}");
+    assert!(
+        matches!(next, EngramRootCapture::Recorded { .. }),
+        "{next:?}"
+    );
 }
 
 /// If the pass can't finish the publication either, evidence stays withheld: an
@@ -504,10 +787,18 @@ fn a_publication_the_pass_cannot_finish_keeps_withholding() {
     let (claimed, entry, owner) = live_idle_root("root-candidate-pass-refused");
     strand_a_publication(&claimed, &entry, &owner);
     let refused = refuse_next_publication(&claimed, "before_recovery_publication");
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
     assert!(refused.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(root_capture(&claimed), Err(EngramUnconfirmedRootReason::WorkTransitionUnpublished));
-    assert_eq!(authority_owner(&claimed, &entry).phase, EngramAuthorityPhase::Candidate);
+    assert_eq!(
+        root_capture(&claimed),
+        Err(EngramUnconfirmedRootReason::WorkTransitionUnpublished)
+    );
+    assert_eq!(
+        authority_owner(&claimed, &entry).phase,
+        EngramAuthorityPhase::Candidate
+    );
 }
 
 /// A Prepared owner with no retained run belongs to its naming, and a turn opening
@@ -515,13 +806,24 @@ fn a_publication_the_pass_cannot_finish_keeps_withholding() {
 #[test]
 fn a_prepared_owner_with_nothing_retained_asks_for_no_pass() {
     let (claimed, entry, owner) = live_idle_root("root-prepared-no-pass");
-    claimed.state.prepare_engram_authority(&entry.store, &owner.binding, Duration::from_secs(2)).unwrap();
+    claimed
+        .state
+        .prepare_engram_authority(&entry.store, &owner.binding, Duration::from_secs(2))
+        .unwrap();
     let mut inner = claimed.state.inner.lock().unwrap();
-    let index = inner.engram_work_naming_history.iter()
-        .position(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap();
-    inner.engram_work_naming_history[index].unresolved_runs.clear();
+    let index = inner
+        .engram_work_naming_history
+        .iter()
+        .position(|history| history.store == entry.store && history.work_id == entry.work_id)
+        .unwrap();
+    inner.engram_work_naming_history[index]
+        .unresolved_runs
+        .clear();
     let history = inner.engram_work_naming_history[index].clone();
-    assert_eq!(history.transition.as_ref().unwrap().phase, EngramAuthorityPhase::Prepared);
+    assert_eq!(
+        history.transition.as_ref().unwrap().phase,
+        EngramAuthorityPhase::Prepared
+    );
     assert!(!engram_history_needs_recovery_locked(&inner, &history));
 }
 
@@ -530,11 +832,29 @@ fn a_prepared_owner_with_nothing_retained_asks_for_no_pass() {
 #[test]
 fn a_bound_read_of_a_released_claim_still_retires_its_root() {
     let (claimed, entry, _) = live_unfocused_root("root-settled-released-claim");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.get_mut(&entry.claim_id).unwrap()["claim"] = json!({"state": "released"});
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry),
-        "a released claim retires its root");
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap()["claim"] = json!({"state": "released"});
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert!(
+        !claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(&entry),
+        "a released claim retires its root"
+    );
 }
 
 /// A refusal in an older build's words goes on to the batch, which records it for
@@ -542,12 +862,32 @@ fn a_bound_read_of_a_released_claim_still_retires_its_root() {
 #[test]
 fn an_older_builds_claim_refusal_is_still_recorded() {
     let (claimed, entry, _) = live_unfocused_root("root-settled-old-refusal");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_read_errors.insert(entry.claim_id.clone(),
-            json!({"code": "invalid_input", "message": ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT}));
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert!(claimed.state.inner.lock().unwrap().engram_root_reclamation.refused_claims.iter()
-        .any(|(store, claim)| store == &entry.store && claim == &entry.claim_id));
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .insert(
+            entry.claim_id.clone(),
+            json!({"code": "invalid_input", "message": ENGRAM_NAMED_ROOT_CLAIM_NOT_CURRENT}),
+        );
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert!(
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_root_reclamation
+            .refused_claims
+            .iter()
+            .any(|(store, claim)| store == &entry.store && claim == &entry.claim_id)
+    );
 }
 
 /// The recurring pass, driven directly on the one root it plans.
@@ -569,9 +909,18 @@ fn watch_unconfirmed(
     entry: &EngramWorkSourceRoot,
 ) -> Arc<Mutex<Vec<(String, EngramUnconfirmedRootReason)>>> {
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let (recorded, inner, store, work) =
-        (seen.clone(), claimed.state.inner.clone(), entry.store.clone(), entry.work_id.clone());
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |at: &str| {
+    let (recorded, inner, store, work) = (
+        seen.clone(),
+        claimed.state.inner.clone(),
+        entry.store.clone(),
+        entry.work_id.clone(),
+    );
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |at: &str| {
         let reason = engram_authority_work_unresolved_reason(&inner.lock().unwrap(), &store, &work);
         if let Some(reason) = reason {
             recorded.lock().unwrap().push((at.to_owned(), reason));
@@ -586,7 +935,11 @@ fn assert_recurring_pass_left_it_alone(
     owner: &EngramAuthorityTransition,
 ) {
     assert_eq!(unresolved_reason(claimed, entry), None);
-    assert_eq!(&authority_owner(claimed, entry), owner, "no owner was prepared for nothing");
+    assert_eq!(
+        &authority_owner(claimed, entry),
+        owner,
+        "no owner was prepared for nothing"
+    );
 }
 
 /// The pass reads a live root and has nothing to settle on it, so a turn opening
@@ -600,9 +953,21 @@ fn recurring_pass_leaves_a_live_root(
     let reads = root_reads(claimed);
     let seen = watch_unconfirmed(claimed, entry);
     recurring_pass(claimed, route);
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(root_reads(claimed) > reads, "the lifecycle read still happens");
-    assert_eq!(*seen.lock().unwrap(), Vec::new(), "a turn opening inside the pass would be unconfirmed");
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        root_reads(claimed) > reads,
+        "the lifecycle read still happens"
+    );
+    assert_eq!(
+        *seen.lock().unwrap(),
+        Vec::new(),
+        "a turn opening inside the pass would be unconfirmed"
+    );
     assert_recurring_pass_left_it_alone(claimed, entry, owner);
 }
 
@@ -611,18 +976,36 @@ fn a_recurring_pass_leaves_an_idle_owners_live_root_confirmed() {
     let (claimed, entry, owner) = live_idle_root("recurring-idle");
     recurring_pass_leaves_a_live_root(&claimed, &entry, &owner, idle_route(&claimed));
     let capture = root_capture(&claimed);
-    assert!(matches!(capture, Ok(EngramRootCapture::Recorded { .. })), "{capture:?}");
+    assert!(
+        matches!(capture, Ok(EngramRootCapture::Recorded { .. })),
+        "{capture:?}"
+    );
 }
 
 #[test]
 fn a_recurring_pass_leaves_an_unfocused_live_root_confirmed() {
     let (claimed, entry, owner) = live_unfocused_root("recurring-unfocused");
-    recurring_pass_leaves_a_live_root(&claimed, &entry, &owner, EngramRootReclamationRoute::Unfocused);
+    recurring_pass_leaves_a_live_root(
+        &claimed,
+        &entry,
+        &owner,
+        EngramRootReclamationRoute::Unfocused,
+    );
 }
 
 fn leave_root_reads_unanswered(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) {
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_read_errors.insert(entry.claim_id.clone(), json!({"code": "store_busy", "message": "try later"}));
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .insert(
+            entry.claim_id.clone(),
+            json!({"code": "store_busy", "message": "try later"}),
+        );
 }
 
 /// An unanswered read learns nothing, and the idle owner's next turn opens confirmed.
@@ -632,7 +1015,10 @@ fn an_unanswered_recurring_read_leaves_an_idle_owners_live_root_confirmed() {
     leave_root_reads_unanswered(&claimed, &entry);
     recurring_pass(&claimed, idle_route(&claimed));
     let capture = root_capture(&claimed);
-    assert!(matches!(capture, Ok(EngramRootCapture::Recorded { .. })), "{capture:?}");
+    assert!(
+        matches!(capture, Ok(EngramRootCapture::Recorded { .. })),
+        "{capture:?}"
+    );
     assert_recurring_pass_left_it_alone(&claimed, &entry, &owner);
 }
 
@@ -651,8 +1037,14 @@ fn a_recurring_pass_cannot_strand_an_idle_owners_live_root_when_a_publication_is
     let refused = refuse_next_publication(&claimed, "before_publication");
     recurring_pass(&claimed, idle_route(&claimed));
     let capture = root_capture(&claimed);
-    assert!(matches!(capture, Ok(EngramRootCapture::Recorded { .. })), "{capture:?}");
-    assert!(!refused.load(std::sync::atomic::Ordering::SeqCst), "nothing was left to publish");
+    assert!(
+        matches!(capture, Ok(EngramRootCapture::Recorded { .. })),
+        "{capture:?}"
+    );
+    assert!(
+        !refused.load(std::sync::atomic::Ordering::SeqCst),
+        "nothing was left to publish"
+    );
     assert_recurring_pass_left_it_alone(&claimed, &entry, &owner);
 }
 
@@ -662,7 +1054,10 @@ fn a_recurring_pass_cannot_strand_an_unfocused_live_root_when_a_publication_is_r
     let refused = refuse_next_publication(&claimed, "before_publication");
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
     assert_eq!(unresolved_reason(&claimed, &entry), None);
-    assert!(!refused.load(std::sync::atomic::Ordering::SeqCst), "nothing was left to publish");
+    assert!(
+        !refused.load(std::sync::atomic::Ordering::SeqCst),
+        "nothing was left to publish"
+    );
     assert_recurring_pass_left_it_alone(&claimed, &entry, &owner);
 }
 
@@ -679,7 +1074,10 @@ fn an_unavailable_recurring_read_leaves_a_live_root_confirmed() {
     }
     recurring_pass(&claimed, idle_route(&claimed));
     let capture = root_capture(&claimed);
-    assert!(matches!(capture, Ok(EngramRootCapture::Recorded { .. })), "{capture:?}");
+    assert!(
+        matches!(capture, Ok(EngramRootCapture::Recorded { .. })),
+        "{capture:?}"
+    );
     assert_recurring_pass_left_it_alone(&claimed, &entry, &owner);
 }
 
@@ -687,22 +1085,54 @@ fn an_unavailable_recurring_read_leaves_a_live_root_confirmed() {
 #[test]
 fn a_recurring_pass_still_retires_a_bound_root_whose_claim_was_released() {
     let (claimed, entry, _) = live_unfocused_root("recurring-released-claim");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.get_mut(&entry.claim_id).unwrap()["claim"] = json!({"state": "released"});
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap()["claim"] = json!({"state": "released"});
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
-    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
+    assert!(
+        !claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(&entry)
+    );
 }
 
 /// The read that found something to settle only decided: the owner reads for itself.
 #[test]
 fn a_recurring_pass_reads_a_root_it_retires_twice() {
     let (claimed, entry, _) = live_unfocused_root("recurring-two-reads");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.get_mut(&entry.claim_id).unwrap()["claim"] = json!({"state": "released"});
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap()["claim"] = json!({"state": "released"});
     let reads = root_reads(&claimed);
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
     assert_eq!(root_reads(&claimed) - reads, 2);
-    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
+    assert!(
+        !claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(&entry)
+    );
 }
 
 /// Above the floor a root can still lose its second read: the attempt fails and the
@@ -711,27 +1141,80 @@ fn a_recurring_pass_reads_a_root_it_retires_twice() {
 #[test]
 fn a_root_whose_owners_read_goes_unanswered_heals_on_its_next_attempt() {
     let (claimed, entry, _) = live_unfocused_root("recurring-owner-read-unanswered");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.get_mut(&entry.claim_id).unwrap()["claim"] = json!({"state": "released"});
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap()["claim"] = json!({"state": "released"});
     let (transport, claim) = (claimed.transport.clone(), entry.claim_id.clone());
     let once = std::sync::atomic::AtomicBool::new(false);
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |at: &str| {
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |at: &str| {
         // After the deciding read, while the owner is being prepared.
         if at == "before_delta" && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            transport.named_roots.lock().unwrap().as_mut().unwrap().root_read_errors
-                .insert(claim.clone(), json!({"code": "store_busy", "message": "try later"}));
+            transport
+                .named_roots
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .root_read_errors
+                .insert(
+                    claim.clone(),
+                    json!({"code": "store_busy", "message": "try later"}),
+                );
         }
     }));
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert_eq!(unresolved_reason(&claimed, &entry), Some(EngramUnconfirmedRootReason::WorkRunsUnresolved));
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert_eq!(
+        unresolved_reason(&claimed, &entry),
+        Some(EngramUnconfirmedRootReason::WorkRunsUnresolved)
+    );
     assert_root_retained(&claimed, &entry);
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap().root_read_errors.remove(&entry.claim_id);
-    claimed.state.engram_budget_clock().advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .remove(&entry.claim_id);
+    claimed
+        .state
+        .engram_budget_clock()
+        .advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
     let reads = root_reads(&claimed);
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
-    assert_eq!(root_reads(&claimed) - reads, 1, "an unsettled work has no deciding read");
-    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
+    assert_eq!(
+        root_reads(&claimed) - reads,
+        1,
+        "an unsettled work has no deciding read"
+    );
+    assert!(
+        !claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(&entry)
+    );
 }
 
 /// A skip adds no load: a live root costs one read, and its cooldown holds.
@@ -741,8 +1224,14 @@ fn a_live_root_is_read_once_per_cooldown() {
     let reads = root_reads(&claimed);
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
     assert_eq!(root_reads(&claimed) - reads, 1);
-    assert!(reclamation_plan(&claimed).is_empty(), "it waits out its cooldown");
-    claimed.state.engram_budget_clock().advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
+    assert!(
+        reclamation_plan(&claimed).is_empty(),
+        "it waits out its cooldown"
+    );
+    claimed
+        .state
+        .engram_budget_clock()
+        .advance(ENGRAM_ROOT_RECLAMATION_COOLDOWN);
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
     assert_eq!(root_reads(&claimed) - reads, 2);
     assert_eq!(authority_owner(&claimed, &entry), owner);
@@ -755,9 +1244,19 @@ fn an_unanswered_recurring_read_is_reported_as_the_attempts_outcome() {
     leave_root_reads_unanswered(&claimed, &entry);
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
     let now = claimed.state.engram_budget_clock().now();
-    let status = engram_named_root_reclamation_text(&claimed.state.inner.lock().unwrap(), &entry, now);
+    let status =
+        engram_named_root_reclamation_text(&claimed.state.inner.lock().unwrap(), &entry, now);
     assert!(status.contains("try later"), "{status}");
-    assert_eq!(claimed.state.inner.lock().unwrap().engram_work_naming_history[0].recovery_reason, None);
+    assert_eq!(
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_naming_history[0]
+            .recovery_reason,
+        None
+    );
 }
 
 /// A naming that lands during the read is why the read learned something. It isn't
@@ -765,8 +1264,16 @@ fn an_unanswered_recurring_read_is_reported_as_the_attempts_outcome() {
 #[test]
 fn a_selection_changed_during_a_recurring_read_prepares_nothing() {
     let (claimed, entry, owner) = live_unfocused_root("recurring-read-race");
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_reads.get_mut(&entry.claim_id).unwrap()["claim"] = json!({"state": "released"});
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap()["claim"] = json!({"state": "released"});
     let plan = reclamation_plan(&claimed);
     let state = claimed.state.clone();
     TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| {
@@ -776,8 +1283,21 @@ fn a_selection_changed_during_a_recurring_read_prepares_nothing() {
     });
     claimed.state.run_engram_root_reclamation_pass(plan);
     assert_eq!(unresolved_reason(&claimed, &entry), None);
-    assert_eq!(authority_owner(&claimed, &entry), owner, "no owner was prepared over it");
-    assert_eq!(claimed.state.inner.lock().unwrap().engram_work_source_roots.len(), 1);
+    assert_eq!(
+        authority_owner(&claimed, &entry),
+        owner,
+        "no owner was prepared over it"
+    );
+    assert_eq!(
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .len(),
+        1
+    );
 }
 
 /// With no proof of this run yet, the read has something to teach.
@@ -786,17 +1306,28 @@ fn a_recurring_pass_learns_a_run_it_has_no_proof_of() {
     let (claimed, entry, owner) = live_unfocused_root("recurring-unproven");
     {
         let mut inner = claimed.state.inner.lock().unwrap();
-        let history = inner.engram_work_naming_history.iter_mut()
-            .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap();
+        let history = inner
+            .engram_work_naming_history
+            .iter_mut()
+            .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+            .unwrap();
         for proof in &mut history.proofs {
             proof.binding.run_id.push_str("-another");
         }
     }
     recurring_pass(&claimed, EngramRootReclamationRoute::Unfocused);
     let inner = claimed.state.inner.lock().unwrap();
-    let history = inner.engram_work_naming_history.iter()
-        .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap();
-    assert!(history.proofs.iter().any(|proof| engram_same_recovery_run(&proof.binding, &owner.binding)));
+    let history = inner
+        .engram_work_naming_history
+        .iter()
+        .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+        .unwrap();
+    assert!(
+        history
+            .proofs
+            .iter()
+            .any(|proof| engram_same_recovery_run(&proof.binding, &owner.binding))
+    );
 }
 
 /// A work already unsettled isn't read past: the pass's owner settles it as before,
@@ -804,83 +1335,185 @@ fn a_recurring_pass_learns_a_run_it_has_no_proof_of() {
 #[test]
 fn a_recurring_pass_keeps_withholding_a_work_that_is_unsettled() {
     let (claimed, entry, owner) = live_idle_root("recurring-unsettled");
-    claimed.state.prepare_engram_authority(&entry.store, &owner.binding, Duration::from_secs(2)).unwrap();
-    assert_eq!(root_capture(&claimed), Err(EngramUnconfirmedRootReason::WorkRunsUnresolved));
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
-        .root_read_errors.insert(entry.claim_id.clone(), json!({"code": "store_busy", "message": "try later"}));
+    claimed
+        .state
+        .prepare_engram_authority(&entry.store, &owner.binding, Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(
+        root_capture(&claimed),
+        Err(EngramUnconfirmedRootReason::WorkRunsUnresolved)
+    );
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .root_read_errors
+        .insert(
+            entry.claim_id.clone(),
+            json!({"code": "store_busy", "message": "try later"}),
+        );
     recurring_pass(&claimed, idle_route(&claimed));
-    assert_eq!(root_capture(&claimed), Err(EngramUnconfirmedRootReason::WorkRunsUnresolved));
+    assert_eq!(
+        root_capture(&claimed),
+        Err(EngramUnconfirmedRootReason::WorkRunsUnresolved)
+    );
 }
 
 #[test]
-fn named_root_reclamation_completed_old_claim_frees_capacity() { recovery_frees_capacity("completed"); }
+fn named_root_reclamation_completed_old_claim_frees_capacity() {
+    recovery_frees_capacity("completed");
+}
 #[test]
-fn named_root_reclamation_cancelled_old_claim_frees_capacity() { recovery_frees_capacity("cancelled"); }
+fn named_root_reclamation_cancelled_old_claim_frees_capacity() {
+    recovery_frees_capacity("cancelled");
+}
 #[test]
-fn named_root_reclamation_released_old_claim_frees_capacity() { recovery_frees_capacity("released"); }
+fn named_root_reclamation_released_old_claim_frees_capacity() {
+    recovery_frees_capacity("released");
+}
 #[test]
-fn named_root_reclamation_ended_old_binding_frees_capacity() { recovery_frees_capacity("ended"); }
+fn named_root_reclamation_ended_old_binding_frees_capacity() {
+    recovery_frees_capacity("ended");
+}
 
 fn own_clear_without_live_claim(proof_kind: &str) {
     let label = format!("root-reclamation-clear-{proof_kind}");
     let (claimed, entry) = settled_root(&label, proof_kind);
-    let binds_before = claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_bind").count();
-    let result = claimed.state.name_engram_source_root(&claimed.session_id,
-        EngramSourceRootRequest { work: entry.short_ref.clone(), path: None });
-    assert!(result.is_ok(), "the original namer's ended entry clears without a held claim: {result:?}");
-    assert!(engram_work_source_root_for_claim(
-        &claimed.state.inner.lock().unwrap().engram_work_source_roots,
-        &entry.store, &entry.work_id, &entry.claim_id).is_none());
-    assert_eq!(claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_bind").count(), binds_before,
-        "host retirement cannot fabricate an Ended producer event for the old claim");
+    let binds_before = claimed
+        .transport
+        .requests()
+        .iter()
+        .filter(|request| request.request["operation"] == "named_root_bind")
+        .count();
+    let result = claimed.state.name_engram_source_root(
+        &claimed.session_id,
+        EngramSourceRootRequest {
+            work: entry.short_ref.clone(),
+            path: None,
+        },
+    );
+    assert!(
+        result.is_ok(),
+        "the original namer's ended entry clears without a held claim: {result:?}"
+    );
+    assert!(
+        engram_work_source_root_for_claim(
+            &claimed.state.inner.lock().unwrap().engram_work_source_roots,
+            &entry.store,
+            &entry.work_id,
+            &entry.claim_id
+        )
+        .is_none()
+    );
+    assert_eq!(
+        claimed
+            .transport
+            .requests()
+            .iter()
+            .filter(|request| request.request["operation"] == "named_root_bind")
+            .count(),
+        binds_before,
+        "host retirement cannot fabricate an Ended producer event for the old claim"
+    );
 }
 
 #[test]
-fn named_root_reclamation_own_completed_clear_without_live_claim() { own_clear_without_live_claim("completed"); }
+fn named_root_reclamation_own_completed_clear_without_live_claim() {
+    own_clear_without_live_claim("completed");
+}
 #[test]
-fn named_root_reclamation_own_released_clear_without_live_claim() { own_clear_without_live_claim("released"); }
+fn named_root_reclamation_own_released_clear_without_live_claim() {
+    own_clear_without_live_claim("released");
+}
 
 fn recovery_retains_uncertainty(proof_kind: &str) {
     let label = format!("root-reclamation-retain-{proof_kind}");
     let (claimed, entry) = settled_root(&label, proof_kind);
-    claimed.state.recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
-    assert_eq!(engram_work_source_root_for_claim(
-        &claimed.state.inner.lock().unwrap().engram_work_source_roots,
-        &entry.store, &entry.work_id, &entry.claim_id), Some(&entry));
-    let result = claimed.state.name_engram_source_root(&claimed.session_id,
-        EngramSourceRootRequest { work: entry.short_ref.clone(), path: None });
-    assert!(result.is_err(), "an open or unknown old binding cannot clear");
-    assert_eq!(engram_work_source_root_for_claim(
-        &claimed.state.inner.lock().unwrap().engram_work_source_roots,
-        &entry.store, &entry.work_id, &entry.claim_id), Some(&entry));
+    claimed
+        .state
+        .recover_engram_authority_runs(&claimed.session_id, Duration::from_secs(2));
+    assert_eq!(
+        engram_work_source_root_for_claim(
+            &claimed.state.inner.lock().unwrap().engram_work_source_roots,
+            &entry.store,
+            &entry.work_id,
+            &entry.claim_id
+        ),
+        Some(&entry)
+    );
+    let result = claimed.state.name_engram_source_root(
+        &claimed.session_id,
+        EngramSourceRootRequest {
+            work: entry.short_ref.clone(),
+            path: None,
+        },
+    );
+    assert!(
+        result.is_err(),
+        "an open or unknown old binding cannot clear"
+    );
+    assert_eq!(
+        engram_work_source_root_for_claim(
+            &claimed.state.inner.lock().unwrap().engram_work_source_roots,
+            &entry.store,
+            &entry.work_id,
+            &entry.claim_id
+        ),
+        Some(&entry)
+    );
 }
 
 #[test]
-fn named_root_reclamation_live_old_binding_is_retained() { recovery_retains_uncertainty("live"); }
+fn named_root_reclamation_live_old_binding_is_retained() {
+    recovery_retains_uncertainty("live");
+}
 #[test]
-fn named_root_reclamation_unknown_old_binding_is_retained() { recovery_retains_uncertainty("unknown"); }
+fn named_root_reclamation_unknown_old_binding_is_retained() {
+    recovery_retains_uncertainty("unknown");
+}
 
 fn reclamation_plan(claimed: &EOCheckedTurn) -> Vec<EngramRootReclamationTask> {
     let now = claimed.state.engram_budget_clock().now();
     let (snapshot, expected, disposition) = {
         let inner = claimed.state.inner.lock().unwrap();
-        (EngramRootReclamationSnapshot::capture(&inner),
+        (
+            EngramRootReclamationSnapshot::capture(&inner),
             engram_root_reclamation_plan_locked(&inner, now),
-            engram_named_root_disposition_due_locked(&inner, now))
+            engram_named_root_disposition_due_locked(&inner, now),
+        )
     };
     let plan = snapshot.plan(now);
-    assert_eq!(plan.iter().map(|task| (&task.root, &task.route)).collect::<Vec<_>>(),
-        expected.iter().map(|task| (&task.root, &task.route)).collect::<Vec<_>>(),
-        "the snapshot plan must equal the original locked planner");
-    assert_eq!(snapshot.disposition_due(now), disposition,
-        "the snapshot disposition decision must equal the original locked scan");
+    assert_eq!(
+        plan.iter()
+            .map(|task| (&task.root, &task.route))
+            .collect::<Vec<_>>(),
+        expected
+            .iter()
+            .map(|task| (&task.root, &task.route))
+            .collect::<Vec<_>>(),
+        "the snapshot plan must equal the original locked planner"
+    );
+    assert_eq!(
+        snapshot.disposition_due(now),
+        disposition,
+        "the snapshot disposition decision must equal the original locked scan"
+    );
     plan
 }
 
 fn assert_root_retained(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) {
-    assert!(claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(entry));
+    assert!(
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(entry)
+    );
 }
 
 #[test]
@@ -897,32 +1530,75 @@ fn named_root_reclamation_bounded_pass_retires_unfocused_without_provider_dispat
     assert_eq!(notices.len(), 1);
     assert!(notices[0].published);
     assert!(!notices[0].delivered);
-    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(matches!(
+        claimed._runtime_rx.lock().unwrap().try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
 }
 
 #[test]
 fn named_root_reclamation_idle_current_binding_uses_existing_recovery_owner() {
     let (claimed, entry) = settled_root("reclamation-idle-current", "completed");
-    let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
-        &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
+    let binding = engram_root_journal(
+        &claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_named_root_journal,
+        &entry.store,
+        &entry.claim_id,
+    )
+    .unwrap()
+    .read_binding
+    .clone()
+    .unwrap();
     claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding.clone());
         record.session.status = SessionStatus::Idle;
     });
-    claimed.transport.enable_named_roots(&claimed.session_id, &binding);
+    claimed
+        .transport
+        .enable_named_roots(&claimed.session_id, &binding);
     let plan = reclamation_plan(&claimed);
     assert_eq!(plan.len(), 1);
-    assert_eq!(plan[0].route, EngramRootReclamationRoute::Current(claimed.session_id.clone()));
+    assert_eq!(
+        plan[0].route,
+        EngramRootReclamationRoute::Current(claimed.session_id.clone())
+    );
     claimed.state.run_engram_root_reclamation_pass(plan);
-    assert!(!claimed.state.inner.lock().unwrap().engram_work_source_roots.contains(&entry));
-    assert!(matches!(claimed._runtime_rx.lock().unwrap().try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+    assert!(
+        !claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_source_roots
+            .contains(&entry)
+    );
+    assert!(matches!(
+        claimed._runtime_rx.lock().unwrap().try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
 }
 
 #[test]
 fn named_root_reclamation_active_current_and_pending_intent_are_not_candidates() {
     let (claimed, entry) = settled_root("reclamation-excluded-owners", "completed");
-    let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
-        &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
+    let binding = engram_root_journal(
+        &claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_named_root_journal,
+        &entry.store,
+        &entry.claim_id,
+    )
+    .unwrap()
+    .read_binding
+    .clone()
+    .unwrap();
     claimed.record_mut(|record| {
         record.engram.work_binding = Some(binding);
         record.session.status = SessionStatus::Active;
@@ -941,8 +1617,20 @@ fn named_root_reclamation_active_current_and_pending_intent_are_not_candidates()
 #[test]
 fn named_root_reclamation_owner_becoming_current_during_read_retains_entry() {
     let (claimed, entry) = settled_root("reclamation-owner-race", "completed");
-    let binding = engram_root_journal(&claimed.state.inner.lock().unwrap().engram_named_root_journal,
-        &entry.store, &entry.claim_id).unwrap().read_binding.clone().unwrap();
+    let binding = engram_root_journal(
+        &claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_named_root_journal,
+        &entry.store,
+        &entry.claim_id,
+    )
+    .unwrap()
+    .read_binding
+    .clone()
+    .unwrap();
     let plan = reclamation_plan(&claimed);
     let state = claimed.state.clone();
     let session_id = claimed.session_id.clone();
@@ -953,7 +1641,16 @@ fn named_root_reclamation_owner_becoming_current_during_read_retains_entry() {
     });
     claimed.state.run_engram_root_reclamation_pass(plan);
     assert_root_retained(&claimed, &entry);
-    assert!(claimed.state.inner.lock().unwrap().engram_work_naming_history[0].retirements.is_empty());
+    assert!(
+        claimed
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .engram_work_naming_history[0]
+            .retirements
+            .is_empty()
+    );
 }
 
 #[test]
@@ -975,8 +1672,14 @@ fn named_root_reclamation_exact_selection_and_pending_journal_races_are_fenced()
         let inner = claimed.state.inner.lock().unwrap();
         assert_eq!(inner.engram_work_source_roots.len(), 1);
         assert!(inner.engram_work_naming_history[0].retirements.is_empty());
-        assert_eq!(inner.engram_work_source_roots[0].generation, entry.generation + u64::from(!pending));
-        assert_eq!(inner.engram_named_root_journal[0].pending.is_some(), pending);
+        assert_eq!(
+            inner.engram_work_source_roots[0].generation,
+            entry.generation + u64::from(!pending)
+        );
+        assert_eq!(
+            inner.engram_named_root_journal[0].pending.is_some(),
+            pending
+        );
     }
 }
 
@@ -1006,13 +1709,22 @@ fn named_root_reclamation_planner_caps_reads_and_cooldown_advances_oldest_entrie
     {
         let mut inner = claimed.state.inner.lock().unwrap();
         for task in &first {
-            inner.engram_root_reclamation.cooldowns.push((task.root.clone(), now + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
+            inner
+                .engram_root_reclamation
+                .cooldowns
+                .push((task.root.clone(), now + ENGRAM_ROOT_RECLAMATION_COOLDOWN));
         }
     }
     let next = reclamation_plan(&claimed);
     assert_eq!(next.len(), 8);
-    assert!(next.iter().all(|next| first.iter().all(|old| old.root != next.root)));
-    assert!(next.windows(2).all(|pair| pair[0].root.named_at <= pair[1].root.named_at));
+    assert!(
+        next.iter()
+            .all(|next| first.iter().all(|old| old.root != next.root))
+    );
+    assert!(
+        next.windows(2)
+            .all(|pair| pair[0].root.named_at <= pair[1].root.named_at)
+    );
 }
 
 #[test]
@@ -1024,7 +1736,17 @@ fn named_root_reclamation_deadline_stops_pass_without_retiring_unacknowledged_im
     claimed.state.run_engram_root_reclamation_pass(plan);
     let inner = claimed.state.inner.lock().unwrap();
     assert_eq!(engram_named_root_capacity(&inner), 1);
-    assert!(inner.engram_work_naming_history[0].retirements.iter().all(|notice| !notice.published));
-    assert!(inner.engram_work_source_roots.contains(&entry)
-        || inner.engram_work_naming_history[0].retirements.iter().any(|notice| notice.selection == entry));
+    assert!(
+        inner.engram_work_naming_history[0]
+            .retirements
+            .iter()
+            .all(|notice| !notice.published)
+    );
+    assert!(
+        inner.engram_work_source_roots.contains(&entry)
+            || inner.engram_work_naming_history[0]
+                .retirements
+                .iter()
+                .any(|notice| notice.selection == entry)
+    );
 }

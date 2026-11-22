@@ -1,26 +1,61 @@
 #!/usr/bin/env node
-// Turns include!() fragments of src/main.rs into ordinary Rust modules, a
-// chosen set at a time, and proves that a converted tree differs from its base
-// only by module wiring and visibility.
+// Turns include!() fragments into ordinary Rust modules, a chosen set at a
+// time, and proves that a converted tree differs from its base only by module
+// wiring and visibility.
 //
 //   node scripts/include-to-mod.mjs analyze ROOT
 //   node scripts/include-to-mod.mjs convert ROOT UNIT[,UNIT...] [--write] [--expose NAME[,NAME...]]
 //   node scripts/include-to-mod.mjs verify BASE_ROOT NEW_ROOT [--expose NAME[,NAME...]]
 //
-// A unit is a file that src/main.rs includes at its top level, together with
-// every .rs file that file includes in turn. For each unit `convert` replaces
-// `include!("x.rs");` in src/main.rs with `mod x;` and, when the module has a
-// name to re-export, `use x::*;`, under #[cfg(test)] when only test code
-// names its items. It adds one `use super::*;` to the file when
-// the file, or a child module it mounts, names anything the crate root
-// provides, and it inserts `pub(crate)` where the rule below asks for it. It
-// refuses the whole request, before writing anything, when a unit needs a
-// decision it cannot make (see `planUnit`'s hazards); those units are
-// converted by hand. Its report names the units that hold
-// platform-conditional code (`platformUnits`): a batch with any needs a
-// compile on the other platform too, a batch with none does not.
+// A unit is a file that another file under src includes at its top level,
+// together with every .rs file that file includes in turn. It is named by its
+// path below src (`x.rs`, `tests/x.rs`), and its parent is the one file that
+// includes it: src/main.rs, or a module file. An include!() written inside an
+// inline `mod name { }` is not a unit. `analyze` lists the units of every
+// parent, and `convert` finds each unit's parent itself.
 //
-// Where `pub(crate)` goes:
+// For a unit of src/main.rs, `convert` replaces `include!("x.rs");` with
+// `mod x;` and, when the module has a name to hand on, the import `use x::*;`,
+// under #[cfg(test)] when only test code names its items. It adds one
+// `use super::*;` to the file when the file, or a child module it mounts,
+// names anything the crate root provides, and it inserts `pub(crate)` where
+// the rule below asks for it.
+//
+// For a unit of any other parent p.rs (a nested unit) the include becomes
+// `#[path = "x.rs"]` and `mod x;`, because a plain `mod x;` there would look
+// for p/x.rs, followed by a glob of the module under the same #[cfg(test)]
+// rule: the re-export `pub(crate) use x::*;` when the unit has a name that
+// was visible beyond its parent, the import `use x::*;` when it has none (a
+// re-export that hands nothing on is an unused import to the compiler). A
+// glob never widens a name past its own visibility, so every name keeps the
+// reach it had. The visibility inserted in a nested unit is `pub(super)`: a
+// private item of the fragment was visible in its parent and below it, and
+// that is what `pub(super)` on an item of the child module means. The file
+// gets `use super::*;` when it names anything its parent provides; a fragment
+// that already has that line keeps it as its own, provided the parent has
+// another one to keep its parent's names by.
+//
+// `convert` refuses the whole request, before writing anything, when a unit
+// needs a decision it cannot make (see `planUnit`'s hazards and
+// `siteHazards`); those units are converted by hand. In a nested unit that
+// includes every `super::` path and `pub(super)` that climbs out of the file,
+// since each would stop one module short, and `module_path!()`. `self::`
+// paths are left alone, as they are for a unit of src/main.rs: the module's
+// own namespace holds its parent's names through `use super::*;`. Its report
+// names the units that hold platform-conditional code (`platformUnits`): a
+// batch with any needs a compile on the other platform too, a batch with none
+// does not.
+//
+// Known limitations for nested units. A name the unit defines was an item of
+// its parent and is a glob import there afterwards: where the parent also
+// gets that name through another glob, the item used to win and the two globs
+// now conflict. The tool does not look for this; the compiler reports each
+// use as E0659. A fragment that a nested unit includes gets `pub(super)` like
+// the rest of the unit, and that is a hazard when the fragment is later asked
+// for as a unit of its own. And the path of every test in the unit gains the
+// new module's name, which matters to whatever names a test by its path.
+//
+// Where the visibility (`pub(crate)`, or `pub(super)` in a nested unit) goes:
 //   - every module-level `use` and every trait, because another file can
 //     depend on them without naming them;
 //   - a fn, const, static, struct, enum, type alias, inline mod, inherent
@@ -38,7 +73,7 @@
 // `verify` checks a converted tree in two ways. It converts the base again
 // and requires every changed file to equal that conversion, formatted with
 // rustfmt; so nothing was inserted anywhere the plan does not put it, and no
-// re-export the plan calls for is missing. And, without relying on the plan,
+// glob the plan calls for is missing. And, without relying on the plan,
 // it takes the inserted tokens and the wiring out of the candidate again and
 // requires the result, formatted, to equal the base file, formatted; so the
 // conversion added nothing else. Formatting is part of a conversion because
@@ -516,7 +551,18 @@ export class SourceTree {
     this.cratePath = new Set(); // NAME in `crate::NAME`
     this.plainCratePath = new Set(); // the same, outside test code
     this.structUpdates = new Map(); // struct name, or "*" when unknown -> files using `..base`
+    this.modNames = new Map(); // NAME in `mod NAME` -> files that declare it
+    this.includedBy = new Map(); // .rs file -> the include!() invocations that name it, as { by, top }
+    this.includes = new Map(); // file -> the .rs files it includes, at any depth
     for (const file of this.files.values()) this.#index(file);
+  }
+
+  // A file with every file it includes, directly or through another.
+  includeClosure(rel, into = new Set()) {
+    if (into.has(rel)) return into;
+    into.add(rel);
+    for (const target of this.includes.get(rel) ?? []) this.includeClosure(target, into);
+    return into;
   }
 
   // Whether token `index` of a file is compiled only for tests.
@@ -571,15 +617,26 @@ export class SourceTree {
       map.get(key).add(file.rel);
     };
     const T = file.T;
+    let depth = 0; // the groups around a token: 0 at the file's top level
     for (let i = 0; i < T.length; i++) {
       const t = T[i];
       const plainCode = !this.inTestCode(file.rel, i);
+      if (isOpen(t)) depth++;
+      else if (isClose(t)) depth--;
       if (t.k === "ident") {
         note(this.uses, plain(t.t));
         if (plainCode) note(this.plainUses, plain(t.t));
         if (t.t === "crate" && T[i + 1]?.t === "::" && T[i + 2]?.k === "ident") {
           this.cratePath.add(plain(T[i + 2].t));
           if (plainCode) this.plainCratePath.add(plain(T[i + 2].t));
+        }
+        if (t.t === "mod" && T[i + 1]?.k === "ident") note(this.modNames, plain(T[i + 1].t));
+        if (t.t === "include" && T[i + 1]?.t === "!" && T[i + 3]?.k === "str" && /^".*\.rs"$/.test(T[i + 3].t)) {
+          const target = path.posix.join(path.posix.dirname(file.rel), JSON.parse(T[i + 3].t));
+          if (!this.includedBy.has(target)) this.includedBy.set(target, []);
+          this.includedBy.get(target).push({ by: file.rel, top: depth === 0 });
+          if (!this.includes.has(file.rel)) this.includes.set(file.rel, []);
+          this.includes.get(file.rel).push(target);
         }
       } else if (t.k === "str") {
         for (const word of t.t.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
@@ -611,13 +668,15 @@ export class SourceTree {
     return false;
   }
 
-  // The names a module gets from the crate root through `use super::*;`,
-  // each with the files that provide it: what src/main.rs defines or
-  // imports, what the fragments it includes define or import at module
-  // level, and what the local modules it glob-imports make visible.
-  rootNames() {
-    if (this.rootNameIndex) return this.rootNameIndex;
+  // The names one module file holds, each with the files that provide it:
+  // what the file defines or imports, what the fragments it includes define
+  // or import at module level, and what the child modules it glob-imports
+  // make visible. src/main.rs mounts such a child as `mod x;` from x.rs; any
+  // other file mounts it by #[path]. `inherits` tells whether the module also
+  // glob-imports its own parent.
+  #moduleNames(start) {
     const names = new Map();
+    let inherits = false;
     const provide = (name, rel) => {
       if (name === "_") return; // `use Trait as _;` gives no name
       if (!names.has(name)) names.set(name, new Set());
@@ -629,48 +688,120 @@ export class SourceTree {
       if (!file || seen.has(rel)) return;
       seen.add(rel);
       const T = file.T;
+      const dir = path.posix.dirname(rel);
+      const mounted = new Map(); // module name -> the file its #[path] names
       const visit = (items) => {
         for (const item of items) {
           if (item.kind === "macro" && item.macro === "include" && item.include?.endsWith(".rs")) {
-            collect(path.posix.join(path.posix.dirname(rel), item.include), onlyVisible);
+            collect(path.posix.join(dir, item.include), onlyVisible);
           } else if (item.kind === "foreign" || (item.kind === "macro" && item.macro === "thread_local")) {
             visit(item.children);
           } else if (item.kind === "use") {
             const glob = T[item.last - 1]?.t === "*" && T[item.start + 2]?.t === "::" && item.last - item.start === 4;
-            const local = glob ? `${plain(T[item.start + 1].t)}.rs` : null;
-            if (local && rel === "main.rs" && this.files.has(local)) collect(local, true);
+            const from = glob ? plain(T[item.start + 1].t) : null;
+            if (from === "super" && !onlyVisible) inherits = true;
+            if (from && rel === "main.rs" && this.files.has(`${from}.rs`)) collect(`${from}.rs`, true);
+            else if (mounted.has(from) && (!onlyVisible || item.vis)) collect(mounted.get(from), true);
             else if (!onlyVisible || item.vis) for (const leaf of useLeaves(T, item)) provide(leaf, rel);
           } else if (item.name && item.kind !== "impl" && item.kind !== "macro" && (!onlyVisible || item.vis)) {
             provide(item.name, rel);
           }
         }
       };
-      visit(parseItems(T, 0, T.length, rel));
+      const items = parseItems(T, 0, T.length, rel);
+      for (const item of items) {
+        const mount = item.kind === "mod" && item.outOfLine && rel !== "main.rs" ? pathAttribute(T, item) : null;
+        if (mount) mounted.set(item.name, path.posix.join(dir, mount));
+      }
+      visit(items);
     };
-    collect("main.rs", false);
-    this.rootNameIndex = names;
-    return names;
+    collect(start, false);
+    return { names, inherits };
   }
 
-  // The files src/main.rs includes at its top level, in order.
-  mainUnits() {
-    const main = this.files.get("main.rs");
-    if (!main) throw new Error("src/main.rs not found");
-    const items = parseItems(main.T, 0, main.T.length, "main.rs");
+  // The names a module gets from the crate root through `use super::*;`.
+  rootNames() {
+    this.rootNameIndex ??= this.#moduleNames("main.rs").names;
+    return this.rootNameIndex;
+  }
+
+  // The names a child module of the module file `rel` gets through
+  // `use super::*;`. When that file glob-imports its own parent, the crate
+  // root's names stand in for whatever lies between the two: a module in
+  // between adds its own names, which this does not see.
+  parentNames(rel) {
+    if (rel === "main.rs") return this.rootNames();
+    this.parentNameIndex ??= new Map();
+    if (!this.parentNameIndex.has(rel)) {
+      const { names, inherits } = this.#moduleNames(rel);
+      for (const [name, files] of inherits ? this.rootNames() : []) {
+        if (!names.has(name)) names.set(name, new Set());
+        for (const file of files) names.get(name).add(file);
+      }
+      this.parentNameIndex.set(rel, names);
+    }
+    return this.parentNameIndex.get(rel);
+  }
+
+  // The files `rel` includes at its top level, in order.
+  #unitsIn(rel) {
+    const parent = this.files.get(rel);
+    const T = parent.T;
+    const items = parseItems(T, 0, T.length, rel);
+    const attribute = ([a, b]) => T.slice(a, b + 1).map((t) => t.t).join("");
     return items
       .map((item, index) => ({ item, previous: items[index - 1], next: items[index + 1] }))
       .filter(({ item }) => item.kind === "macro" && item.macro === "include" && item.include?.endsWith(".rs"))
       .map(({ item, previous, next }) => ({
-        file: item.include,
-        cfgTest: item.attrs.some(([a, b]) => main.T.slice(a, b + 1).map((t) => t.t).join("") === "#[cfg(test)]"),
-        otherAttrs: item.attrs.some(([a, b]) => main.T.slice(a, b + 1).map((t) => t.t).join("") !== "#[cfg(test)]"),
+        file: path.posix.join(path.posix.dirname(rel), item.include),
+        parent: rel,
+        // the file name as the invocation writes it, quotes included
+        literal: T.slice(item.start, item.last + 1).find((t) => t.k === "str").t,
+        cfgTest: item.attrs.some((range) => attribute(range) === "#[cfg(test)]"),
+        otherAttrs: item.attrs.some((range) => attribute(range) !== "#[cfg(test)]"),
         // the text of the invocation itself, from `include` to its `;`
-        range: [main.T[item.start].s, main.T[item.last].e],
+        range: [T[item.start].s, T[item.last].e],
         beforeUse: next?.kind === "use",
         // where an existing `mod x;` right above it ends, if there is one
-        afterMod: previous?.kind === "mod" && previous.outOfLine ? main.T[previous.last].e : null,
+        afterMod: previous?.kind === "mod" && previous.outOfLine ? T[previous.last].e : null,
       }));
   }
+
+  // The files src/main.rs includes at its top level, in order.
+  mainUnits() {
+    if (!this.files.get("main.rs")) throw new Error("src/main.rs not found");
+    return this.#unitsIn("main.rs");
+  }
+
+  // Every unit: those of src/main.rs, then those of each other file that
+  // includes one at its top level, by file name. A parent this tool cannot
+  // parse still yields its units, each carrying the error.
+  units() {
+    if (this.unitIndex) return this.unitIndex;
+    const all = this.mainUnits();
+    const sites = [...this.includedBy].flatMap(([file, list]) => list.filter((site) => site.top).map((site) => ({ file, parent: site.by })));
+    for (const parent of [...new Set(sites.map((site) => site.parent))].sort()) {
+      if (parent === "main.rs") continue;
+      try {
+        all.push(...this.#unitsIn(parent));
+      } catch (error) {
+        for (const site of sites) if (site.parent === parent) all.push({ ...site, error: error.message });
+      }
+    }
+    this.unitIndex = all;
+    return all;
+  }
+}
+
+// The file a `mod x;` item's #[path] attribute names, if it has one.
+function pathAttribute(T, item) {
+  const attr = item.attrs.map(([a, b]) => T.slice(a, b + 1)).find((tokens) => tokens[2]?.t === "path" && tokens[4]?.k === "str");
+  return attr ? JSON.parse(attr[4].t) : null;
+}
+
+// Whether an item is exactly `use super::*;`, whatever stands before `use`.
+function isParentGlob(T, item) {
+  return item.kind === "use" && item.last - item.start === 4 && T[item.start + 1].t === "super" && T[item.start + 2].t === "::" && T[item.start + 3].t === "*";
 }
 
 // The names a `use` item brings in: the last segment of each path, or its
@@ -690,12 +821,19 @@ function useLeaves(T, item) {
   return leaves;
 }
 
+// Whether T[p] opens the restriction of a `pub(super)` or `pub(in ...)`.
+const opensRestriction = (T, p) => T[p].t === "(" && T[p - 1]?.t === "pub" && (T[p + 1]?.t === "in" || (T[p + 1]?.t === "super" && T[p + 2]?.t === ")"));
+
 // `pub(super)` and `pub(in ...)` whose target would move when the file stops
-// being pasted into the crate root. `modDepth` counts the inline modules
-// around a token; a restriction that climbs to the file's top level, or names
-// a path from the crate root, meant the crate root and would mean the new
-// module.
-function movedRestrictions(file, baseDepth) {
+// being pasted into its parent. `modDepth` counts the inline modules around a
+// token. A restriction that climbs to the file's top level or past it meant
+// the parent, or a module above it, and would stop one module short. A path
+// from the crate root that names a module inside the file no longer names an
+// ancestor. In a unit of src/main.rs every such path does that. In a nested
+// unit, one written at the file's top level can only name the parent or a
+// module above it, which it still does, with the same reach; deeper down the
+// tool cannot tell the two apart and refuses.
+function movedRestrictions(file, baseDepth, nested = false) {
   const T = file.T;
   const found = [];
   const groups = [];
@@ -712,10 +850,63 @@ function movedRestrictions(file, baseDepth) {
       const inner = T.slice(i + 2, matchGroup(T, i + 1)).map((x) => x.t);
       const climbs = inner.filter((x) => x === "super").length;
       const fromCrate = inner.includes("crate") && inner.length > 2;
-      if (fromCrate || climbs >= modDepth) found.push(`${file.rel}: pub(${inner.join("")}) at offset ${t.s} would change meaning`);
+      const moved = fromCrate ? !(nested && modDepth === 0) : climbs >= modDepth;
+      if (moved) found.push(`${file.rel}: pub(${inner.join("")}) at offset ${t.s} would change meaning`);
     }
   }
   return found;
+}
+
+// `super::` paths in a nested unit that would resolve one module short once
+// the file is a child of its parent: those that climb past the file's top
+// level, which meant a module above the parent. A path that climbs exactly to
+// the top level meant the parent and means the new module, whose namespace
+// holds the parent's names through `use super::*;`, so it stays, as it does in
+// a unit of src/main.rs. `exempt` holds the token indexes of the `super` this
+// does not judge. A string literal that spells such a path, as a serde
+// attribute may, is refused wherever it stands, and so is `module_path!()`,
+// whose value would become the new module's path.
+function movedPaths(file, baseDepth, exempt = new Set()) {
+  const T = file.T;
+  const found = [];
+  const groups = [];
+  let modDepth = baseDepth;
+  for (let i = 0; i < T.length; i++) {
+    const t = T[i];
+    if (isOpen(t)) {
+      // a visibility restriction is for movedRestrictions to judge
+      if (opensRestriction(T, i)) { i = matchGroup(T, i); continue; }
+      const inlineMod = t.t === "{" && T[i - 1]?.k === "ident" && T[i - 2]?.t === "mod";
+      groups.push(inlineMod);
+      if (inlineMod) modDepth++;
+    } else if (isClose(t)) {
+      if (groups.pop()) modDepth--;
+    } else if (t.k === "str" && /\bsuper\s*::/.test(t.t)) {
+      found.push(`${file.rel}: the string at offset ${t.s} spells a super:: path, which would change meaning`);
+    } else if (t.t === "module_path" && t.k === "ident" && T[i + 1]?.t === "!") {
+      found.push(`${file.rel}: module_path!() at offset ${t.s} would name the new module`);
+    } else if (t.t === "super" && t.k === "ident" && !(T[i - 1]?.t === "::" && T[i - 2]?.t === "super") && !exempt.has(i)) {
+      let climbs = 1;
+      while (T[i + 2 * climbs - 1]?.t === "::" && T[i + 2 * climbs]?.t === "super") climbs++;
+      if (climbs > modDepth) found.push(`${file.rel}: the super:: path at offset ${t.s} would change meaning`);
+    }
+  }
+  return found;
+}
+
+// Whether the module file `rel` keeps a `use super::*;` of its own when the
+// units in `converting` leave it: one in its own text, or in a fragment it
+// goes on including, in every build.
+function keepsParentGlob(tree, rel, converting) {
+  const file = tree.files.get(rel);
+  if (!file) return false;
+  return parseItems(file.T, 0, file.T.length, rel).some((item) => {
+    if (item.attrs.length) return false;
+    if (isParentGlob(file.T, item)) return true;
+    if (item.kind !== "macro" || item.macro !== "include" || !item.include?.endsWith(".rs")) return false;
+    const target = path.posix.join(path.posix.dirname(rel), item.include);
+    return !converting.has(target) && keepsParentGlob(tree, target, converting);
+  });
 }
 
 const PLATFORM_PREDICATES = new Set(["windows", "unix", "target_os", "target_family", "target_arch"]);
@@ -740,14 +931,37 @@ function platformConditionals(file) {
 // ------------------------------------------------------------- planning
 const TYPE_KINDS = new Set(["struct", "enum", "type", "trait"]);
 
+// What stands in the way at the place a unit is included, whatever its text
+// holds: a parent this tool cannot parse, an attribute it would have to carry
+// over, more than one include!() of the file, so that it has no single
+// parent, or a parent that is itself pasted into another file.
+function siteHazards(tree, unit) {
+  if (unit.error) return [unit.error];
+  const hazards = [];
+  if (unit.otherAttrs) hazards.push(`${unit.file}: its include!() carries an attribute other than #[cfg(test)]`);
+  const sites = tree.includedBy.get(unit.file) ?? [];
+  if (sites.length > 1) hazards.push(`${unit.file}: included ${sites.length} times (by ${sites.map((site) => site.by).join(", ")}), so it has no single parent`);
+  const above = tree.includedBy.get(unit.parent) ?? [];
+  if (above.length) hazards.push(`${unit.file}: its parent ${unit.parent} is itself a fragment of ${above[0].by}, and is converted with that unit or after it`);
+  return hazards;
+}
+
 // The edit plan for one unit: the files it spans, where a visibility token
-// goes, and the hazards that make it a hand conversion.
-export function planUnit(tree, unitFile, expose = new Set()) {
+// goes, and the hazards that make it a hand conversion. `batch` names the
+// units converted together with it.
+export function planUnit(tree, unitFile, expose = new Set(), batch = [unitFile]) {
   const unitFiles = new Set();
   const parsed = new Map(); // rel -> { file, items, context }
   const hazards = [];
   const childModules = [];
-  const stem = unitFile.replace(/\.rs$/, "");
+  // A unit of src/main.rs becomes a child of the crate root; a nested unit
+  // becomes a child of the module file that includes it.
+  const parent = tree.units().find((unit) => unit.file === unitFile)?.parent ?? "main.rs";
+  const nested = parent !== "main.rs";
+  const stem = nested ? path.posix.basename(unitFile, ".rs") : unitFile.replace(/\.rs$/, "");
+  // A nested unit's own `use super::*;` lines: each was its parent's import
+  // and becomes the new module's.
+  const parentGlobs = new Set();
   const load = (rel, context) => {
     const file = tree.files.get(rel);
     if (!file) { hazards.push(`${unitFile}: include target ${rel} not found`); return; }
@@ -755,7 +969,16 @@ export function planUnit(tree, unitFile, expose = new Set()) {
     unitFiles.add(rel);
     const items = parseItems(file.T, 0, file.T.length, rel);
     parsed.set(rel, { file, items, context });
-    hazards.push(...movedRestrictions(file, context === "nested" ? 1 : 0));
+    const depth = context === "nested" ? 1 : 0;
+    hazards.push(...movedRestrictions(file, depth, nested));
+    if (nested) {
+      const globs = context === "mod" ? items.filter((item) => isParentGlob(file.T, item)) : [];
+      for (const item of globs) {
+        if (item.attrs.length || item.vis) hazards.push(`${rel}: its use super::*; carries an attribute or a visibility`);
+        else parentGlobs.add(item);
+      }
+      hazards.push(...movedPaths(file, depth, new Set(globs.map((item) => item.start + 1))));
+    }
     const walk = (list, ctx) => {
       for (const item of list) {
         if (item.kind === "macro" && item.macro === "include" && item.include?.endsWith(".rs")) {
@@ -786,7 +1009,8 @@ export function planUnit(tree, unitFile, expose = new Set()) {
     const file = tree.files.get(rel);
     if (!file) return;
     inside.add(rel);
-    hazards.push(...movedRestrictions(file, 1));
+    hazards.push(...movedRestrictions(file, 1, nested));
+    if (nested) hazards.push(...movedPaths(file, 1));
     const own = rel.replace(/\.rs$/, "") + "/";
     for (const other of tree.files.keys()) if (other.startsWith(own)) inside.add(other);
     for (const item of parseItems(file.T, 0, file.T.length, rel)) {
@@ -837,7 +1061,7 @@ export function planUnit(tree, unitFile, expose = new Set()) {
   for (const def of defs) {
     if (def.item.vis || def.context === "nested" || def.name === "_") continue;
     if (def.kind === "use" || def.kind === "trait") {
-      if (def.context === "mod") promote.add(def);
+      if (def.context === "mod" && !parentGlobs.has(def.item)) promote.add(def);
     } else if (external(def.name)) {
       if (ownerType(def)) members.push(def);
       else promote.add(def);
@@ -911,7 +1135,7 @@ export function planUnit(tree, unitFile, expose = new Set()) {
     }
   }
 
-  const edits = new Map(); // rel -> offsets where `pub(crate) ` is inserted
+  const edits = new Map(); // rel -> offsets where the visibility is inserted
   const insertAt = (file, offset) => {
     if (!edits.has(file.rel)) edits.set(file.rel, []);
     edits.get(file.rel).push(offset);
@@ -932,6 +1156,31 @@ export function planUnit(tree, unitFile, expose = new Set()) {
   // glob import of it would be an unused import.
   const nameable = defs.filter((def) => (def.context === "mod" || def.context === "foreign") && visible(def));
   const reexport = nameable.length > 0;
+  // Whether a nested unit's parent has to re-export the module's names, not
+  // only import them: one of them was written `pub` or `pub(crate)`. With
+  // none, a `pub(crate)` glob would hand nothing on that far, which the
+  // compiler reports as an unused import. The same would happen in a build
+  // that lacks every such name, so a unit whose only ones are compiled for
+  // tests alone, in a module that is not, is refused; and so is one whose
+  // names reach beyond the parent only as far as a `pub(in ...)` path, which
+  // would want a glob restricted to that path.
+  const visibility = (def) => (def.item.vis ? def.file.T.slice(def.item.vis[0], def.item.vis[1] + 1).map((t) => t.t).join("") : "");
+  const wide = nested ? nameable.filter((def) => ["pub", "pub(crate)"].includes(visibility(def))) : [];
+  if (wide.length && !tree.testOnly.has(unitFile) && wide.every((def) => tree.inTestCode(def.file.rel, def.item.start))) {
+    hazards.push(`${unitFile}: the names it shows beyond ${parent} exist only in test builds, so no one glob of the module fits every build`);
+  }
+  if (nested && !wide.length && nameable.some((def) => visibility(def).startsWith("pub(in"))) {
+    hazards.push(`${unitFile}: the names it shows beyond ${parent} are restricted to a path, and the glob of the module would have to be too`);
+  }
+  // A module of the unit's name that the parent may already see through a
+  // glob import, because a file at or above the parent's folder declares it,
+  // would give way to the new module without an error.
+  const mayBeSeen = (rel) => !inside.has(rel) && (path.posix.dirname(rel) === "." || `${path.posix.dirname(parent)}/`.startsWith(`${path.posix.dirname(rel)}/`));
+  const namesake = nested ? [...(tree.modNames.get(stem) ?? [])].find(mayBeSeen) : undefined;
+  if (namesake) hazards.push(`${unitFile}: ${namesake} declares a module named ${stem}, which the new module could shadow in ${parent}`);
+  if (parentGlobs.size && !keepsParentGlob(tree, parent, new Set(batch))) {
+    hazards.push(`${unitFile}: its use super::*; is the only one ${parent} keeps in every build, and ${parent} would lose its own parent's names`);
+  }
   // Whether only test code needs the re-export: wherever another file names
   // one of the module's items, it does so in code compiled only for tests.
   // In another build nothing would read the glob import, an unused import.
@@ -956,8 +1205,10 @@ export function planUnit(tree, unitFile, expose = new Set()) {
   // name after `::` belongs to its path, except after `super::` or `self::`,
   // which reach the module's own imports. Child module files count: they
   // read the root through this module. When every such name sits in code
-  // compiled only for tests, the import is needed only there.
-  const rootNames = tree.rootNames();
+  // compiled only for tests, the import is needed only there. For a nested
+  // unit the parent stands where the crate root does here, and a unit that
+  // has its own `use super::*;` gets no second one.
+  const rootNames = tree.parentNames(parent);
   // a name the unit defines or imports itself is its own, whatever the root has
   const ownNames = new Set();
   for (const def of defs) {
@@ -980,14 +1231,22 @@ export function planUnit(tree, unitFile, expose = new Set()) {
       if (!tree.inTestCode(rel, i)) importsRootForTests = false;
     }
   }
+  if (parentGlobs.size) importsRoot = false;
   importsRootForTests &&= importsRoot;
   return {
     unitFile,
     unitFiles,
+    parent,
+    nested,
+    // the name of the new module, and what is inserted where an item turns visible
+    module: stem,
+    visibility: nested ? "pub(super) " : "pub(crate) ",
     edits,
     hazards,
     reexport,
     reexportForTests,
+    // what stands before `use x::*;` in the parent
+    reexportVisibility: wide.length ? "pub(crate) " : "",
     importsRoot,
     importsRootForTests,
     stats: {
@@ -1002,11 +1261,9 @@ export function planUnit(tree, unitFile, expose = new Set()) {
   };
 }
 
-const VISIBILITY = "pub(crate) ";
-
-function insertVisibility(text, offsets) {
+function insertVisibility(text, offsets, visibility) {
   let out = text;
-  for (const offset of [...offsets].sort((a, b) => b - a)) out = out.slice(0, offset) + VISIBILITY + out.slice(offset);
+  for (const offset of [...offsets].sort((a, b) => b - a)) out = out.slice(0, offset) + visibility + out.slice(offset);
   return out;
 }
 
@@ -1026,19 +1283,18 @@ function headerEnd(file) {
 // new text of each changed file. A refusal changes nothing.
 export function convertUnits(root, unitFiles, { expose = [] } = {}) {
   const tree = new SourceTree(root);
-  const units = tree.mainUnits();
+  const units = tree.units();
   const exposed = new Set(expose.map(plain));
   const plans = [];
   const refused = [];
   for (const unitFile of unitFiles) {
     const unit = units.find((u) => u.file === unitFile);
-    if (!unit) { refused.push({ unit: unitFile, hazards: [`${unitFile} is not included at the top level of src/main.rs`] }); continue; }
-    const hazards = [];
-    if (unit.otherAttrs) hazards.push(`${unitFile}: its include!() carries an attribute other than #[cfg(test)]`);
+    if (!unit) { refused.push({ unit: unitFile, hazards: [`${unitFile} is not included at the top level of any file under src`] }); continue; }
+    const hazards = siteHazards(tree, unit);
     let plan;
     try {
-      plan = planUnit(tree, unitFile, exposed);
-      hazards.push(...plan.hazards);
+      if (!unit.error) plan = planUnit(tree, unitFile, exposed, unitFiles);
+      hazards.push(...(plan?.hazards ?? []));
     } catch (error) {
       hazards.push(error.message);
     }
@@ -1055,56 +1311,70 @@ export function convertUnits(root, unitFiles, { expose = [] } = {}) {
   if (refused.length) return { refused, changes: new Map(), converted: [] };
 
   const changes = new Map(); // absolute path -> new text
-  const main = tree.files.get("main.rs");
-  const mainEol = main.text.includes("\r\n") ? "\r\n" : "\n";
-  const replacements = []; // [from, to, text] in src/main.rs
+  const wiring = new Map(); // parent -> [from, to, text] replacements in it
   const converted = [];
   for (const { unit, plan } of plans) {
-    const stem = unit.file.replace(/\.rs$/, "");
+    const stem = plan.module;
+    // A module that only test builds compile needs no #[cfg(test)] of its
+    // own inside: its include carries one, or its parent is such a module.
+    const testOnly = unit.cfgTest || (plan.nested && tree.testOnly.has(unit.file));
     for (const rel of plan.unitFiles) {
       const file = tree.files.get(rel);
       const offsets = plan.edits.get(rel) ?? [];
-      let text = insertVisibility(file.text, offsets);
+      let text = insertVisibility(file.text, offsets, plan.visibility);
       if (rel === unit.file && plan.importsRoot) {
         const eol = file.text.includes("\r\n") ? "\r\n" : "\n";
         const at = headerEnd(file);
-        const shifted = at + offsets.filter((offset) => offset < at).length * VISIBILITY.length;
+        const shifted = at + offsets.filter((offset) => offset < at).length * plan.visibility.length;
         // a file that is itself included only for tests needs no second cfg
-        const glob = `${plan.importsRootForTests && !unit.cfgTest ? `#[cfg(test)]${eol}` : ""}use super::*;`;
+        const glob = `${plan.importsRootForTests && !testOnly ? `#[cfg(test)]${eol}` : ""}use super::*;`;
         const line = at === 0 ? `${glob}${eol}${eol}` : `${eol}${glob}${eol}`;
         text = text.slice(0, shifted) + line + text.slice(shifted);
       }
       if (text !== file.text) changes.set(file.full, text);
     }
-    const cfg = unit.cfgTest || plan.reexportForTests ? `#[cfg(test)]${mainEol}` : "";
-    const glob = plan.reexport ? `${mainEol}${cfg}use ${stem}::*;` : "";
+    const parent = tree.files.get(unit.parent);
+    const parentEol = parent.text.includes("\r\n") ? "\r\n" : "\n";
+    if (!wiring.has(unit.parent)) wiring.set(unit.parent, []);
+    const replacements = wiring.get(unit.parent);
+    // In src/main.rs `mod x;` finds x.rs by itself. In another file it would
+    // look in that file's own folder, so #[path] names the fragment.
+    const mount = `${plan.nested ? `#[path = ${unit.literal}]${parentEol}` : ""}mod ${stem};`;
+    const cfg = unit.cfgTest || (plan.reexportForTests && !testOnly) ? `#[cfg(test)]${parentEol}` : "";
+    const glob = plan.reexport ? `${parentEol}${cfg}${plan.reexportVisibility}use ${stem}::*;` : "";
     // rustfmt sorts adjacent `mod` lines and adjacent `use` lines. A blank
     // line keeps the original order where the new line would otherwise join
     // such a run: a `mod` without a re-export, whose next line may be another
     // `mod`, and a re-export that an import follows.
     const joinsRun = !plan.reexport || unit.beforeUse;
-    const blankFollows = /^[ \t]*\r?\n[ \t]*\r?\n/.test(main.text.slice(unit.range[1]));
-    replacements.push([...unit.range, `mod ${stem};${glob}${joinsRun && !blankFollows ? mainEol : ""}`]);
+    const blankFollows = /^[ \t]*\r?\n[ \t]*\r?\n/.test(parent.text.slice(unit.range[1]));
+    replacements.push([...unit.range, `${mount}${glob}${joinsRun && !blankFollows ? parentEol : ""}`]);
     // The same above it: after an existing `mod` line the new one would be
     // sorted into its run, so a blank line ends that line first.
-    if (unit.afterMod !== null && !/^[^\n]*\r?\n[ \t]*\r?\n/.test(main.text.slice(unit.afterMod))) {
-      const lineEnd = main.text.indexOf(mainEol, unit.afterMod);
-      replacements.push([lineEnd, lineEnd, mainEol]);
+    if (unit.afterMod !== null && !/^[^\n]*\r?\n[ \t]*\r?\n/.test(parent.text.slice(unit.afterMod))) {
+      const lineEnd = parent.text.indexOf(parentEol, unit.afterMod);
+      replacements.push([lineEnd, lineEnd, parentEol]);
     }
     converted.push({
       unit: unit.file,
+      parent: unit.parent,
       ...plan.stats,
       reexported: plan.reexport,
-      reexportedForTests: plan.reexport && plan.reexportForTests && !unit.cfgTest,
+      reexportedForTests: plan.reexport && plan.reexportForTests && !testOnly,
+      // in a nested parent: whether the glob is `pub(crate) use`, not `use`
+      ...(plan.nested ? { reexportedBeyondParent: plan.reexport && plan.reexportVisibility !== "" } : {}),
       importsRoot: plan.importsRoot,
-      importsRootForTests: plan.importsRootForTests && !unit.cfgTest,
+      importsRootForTests: plan.importsRootForTests && !testOnly,
     });
   }
   // The parsed range of each invocation is replaced, last one first, so text
   // that merely looks like an include line, in a string for example, stays.
-  let mainText = main.text;
-  for (const [from, to, text] of replacements.sort((a, b) => b[0] - a[0])) mainText = mainText.slice(0, from) + text + mainText.slice(to);
-  changes.set(main.full, mainText);
+  for (const [rel, replacements] of wiring) {
+    const parent = tree.files.get(rel);
+    let text = parent.text;
+    for (const [from, to, line] of replacements.sort((a, b) => b[0] - a[0])) text = text.slice(0, from) + line + text.slice(to);
+    changes.set(parent.full, text);
+  }
   return { refused, changes, converted };
 }
 
@@ -1149,8 +1419,14 @@ export function verifyTrees(baseRoot, newRoot, { format = rustfmt, expose = [] }
   for (const name of base.keys()) if (!next.has(name)) problems.push(`${name}: removed`);
 
   // What the tool makes of the base, for the units the candidate converted.
-  const stillIncluded = new Set(new SourceTree(newRoot).mainUnits().map((unit) => unit.file));
-  const convertedUnits = new SourceTree(baseRoot).mainUnits().map((unit) => unit.file).filter((unit) => !stillIncluded.has(unit));
+  const baseTree = new SourceTree(baseRoot);
+  const stillIncluded = new Set(new SourceTree(newRoot).units().map((unit) => unit.file));
+  const convertedSites = baseTree.units().filter((unit) => !stillIncluded.has(unit.file));
+  const convertedUnits = [...new Set(convertedSites.map((unit) => unit.file))];
+  // The files of the converted nested units, by the base's own include
+  // lines: there the inserted visibility is pub(super), elsewhere pub(crate).
+  const nestedFiles = new Set();
+  for (const unit of convertedSites) if (unit.parent !== "main.rs") baseTree.includeClosure(unit.file, nestedFiles);
   const expected = convertUnits(baseRoot, convertedUnits, { expose });
   for (const { unit, hazards } of expected.refused) {
     problems.push(`${unit}: the tool refuses to convert this unit (${hazards[0]}), so verify cannot pass it`);
@@ -1220,7 +1496,7 @@ export function verifyTrees(baseRoot, newRoot, { format = rustfmt, expose = [] }
         continue;
       }
       if (A[i] && B[j] && A[i].t === B[j].t) { i++; j++; continue; }
-      if (at(B, j, "pub", "(", "crate", ")")) {
+      if (at(B, j, "pub", "(", nestedFiles.has(name) ? "super" : "crate", ")")) {
         let to = B[j + 3].e;
         while (after[to] === " ") to++;
         cuts.push([B[j].s, to, ""]);
@@ -1228,16 +1504,21 @@ export function verifyTrees(baseRoot, newRoot, { format = rustfmt, expose = [] }
         j += 4;
         continue;
       }
-      if (name === "main.rs" && at(A, i, "include", "!", "(") && A[i + 3]?.k === "str" && at(B, j, "mod")) {
+      // src/main.rs mounts the module as `mod x;`; any other parent names
+      // the file first, as `#[path = "x.rs"]`
+      const pathed = name !== "main.rs";
+      if (at(A, i, "include", "!", "(") && A[i + 3]?.k === "str" && (pathed ? at(B, j, "#", "[", "path", "=") : at(B, j, "mod"))) {
         const file = JSON.parse(A[i + 3].t);
-        const stem = file.replace(/\.rs$/, "");
-        const from = B[j].s;
-        if (!at(B, j, "mod", stem, ";")) { problems.push(`main.rs: include of ${file} replaced by something else`); walked = false; break; }
+        const stem = pathed ? path.posix.basename(file, ".rs") : file.replace(/\.rs$/, "");
+        const first = j;
+        const from = B[first].s;
+        if (pathed && B[j + 4]?.t === A[i + 3].t && at(B, j + 5, "]")) j += 6;
+        if (!at(B, j, "mod", stem, ";") || (pathed && j === first)) { problems.push(`${name}: include of ${file} replaced by something else`); walked = false; break; }
         // a blank line the conversion put above its lines, after an existing
         // `mod` line, goes too
         const lead = at(A, i - 7, "#", "[", "cfg", "(", "test", ")", "]") ? 7 : 0;
         const aboveBase = A[i - lead - 1];
-        const above = B[j - lead - 1];
+        const above = B[first - lead - 1];
         const blankBelow = (text, token) => /^[^\n]*\n[ \t]*\n/.test(text.slice(token.e));
         if (above && aboveBase && wiredThrough <= above.e && blankBelow(after, above) && !blankBelow(wanted, aboveBase)) {
           const lineEnd = after.indexOf("\n", above.e);
@@ -1248,7 +1529,9 @@ export function verifyTrees(baseRoot, newRoot, { format = rustfmt, expose = [] }
         // `use x::*;` follows unless the module has nothing to re-export
         const hadCfg = at(A, i - 13, "#", "[", "cfg", "(", "test", ")", "]");
         const cfgHere = at(B, j, "#", "[", "cfg", "(", "test", ")", "]");
-        const useAt = cfgHere ? j + 7 : j;
+        // in a nested parent the glob may be a re-export; the plan says which
+        const reexported = pathed && at(B, cfgHere ? j + 7 : j, "pub", "(", "crate", ")", "use");
+        const useAt = (cfgHere ? j + 7 : j) + (reexported ? 4 : 0);
         // a blank line the conversion put after its lines, to keep rustfmt
         // from sorting them into the run that follows, goes too
         const baseEnd = A[i - 1].e;
@@ -1261,7 +1544,7 @@ export function verifyTrees(baseRoot, newRoot, { format = rustfmt, expose = [] }
         }
         // a re-export may be narrowed to test builds, never widened from them
         if (hadCfg && !cfgHere) {
-          problems.push(`main.rs: use ${stem}::* lost #[cfg(test)]`);
+          problems.push(`${name}: use ${stem}::* lost #[cfg(test)]`);
           walked = false;
           break;
         }
@@ -1312,16 +1595,19 @@ function analyze(root) {
   const tree = new SourceTree(root);
   const totals = { units: 0, files: 0, definitions: 0, alreadyVisible: 0, madeVisible: 0, private: 0, fieldsMadeVisible: 0, platformConditionals: 0 };
   const units = [];
-  for (const unit of tree.mainUnits()) {
+  for (const unit of tree.units()) {
     totals.units++;
-    const row = { unit: unit.file, cfgTest: unit.cfgTest, hazards: [] };
+    const row = { unit: unit.file, parent: unit.parent, cfgTest: Boolean(unit.cfgTest), hazards: siteHazards(tree, unit) };
+    // A file whose parent is itself a fragment belongs to that fragment's
+    // unit, which counts it; so does a file this tool cannot place.
+    const placed = !unit.error && !tree.includedBy.has(unit.parent);
     try {
-      const plan = planUnit(tree, unit.file);
-      Object.assign(row, plan.stats);
-      row.hazards = plan.hazards;
-      for (const key of Object.keys(plan.stats)) totals[key] += plan.stats[key];
+      const plan = placed ? planUnit(tree, unit.file) : null;
+      Object.assign(row, plan?.stats);
+      row.hazards.push(...(plan?.hazards ?? []));
+      for (const key of Object.keys(plan?.stats ?? {})) totals[key] += plan.stats[key];
     } catch (error) {
-      row.hazards = [error.message];
+      row.hazards.push(error.message);
     }
     units.push(row);
   }
@@ -1357,7 +1643,10 @@ function main(argv) {
     print(result);
     return result.problems.length ? 1 : 0;
   }
-  process.stderr.write("usage: include-to-mod.mjs analyze ROOT | convert ROOT UNIT[,UNIT...] [--write] [--expose NAME[,NAME...]] | verify BASE_ROOT NEW_ROOT [--expose NAME[,NAME...]]\n");
+  process.stderr.write(
+    "usage: include-to-mod.mjs analyze ROOT | convert ROOT UNIT[,UNIT...] [--write] [--expose NAME[,NAME...]] | verify BASE_ROOT NEW_ROOT [--expose NAME[,NAME...]]\n" +
+      "  UNIT is a file that src/main.rs or a module file includes at its top level, by its path below ROOT/src (x.rs, tests/x.rs)\n",
+  );
   return 2;
 }
 

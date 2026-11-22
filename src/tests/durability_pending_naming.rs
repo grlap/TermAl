@@ -6,16 +6,26 @@ use super::*;
 fn pending_naming_worktree(root: &FsPath) -> PathBuf {
     prepare_naming_worktree_container(root);
     let path = root.join(".worktrees").join("durability-naming");
-    run_git_test_command(root, &[
-        "worktree", "add", "--quiet", "-b", "durability-naming", path.to_str().unwrap(),
-    ]);
+    run_git_test_command(
+        root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "durability-naming",
+            path.to_str().unwrap(),
+        ],
+    );
     path
 }
 
 fn pending_naming_request(
-    turn: &EOCheckedTurn, path: Option<&FsPath>,
+    turn: &EOCheckedTurn,
+    path: Option<&FsPath>,
 ) -> Result<EngramSourceRootResponse, ApiError> {
-    let association = turn.record(|record| record.engram.work_binding.clone())
+    let association = turn
+        .record(|record| record.engram.work_binding.clone())
         .unwrap_or_else(|| {
             // Reload deliberately clears the local association. Retain only
             // the fixture's one scripted remote association as request input;
@@ -27,13 +37,16 @@ fn pending_naming_request(
         });
     let work = association.work_id;
     assert_ordinary_turn_has_no_native_requests(turn);
-    let result = turn.state.name_engram_source_root(&turn.session_id, EngramSourceRootRequest {
-        work, path: path.map(|path| Some(path.to_string_lossy().into_owned())),
-    });
+    let result = turn.state.name_engram_source_root(
+        &turn.session_id,
+        EngramSourceRootRequest {
+            work,
+            path: path.map(|path| Some(path.to_string_lossy().into_owned())),
+        },
+    );
     assert_ordinary_turn_has_no_native_requests(turn);
     result
 }
-
 
 #[test]
 fn durability_pending_orphaned_withholding_reguard_preserves_classification() {
@@ -60,13 +73,22 @@ fn withholding_reguard(classified: bool, replace_binding: bool) {
     let mut state = claimed.state.clone();
     let (tx, rx) = mpsc::channel();
     state.persist_tx = tx;
-    let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().unwrap();
+    let target = AppState::engram_source_root_target_locked(
+        &claimed.state.inner.lock().unwrap(),
+        &claimed.session_id,
+    )
+    .unwrap()
+    .unwrap();
     let worker_state = state.clone();
     let worker_target = target.clone();
     let worker = std::thread::spawn(move || {
         let deadline = worker_state.engram_budget_clock().now() + Duration::from_secs(2);
         worker_state.apply_engram_root_withholding_until(
-            &worker_target, worker_target.work_binding.as_ref(), None, deadline)
+            &worker_target,
+            worker_target.work_binding.as_ref(),
+            None,
+            deadline,
+        )
     });
     let mut batch = PersistFenceBatch::default();
     receive_naming_authority_fence(&rx, &mut batch, &worker);
@@ -79,7 +101,13 @@ fn withholding_reguard(classified: bool, replace_binding: bool) {
     let mut cache = SqlitePersistConnectionCache::new();
     if replace_binding {
         claimed.record_mut(|record| {
-            record.engram.work_binding.as_mut().unwrap().claim_id.push_str("-successor");
+            record
+                .engram
+                .work_binding
+                .as_mut()
+                .unwrap()
+                .claim_id
+                .push_str("-successor");
         });
         persist_delta_with_fences(
             &mut cache,
@@ -163,18 +191,28 @@ fn durability_pending_orphaned_classified_reconcile_keeps_origin_categories() {
             let _scope = TestTempRootDirectoryScope::repository_local();
             let claimed = EOCheckedTurn::idle("legacy-reconcile", true);
 
-            let target = AppState::engram_source_root_target_locked(&claimed.state.inner.lock().unwrap(), &claimed.session_id).unwrap().unwrap();
+            let target = AppState::engram_source_root_target_locked(
+                &claimed.state.inner.lock().unwrap(),
+                &claimed.session_id,
+            )
+            .unwrap()
+            .unwrap();
             let mut state = claimed.state.clone();
             let (tx, rx) = mpsc::channel();
             state.persist_tx = tx;
             let fence = EngramRootReadFence::capture(&state.inner.lock().unwrap());
             let worker_state = state.clone();
             let worker = std::thread::spawn(move || {
-                worker_state.reconcile_engram_named_root_with_route_classified_until(
-                    &target.connection.session_id, target.work_binding.as_ref(),
-                    Some(EngramNamedRootState::None), &fence, Some(&target.connection),
-                    worker_state.engram_budget_clock().now() + Duration::from_secs(2),
-                ).map_err(EngramRootReconcileFailure::into_transport)
+                worker_state
+                    .reconcile_engram_named_root_with_route_classified_until(
+                        &target.connection.session_id,
+                        target.work_binding.as_ref(),
+                        Some(EngramNamedRootState::None),
+                        &fence,
+                        Some(&target.connection),
+                        worker_state.engram_budget_clock().now() + Duration::from_secs(2),
+                    )
+                    .map_err(EngramRootReconcileFailure::into_transport)
             });
             let mut batch = PersistFenceBatch::default();
             let mut cache = SqlitePersistConnectionCache::new();
@@ -278,8 +316,7 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
     let worktree = pending_naming_worktree(&claimed.root);
 
     if clear {
-        pending_naming_request(&claimed, Some(&worktree))
-        .unwrap();
+        pending_naming_request(&claimed, Some(&worktree)).unwrap();
     }
     claimed
         .transport
@@ -289,8 +326,7 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         .as_mut()
         .unwrap()
         .lose_next_reply = true;
-    pending_naming_request(&claimed, if clear { None } else { Some(&worktree) })
-    .unwrap_err();
+    pending_naming_request(&claimed, if clear { None } else { Some(&worktree) }).unwrap_err();
     let original = claimed
         .state
         .inner
@@ -309,11 +345,17 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
     claimed.record_mut(|record| record.engram.work_binding = association);
     // The successor's ordinary child must answer for its own session. The
     // predecessor's explicit identity reply is not valid for this connection.
-    claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+    claimed
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
         .work_session_read_reply = Some(Ok(json!({
-            "project_id": "github.com/example/source-root", "session_id": claimed.session_id,
-            "work_session": true, "capabilities": ["host_work_v1"],
-        })));
+        "project_id": "github.com/example/source-root", "session_id": claimed.session_id,
+        "work_session": true, "capabilities": ["host_work_v1"],
+    })));
 
     let binds_before = claimed
         .transport
@@ -341,7 +383,9 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
             *hook.borrow_mut() = Some(Box::new(move || {
                 // Earlier maintenance reads are not proof that this orphan
                 // has been read. Fence injection starts after this boundary.
-                let reads = transport.requests().iter()
+                let reads = transport
+                    .requests()
+                    .iter()
                     .filter(|request| request.request["operation"] == "named_root_read")
                     .count();
                 let mut inner = state.inner.lock().unwrap();
@@ -351,7 +395,8 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
                 orphaned_in_worker.store(true, std::sync::atomic::Ordering::SeqCst);
             }));
         });
-        let result = pending_naming_request(&claimed, if clear { None } else { Some(&worker_tree) });
+        let result =
+            pending_naming_request(&claimed, if clear { None } else { Some(&worker_tree) });
         (claimed, result)
     });
     let mut batch = PersistFenceBatch::default();
@@ -395,10 +440,15 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         if target {
             let image = image.unwrap().clone();
             assert!(orphaned.load(std::sync::atomic::Ordering::SeqCst));
-            assert!(transport.requests().iter()
-                .filter(|request| request.request["operation"] == "named_root_read")
-                .count() > reads_at_orphaning.load(std::sync::atomic::Ordering::SeqCst),
-                "the selected orphan owner follows a read made after reporter removal");
+            assert!(
+                transport
+                    .requests()
+                    .iter()
+                    .filter(|request| request.request["operation"] == "named_root_read")
+                    .count()
+                    > reads_at_orphaning.load(std::sync::atomic::Ordering::SeqCst),
+                "the selected orphan owner follows a read made after reporter removal"
+            );
             if let Some(failure) = failure.clone() {
                 batch.fail(failure);
             } else {
@@ -429,8 +479,8 @@ async fn orphaned_naming_fence(publication: bool, clear: bool, failure: Option<P
         drop(rx);
     }
     let (mut claimed, result) = worker.join().unwrap();
-    let (image, late) =
-        observed.expect("the orphan branch reaches its own guarded phase AFTER canonical NamedRootRead");
+    let (image, late) = observed
+        .expect("the orphan branch reaches its own guarded phase AFTER canonical NamedRootRead");
     let response = match result {
         Err(error) => error.into_response(),
         Ok(_) => panic!("an unacknowledged orphan phase is not successful naming"),
@@ -621,8 +671,7 @@ async fn durability_pending_naming_first_guard_has_no_invented_generation_after_
     reload_pending_naming(&mut claimed, loaded);
     // This is a fresh application under the fixture's current held claim,
     // not acknowledgement of a generation the old guard never allocated.
-    let named = pending_naming_request(&claimed, Some(&worktree))
-    .unwrap();
+    let named = pending_naming_request(&claimed, Some(&worktree)).unwrap();
     assert!(named.generation > 0);
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body["operation"], "named_root_naming");
@@ -842,8 +891,7 @@ async fn durability_pending_review_clear_publication_keeps_original_generation()
     let label = "durability-pending-clear-publication";
     let mut claimed = EOCheckedTurn::idle(label, true);
     let worktree = pending_naming_worktree(&claimed.root);
-    pending_naming_request(&claimed, Some(&worktree))
-    .unwrap();
+    pending_naming_request(&claimed, Some(&worktree)).unwrap();
     let original = claimed.state.inner.lock().unwrap().engram_work_source_roots[0].clone();
     let (tx, rx) = mpsc::channel();
     claimed.state.persist_tx = tx;

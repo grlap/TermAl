@@ -2,7 +2,11 @@
 // wrapper launches. Does not own production paths or retry failed removals.
 // New module, extracted from the raw OS-temp lookup in TestTempRoot.
 
-use super::*;
+use std::{
+    fs, io,
+    path::{Path as FsPath, PathBuf},
+    time::Duration,
+};
 
 pub(crate) fn resolve_test_temp_directory(
     user_temp: &FsPath,

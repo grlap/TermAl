@@ -10,7 +10,13 @@ fn substituted_reporter_naming(clear: bool) {
             let label = format!("reporter-{clear}-{reporter_unbound}-{superseded}");
             let (mut claimed, tree) = root_fixture(&label);
             if !clear {
-                claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+                claimed
+                    .transport
+                    .named_roots
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
                     .lose_next_reply = true;
                 request_fixture_name(&claimed, Some(&tree)).unwrap_err();
             } else {
@@ -34,31 +40,51 @@ fn substituted_reporter_naming(clear: bool) {
             claimed.session_id =
                 create_test_project_session(&claimed.state, Agent::Codex, &project, &claimed.root);
             claimed.record_mut(|record| record.engram.work_binding = Some(original.clone()));
-            claimed.transport.named_roots.lock().unwrap().as_mut().unwrap()
+            claimed
+                .transport
+                .named_roots
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
                 .work_session_read_reply = Some(Ok(json!({
-                    "project_id": "github.com/example/source-root",
-                    "session_id": claimed.session_id,
-                    "work_session": true, "capabilities": ["host_work_v1"],
-                })));
+                "project_id": "github.com/example/source-root",
+                "session_id": claimed.session_id,
+                "work_session": true, "capabilities": ["host_work_v1"],
+            })));
             let witnessed = Arc::new(std::sync::atomic::AtomicBool::new(false));
             if superseded {
                 supersede_after_renewed_send(
-                    claimed.state.clone(), claimed.transport.clone(), store.clone(),
-                    original.clone(), witnessed.clone(),
+                    claimed.state.clone(),
+                    claimed.transport.clone(),
+                    store.clone(),
+                    original.clone(),
+                    witnessed.clone(),
                 );
             }
             let result = request_fixture_name(&claimed, if clear { None } else { Some(&tree) });
             TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| hook.borrow_mut().take());
             let response = result.unwrap_or_else(|error| panic!("{label}: {error:?}"));
-            assert_eq!(witnessed.load(std::sync::atomic::Ordering::SeqCst), superseded);
+            assert_eq!(
+                witnessed.load(std::sync::atomic::Ordering::SeqCst),
+                superseded
+            );
             let requests = claimed.transport.requests();
-            let sends = requests.iter()
+            let sends = requests
+                .iter()
                 .filter(|request| request.request["operation"] == "named_root_bind")
                 .collect::<Vec<_>>();
             assert_eq!(sends.len(), 2, "owner recovery does not send another event");
-            assert!(sends.iter().all(|request| request.connection.session_id == reporter));
+            assert!(
+                sends
+                    .iter()
+                    .all(|request| request.connection.session_id == reporter)
+            );
             if !clear {
-                assert_eq!(sends[0].request, sends[1].request, "immutable intent replay");
+                assert_eq!(
+                    sends[0].request, sends[1].request,
+                    "immutable intent replay"
+                );
             } else {
                 assert_eq!(sends[1].request["kind"], "ended");
             }
@@ -67,9 +93,16 @@ fn substituted_reporter_naming(clear: bool) {
             assert_eq!(reporter_record.engram.work_binding, reporter_binding);
             let caller = &inner.sessions[inner.find_session_index(&claimed.session_id).unwrap()];
             assert_eq!(caller.engram.work_binding.as_ref(), Some(&original));
-            assert!(inner.engram_named_root_journal.iter().all(|journal| journal.pending.is_none()));
+            assert!(
+                inner
+                    .engram_named_root_journal
+                    .iter()
+                    .all(|journal| journal.pending.is_none())
+            );
             let selected = engram_work_source_root_for_work(
-                &inner.engram_work_source_roots, &store, &original.work_id,
+                &inner.engram_work_source_roots,
+                &store,
+                &original.work_id,
             );
             if clear {
                 assert!(selected.is_none());
@@ -77,8 +110,11 @@ fn substituted_reporter_naming(clear: bool) {
             } else {
                 assert_eq!(selected.unwrap().generation, response.generation);
                 let journal = engram_root_journal(
-                    &inner.engram_named_root_journal, &store, &original.claim_id,
-                ).unwrap();
+                    &inner.engram_named_root_journal,
+                    &store,
+                    &original.claim_id,
+                )
+                .unwrap();
                 assert_eq!(journal.read_binding.as_ref(), Some(&original));
             }
         }
@@ -249,9 +285,13 @@ fn renewed_naming(operation: &str) {
                     .iter()
                     .all(|journal| journal.pending.is_none())
             );
-            let journal = engram_root_journal(&inner.engram_named_root_journal, &store, &original.claim_id);
+            let journal =
+                engram_root_journal(&inner.engram_named_root_journal, &store, &original.claim_id);
             if path.is_some() {
-                assert!(journal.is_some(), "a bound naming retains its original read association");
+                assert!(
+                    journal.is_some(),
+                    "a bound naming retains its original read association"
+                );
             }
             if let Some(journal) = journal {
                 assert_eq!(journal.read_binding.as_ref(), Some(&original));

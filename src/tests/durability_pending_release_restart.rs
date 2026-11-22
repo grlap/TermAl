@@ -436,7 +436,10 @@ fn reload_release_fixture_for(claimed: &EOCheckedTurn, selection: &EngramWorkSou
     );
 }
 
-fn release_owner(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) -> EngramAuthorityTransition {
+fn release_owner(
+    claimed: &EOCheckedTurn,
+    entry: &EngramWorkSourceRoot,
+) -> EngramAuthorityTransition {
     claimed
         .state
         .inner
@@ -654,8 +657,12 @@ fn durability_pending_release_restart_own_notice_preserves_publication_rules() {
         }
     }
     reload_release_fixture(&claimed);
-    let reads_before = claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_read").count();
+    let reads_before = claimed
+        .transport
+        .requests()
+        .iter()
+        .filter(|request| request.request["operation"] == "named_root_read")
+        .count();
     let response = claimed
         .state
         .release_engram_named_root(
@@ -672,9 +679,16 @@ fn durability_pending_release_restart_own_notice_preserves_publication_rules() {
     assert_eq!(records[0].id, original.id);
     assert_eq!(records[0].authority_owner, original.authority_owner);
     assert!(records[0].acknowledged);
-    assert_eq!(claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_read").count(), reads_before,
-        "an own retirement notice resumes publication, not another canonical read");
+    assert_eq!(
+        claimed
+            .transport
+            .requests()
+            .iter()
+            .filter(|request| request.request["operation"] == "named_root_read")
+            .count(),
+        reads_before,
+        "an own retirement notice resumes publication, not another canonical read"
+    );
 }
 
 #[test]
@@ -717,11 +731,21 @@ fn late_retained_candidate(
     let root = entry.clone();
     let task = std::thread::spawn(move || {
         if explicit {
-            state.release_engram_named_root(Some("session-operator"),
-                release_request(&root, "completed original lane")).map(|_| ())
+            state
+                .release_engram_named_root(
+                    Some("session-operator"),
+                    release_request(&root, "completed original lane"),
+                )
+                .map(|_| ())
         } else {
-            let deadline = state.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
-            state.recover_one_engram_root_until(&root, &EngramRootReclamationRoute::Unfocused, deadline)
+            let deadline =
+                state.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
+            state
+                .recover_one_engram_root_until(
+                    &root,
+                    &EngramRootReclamationRoute::Unfocused,
+                    deadline,
+                )
                 .map(|_| ())
         }
     });
@@ -729,68 +753,128 @@ fn late_retained_candidate(
     let mut cache = SqlitePersistConnectionCache::new();
     receive_naming_authority_fence(&rx, &mut batch, &task);
     let prepared = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &prepared, &mut batch).unwrap();
+    persist_delta_with_fences(
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &prepared,
+        &mut batch,
+    )
+    .unwrap();
     receive_naming_authority_fence(&rx, &mut batch, &task);
     let image = match &batch.pending[0].target {
         PersistFenceTarget::EngramWorkAuthority(image) => image.as_ref().clone(),
         _ => panic!("recovery must fence its Candidate image"),
     };
-    assert_eq!(image.history.transition.as_ref().unwrap().phase, EngramAuthorityPhase::Candidate);
+    assert_eq!(
+        image.history.transition.as_ref().unwrap().phase,
+        EngramAuthorityPhase::Candidate
+    );
     assert_eq!(image.selection.as_ref(), Some(&entry));
-    assert!(matches!(batch.pending[0].completion.poll_at(batch.pending[0].completion.deadline),
-        Some(Err(PersistFenceError::Deadline))));
+    assert!(matches!(
+        batch.pending[0]
+            .completion
+            .poll_at(batch.pending[0].completion.deadline),
+        Some(Err(PersistFenceError::Deadline))
+    ));
     claimed.state.engram_budget_clock().notify();
-    let error = task.join().unwrap().expect_err("an expired Candidate is not an ACK");
+    let error = task
+        .join()
+        .unwrap()
+        .expect_err("an expired Candidate is not an ACK");
     assert!(error.is_enqueued_durability_deadline());
     if explicit {
         assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(audit(&claimed).len(), 1);
     } else {
-        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR, "maintenance stays private");
+        assert_eq!(
+            error.status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "maintenance stays private"
+        );
         assert!(audit(&claimed).is_empty());
     }
     let late = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &late, &mut batch).unwrap();
+    persist_delta_with_fences(
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &late,
+        &mut batch,
+    )
+    .unwrap();
     assert!(retained(&claimed, &entry));
     (claimed, entry, image)
 }
 
 fn close_retained_candidate_run(claimed: &EOCheckedTurn, entry: &EngramWorkSourceRoot) {
     let mut transport = claimed.transport.named_roots.lock().unwrap();
-    let proof = transport.as_mut().unwrap().root_reads.get_mut(&entry.claim_id).unwrap();
+    let proof = transport
+        .as_mut()
+        .unwrap()
+        .root_reads
+        .get_mut(&entry.claim_id)
+        .unwrap();
     proof["run"]["state"] = json!("completed");
     proof["read_cut"]["position"] = json!(proof["read_cut"]["position"].as_i64().unwrap() + 1);
 }
 
 fn retained_candidate_retry(published: bool) {
     let _scope = TestTempRootDirectoryScope::repository_local();
-    let label = if published { "release-published-retry" } else { "release-candidate-retry" };
+    let label = if published {
+        "release-published-retry"
+    } else {
+        "release-candidate-retry"
+    };
     let (claimed, entry, image) = late_retained_candidate(label, true);
     let original = audit(&claimed)[0].clone();
     let owner = image.history.transition.as_ref().unwrap();
     reload_release_fixture(&claimed);
     if published {
-        claimed.state.recover_engram_authority_candidate_until(&entry.store, &entry.work_id,
-            claimed.state.engram_budget_clock().now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET).unwrap();
-        assert_eq!(release_owner(&claimed, &entry).phase, EngramAuthorityPhase::Published);
+        claimed
+            .state
+            .recover_engram_authority_candidate_until(
+                &entry.store,
+                &entry.work_id,
+                claimed.state.engram_budget_clock().now()
+                    + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET,
+            )
+            .unwrap();
+        assert_eq!(
+            release_owner(&claimed, &entry).phase,
+            EngramAuthorityPhase::Published
+        );
     }
     close_retained_candidate_run(&claimed, &entry);
-    let released = claimed.state.release_engram_named_root(Some("session-operator"),
-        release_request(&entry, "completed original lane")).unwrap();
+    let released = claimed
+        .state
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "completed original lane"),
+        )
+        .unwrap();
     assert!(released.released);
     assert_eq!(released.resolution, "resumed");
     assert!(!retained(&claimed, &entry));
     let records = audit(&claimed);
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].id, original.id);
-    assert_eq!(records[0].authority_owner.as_deref(), Some(owner.id.as_str()));
+    assert_eq!(
+        records[0].authority_owner.as_deref(),
+        Some(owner.id.as_str())
+    );
     assert!(records[0].acknowledged);
     let current = release_owner(&claimed, &entry);
     assert_eq!(current.id, owner.id);
     assert_eq!(current.version, owner.version);
     let inner = claimed.state.inner.lock().unwrap();
-    assert_eq!(inner.engram_work_naming_history.iter().flat_map(|history| &history.retirements)
-        .filter(|notice| notice.selection == entry).count(), 1);
+    assert_eq!(
+        inner
+            .engram_work_naming_history
+            .iter()
+            .flat_map(|history| &history.retirements)
+            .filter(|notice| notice.selection == entry)
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -809,10 +893,19 @@ fn durability_pending_review_release_live_reread_keeps_original_audit() {
     let (claimed, entry, image) = late_retained_candidate("release-candidate-live", true);
     let original = audit(&claimed)[0].clone();
     reload_release_fixture(&claimed);
-    let error = claimed.state.release_engram_named_root(Some("session-operator"),
-        release_request(&entry, "completed original lane")).unwrap_err();
+    let error = claimed
+        .state
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "completed original lane"),
+        )
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(error.message.contains("canonical facts still retain"), "{}", error.message);
+    assert!(
+        error.message.contains("canonical facts still retain"),
+        "{}",
+        error.message
+    );
     assert!(retained(&claimed, &entry));
     assert_eq!(audit(&claimed), vec![original]);
     let current = release_owner(&claimed, &entry);
@@ -830,27 +923,46 @@ async fn durability_pending_review_prior_candidate_has_no_phantom_release_audit(
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
     let request = release_request(&entry, "completed original lane");
-    let worker = std::thread::spawn(move || state.release_engram_named_root(Some("session-operator"), request));
+    let worker = std::thread::spawn(move || {
+        state.release_engram_named_root(Some("session-operator"), request)
+    });
     let mut batch = PersistFenceBatch::default();
     receive_naming_authority_fence(&rx, &mut batch, &worker);
     assert!(matches!(&batch.pending[0].target,
         PersistFenceTarget::EngramWorkAuthority(candidate)
             if candidate.history.transition.as_ref() == Some(owner)));
     let audit_count_before_reply = audit(&claimed).len();
-    assert!(matches!(batch.pending[0].completion.poll_at(batch.pending[0].completion.deadline),
-        Some(Err(PersistFenceError::Deadline))));
+    assert!(matches!(
+        batch.pending[0]
+            .completion
+            .poll_at(batch.pending[0].completion.deadline),
+        Some(Err(PersistFenceError::Deadline))
+    ));
     claimed.state.engram_budget_clock().notify();
     let error = worker.join().unwrap().unwrap_err();
     let response = error.into_response();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), 8192).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
     let pending: Value = serde_json::from_slice(&bytes).unwrap();
     let late = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
     let mut cache = SqlitePersistConnectionCache::new();
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &late, &mut batch).unwrap();
+    persist_delta_with_fences(
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &late,
+        &mut batch,
+    )
+    .unwrap();
     drop(rx);
-    let disk = load_state(claimed.state.persistence_path.as_path()).unwrap().unwrap();
-    assert_eq!(audit_count_before_reply, 0, "no audit before the older Candidate settles");
+    let disk = load_state(claimed.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        audit_count_before_reply, 0,
+        "no audit before the older Candidate settles"
+    );
     assert!(disk.engram_named_root_release_audit.is_empty());
     assert!(disk.engram_work_source_roots.contains(&entry));
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{pending}");
@@ -860,7 +972,10 @@ async fn durability_pending_review_prior_candidate_has_no_phantom_release_audit(
     assert_eq!(pending["identity"]["ownerId"], owner.id);
     assert_eq!(pending["identity"]["ownerVersion"], owner.version);
     assert_eq!(pending["identity"]["releaseStage"], "prior_authority");
-    assert_eq!(pending["identity"]["requestedSelection"]["generation"], entry.generation);
+    assert_eq!(
+        pending["identity"]["requestedSelection"]["generation"],
+        entry.generation
+    );
     assert!(durability_pending_for_request(status, "POST",
         "/api/sessions/session-operator/engram-named-root-release", "session-operator",
         &json!({"work": entry.short_ref, "generation": entry.generation, "reason": "completed original lane"}),
@@ -868,8 +983,13 @@ async fn durability_pending_review_prior_candidate_has_no_phantom_release_audit(
     assert_eq!(pending["retry"]["mode"], "same_request");
     reload_release_fixture_for(&claimed, &entry);
     close_retained_candidate_run(&claimed, &entry);
-    let released = claimed.state.release_engram_named_root(Some("session-operator"),
-        release_request(&entry, "completed original lane")).unwrap();
+    let released = claimed
+        .state
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "completed original lane"),
+        )
+        .unwrap();
     assert!(released.released);
     assert_eq!(released.resolution, "applied_fresh");
     assert_eq!(audit(&claimed).len(), 1);
@@ -883,17 +1003,33 @@ fn durability_pending_review_release_changed_candidate_binding_conflicts() {
     reload_release_fixture(&claimed);
     {
         let mut inner = claimed.state.inner.lock().unwrap();
-        inner.engram_work_naming_history.iter_mut()
-            .find(|history| history.store == entry.store && history.work_id == entry.work_id).unwrap()
-            .transition.as_mut().unwrap().binding.work_revision += 1;
+        inner
+            .engram_work_naming_history
+            .iter_mut()
+            .find(|history| history.store == entry.store && history.work_id == entry.work_id)
+            .unwrap()
+            .transition
+            .as_mut()
+            .unwrap()
+            .binding
+            .work_revision += 1;
     }
     let owner = release_owner(&claimed, &entry);
     let before = claimed.transport.requests().len();
-    let error = claimed.state.release_engram_named_root(Some("session-operator"),
-        release_request(&entry, "completed original lane")).unwrap_err();
+    let error = claimed
+        .state
+        .release_engram_named_root(
+            Some("session-operator"),
+            release_request(&entry, "completed original lane"),
+        )
+        .unwrap_err();
     assert_eq!(error.status, StatusCode::CONFLICT);
     assert!(error.message.contains(&original.id));
-    assert_eq!(claimed.transport.requests().len(), before, "no reread under a changed binding");
+    assert_eq!(
+        claimed.transport.requests().len(),
+        before,
+        "no reread under a changed binding"
+    );
     assert_eq!(audit(&claimed), vec![original]);
     assert_eq!(release_owner(&claimed, &entry), owner);
     assert!(retained(&claimed, &entry));
@@ -910,18 +1046,29 @@ fn durability_pending_review_old_candidate_ack_cannot_ack_rearmed_read() {
         let inner = claimed.state.inner.lock().unwrap();
         EngramAuthorityImage::capture(&inner, &entry.store, &entry.work_id).unwrap()
     };
-    assert_eq!(old_image.history.transition.as_ref().unwrap().phase, EngramAuthorityPhase::Candidate);
+    assert_eq!(
+        old_image.history.transition.as_ref().unwrap().phase,
+        EngramAuthorityPhase::Candidate
+    );
     // Capture an actual selected delta, not a synthetic fence success.
     let prior_delta = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
     assert!(old_image.matches_metadata(&prior_delta.metadata));
-    let reads_before = claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_read").count();
+    let reads_before = claimed
+        .transport
+        .requests()
+        .iter()
+        .filter(|request| request.request["operation"] == "named_root_read")
+        .count();
     let (tx, rx) = mpsc::channel();
     claimed.state.persist_tx = tx;
     let state = claimed.state.clone();
     let root = entry.clone();
-    let worker = std::thread::spawn(move || state.release_engram_named_root(Some("session-operator"),
-        release_request(&root, "completed original lane")));
+    let worker = std::thread::spawn(move || {
+        state.release_engram_named_root(
+            Some("session-operator"),
+            release_request(&root, "completed original lane"),
+        )
+    });
     let mut batch = PersistFenceBatch::default();
     let mut cache = SqlitePersistConnectionCache::new();
     // First finish the already-existing Candidate, without a canonical read.
@@ -930,18 +1077,36 @@ fn durability_pending_review_old_candidate_ack_cannot_ack_rearmed_read() {
         PersistFenceTarget::EngramWorkAuthority(image) if **image == old_image));
     let candidate = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
     let committed = persist_delta_via_cache(
-        &mut cache, claimed.state.persistence_path.as_path(), &candidate,
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &candidate,
     );
-    assert!(committed.is_ok(), "Candidate must commit before its ACK: {committed:?}");
+    assert!(
+        committed.is_ok(),
+        "Candidate must commit before its ACK: {committed:?}"
+    );
     // Recapture the same Candidate after its real COMMIT adopted the new
     // predecessor, while its ACK still holds the worker at that crash cut.
     let candidate_replay = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
     let old_target = PersistFenceTarget::EngramWorkAuthority(Box::new(old_image.clone()));
-    assert!(["engramWorkNamingHistory", "engramWorkSourceRoots", "engramNamedRootJournal"]
-        .iter().all(|field| candidate_replay.metadata.metadata_collection_is_omitted(field)));
+    assert!(
+        [
+            "engramWorkNamingHistory",
+            "engramWorkSourceRoots",
+            "engramNamedRootJournal"
+        ]
+        .iter()
+        .all(|field| candidate_replay
+            .metadata
+            .metadata_collection_is_omitted(field))
+    );
     assert!(!old_target.is_in_delta(&candidate_replay));
-    assert!(old_target.is_already_durable(cache.connection.as_ref().unwrap()).unwrap(),
-        "the replay retains the exact committed Candidate without cloning its unchanged collections");
+    assert!(
+        old_target
+            .is_already_durable(cache.connection.as_ref().unwrap())
+            .unwrap(),
+        "the replay retains the exact committed Candidate without cloning its unchanged collections"
+    );
     batch.finish_write(&candidate, &committed, cache.connection.as_ref());
     // Its same owner must now obtain a NEW full Prepared-image ACK.
     receive_naming_authority_fence(&rx, &mut batch, &worker);
@@ -955,36 +1120,70 @@ fn durability_pending_review_old_candidate_ack_cannot_ack_rearmed_read() {
     let clock = claimed.state.engram_budget_clock();
     let deadline = clock.now() + ENGRAM_NAMED_ROOT_RELEASE_AUTHORITY_BUDGET;
     let (stale, waiter) = PersistFence::new_with_clock(
-        PersistFenceTarget::EngramWorkAuthority(Box::new(old_image)), deadline, clock);
+        PersistFenceTarget::EngramWorkAuthority(Box::new(old_image)),
+        deadline,
+        clock,
+    );
     batch.accept(PersistRequest::Fence(Box::new(stale)));
     // The immutable predecessor from before the first COMMIT must refuse;
     // neither pending fence receives a fabricated success from that refusal.
     let stale_error = persist_delta_via_cache(
-        &mut cache, claimed.state.persistence_path.as_path(), &prior_delta,
-    ).unwrap_err();
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &prior_delta,
+    )
+    .unwrap_err();
     assert!(stale_error.to_string().contains("stale metadata snapshot"));
     assert_eq!(batch.pending.len(), 2);
     assert!(!worker.is_finished());
     // A freshly captured Candidate can really commit/ACK its own image, but
     // cannot ACK the new guard or permit its canonical read/publication.
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &candidate_replay, &mut batch).unwrap();
+    persist_delta_with_fences(
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &candidate_replay,
+        &mut batch,
+    )
+    .unwrap();
     assert!(matches!(waiter.wait_until(deadline), Some(Ok(()))));
     assert_eq!(batch.pending.len(), 1);
     assert!(!worker.is_finished());
-    assert_eq!(claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_read").count(), reads_before);
+    assert_eq!(
+        claimed
+            .transport
+            .requests()
+            .iter()
+            .filter(|request| request.request["operation"] == "named_root_read")
+            .count(),
+        reads_before
+    );
     let guarded = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
-    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &guarded, &mut batch).unwrap();
+    persist_delta_with_fences(
+        &mut cache,
+        claimed.state.persistence_path.as_path(),
+        &guarded,
+        &mut batch,
+    )
+    .unwrap();
     let started = std::time::Instant::now();
     while !worker.is_finished() {
-        assert!(started.elapsed() < phase_sync::DEADLOCK_GUARD, "release retry writer stalled");
+        assert!(
+            started.elapsed() < phase_sync::DEADLOCK_GUARD,
+            "release retry writer stalled"
+        );
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(request) => {
                 let fence = matches!(request, PersistRequest::Fence(_));
                 batch.accept(request);
                 if fence {
                     let delta = collect_persist_delta_from_shared_state(&claimed.state.inner, 0);
-                    persist_delta_with_fences(&mut cache, claimed.state.persistence_path.as_path(), &delta, &mut batch).unwrap();
+                    persist_delta_with_fences(
+                        &mut cache,
+                        claimed.state.persistence_path.as_path(),
+                        &delta,
+                        &mut batch,
+                    )
+                    .unwrap();
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}

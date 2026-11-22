@@ -4,7 +4,7 @@
 //
 // HTTP handlers (`get_review`, `put_review`, `get_review_summary`) stay in
 // api.rs. This file owns the on-disk review document lifecycle; what other
-// files use is `pub(crate)` and re-exported at the crate root.
+// files use is `pub(crate)` and imported at the crate root.
 
 use super::*;
 

@@ -12,8 +12,8 @@
 // the evaluation side (acceptance_evaluation_unchanged_binding.rs) or the
 // authority fence's own phases (engram_authority_fence_phases.rs).
 // New module.
+use super::reclamation::{request_fixture_name, root_fixture};
 use super::*;
-use super::reclamation::{root_fixture, request_fixture_name};
 
 mod rejections {
     use super::*;
@@ -31,21 +31,25 @@ fn supersede_once_at_owner_check(claimed: &EOCheckedTurn) -> Arc<std::sync::atom
     let superseded = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_superseded = superseded.clone();
     let state = claimed.state.clone();
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary =
-        Some(Arc::new(move |phase| {
-            if phase == "before_owner_check"
-                && !hook_superseded.swap(true, std::sync::atomic::Ordering::SeqCst)
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |phase| {
+        if phase == "before_owner_check"
+            && !hook_superseded.swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let mut inner = state.inner.lock().unwrap();
+            if let Some(transition) = inner
+                .engram_work_naming_history
+                .iter_mut()
+                .find_map(|history| history.transition.as_mut())
             {
-                let mut inner = state.inner.lock().unwrap();
-                if let Some(transition) = inner
-                    .engram_work_naming_history
-                    .iter_mut()
-                    .find_map(|history| history.transition.as_mut())
-                {
-                    transition.id.push_str("-superseded-by-another-owner");
-                }
+                transition.id.push_str("-superseded-by-another-owner");
             }
-        }));
+        }
+    }));
     superseded
 }
 
@@ -58,8 +62,7 @@ fn a_kept_re_name_clears_the_holders_own_stale_journal_flags() {
     for stale in ["displaced", "reconciliation"] {
         let label = format!("naming-kept-clears-{stale}");
         let (claimed, tree) = root_fixture(&label);
-        let first = request_fixture_name(&claimed, Some(&tree))
-            .expect("the first name");
+        let first = request_fixture_name(&claimed, Some(&tree)).expect("the first name");
         {
             let mut inner = claimed.state.inner.lock().unwrap();
             let entry = inner.engram_work_source_roots[0].clone();
@@ -86,18 +89,22 @@ fn a_kept_re_name_clears_the_holders_own_stale_journal_flags() {
             }
         }
 
-        let again = request_fixture_name(&claimed, Some(&tree))
-            .expect("the same name again");
-        assert_eq!(again.generation, first.generation, "{stale}: the re-name is kept");
+        let again = request_fixture_name(&claimed, Some(&tree)).expect("the same name again");
+        assert_eq!(
+            again.generation, first.generation,
+            "{stale}: the re-name is kept"
+        );
 
         let inner = claimed.state.inner.lock().unwrap();
         let entry = &inner.engram_work_source_roots[0];
-        let journal = engram_root_journal(&inner.engram_named_root_journal, &entry.store, &entry.claim_id)
-            .expect("the holder's journal");
+        let journal = engram_root_journal(
+            &inner.engram_named_root_journal,
+            &entry.store,
+            &entry.claim_id,
+        )
+        .expect("the holder's journal");
         assert!(
-            !journal.obsolete
-                && journal.retirement.is_none()
-                && !journal.requires_reconciliation(),
+            !journal.obsolete && journal.retirement.is_none() && !journal.requires_reconciliation(),
             "{stale}: a kept re-name confirmed this claim's binding, so its own stale flags \
              are cleared and evaluations under it are no longer refused: {journal:#?}"
         );
@@ -109,8 +116,8 @@ fn an_unsuperseded_naming_completes() {
     // Control: the fixture names successfully when nothing supersedes it.
     let label = "naming-unsuperseded";
     let (claimed, tree) = root_fixture(label);
-    let named = request_fixture_name(&claimed, Some(&tree))
-        .expect("an undisturbed naming completes");
+    let named =
+        request_fixture_name(&claimed, Some(&tree)).expect("an undisturbed naming completes");
     assert!(named.generation > 0, "{named:?}");
 }
 
@@ -121,7 +128,12 @@ fn a_naming_superseded_mid_acknowledgement_completes_under_its_unchanged_binding
     let superseded = supersede_once_at_owner_check(&claimed);
 
     let named = request_fixture_name(&claimed, Some(&tree));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
 
     assert!(
         superseded.load(std::sync::atomic::Ordering::SeqCst),
@@ -138,13 +150,29 @@ fn a_naming_superseded_mid_acknowledgement_completes_under_its_unchanged_binding
     let entries = inner
         .engram_work_source_roots
         .iter()
-        .filter(|entry| entry.work_id == test_control_work_binding(&format!("eo-check-{label}"), 1).work_id)
+        .filter(|entry| {
+            entry.work_id == test_control_work_binding(&format!("eo-check-{label}"), 1).work_id
+        })
         .collect::<Vec<_>>();
-    assert_eq!(entries.len(), 1, "exactly one effective naming: {entries:#?}");
-    assert_eq!(entries[0].generation, named.generation, "no spurious generation change");
-    let journal = engram_root_journal(&inner.engram_named_root_journal, &entries[0].store, &entries[0].claim_id)
-        .expect("the claim's journal");
-    assert!(journal.pending.is_none(), "the naming settled: {journal:#?}");
+    assert_eq!(
+        entries.len(),
+        1,
+        "exactly one effective naming: {entries:#?}"
+    );
+    assert_eq!(
+        entries[0].generation, named.generation,
+        "no spurious generation change"
+    );
+    let journal = engram_root_journal(
+        &inner.engram_named_root_journal,
+        &entries[0].store,
+        &entries[0].claim_id,
+    )
+    .expect("the claim's journal");
+    assert!(
+        journal.pending.is_none(),
+        "the naming settled: {journal:#?}"
+    );
 }
 
 // The existing hook runs after a canonical reply has decoded, before the
@@ -164,9 +192,16 @@ fn supersede_after_event_read(
                 engram_root_journal(&inner.engram_named_root_journal, &store, &binding.claim_id)
                     .and_then(|journal| journal.pending.as_ref())
                     .map(|event| {
-                        let owner = inner.engram_work_naming_history.iter()
-                            .find(|history| history.store == store && history.work_id == binding.work_id)
-                            .unwrap().transition.clone().unwrap();
+                        let owner = inner
+                            .engram_work_naming_history
+                            .iter()
+                            .find(|history| {
+                                history.store == store && history.work_id == binding.work_id
+                            })
+                            .unwrap()
+                            .transition
+                            .clone()
+                            .unwrap();
                         (event.clone(), owner)
                     })
             };
@@ -174,8 +209,13 @@ fn supersede_after_event_read(
                 supersede_after_event_read(state, store, binding, witness);
                 return;
             };
-            let after = state.prepare_engram_authority(&store, &binding, DEADLOCK_GUARD).unwrap();
-            assert_eq!(before.binding, after.binding, "the competing owner keeps the exact binding");
+            let after = state
+                .prepare_engram_authority(&store, &binding, DEADLOCK_GUARD)
+                .unwrap();
+            assert_eq!(
+                before.binding, after.binding,
+                "the competing owner keeps the exact binding"
+            );
             assert_ne!(before.id, after.id);
             assert!(after.version > before.version);
             *witness.lock().unwrap() = Some(json!({
@@ -220,20 +260,33 @@ fn supersede_at_naming_phase(
 ) {
     let changed = std::sync::atomic::AtomicBool::new(false);
     let competing = state.clone();
-    state.inner.lock().unwrap().test_engram_authority_ack_boundary = Some(Arc::new(move |observed| {
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = Some(Arc::new(move |observed| {
         if observed != phase || changed.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return;
         }
         let (before, event) = {
             let inner = competing.inner.lock().unwrap();
-            let before = inner.engram_work_naming_history.iter()
+            let before = inner
+                .engram_work_naming_history
+                .iter()
                 .find(|history| history.store == store && history.work_id == binding.work_id)
-                .unwrap().transition.clone().unwrap();
-            let event = engram_root_journal(&inner.engram_named_root_journal, &store, &binding.claim_id)
-                .and_then(|journal| journal.pending.as_ref()).map(|event| event.request().unwrap());
+                .unwrap()
+                .transition
+                .clone()
+                .unwrap();
+            let event =
+                engram_root_journal(&inner.engram_named_root_journal, &store, &binding.claim_id)
+                    .and_then(|journal| journal.pending.as_ref())
+                    .map(|event| event.request().unwrap());
             (before, event)
         };
-        let after = competing.prepare_engram_authority(&store, &binding, DEADLOCK_GUARD).unwrap();
+        let after = competing
+            .prepare_engram_authority(&store, &binding, DEADLOCK_GUARD)
+            .unwrap();
         assert_eq!(before.binding, after.binding);
         assert_ne!(before.id, after.id);
         assert!(after.version > before.version);
@@ -244,14 +297,26 @@ fn supersede_at_naming_phase(
 }
 
 fn naming_owner_supersession(rename: bool, before_selection: bool) {
-    let label = if rename { "rename-post-read-owner" } else { "name-post-read-owner" };
+    let label = if rename {
+        "rename-post-read-owner"
+    } else {
+        "name-post-read-owner"
+    };
     let (claimed, first) = root_fixture(label);
     let path = if rename {
         request_fixture_name(&claimed, Some(&first)).unwrap();
         let second = claimed.root.join(".worktrees").join("second");
-        run_git_test_command(&claimed.root, &[
-            "worktree", "add", "--quiet", "-b", "second", second.to_str().unwrap(),
-        ]);
+        run_git_test_command(
+            &claimed.root,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                "second",
+                second.to_str().unwrap(),
+            ],
+        );
         second
     } else {
         first
@@ -260,31 +325,76 @@ fn naming_owner_supersession(rename: bool, before_selection: bool) {
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
     let witness = Arc::new(Mutex::new(None));
     if before_selection {
-        supersede_at_naming_phase(&claimed.state, store, binding.clone(),
-            "before_naming_selection", witness.clone());
+        supersede_at_naming_phase(
+            &claimed.state,
+            store,
+            binding.clone(),
+            "before_naming_selection",
+            witness.clone(),
+        );
     } else {
-        supersede_after_event_read(claimed.state.clone(), store, binding.clone(), witness.clone());
+        supersede_after_event_read(
+            claimed.state.clone(),
+            store,
+            binding.clone(),
+            witness.clone(),
+        );
     }
     let result = request_fixture_name(&claimed, Some(&path));
     // A failure must not retain a thread-local closure holding the fixture.
     TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| hook.borrow_mut().take());
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    let witness = witness.lock().unwrap().take().expect("the post-event read was superseded");
-    assert_eq!(claimed.record(|record| record.engram.work_binding.clone()), Some(binding));
-    let sends = claimed.transport.requests().into_iter()
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    let witness = witness
+        .lock()
+        .unwrap()
+        .take()
+        .expect("the post-event read was superseded");
+    assert_eq!(
+        claimed.record(|record| record.engram.work_binding.clone()),
+        Some(binding)
+    );
+    let sends = claimed
+        .transport
+        .requests()
+        .into_iter()
         .filter(|request| request.request["operation"] == "named_root_bind")
-        .map(|request| request.request).collect::<Vec<_>>();
-    assert_eq!(sends.last(), Some(&witness["event"]), "the raced proof follows the actual send");
-    assert_eq!(sends.len(), if rename { 2 } else { 1 }, "owner recovery re-reads without another producer transition");
+        .map(|request| request.request)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sends.last(),
+        Some(&witness["event"]),
+        "the raced proof follows the actual send"
+    );
+    assert_eq!(
+        sends.len(),
+        if rename { 2 } else { 1 },
+        "owner recovery re-reads without another producer transition"
+    );
     let named = result.unwrap_or_else(|error| panic!(
         "same-binding post-read supersession must complete for the live holder: status={}, error={}",
         error.status, error.message,
     ));
     let inner = claimed.state.inner.lock().unwrap();
     assert_eq!(inner.engram_work_source_roots.len(), 1);
-    assert_eq!(inner.engram_work_source_roots[0].generation, named.generation);
-    assert!(inner.engram_named_root_journal.iter().all(|journal| journal.pending.is_none()));
-    assert_eq!(named.generation, witness["event"]["generation"].as_u64().unwrap());
+    assert_eq!(
+        inner.engram_work_source_roots[0].generation,
+        named.generation
+    );
+    assert!(
+        inner
+            .engram_named_root_journal
+            .iter()
+            .all(|journal| journal.pending.is_none())
+    );
+    assert_eq!(
+        named.generation,
+        witness["event"]["generation"].as_u64().unwrap()
+    );
 }
 
 #[test]
@@ -293,19 +403,47 @@ fn a_kept_naming_superseded_after_selection_persistence_completes_without_anothe
     let first = request_fixture_name(&claimed, Some(&tree)).unwrap();
     let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
     let witness = Arc::new(Mutex::new(None));
-    supersede_at_naming_phase(&claimed.state, naming_store(&claimed), binding.clone(),
-        "before_kept_naming_proof", witness.clone());
+    supersede_at_naming_phase(
+        &claimed.state,
+        naming_store(&claimed),
+        binding.clone(),
+        "before_kept_naming_proof",
+        witness.clone(),
+    );
     let result = request_fixture_name(&claimed, Some(&tree));
-    claimed.state.inner.lock().unwrap().test_engram_authority_ack_boundary = None;
-    assert!(witness.lock().unwrap().is_some(), "the persisted kept selection reached its later proof");
+    claimed
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_engram_authority_ack_boundary = None;
+    assert!(
+        witness.lock().unwrap().is_some(),
+        "the persisted kept selection reached its later proof"
+    );
     let named = result.unwrap_or_else(|error| panic!("kept selection recovery: {}", error.message));
     assert_eq!(named.generation, first.generation);
-    assert_eq!(claimed.record(|record| record.engram.work_binding.clone()), Some(binding));
-    assert_eq!(claimed.transport.requests().iter()
-        .filter(|request| request.request["operation"] == "named_root_bind").count(), 1);
+    assert_eq!(
+        claimed.record(|record| record.engram.work_binding.clone()),
+        Some(binding)
+    );
+    assert_eq!(
+        claimed
+            .transport
+            .requests()
+            .iter()
+            .filter(|request| request.request["operation"] == "named_root_bind")
+            .count(),
+        1
+    );
     let inner = claimed.state.inner.lock().unwrap();
     assert_eq!(inner.engram_work_source_roots.len(), 1);
-    assert!(inner.engram_named_root_journal.iter().all(|journal| journal.pending.is_none()));
+    assert!(
+        inner
+            .engram_named_root_journal
+            .iter()
+            .all(|journal| journal.pending.is_none())
+    );
 }
 
 fn supersede_pending_reads(
@@ -326,13 +464,19 @@ fn supersede_pending_reads(
                 supersede_pending_reads(state, store, binding, count, fault);
                 return;
             }
-            state.prepare_engram_authority(&store, &binding, DEADLOCK_GUARD).unwrap();
+            state
+                .prepare_engram_authority(&store, &binding, DEADLOCK_GUARD)
+                .unwrap();
             count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if fault == "deadline" {
-                state.engram_budget_clock().advance(ENGRAM_SOURCE_ROOT_NAMING_BUDGET);
+                state
+                    .engram_budget_clock()
+                    .advance(ENGRAM_SOURCE_ROOT_NAMING_BUDGET);
             } else if fault == "binding" {
                 let mut inner = state.inner.lock().unwrap();
-                let record = inner.sessions.iter_mut()
+                let record = inner
+                    .sessions
+                    .iter_mut()
                     .find(|record| record.engram.work_binding.as_ref() == Some(&binding))
                     .expect("the fixture's exact live holder");
                 record.engram.work_binding.as_mut().unwrap().claim_fence += 1;
@@ -350,23 +494,55 @@ fn post_read_naming_owner_recovery_keeps_its_limit_deadline_and_binding_fence() 
         let binding = claimed.record(|record| record.engram.work_binding.clone().unwrap());
         let store = naming_store(&claimed);
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        supersede_pending_reads(claimed.state.clone(), store.clone(), binding.clone(), count.clone(), fault);
+        supersede_pending_reads(
+            claimed.state.clone(),
+            store.clone(),
+            binding.clone(),
+            count.clone(),
+            fault,
+        );
         let result = request_fixture_name(&claimed, Some(&tree));
         TEST_ENGRAM_DURING_ROOT_LIFECYCLE_READ.with(|hook| hook.borrow_mut().take());
         let error = result.expect_err("bounded recovery cannot complete under this fault");
-        assert_eq!(error.status, StatusCode::CONFLICT,
-            "{fault}: {}", error.message);
-        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst),
-            if fault == "repeated" { 1 + ENGRAM_NAMING_SUPERSEDED_RETRIES } else { 1 },
-            "{fault}: only unchanged authority within the original budget can be retried");
-        assert!(!error.message.contains("nothing was named"), "{fault}: {}", error.message);
-        assert_eq!(claimed.transport.requests().iter()
-            .filter(|request| request.request["operation"] == "named_root_bind").count(), 1);
+        assert_eq!(
+            error.status,
+            StatusCode::CONFLICT,
+            "{fault}: {}",
+            error.message
+        );
+        assert_eq!(
+            count.load(std::sync::atomic::Ordering::SeqCst),
+            if fault == "repeated" {
+                1 + ENGRAM_NAMING_SUPERSEDED_RETRIES
+            } else {
+                1
+            },
+            "{fault}: only unchanged authority within the original budget can be retried"
+        );
+        assert!(
+            !error.message.contains("nothing was named"),
+            "{fault}: {}",
+            error.message
+        );
+        assert_eq!(
+            claimed
+                .transport
+                .requests()
+                .iter()
+                .filter(|request| request.request["operation"] == "named_root_bind")
+                .count(),
+            1
+        );
         let inner = claimed.state.inner.lock().unwrap();
         assert!(inner.engram_work_source_roots.is_empty());
-        let journal = engram_root_journal(&inner.engram_named_root_journal, &store, &binding.claim_id).unwrap();
+        let journal =
+            engram_root_journal(&inner.engram_named_root_journal, &store, &binding.claim_id)
+                .unwrap();
         assert_eq!(journal.read_binding.as_ref(), Some(&binding));
-        assert_eq!(journal.pending.as_ref().unwrap().root.claim_fence, binding.claim_fence);
+        assert_eq!(
+            journal.pending.as_ref().unwrap().root.claim_fence,
+            binding.claim_fence
+        );
         assert!(journal.confirmed.is_none());
     }
 }

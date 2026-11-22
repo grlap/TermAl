@@ -9,7 +9,7 @@ instruction files.
 The HTTP handler (`search_instructions`) and the request/response structs
 (`InstructionSearchQuery`, `InstructionSearchResponse`, ...) stay in
 `api.rs`. This file owns only the traversal logic; what other files use is
-`pub(crate)` and re-exported at the crate root.
+`pub(crate)` and imported at the crate root.
 */
 
 use super::*;
