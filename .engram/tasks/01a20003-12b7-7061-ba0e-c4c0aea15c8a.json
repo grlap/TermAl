@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed f28c6b9f on origin/master. The scoped read-only Bash gate admits the exact Engram source query on clean and dirty review roots. Revision 4 independently passed 3/3. The named-root focused run and exact Linux full gate passed. Verified both test refs removed. The binary install is in the joint wave and the live post-restart reviewer check is tracked on w-e5430c654802.",
+    "completed_at": "2026-11-21T23:47:27.410233500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
