@@ -147,8 +147,8 @@ again; some of the fields they name no longer exist. Every field
 `EngramSessionState` has today is `pub(crate)`, so code outside the Engram
 files can still read and write them, and turning such accesses into calls is
 still the work. What changed is that an item can now be private to its module
-and that module's children, and that a new use of a private item from
-elsewhere does not compile.
+and that module's descendant modules, and that a new use of a private item
+from elsewhere does not compile.
 Some modules still pull further files into themselves with `include!()`
 (`src/persist.rs` includes seventeen); those files share that one module's
 private scope, not the crate's.
@@ -496,7 +496,7 @@ file happens to use, which is wider than what a component should offer.
 Option 2 now reads as leaving visibility where the conversion put it. Its
 cost is the one stated above, with one difference: most items that nothing
 outside their file used are private, and a new use of one from outside its
-module and that module's children fails to compile.
+module and that module's descendant modules fails to compile.
 
 ## 4. The host event stream
 

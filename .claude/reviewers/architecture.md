@@ -73,8 +73,8 @@ For a new mechanism or a significant behavior change, the item states the goal, 
 
 ## What NOT to flag
 
-- The fact that `main.rs` is a single large file (this is a known intentional tradeoff)
-- The fact that `App.tsx` is a single large file (same reason — iteration speed)
+- The fact that `main.rs` is a long list of module declarations and glob imports, which lets backend code name shared types without a path (this is a known intentional tradeoff)
+- The fact that `App.tsx` is a single large file (a known intentional tradeoff, for iteration speed)
 - Exception to the large-file carveout: flag reviewed changes that materially worsen size, coupling, or documentation gaps in historical large files, or that miss an obvious low-risk extraction boundary
 - Performance micro-optimizations unless architecturally significant
 - Code style preferences (formatting, naming) — leave to linters

@@ -53,7 +53,7 @@ Focus: Error handling, concurrency, async safety, idiomatic Rust patterns.
 
 - Using `std::thread` for agent runtime threads (intentional — these do blocking stdio)
 - Using `std::sync::Mutex` for `AppState.inner` (held briefly, never across await)
-- Single-file architecture (`main.rs`) — known tradeoff
+- Glob imports between `main.rs` and the backend modules (`use x::*;` in `main.rs`, `use super::*;` in a module) — known tradeoff
 - `clone()` on small types like `String` session IDs in non-hot paths
 - `expect("state mutex poisoned")` on mutex locks — this is the project pattern
 
