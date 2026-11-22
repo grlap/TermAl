@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "CLAUDE.md and AGENTS.md (Commit and push bullet) now read: a commit or push outside the standing rule needs the developer's explicit approval; another agent may relay it verbatim with its source; the relay carries only the approval and scope actually stated.\n\nIt landed as 1b1974103475294cfd1ea0cd381306cbc255e864 (ff from a4727fba), pushed to origin/master at 2026-11-22T07:19:39Z, under the standing rule for a Markdown-only change.\n\nEvidence:\n- the wording was concurred by both coordinators and Kimi;\n- Greg chose it („cool!”) and his widening word is recorded;\n- Fable2's final-diff audit passed;\n- the doc link check test-7858ba94 passed;\n- the review pair (Codex 19501, Claude 19502) is clean;\n- the post-landing evaluation passed all 3 criteria.\n\nThere was no install, because only Markdown changed.",
+    "completed_at": "2026-11-22T07:23:42.225635800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

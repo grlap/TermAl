@@ -1,0 +1,24 @@
+{
+  "id": "01a20232-2cea-78e0-949a-925034434963",
+  "external_ref": null,
+  "title": "Cold boot admits a well-formed tail row of an unknown Message variant that the eager loader would quarantine",
+  "outcome": "A finished delegation child whose retained tail holds a well-formed row that does not decode as a Message (for example a variant written by a newer build) is handled deliberately: either quarantined at boot as the eager loader does, or served with an explicit, visible per-row error, and the chosen behaviour is documented and tested.",
+  "acceptance": [
+    "Cold boot admits a well-formed tail row of an unknown Message variant that the eager loader would quarantine is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

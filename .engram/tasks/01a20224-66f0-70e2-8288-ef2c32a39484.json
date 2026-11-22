@@ -1,0 +1,29 @@
+{
+  "id": "01a20224-66f0-70e2-8288-ef2c32a39484",
+  "external_ref": null,
+  "title": "With several named source roots in one session, sightings follow the most recently named root, not the item in Engram focus",
+  "outcome": "Reported by Fable52 (mailbox 30a7a691 #69), 2026-11-22. Fable52 held two items with different named source roots: w-54bc72cb22b2 (.tmp/i2m-comments-ebc30de9) and w-d650aadd67ab (the docs worktree, named last). Its turns were recorded as sightings of the LAST-named root, including turns in which w-54bc72cb22b2 was the Engram focus. So w-54bc72cb22b2 had no observation, and its evaluation was refused twice with named_root_sighting_unavailable. Naming w-54bc72cb22b2's root again, with the same path and an unchanged generation, made the host announce it as the source basis at the next turn (\"prospective focus publication is pending\" in between), and sightings arrived one turn later. Three turns were lost. An Engram note on another item does not move the measured root. Either the host should measure the root named for the item in focus, or the instructions should state that the most recently named root is measured and re-naming is required on a focus switch.",
+  "acceptance": [
+    "When one session holds several items with different named source roots, the host attributes each turn's sightings to the root named for the item in Engram focus, or the documented behaviour (CLAUDE.md Engram work tracker section, docs) states exactly which root is measured and how to switch it; a behaviour test covers the focus-switch case.",
+    "An evaluation requested for an item whose named root was named earlier in the session than another item's is not refused with named_root_sighting_unavailable solely because a later root was named."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

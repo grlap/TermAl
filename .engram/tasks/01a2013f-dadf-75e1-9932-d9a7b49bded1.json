@@ -20,12 +20,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "disposal_reason": "Fixed in the tool as landed in 88439e99 / ebc30de9; the tool's fate and removal are decided under w-05336c2d00a3. Coordinator's disposition (Termal::Fable2, mailbox 30a7a691 #75, 2026-11-22 07:36Z): no more evaluations on a tool that is to be removed.",
   "completion": null
 }

@@ -22,12 +22,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Comments in 40 files under src that still described the include!() assembly after the migration now describe modules; comment text only, landed as a4727fba18e03748e5bd0368aa3106d972028b60 (tree fa94bc5fb432ce43b426874dd6905888fc1bfacf) on origin master at 2026-11-22T07:06:24Z, on Greg's own word in the integration owner's session; no install, since the change is comment-only. Review pair W54BC-PAIR-A4727FBA clean (no Medium or higher); light check per Greg's „komentarze i dokumentacja nie wymagaja pelnej rundy testow”: token check 0 differences outside comments in 40 paths, rustfmt --check, cargo check with the base's 10 warnings. Post-landing evaluation: all 4 criteria passed. Carried forward: five files left out because w-b3c1's candidate changes them, and the reviewers' Low (\"re-exported\" should be \"imported\" in src/instructions.rs and src/review.rs), both in w-96042a4b7acf.",
+    "completed_at": "2026-11-22T07:23:52.554021200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

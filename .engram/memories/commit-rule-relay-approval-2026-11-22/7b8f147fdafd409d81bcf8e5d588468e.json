@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "commit-rule-relay-approval-2026-11-22",
+    "revision_id": "7b8f147fdafd409d81bcf8e5d588468e",
+    "previous": null,
+    "body_sha256": "6a8e66f2bcf8b59975fce90952df96f28238b7fac3da2822783687569aa48cce",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T07:20:39.238396300Z"
+    }
+  },
+  "body": "RULE CHANGE LANDED 2026-11-22T07:19:39Z (w-d0fb35c08022, master 1b197410). TermAl CLAUDE.md and AGENTS.md \"Commit and push\": a commit or push outside the standing rule \"needs the developer's explicit approval. Where the developer's explicit approval is required, another agent may relay it verbatim with its source. The relay carries only the approval and scope actually stated.\"\nThis REPLACES the earlier text (\"needs Greg's own word in the acting session … a word relayed by another session never carries a commit or push\"). From now on, Greg's approval relayed verbatim with its source (for example by Engram::Asistant from Telegram) carries an out-of-rule commit or push, within the scope it states. Practice: the acting session records the relayed approval, verbatim with its source, on the item before acting. Restart, deploy and global configuration stay Greg's alone (unchanged). Wording chosen by Greg („cool!” to Kimi's sentences, Asistant #1862); concurred by Termal::Fable2, Engram::Fable and Kimi::Consultant; (c) audit passed. Engram's twin rule is Engram::Fable's (w-d40dd27bcb67), after the restart."
+}

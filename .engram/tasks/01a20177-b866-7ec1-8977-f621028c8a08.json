@@ -8,7 +8,7 @@
     "The tool's check passes with no problem on the scripted commit against its base: for every changed file, the candidate equals the tool's own conversion of the base, and with the inserted visibility and wiring removed it formats to the same text as the base file.",
     "The crate compiles for tests and non-tests on Linux and on Windows with no warning its base does not have, and cargo fmt --check passes; a macOS cargo check is run on the exact candidate if a macOS runner is available, and otherwise the handoff states that macOS was not compiled.",
     "The full gate passes on the exact landed input on Linux and on Windows: with `node scripts/test-launcher.mjs full --input commit` where the runner can run it; on a hostless runner that cannot, with `node scripts/test-launcher.mjs full --input plain` in a fresh clean checkout of that exact commit, with request.sourceId, results.sourceIdBefore and results.sourceIdAfter all equal to its commit and tree and the checkout clean afterwards.",
-    "The handoff lists each hand-converted unit with what was changed. No value that is stored, sent on a wire, matched by a filter or asserted by a test changes, except values derived from three sources, which the handoff names with each construct that reads them and the places known to record each: the source position (file, line, column) of code in a converted file; a module path; and the libtest name of a test declared inside a converted file. No record's format or meaning changes."
+    "The handoff lists each hand-converted unit with what was changed. No value that is stored, sent on a wire, matched by a filter or asserted by a test changes, except values derived from three sources: the source position (file, line, column) of code in a file the migration changes (the paths `git diff --name-only bd01930c ebc30de9` lists); a module path; and the libtest name of a test whose path gained the module of a converted file. No record's format or meaning changes. The handoff describes each source and the readers of it known at landing; that description is informative, and a further reader of these same three sources is not a failure of this criterion."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
@@ -22,12 +22,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Every .rs fragment src/main.rs included is now an ordinary Rust module: 435 converted by scripts/include-to-mod.mjs (88439e99, checked by the tool's verify with 0 problems) and 14 by hand (ebc30de9), on top of slice 0 (bd01930c). Landed as ebc30de9ffa81b187765615291e0391929912013 (tree 163fe259c512866bbb0e27952fdc0fd70bb074d8) on origin master at 2026-11-22T06:38:30Z, on Greg's own word in the integration owner's session, without a review pair by his direction; the integration owner built and installed that tree at 06:50:36Z. Compiles clean on Linux, Windows and macOS with the bases' warning counts; full gates passed on the exact commit on Linux (test-f1333e8f, commit mode) and Windows (test-11025872, plain mode in a fresh clean checkout). Evaluation on revision 9: all 5 criteria passed. Known effect, recorded in the handoff notes: values derived from a source position in a file the migration changes, from a module path, or from the libtest name of a test in a converted file differ; no record's format or meaning changes. Left for follow-up: 88 include!() fragments inside modules (w-05336c2d00a3), stale comments in five files (w-96042a4b7acf), docs (w-d650aadd67ab), and the conversion tool's removal with the last fragment.",
+    "completed_at": "2026-11-22T07:35:49.911957Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

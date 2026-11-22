@@ -1,0 +1,32 @@
+{
+  "id": "01a20231-df3e-7871-995e-59bf4a5b15a0",
+  "external_ref": null,
+  "title": "Docs: module privacy reaches descendant modules, not only children (Low from the docs review)",
+  "outcome": "Low left unfixed at the landing of w-d650aadd67ab's candidate 33b6a031, filed as its own item under the commit rule. Both reviewers of round 4 (WD650-PAIR4-33B6A031) raised it: Codex as a Low (delegation-cc0b4cc7-9d26-465b-b7d0-a893b76042ea), Claude as a Note (delegation-5f897c99-3354-4a3d-bff0-4d92c9347c38). Three sentences added by that change say an unmarked item is private to \"its module and that module's children\": docs/architecture.md:1762 (\"can be used only inside its own module and that module's children\"), docs/features/host-architecture.md:149 (\"private to its module and that module's children\") and :498-499 (\"from outside its module and that module's children\"). Rust's rule covers all descendant modules; in this tree it matters for nested modules such as src/host_utilization/native/linux.rs, which uses its grandparent's private items. Codex adds that the sentence in architecture.md should speak of private items, since an unmarked trait method is callable wherever the trait is visible. The fix is \"descendant modules\" in the three places and, in architecture.md, \"a private function, type, constant or struct field\". Markdown only; it can be batched with w-871c322c2d8e (the reviewer-lens lines), which is also Markdown only.",
+  "acceptance": [
+    "docs/architecture.md and the two dated notes in docs/features/host-architecture.md say that a private item can be used in its own module and in that module's descendant modules, and no longer limit it to children.",
+    "The independent review pair has no outstanding in-scope finding of Medium or higher, and the doc link check passes on the exact landed input."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "docs",
+    "greg-directed",
+    "include-to-mod",
+    "low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
