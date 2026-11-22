@@ -55,6 +55,13 @@ Settings and enrollment are not themselves proof of a link.
 attestation; its `startupExpired` is not evidence of a new SSH attempt.
 `currentBasis: null` means no attestation attempt has been recorded yet,
 including when a worker is still reading credentials before its first proof.
+`lastTerminal` retains the first termination of the most recent authenticated
+link that recorded one. It identifies the local role, phase, reason, I/O kind,
+incarnation and generations. Its own `currentBasis` becomes false when the
+peer's enrollment or installed transport changes. `lastAcceptedSequence` and
+`lastAcceptedAgeMsAtTerminal` describe the last accepted control heartbeat at
+termination and are both null if none was accepted. `lastTerminal` is null
+until a termination is recorded.
 The optional `worker` object reports the current worker ID, owning server
 instance, attempt number, enrollment and transport generations, start/update
 times and stage. Its own `currentBasis` identifies whether that progress

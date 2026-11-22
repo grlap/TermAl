@@ -172,6 +172,17 @@ impl Control {
         change: impl FnOnce(&mut Vec<Vec<u8>>),
         pause: Option<(tokio::sync::oneshot::Sender<()>, Arc<tokio::sync::Notify>)>,
     ) -> Result<Self, String> {
+        let mut control = Self::open_unready(info, secret, change, pause).await?;
+        control.heartbeat(1, &[7; 16]).await?;
+        Ok(control)
+    }
+
+    pub async fn open_unready(
+        info: &PeerInfo,
+        secret: char,
+        change: impl FnOnce(&mut Vec<Vec<u8>>),
+        pause: Option<(tokio::sync::oneshot::Sender<()>, Arc<tokio::sync::Notify>)>,
+    ) -> Result<Self, String> {
         let mut io = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
             .await
             .map_err(|_| "control connection refused")?;
@@ -226,12 +237,11 @@ impl Control {
         )?;
         let session =
             ReferenceSession::derive(transcript, incarnation.to_string(), &fields[3], &nc, secret);
-        let mut control = Self {
+        let control = Self {
             io,
             session,
             hello_c,
         };
-        control.heartbeat(1, &[7; 16]).await?;
         Ok(control)
     }
 

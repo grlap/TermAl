@@ -157,6 +157,7 @@ pub(crate) async fn federation_attest_satellite(
         )
         .await
         .map_err(|_| {
+            channel.observe_terminal(&context, "attest", "tagWriteExpired");
             federation_attestation_error(
                 channel,
                 Some(owner),
@@ -167,6 +168,7 @@ pub(crate) async fn federation_attest_satellite(
             )
         })?
         .map_err(|error| {
+            channel.observe_terminal(&context, "attest", "linkDownBeforeTag");
             federation_attestation_error(
                 channel,
                 Some(owner),
