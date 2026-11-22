@@ -1,0 +1,30 @@
+{
+  "id": "01a2013f-52a4-70f3-9432-ca3e987cf6fe",
+  "external_ref": null,
+  "title": "include-to-mod tool: replace the include! it parsed in main.rs by its source range, not by matching a line",
+  "outcome": "From review round B1-PAIR2-B15DCD57 on b15dcd57 (Codex, review-result-56fcd943ec8e908cff16f0ecae91022abef126944833f6a1619c50773149d008), raised as Medium at scripts/include-to-mod.mjs:828 and reclassified Low by Termal::Fable2 (TermAl mailbox 30a7a691 #27 and #29): convertUnits finds a top-level include with its parser but then replaces the first line of src/main.rs equal to `include!(\"x.rs\");`; a raw string holding such a line before the real include would be rewritten instead. On this repository's tree the case does not occur (all 432 such lines in src/main.rs are the 432 parsed top-level units), and verify rejects the outcome. Fix: replace by the parsed item's source range. To be fixed in the tool in B2's candidate, before B2 uses it. The same round's other Medium, a symbolic link named *.rs under src (:434), was REJECTED by the coordinator under Greg's rule against protections for hypothetical inputs and is not filed.",
+  "acceptance": [
+    "convert replaces the include it parsed, by its source range; a fixture with an identical line inside a raw string before the real include keeps that string unchanged and converts the real include. Or the tool has been removed from master."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "review-low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

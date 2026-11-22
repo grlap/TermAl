@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-cargo-memory-budget-rev16-2026-11-22",
+  "head": {
+    "state": "active",
+    "chain": [
+      "57d7e7a0d28343d19c1f7c45fa1e78b8"
+    ]
+  }
+}

@@ -2,10 +2,10 @@
   "id": "01a14b91-88d1-70d0-8cb7-b3c1cd1bcea1",
   "external_ref": null,
   "title": "Boot loads live-projection sessions eagerly and terminal session history lazily",
-  "outcome": "Boot no longer loads every persisted session with its tails (src/persist_sqlite_transcript_read.rs:14-75) before serving; live-projection members load eagerly and terminal history loads on demand from the archive index, so boot time and memory are bounded by live membership, with no durable change.",
+  "outcome": "Finished delegation children keep no resident transcript: boot reads no tail for them and persistence trims them once their delegation is terminal, while tail, history and result-output reads serve them from SQLite on demand. Roots, live children and children of open delegations keep their tail; summary membership, prompt histories and the delegation inventory are unchanged, with no durable change.",
   "acceptance": [
-    "A boot over a store with more than N terminal sessions serves /api/state before any terminal session's transcript tail is read, proven by a test with an instrumented reader.",
-    "Every archive and per-id history read after boot returns the same content as before this change, covered by tests on a real temporary SQLite store with roots, live children, terminal children and dangling links.",
+    "A boot over a store holding finished delegation children (delegation terminal, child idle or failed, nothing queued, running or pending) reads no transcript tail for those children before /api/state is served, proven by a test that counts tail reads per session on the production boot path; roots, live children and children of open delegations still load their tail.",
+    "Every per-id tail, history page and delegation result-output read after boot returns the same content as before this change for roots, live children, finished children and dangling links, covered by tests on a real temporary SQLite store; a full and a delta persistence while a child is cold, then a follow-up append and a reopen, keep every original position, id and body.",
     "The measured boot duration and resident memory before and after are recorded on the item; the full gate passes on the exact committed tree with a clean independent review pair."
   ],
   "acceptance_bindings": [
@@ -30,9 +30,11 @@
   ],
   "evaluation_mode": null,
   "kind": "feature",
-  "priority": 3,
+  "priority": 0,
   "labels": [
     "boot",
+    "greg-directed",
+    "memory",
     "performance",
     "state-flood"
   ],

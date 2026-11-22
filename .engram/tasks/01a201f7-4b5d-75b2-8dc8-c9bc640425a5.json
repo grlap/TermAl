@@ -1,0 +1,24 @@
+{
+  "id": "01a201f7-4b5d-75b2-8dc8-c9bc640425a5",
+  "external_ref": null,
+  "title": "Cold-transcript candidate recheck scans the whole delegation inventory and card index per candidate under the state lock",
+  "outcome": "A persistence pass that rechecks finished-child candidates builds the delegation-link and card-owner lookups once per pass (or uses an existing index), so its work under StateInner is bounded by one inventory scan rather than one per candidate.",
+  "acceptance": [
+    "Cold-transcript candidate recheck scans the whole delegation inventory and card index per candidate under the state lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

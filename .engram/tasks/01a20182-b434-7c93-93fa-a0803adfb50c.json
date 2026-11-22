@@ -1,0 +1,28 @@
+{
+  "id": "01a20182-b434-7c93-93fa-a0803adfb50c",
+  "external_ref": null,
+  "title": "DL560: sweep 100+ historical .tmp worktree roots by owner release (disk below the launcher's 100 GiB warning)",
+  "outcome": "On 2026-11-22 04:27Z, DL560's test launcher warned that the disk had 93.8 GiB free, below its 100 GiB warning line (C6, I2M-A START, relayed by Opus2 #7485). It was a warning, not a refusal. More than 100 registered worktrees sit under /home/greg/github/TermAl/.tmp (C6's list #4126/#4127): author-*, r/*, 27e5-*, fc7c-*, srb-*, f823-* and similar, mostly historical roots of their owners. Twin of Windows B's w-b92d241c0154. Each root is mapped to the item and owner it served, released by that owner or by the integration owner, and removed by a Codex runner under AGENTS.md \"Cleanup deletions\". Nothing is removed without a release, and roots of the open include! migration (w-f621028c8a08) and of S0 stay until those close.",
+  "acceptance": [
+    "Every .tmp worktree root on DL560 is either mapped to an open item that records its concrete need and end, or released by its owner or the integration owner and removed under AGENTS.md \"Cleanup deletions\", with each removal and the disk free before and after recorded on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "disk",
+    "dl560"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-restart-wave-install-sequence-2026-11-22",
+    "revision_id": "e3b2688e2ce945da89ba56ea335f6f2e",
+    "previous": null,
+    "body_sha256": "a46cacde4c8a058a6128ad1527f1f2a5ac314a2d040bd8fcbb38b15e55d164b4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T00:34:39.741667500Z"
+    }
+  },
+  "body": "Tonight's joint install sequence (Fable2 #7380, agreed with Engram::Fable #8676), keeping the freeze to minutes:\n(0) Both release builds run serially on Central: Engram 5bcd10b8 (Merger), then TermAl `cargo build --release --bin termal` from the master checkout at 487cb4e4, in the SEPARATE target dir target/install-target (memories termal-install-procedure-atomic and install-build-separate-target-then-swap-2026-11-19), so the live exe never disappears. Tell Fable2 when TermAl's binary is BUILT, with its build hash read from the build, never hashed by hand.\n(1) Engram::Fable announces the write freeze. Opus2 relays it verbatim to every TermAl coder and runner (no termal_evaluate_acceptance, no registered launcher runs, no done/gate) and confirms nothing registered is in flight.\n(2) Merger installs engram.exe (records build_fingerprint); Engram::Fable tells Fable2 \"Engram installed\".\n(3) Opus2 installs TermAl at target/release/termal.exe in the master checkout: rename the running exe aside as termal.exe.<sha8>.bak, copy the new one in from the same volume, and record it on w-b646.\n(4) Fable2 sends Greg \"restart now\" with the build hash and the reason.\nAfter the restart: Legal JOB1/JOB2, 5A44-WIN, 7E4F R3 Windows diag, w-f3ee a263e847, c4c0 live check w-e5430c654802, Wave A."
+}

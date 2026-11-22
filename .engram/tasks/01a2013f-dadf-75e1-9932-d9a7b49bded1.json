@@ -1,0 +1,31 @@
+{
+  "id": "01a2013f-dadf-75e1-9932-d9a7b49bded1",
+  "external_ref": null,
+  "title": "include-to-mod tool: verify falsely rejects a unit whose include!() child fragments are not rustfmt-clean",
+  "outcome": "Low from review round B1-PAIR2-B15DCD57 on b15dcd57 (Claude, review-result-d4f996285b1bc9cb9441a4822e771d0b7c9a8497421c2c7a5ccbf52e896ec4bb, scripts/include-to-mod.mjs:896): the reproduction half of verify requires every changed file to equal rustfmt output, but a file that a converted unit still pulls in with include!() is not reached by cargo fmt, so it stays unformatted after convert and the format pass, and verify reports that it differs from the tool's own conversion. A false rejection, never a false acceptance. None of the pilot's 17 units or B2's 48 has include children; 15 remaining units do, among them persist.rs (17 children), workspace_watch.rs (3) and delegation_mcp.rs (2). The tool's header comment about formatting does not hold for those children either. This one is real for a later batch: it MUST be fixed before any batch that carries a unit with include children (ruling of Termal::Fable2, TermAl mailbox 30a7a691 #27 and #29).",
+  "acceptance": [
+    "A fixture unit with an unformatted include!() child converts and verifies without a problem, and the header comment says how such children are treated.",
+    "It is fixed before the first candidate that converts a unit with include children."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "review-low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

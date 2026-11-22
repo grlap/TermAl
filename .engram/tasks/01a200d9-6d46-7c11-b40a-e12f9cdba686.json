@@ -1,0 +1,31 @@
+{
+  "id": "01a200d9-6d46-7c11-b40a-e12f9cdba686",
+  "external_ref": null,
+  "title": "Remove TermAl's review-freeze and review-identity hashing machinery, now superseded by the single shared source_id",
+  "outcome": "Remove TermAl's review-freeze and review-identity hashing machinery, now superseded by the single shared source_id",
+  "acceptance": [
+    "src/review_freeze*.rs, src/review_identity*.rs, src/delegation_mcp_review_freeze.rs, their CLI and integration tests (tests/review_freeze_cli.rs, tests/review_identity_cli.rs, tests/support/review_identity_*) and the termal_review_identity MCP tool are removed, or each remaining piece is shown to have a live caller that the source_id cannot replace, with that caller named on this item.",
+    "No reviewer, gate, audit or landing path asks for a review-freeze fingerprint or a review-identity inventory; docs/features/review-freeze-verification.md is removed or marked historical, and docs that referenced it are updated.",
+    "The full gate passes on the clean candidate commit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "cleanup",
+    "greg-directed",
+    "review-freeze",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

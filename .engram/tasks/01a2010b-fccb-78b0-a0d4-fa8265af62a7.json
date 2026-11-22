@@ -1,0 +1,31 @@
+{
+  "id": "01a2010b-fccb-78b0-a0d4-fa8265af62a7",
+  "external_ref": null,
+  "title": "include! → mod, batch B2: federation mailbox, executor, delivery and entrypoints fragments (48 units)",
+  "outcome": "Second scripted batch of the include! → mod plan recorded on w-e50841447cd8 (batch manifest, Greg's approval 'super wlasnie o to chodzi, oczekuje jakiegos planu i przerostowego poprawiania kodu', Asistant 3ad04090 #5). It converts the 48 fragments that src/main.rs includes from federation_mailbox_errors.rs to mailbox_append_wake.rs, except federation_mailbox_references.rs, which defines a macro another file uses and goes to the hand batch. The conversion is done by scripts/include-to-mod.mjs from the pilot and checked by its verify step; no expression, name, comment or signature changes. No unit in the batch holds platform-conditional code, so it needs no Windows gate. Dry run on the pilot candidate 28fe62ec: 428 definitions, 384 made crate-visible, 44 private; five modules get no re-export (federation_mailbox_directory, federation_mailbox_bindings, federation_mailbox_discovery, federation_mailbox_store, mailbox_append_wake). It lands after the pilot, on the master of that time. It grants no commit, push or restart authority beyond the standing rule.",
+  "acceptance": [
+    "The batch's fragments are ordinary Rust modules declared with mod in src/main.rs, no include! of them remains, the crate compiles for tests and non-tests with no warning that its base does not have, `cargo fmt --check` passes on them, and the existing tests that cover them pass with their bodies unchanged.",
+    "The tool's check passes on the candidate against its base: for every changed file, the candidate with the inserted visibility and wiring removed formats to the same text as the base file.",
+    "The independent review pair has no outstanding in-scope finding of Medium or higher, and the exact landed input passes the standard full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a20177-b866-7ec1-8977-f621028c8a08",
+  "disposal_reason": "Coordinator's ruling, Termal::Fable2 in TermAl mailbox 30a7a691 #39 (2026-11-22 04:13Z), on Greg's direction relayed in 3ad04090 #22 ('Zrobmy migrację jednorazowo...'): one candidate replaces the batch landings B1..B11; the pilot, B2 and B3 are superseded as landings and their reviews stay as evidence for those units and for the tool. B2's candidate e8cfd21b was reviewed clean (B2-PAIR-E8CFD21B) and its 48 units are converted again, by the same tool, in w-f621028c8a08's commit 8d66d70e. Its author-test ref stays until that item's evidence is recorded.",
+  "completion": null
+}

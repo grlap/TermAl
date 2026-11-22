@@ -1,0 +1,28 @@
+{
+  "id": "01a20138-ad50-7e30-bed9-b92d241c0154",
+  "external_ref": null,
+  "title": "Windows B: sweep about 60 GB of historical .tmp/j runner roots of unknown owner",
+  "outcome": "Windows B's read-only size listing (session-5, Win2 relay #21-#25, 2026-11-22 03:05Z, 157 rows) showed C: at about 47.6 GiB free, under the launcher's 50 GiB full floor, with about 100 GB in historical C:/GitHub/Personal/TermAl/.tmp/j roots that session-5 lists as owner UNKNOWN. The coordinator handed ten targets to session-5 for removal the same night: the w-13be1dfe03f9 roots 445e9283, 7752ef3f, bc17730d and d88f4a3f, and the w-64b87934e81a root b26cff16-64b8, each with its -env dir. The remaining roots (the *-lf, *-full, *-env2 and *-a families, eg*-source, and others) still need mapping, by name prefix, to the commit and item they served. Then each one whose items are all closed is removed under AGENTS.md \"Cleanup deletions\". f01b5d1d-65d3 met a policy refusal earlier and needs Greg's word for any forced route. Roots still serving open work stay.",
+  "acceptance": [
+    "Every .tmp/j root on Windows B is either mapped to an open item that records its concrete need and end, or removed under AGENTS.md \"Cleanup deletions\", with the removal and C: free space before and after recorded on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "disk",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

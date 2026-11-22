@@ -1,0 +1,28 @@
+{
+  "id": "01a20164-ab70-7612-9399-d2982d6f0d3f",
+  "external_ref": null,
+  "title": "Enabling Engram for a project does not reach an already-loaded Codex thread: resume overrides are ignored until a cold resume",
+  "outcome": "Observed on the Mac host, 2026-11-22. Comovo's project (project-2, github.com/aolowko/fit_friends) was enabled for Engram with Execution Observability at about 03:50Z: Verify 200, PATCH 200, control-policy 200. The running root session Mac::Comovo (session-6211, Codex CLI/app-server 0.169.0, thread 01a1e002-c866-73e1-95d7-43e43250189a) still had no Engram MCP tools and no ENGRAM_HOME, ENGRAM_ACTOR_ID or ENGRAM_SESSION_ID. Codex logged at 03:42:30Z: \"resume_running_thread: thread/resume overrides ignored for loaded thread …: config overrides were provided and ignored while running\". A fresh read-only child (session-6214, delegation-778d3d64-4e2c-40c9-8484-89f74dec48d6) received the tools and the environment, and its next(peek) and show both returned isError:false. So an operator enabling Engram gets no effect in the already-open session, and TermAl doesn't say so.",
+  "acceptance": [
+    "After a project's Engram enablement changes, a root Codex session whose provider thread is already loaded either receives the Engram MCP tools and environment at its next turn, or TermAl shows the operator that the session needs a resume to receive them. A behaviour test covers the loaded-thread case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "engram",
+    "macos"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

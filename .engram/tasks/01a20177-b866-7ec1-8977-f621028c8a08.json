@@ -1,0 +1,33 @@
+{
+  "id": "01a20177-b866-7ec1-8977-f621028c8a08",
+  "external_ref": null,
+  "title": "include! → mod: the whole migration as one candidate (438 scripted units, then the 11 hand units)",
+  "outcome": "Greg's direction, relayed verbatim by Engram::Asistant in TermAl mailbox 3ad04090 #22 (2026-11-22 04:09Z) and by Termal::Fable2 in 30a7a691 #36: 'Zrobmy migrację jednorazowo. Polegajac na kompilacji i test run ignorując review. Skoro zmiana jest praktycznie mechaniczna?' Asistant adds that Greg explicitly allows skipping review for this migration and is not to be asked that decision again. The coordinator confirmed the shape (30a7a691 #39): one candidate replaces the batch landings B1..B11; it is cut on slice 0's commit bd01930c, so that slice 0 stays its own reviewed and double-gated commit and the fast-forward carries both; the 11 hand units are included, each listed in the handoff with what was changed by hand, and a unit that needs more than moving code, setting visibility and wiring stays an include! and follows separately; diagnostic text a human reads may change when listed, anything stored, sent on a wire, matched by a filter or asserted by a test must not. Every fragment src/main.rs includes becomes an ordinary module: 438 by scripts/include-to-mod.mjs, checked by its verify step, and the 11 the tool refuses by hand. Evidence is the tool's verify, compiles and full gates on Linux and Windows; no review pair. Nothing lands on this basis without Greg's own word in the integration owner's session (Commit and push section: a relayed word does not carry a commit or push outside the standing rule). It grants no commit, push or restart authority.",
+  "acceptance": [
+    "Every .rs fragment that src/main.rs included on the base is an ordinary Rust module declared with mod, except the units the handoff names as left for a follow-up, each with its reason.",
+    "The tool's check passes with no problem on the scripted commit against its base: for every changed file, the candidate equals the tool's own conversion of the base, and with the inserted visibility and wiring removed it formats to the same text as the base file.",
+    "The crate compiles for tests and non-tests on Linux and on Windows with no warning its base does not have, and cargo fmt --check passes; a macOS cargo check is run on the exact candidate if a macOS runner is available, and otherwise the handoff states that macOS was not compiled.",
+    "The standard full gate passes on the exact landed input on Linux and on Windows.",
+    "The handoff lists each unit converted by hand with what was changed by hand, and each known observable difference; none of them changes anything stored, sent on a wire, matched by a filter or asserted by a test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 0,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

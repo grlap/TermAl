@@ -1,0 +1,32 @@
+{
+  "id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "external_ref": null,
+  "title": "include! → mod: scripted, behaviour-preserving conversion of the main.rs fragments (method, tool, pilot batch)",
+  "outcome": "Greg's word, relayed by Engram::Asistant in TermAl mailbox 3ad04090 #1 (2026-11-22 01:27Z): 'ok, chce aby Termal::Fable52 zaczelo poprawiac include!', as an exception to the current hold on Engram and TermAl work. State found: src/main.rs still assembles the backend from 451 include! lines; neither pilot slice has landed (host_log 7a538a07 under w-6296abac468a sits on base 381acc63e; process_limits 43ac5c54 under w-ba1a8582bd9f was reviewed clean on base 63cdb117, and master 487cb4e4 has since changed src/main.rs, so it is no longer byte-identical). At one hand-made slice per day the staged plan on w-6296abac468a does not finish. This item makes the conversion repeatable: a small tool turns a chosen set of fragments into ordinary modules (`mod x;` plus `use x::*;` in main.rs, `use super::*;` in the file) and inserts `pub(crate)` only where a name is used from another file, so file-local items become private for real. A batch is checkable mechanically: removing the inserted visibility tokens and the wiring lines gives back the base text. The glob imports are a stated intermediate step, not the goal; replacing them with explicit imports and narrower facades follows per family once the fragments are modules. This item covers the method, the tool, a pilot batch landed under the standing rule, and measured compile time and memory before and after. Further batches are their own items. It grants no commit, push or restart authority beyond the standing rule.",
+  "acceptance": [
+    "The conversion method is recorded on the item: the rule that decides each inserted pub(crate), the glob imports it leaves behind, and the mechanical check showing that a batch adds only module wiring and visibility tokens.",
+    "The pilot batch's fragments are ordinary Rust modules declared with mod in src/main.rs, no include! of them remains, the crate compiles for tests and non-tests with no new warnings, `cargo fmt --check` passes on them, and the existing tests that cover them pass unchanged.",
+    "cargo check wall time and peak memory, before and after the pilot batch on the same machine, are recorded on the item.",
+    "The independent review pair has no outstanding in-scope finding of Medium or higher, and the exact landed input passes the standard full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

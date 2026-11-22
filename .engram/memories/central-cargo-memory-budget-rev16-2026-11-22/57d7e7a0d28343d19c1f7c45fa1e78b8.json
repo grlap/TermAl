@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-cargo-memory-budget-rev16-2026-11-22",
+    "revision_id": "57d7e7a0d28343d19c1f7c45fa1e78b8",
+    "previous": null,
+    "body_sha256": "ec59d20698a18b8af1243055149a7b6582ca8c7679e00ccc0c4d864c78958868",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T05:34:44.772198900Z"
+    }
+  },
+  "body": "CONTINUATION of central-cargo-memory-budget-2026-11-05, which is full at 8 KiB with rev 15; read both. REV 16 (Opus2, 2026-11-22 05:35Z, on Greg's word).\n\nGreg read 29.22 GiB physical and 20.79 GiB FreeVirtualMemory with Chrome closed and wrote, verbatim (relayed by Engram::Asistant 588693a8 #2504 and TermAl mailbox #78, applied by Fable2 #7500): „korwa, jest wszystko wylaczone, zmiencie ustawienie i do roboty WTF 20GB”.\n\nNEW FLOOR: a COLD -j1 SINGLE leg on Central needs FV (FreeVirtualMemory, raw KiB, never physical) >= 18,874,368 KiB (18 GiB), read twice and stable. This replaces 23,068,672 / 25,165,824 for that lane, with immediate effect.\n\nUnchanged:\n- one leg at a time, nothing beside it;\n- no new LLM spawn from a cold build's start to its link end;\n- record any dip below 12 GiB as an incident;\n- the owner self-stops at 6 GiB;\n- nobody kills a process;\n- the time-critical rule.\n\nRisk to watch, from rev 14's measurement: a cold -j1 --bin termal compile drops FV by about 13 GiB at its peak. From about 20.6 GiB that leaves about 7.6 GiB, below the 12 GiB incident line and above the 6 GiB stop. Read FV during each such leg and record the low.\n\nFirst use: S0 credit leg 1 (w-6296abac468a, host_log 7 --exact) launched at 05:34Z, with FV 21,555,436 / 21,582,004 KiB."
+}

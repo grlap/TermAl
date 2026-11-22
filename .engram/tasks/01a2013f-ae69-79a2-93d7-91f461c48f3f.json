@@ -1,0 +1,30 @@
+{
+  "id": "01a2013f-ae69-79a2-93d7-91f461c48f3f",
+  "external_ref": null,
+  "title": "include-to-mod tool: a rustfmt import reorder in main.rs makes verify reject the tool's own output",
+  "outcome": "Low from review round B1-PAIR2-B15DCD57 on b15dcd57 (Codex, review-result-56fcd943ec8e908cff16f0ecae91022abef126944833f6a1619c50773149d008, scripts/include-to-mod.mjs:947): when an include line in src/main.rs is directly followed by a `use` line, rustfmt sorts the generated `use x::*;` together with it, and the content half of verify, which expects the generated glob right after `mod x;`, rejects the tool's own output. A false rejection, never a false acceptance. On b15dcd57 no include line is directly followed by a `use` line, so no current batch is affected. Fix: find the generated glob within the formatted import group, or keep it in a group of its own. To be fixed in the tool in B2's candidate (ruling of Termal::Fable2, TermAl mailbox 30a7a691 #29).",
+  "acceptance": [
+    "A fixture whose include line is directly followed by a `use` line converts, formats and verifies without a problem; or the tool has been removed from master."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "review-low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

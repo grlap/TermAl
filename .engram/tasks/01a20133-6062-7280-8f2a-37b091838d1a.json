@@ -1,0 +1,29 @@
+{
+  "id": "01a20133-6062-7280-8f2a-37b091838d1a",
+  "external_ref": null,
+  "title": "Git fixture tests fail when the runner's environment sets GIT_ALLOW_PROTOCOL",
+  "outcome": "Observed on Windows B, S0 FULL test-4f73bcbb-7a69-40b6-a40d-2c79c4ec03eb (commit bd01930c, 2026-11-22 02:17-02:59Z). The runner carried GIT_ALLOW_PROTOCOL=https from its fetch isolation into the launcher's test child. Git treats that variable as protocol.allow=never plus an explicit allow-list that overrides protocol.<name>.allow config, so the suite's own `-c protocol.file.allow=always` no longer permits local fixture transport. 13 Rust tests failed, all with \"fatal: transport 'file' not allowed\": submodule, push and sync fixtures in tests::git, tests::acceptance_evaluation::sighting::committed_input, tests::test_runs::engram_verification_record::declared and tests::test_runs::test_run_registration::clone_binding. The same commit passed its Linux FULL test-5db67132 without the variable. Primary cause: the runner's invocation (classified runner/environment). This item covers the test side: the fixtures' git child processes already pin protocol.file.allow, but they inherit GIT_ALLOW_PROTOCOL, so a runner environment that has really occurred defeats them.",
+  "acceptance": [
+    "The Rust test suite's local Git fixtures run with the permissions they declare, whatever GIT_ALLOW_PROTOCOL the parent environment sets, without allowing any transport beyond local file transport.",
+    "A test run with GIT_ALLOW_PROTOCOL=https set in the launching environment passes the tests that failed on Windows B in test-4f73bcbb."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-hermeticity",
+    "tests",
+    "windows-b"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

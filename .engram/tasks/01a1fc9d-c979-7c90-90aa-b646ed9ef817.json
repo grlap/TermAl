@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "TermAl reads the shared Git-delta source identity throughout the launcher, host, admission and remote verification, with historical records preserved as stored. Landed exact 487cb4e4, full Windows gate PASS and clean independent pair. Both installed releases switched at Greg's 01:14:16Z joint restart. Post-restart registered focused verification PASS 12/12 in the new wire format; fresh independent post-landing evaluation e3d7a047c2b04831b5f2ec6a4e826494 passed all three criteria. Exact master confirmed; authored R5 and R6 test refs deleted at 01:25:24Z/01:25:27Z on Nov 22 (push records 03ce22c316e64a8ea1ca666d1bc42031 and d6bddc1c2ff249a0bc47fd0a9d019eaa), carried author-test ref deleted earlier as recorded in f3dec9cd77f84d1d8e2380a489d7df15. All three absent on readback.",
+    "completed_at": "2026-11-22T01:25:59.750868900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

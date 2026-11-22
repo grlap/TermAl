@@ -1,0 +1,30 @@
+{
+  "id": "01a20127-eb7b-7e72-964f-74e8a774d65b",
+  "external_ref": null,
+  "title": "include-to-mod test file runs outside the launcher's helper tests; remove it with the tool or add it to helperTestFiles",
+  "outcome": "Low from the Claude reviewer of the include! pilot pair B1-PAIR-28FE62EC (review-result-3c758eed, 2026-11-22): scripts/include-to-mod.test.mjs is not listed in the test launcher's helperTestFiles, so the full gate does not run it. Coordinator ruling (Fable2 to Fable52 #10): the tool is temporary, so its test stays out of the launcher and runs as a focused command on every candidate that carries the tool. Filed as its own item under the commit rule's Low clause. It closes when the tool and its test are removed with the last fragment, or earlier if the test is added to helperTestFiles.",
+  "acceptance": [
+    "scripts/include-to-mod.mjs and scripts/include-to-mod.test.mjs are removed from master, or scripts/include-to-mod.test.mjs is run by the launcher's full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "review-low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

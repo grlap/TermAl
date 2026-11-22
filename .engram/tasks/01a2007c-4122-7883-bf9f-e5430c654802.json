@@ -17,12 +17,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Verified the deployed read-only Claude Bash gate on TermAl 487cb4e4 with Engram 5bcd10b8. The real Comovo Claude review ran the exact source command on a dirty root and received a complete source_id matching the baseline at all recorded boundaries. The separate dirty-worktree probe also passed, and its disposable worktree was removed. Independent evaluation a15a843cfb0e4f19bd0099449c9526a6 passed the unchanged criterion.",
+    "completed_at": "2026-11-22T01:28:36.485080Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

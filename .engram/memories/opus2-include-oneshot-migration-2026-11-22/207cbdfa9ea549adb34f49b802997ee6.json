@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-include-oneshot-migration-2026-11-22",
+    "revision_id": "207cbdfa9ea549adb34f49b802997ee6",
+    "previous": null,
+    "body_sha256": "a55f0edf333672b7a47f95b2371e29892e31cfa41831848dd851648e58958105",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-22T04:14:16.065239900Z"
+    }
+  },
+  "body": "Opus2 integration plan for the ONE-SHOT include! -> mod migration. Greg's proposal came via Asistant #76 and #2484; Fable2 ruled in #7481, #7483 and #7484.\n\nCandidate:\n- ONE candidate, cut by Termal::Fable52 (19461) on BASE bd01930c155bd15641a6615b37bd87215db02444 (S0's reviewed commit, whose parent is master 487cb4e4). The ff carries S0 plus the migration.\n- It replaces B1..B11. Pilot b15dcd57 (w-e50841447cd8), B2 e8cfd21b (w-fa8265af62a7) and B3 (w-6bc9f4390e7f) are superseded as landings; their reviews stay as evidence.\n- The 11 hand units are in, each listed with what was changed by hand. Anything beyond move, visibility and wiring stays an include!.\n- Units whose module path is observable stay include!: module_path!() (coordination_persist.rs:1121), std::any::type_name (remote_routes.rs:588), and tracing default targets.\n- Diagnostic stderr changes are OK if listed. Nothing stored, sent on a wire, matched by a filter or asserted by a test may change.\n\nGates, per iteration:\n- One compile leg each on DL560 (fmt, cargo check, test --no-run, warnings equal to baseline 10/32, tool tests, verify) and Windows B.\n- Then both FULLs in parallel: DL560 from a test ref, and Windows B hostless plain with GIT_ALLOW_PROTOCOL ABSENT and a short TERMAL_TEST_USER_TEMP.\n- Windows B has a one-repeat rule for environment crashes only.\n- macOS cargo check only if macOS-conditional code moves.\n\nFREEZE: no other TermAl src landing from Fable52's cut report until the migration lands.\n\nLANDING: NO review pair, so it is outside the standing rule. It lands ONLY on Greg's OWN word typed in Opus2's session. Never on a relay from Fable2, Asistant or anyone else.\n\nS0's Central credit legs (w-6296 focused 7 names, w-ba1a nofile_ 26) are needed only to CLOSE w-6296 and w-ba1a, not to land. S0's gates: FULL test-5db67132 (DL560) and Windows test-aef36eb2 (Windows B), both PASS and equal to source_id c519c86b."
+}

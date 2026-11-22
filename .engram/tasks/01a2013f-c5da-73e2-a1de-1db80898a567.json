@@ -1,0 +1,31 @@
+{
+  "id": "01a2013f-c5da-73e2-a1de-1db80898a567",
+  "external_ref": null,
+  "title": "include-to-mod tests: two M2 tampering fixtures do not discriminate the fix",
+  "outcome": "Low from review round B1-PAIR2-B15DCD57 on b15dcd57, found independently by both reviewers (Codex review-result-56fcd943ec8e908cff16f0ecae91022abef126944833f6a1619c50773149d008; Claude review-result-d4f996285b1bc9cb9441a4822e771d0b7c9a8497421c2c7a5ccbf52e896ec4bb; scripts/include-to-mod.test.mjs:400 and :405): the fixtures 'a use super::* placed inside a function body' and 'a pub(crate) slipped into macro input' would have failed the old verifier too, the first because it adds a second glob while keeping the first, the second because it adds a whole statement. They therefore do not show that the reproduction half closed the first round's M2. Fix: move the sole generated `use super::*;` into the function instead of adding one, and use a base that already holds `stringify!(fn)` so that the only difference is the token inside the macro input. M2 stays pinned meanwhile by the fixtures 'a pub(crate) where the plan puts none' and 'a pub(crate) the plan puts that is missing', which the old verifier accepted. To be fixed in B2's candidate (ruling of Termal::Fable2, TermAl mailbox 30a7a691 #29).",
+  "acceptance": [
+    "Each of the two fixtures differs from an accepted conversion only by the misplaced token it names, and fails against the content half alone; or the tool and its test have been removed from master."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "review-low",
+    "rust",
+    "test-design"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

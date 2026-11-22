@@ -1,0 +1,24 @@
+{
+  "id": "01a2019c-ab5c-7910-b9ce-9f04ed83769e",
+  "external_ref": null,
+  "title": "Project digest loses the latest-progress summary when that progress is in a cold finished delegation child",
+  "outcome": "The project digest reports the same latest-progress summary and source message for a project whose latest work is a finished delegation child whose transcript is no longer resident, by capturing that summary off-lock with a recheck or by retaining the bounded summary fields.",
+  "acceptance": [
+    "Project digest loses the latest-progress summary when that progress is in a cold finished delegation child is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a2013f-9be8-7cd1-afc9-3bfc8a019503",
+  "external_ref": null,
+  "title": "include-to-mod tool: --expose ignores a name written with r#",
+  "outcome": "Low from review round B1-PAIR2-B15DCD57 on b15dcd57 (Codex, review-result-56fcd943ec8e908cff16f0ecae91022abef126944833f6a1619c50773149d008, scripts/include-to-mod.mjs:781): --expose keeps the names it is given verbatim, while definitions are keyed by their plain name, so `--expose r#helper` exposes nothing and verify with the same option accepts that. Normalise the option's values the same way. To be fixed in the tool in B2's candidate (ruling of Termal::Fable2, TermAl mailbox 30a7a691 #29).",
+  "acceptance": [
+    "A name passed to --expose as r#x is treated as x by convert and by verify, shown by a fixture test; or the tool has been removed from master."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "review-low",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
