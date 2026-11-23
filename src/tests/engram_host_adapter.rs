@@ -5382,6 +5382,132 @@ fn ordinary_rotation_preserves_healthy_runtimes_when_quarantine_clears_during_va
 }
 
 #[test]
+fn enabling_engram_warns_that_a_loaded_shared_codex_thread_needs_a_cold_resume() {
+    let state = test_app_state();
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join("engram-enable-loaded-codex");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join(".engram-project"), "fixture-ready\n").unwrap();
+    let project = create_test_project(&state, &root, "Engram enablement on a loaded thread");
+    let attached = create_test_project_session(&state, Agent::Codex, &project, &root);
+    let stopped = create_test_project_session(&state, Agent::Codex, &project, &root);
+    let unloaded = create_test_project_session(&state, Agent::Codex, &project, &root);
+
+    let process = phase_sync::ParkedProcess::spawn();
+    let (input_tx, input_rx) = mpsc::channel();
+    let attached_thread = "loaded-before-engram";
+    let stopped_thread = "stopped-before-engram";
+    let runtime = SharedCodexRuntime {
+        runtime_id: "engram-enable-loaded-codex".to_owned(),
+        input_tx,
+        process: process.process.clone(),
+        sessions: SharedCodexSessions::new(),
+        thread_sessions: Arc::new(Mutex::new(HashMap::new())),
+        stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+    };
+    install_single_wire_codex_fixture(&state, Some(runtime.clone()));
+    {
+        let mut inner = state.inner.lock().unwrap();
+        for (id, thread, turn) in [
+            (&attached, Some(attached_thread), None),
+            (&stopped, Some(stopped_thread), Some("turn-to-stop")),
+            (&unloaded, None, None),
+        ] {
+            runtime.sessions.lock().unwrap().insert(
+                id.clone(),
+                SharedCodexSessionState {
+                    thread_id: thread.map(str::to_owned),
+                    turn_id: turn.map(str::to_owned),
+                    ..Default::default()
+                },
+            );
+            if let Some(thread) = thread {
+                runtime
+                    .thread_sessions
+                    .lock()
+                    .unwrap()
+                    .insert(thread.to_owned(), id.clone());
+            }
+            let record = inner.session_mut(id).unwrap();
+            record.runtime = SessionRuntime::Codex(CodexRuntimeHandle {
+                runtime_id: runtime.runtime_id.clone(),
+                input_tx: runtime.input_tx.clone(),
+                process: runtime.process.clone(),
+                shared_session: Some(SharedCodexSessionHandle {
+                    runtime: runtime.clone(),
+                    session_id: id.clone(),
+                }),
+            });
+            set_record_external_session_id(record, thread.map(str::to_owned));
+            if turn.is_some() {
+                record.session.status = SessionStatus::Active;
+            }
+        }
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let input_rx = std::thread::scope(|scope| {
+        let acknowledge_interrupt = scope.spawn(move || {
+            let CodexRuntimeCommand::InterruptTurn {
+                thread_id,
+                turn_id,
+                response_tx,
+            } = phase_sync::receive(&input_rx, "Stop interrupts the loaded Codex thread")
+            else {
+                panic!("expected the Codex interrupt request");
+            };
+            assert_eq!(thread_id, stopped_thread);
+            assert_eq!(turn_id, "turn-to-stop");
+            response_tx.send(Ok(())).unwrap();
+            input_rx
+        });
+        state.stop_session(&stopped).unwrap();
+        acknowledge_interrupt.join().unwrap()
+    });
+
+    state
+        .update_project_engram_settings(&project, real_fixture_engram_settings(&root))
+        .unwrap();
+
+    let inner = state.inner.lock().unwrap();
+    let stopped_record = &inner.sessions[inner.find_session_index(&stopped).unwrap()];
+    assert!(matches!(stopped_record.runtime, SessionRuntime::None));
+    for (id, expected_thread) in [(&attached, attached_thread), (&stopped, stopped_thread)] {
+        let record = &inner.sessions[inner.find_session_index(id).unwrap()];
+        assert_eq!(record.external_session_id.as_deref(), Some(expected_thread));
+        assert!(
+            record.session.messages.iter().any(|message| matches!(
+                message,
+                Message::Text { text, .. } if text.contains("Engram")
+                    && text.contains("cold resume") && text.contains("new Codex session")
+            )),
+            "the operator must see the cold-resume advice and workaround for {expected_thread}"
+        );
+        assert!(!record.session.messages.iter().any(|message| matches!(
+            message,
+            Message::Text { text, .. } if text.contains("Engram") && text.contains("on the next send")
+        )));
+    }
+    let unloaded = &inner.sessions[inner.find_session_index(&unloaded).unwrap()];
+    assert!(unloaded.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text.contains("Engram") && text.contains("on the next send")
+    )));
+    assert!(!unloaded.session.messages.iter().any(|message| matches!(
+        message,
+        Message::Text { text, .. } if text.contains("cold resume")
+    )));
+    assert!(matches!(
+        input_rx.try_recv(),
+        Err(mpsc::TryRecvError::Empty)
+    ));
+}
+
+#[test]
 fn ordinary_connection_rotation_marks_all_runtime_families_for_the_next_send() {
     let (state, root, project, ids) = ordinary_runtime_family_fixture("connection-rotation");
     let old_tokens = {

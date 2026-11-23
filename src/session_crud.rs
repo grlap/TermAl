@@ -450,25 +450,38 @@ pub(crate) fn normalize_engram_host_settings(
     })
 }
 
-fn append_engram_mcp_notices_locked(
+fn append_engram_mcp_rotation_notices_locked(
     inner: &mut StateInner,
     session_ids: &[String],
-    notice: &str,
 ) -> Vec<(String, usize)> {
+    const NEXT_SEND: &str = "Engram connection changed. This runtime will use the current configuration on the next send.";
+    const COLD_RESUME: &str = "Engram connection changed. If this Codex thread is still loaded, it needs a cold resume to pick up the new settings. Open a new Codex session in this project to use Engram now.";
     let mut previous_message_lengths = Vec::new();
     for session_id in session_ids {
         let Some(index) = inner.find_session_index(session_id) else {
             continue;
         };
-        if !inner.sessions[index].is_local_session()
-            || matches!(inner.sessions[index].runtime, SessionRuntime::None)
-        {
+        let record = &inner.sessions[index];
+        if !record.is_local_session() {
             continue;
         }
-        previous_message_lengths.push((
-            session_id.clone(),
-            inner.sessions[index].session.messages.len(),
-        ));
+        let resumable_root_codex = record.session.agent == Agent::Codex
+            && record.session.parent_delegation_id.is_none()
+            && record.external_session_id.is_some()
+            && !record_has_archived_codex_thread(record);
+        // Stop clears TermAl's attachment but can leave the provider thread
+        // loaded in the shared app-server, where a warm resume ignores config.
+        let notice = match &record.runtime {
+            SessionRuntime::None if resumable_root_codex => COLD_RESUME,
+            SessionRuntime::None => continue,
+            SessionRuntime::Codex(handle)
+                if resumable_root_codex && handle.shared_session.is_some() =>
+            {
+                COLD_RESUME
+            }
+            _ => NEXT_SEND,
+        };
+        previous_message_lengths.push((session_id.clone(), record.session.messages.len()));
         let message_id = inner.next_message_id();
         let record = inner
             .session_mut_by_index(index)
@@ -487,14 +500,6 @@ fn append_engram_mcp_notices_locked(
         );
     }
     previous_message_lengths
-}
-
-fn append_engram_mcp_rotation_notices_locked(
-    inner: &mut StateInner,
-    session_ids: &[String],
-) -> Vec<(String, usize)> {
-    const NOTICE: &str = "Engram connection changed. This runtime will use the current configuration on the next send.";
-    append_engram_mcp_notices_locked(inner, session_ids, NOTICE)
 }
 
 #[cfg(test)]
