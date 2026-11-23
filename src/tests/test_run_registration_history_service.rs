@@ -1,29 +1,31 @@
 // Owns the candidate loopback router and an actual SQLite fence writer.
 // Teardown releases every worker before the repository-local root is removed.
 
-struct HistoryService {
-    state: Option<AppState>,
-    runtime: Option<tokio::runtime::Runtime>,
-    server: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
-    stop: Option<tokio::sync::oneshot::Sender<()>>,
-    writer: Option<std::thread::JoinHandle<()>>,
-    broadcaster: Option<std::thread::JoinHandle<()>>,
+use super::*;
+
+pub(super) struct HistoryService {
+    pub(super) state: Option<AppState>,
+    pub(super) runtime: Option<tokio::runtime::Runtime>,
+    pub(super) server: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
+    pub(super) stop: Option<tokio::sync::oneshot::Sender<()>>,
+    pub(super) writer: Option<std::thread::JoinHandle<()>>,
+    pub(super) broadcaster: Option<std::thread::JoinHandle<()>>,
     broadcast_stop: Arc<AtomicBool>,
     broadcast_barrier: mpsc::Receiver<()>,
-    events: broadcast::Receiver<SseStreamEvent>,
-    scan: Option<std::thread::JoinHandle<HistoryReads>>,
-    release_id: Option<String>,
-    commits: Arc<Mutex<HashMap<String, std::time::Instant>>>,
+    pub(super) events: broadcast::Receiver<SseStreamEvent>,
+    pub(super) scan: Option<std::thread::JoinHandle<HistoryReads>>,
+    pub(super) release_id: Option<String>,
+    pub(super) commits: Arc<Mutex<HashMap<String, std::time::Instant>>>,
     // One-shot schedule hook: the writer reports it reached its next tick,
     // then waits for release before draining or collecting anything.
     writer_gate: Arc<Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>>,
-    root: PathBuf,
-    cleaned: mpsc::Receiver<std::result::Result<(), String>>,
-    url: String,
+    pub(super) root: PathBuf,
+    pub(super) cleaned: mpsc::Receiver<std::result::Result<(), String>>,
+    pub(super) url: String,
 }
 
 impl HistoryService {
-    fn new(mut state: AppState) -> Self {
+    pub(super) fn new(mut state: AppState) -> Self {
         let root = state.test_temp_root.as_ref().unwrap().path().to_owned();
         let cleaned = state.test_temp_root.as_ref().unwrap().observe_cleanup();
         // Reload the real baseline before serving; no registration state is
@@ -153,7 +155,7 @@ impl HistoryService {
     /// Holds the writer at its next tick: returns the receiver that reports
     /// the writer reached it and the sender that releases it. Dropping the
     /// sender also releases it.
-    fn hold_next_writer_tick(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    pub(super) fn hold_next_writer_tick(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (reached_tx, reached_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         assert!(
@@ -166,7 +168,7 @@ impl HistoryService {
         (reached_rx, release_tx)
     }
 
-    fn serialized_failure_events(&mut self) -> String {
+    pub(super) fn serialized_failure_events(&mut self) -> String {
         // FIFO drain marker only, matching the established publication fixture.
         // It supplies no state, SQL completion, revision, or registration proof.
         self.state
@@ -194,7 +196,7 @@ impl HistoryService {
         observed
     }
 
-    fn stop_all(&mut self) -> Vec<String> {
+    pub(super) fn stop_all(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
         // Closing an unconsumed handshake releases the scanner on every panic
         // path. It keeps its normal serialization guard until it returns.

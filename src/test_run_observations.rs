@@ -5,9 +5,14 @@
 
 use super::*;
 
-include!("test_run_projection.rs");
-include!("test_run_declared_settlement.rs");
-include!("test_run_untraced_declared.rs");
+#[path = "test_run_projection.rs"]
+mod test_run_projection;
+pub(crate) use test_run_projection::*;
+#[path = "test_run_declared_settlement.rs"]
+mod test_run_declared_settlement;
+
+#[path = "test_run_untraced_declared.rs"]
+mod test_run_untraced_declared;
 
 #[cfg(test)]
 thread_local! {

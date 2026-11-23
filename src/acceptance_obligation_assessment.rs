@@ -18,6 +18,8 @@
 // Split from: new code, included from acceptance_evidence_selection.rs beside
 // the exact record reads it extends.
 
+use super::*;
+
 /// At most this many pages of one record's assessment are read. The tracker
 /// gives 8 rows a page, so 32 pages read 256 rows.
 const MAX_ACCEPTANCE_ASSESSMENT_PAGES_PER_RECORD: usize = 32;

@@ -28,7 +28,9 @@ const TEST_RUN_WAIT_MANDATORY_MAX_BYTES: usize = 48 * 1024;
 pub(crate) const TEST_RUN_WAIT_PROMPT_MAX_BYTES: usize = 64 * 1024;
 /// One run's failure excerpt, at most.
 pub(crate) const TEST_RUN_WAIT_EXCERPT_MAX_BYTES: usize = 8 * 1024;
-include!("test_run_wait_observations.rs");
+#[path = "test_run_wait_observations.rs"]
+mod test_run_wait_observations;
+pub(crate) use test_run_wait_observations::*;
 /// How long registration waits for the forced rescan when an id is unknown.
 #[cfg(not(test))]
 const TEST_RUN_WAIT_FORCED_RESCAN_BOUND: Duration = Duration::from_secs(1);

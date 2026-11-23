@@ -6,7 +6,9 @@
 use super::*;
 
 // The whole obligation assessment of each indexed verification record.
-include!("acceptance_obligation_assessment.rs");
+#[path = "acceptance_obligation_assessment.rs"]
+mod acceptance_obligation_assessment;
+pub(crate) use acceptance_obligation_assessment::*;
 
 pub(crate) const MAX_ACCEPTANCE_SELECTED_RECORDS: usize = 16;
 pub(crate) const MAX_ACCEPTANCE_BINDING_EVIDENCE_PAGES: usize = 16;

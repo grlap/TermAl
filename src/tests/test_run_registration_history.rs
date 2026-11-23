@@ -4,10 +4,17 @@
 // Does not change launcher budgets, fake durability, or measure the old host.
 use super::*;
 
-include!("test_run_registration_history_seed.rs");
-include!("test_run_registration_history_service.rs");
-include!("test_run_registration_history_clock.rs");
-include!("test_run_registration_view.rs");
+#[path = "test_run_registration_history_seed.rs"]
+mod test_run_registration_history_seed;
+use test_run_registration_history_seed::*;
+#[path = "test_run_registration_history_service.rs"]
+mod test_run_registration_history_service;
+use test_run_registration_history_service::*;
+#[path = "test_run_registration_history_clock.rs"]
+mod test_run_registration_history_clock;
+use test_run_registration_history_clock::*;
+#[path = "test_run_registration_view.rs"]
+mod test_run_registration_view;
 
 #[derive(Default)]
 struct HistoryReads {

@@ -2,6 +2,8 @@
 // large source identities. Included beside the existing owned HistoryService;
 // no live store, source capture, stage execution or verification credit.
 
+use super::*;
+
 #[test]
 fn large_source_registration_uses_the_bounded_view_and_keeps_full_detail() {
     let _placement = TestTempRootDirectoryScope::repository_local();

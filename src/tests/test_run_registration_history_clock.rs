@@ -8,8 +8,10 @@
 // structural history case, or the scheduled real-time measurement.
 // New file, not split from another.
 
+use super::*;
+
 /// A served registration fixture whose budget clock is a scripted one.
-fn clock_service(label: &str) -> (HistoryService, PathBuf, String, EngramBudgetClock) {
+pub(super) fn clock_service(label: &str) -> (HistoryService, PathBuf, String, EngramBudgetClock) {
     let state = test_app_state();
     let root = state
         .test_temp_root
@@ -31,7 +33,11 @@ fn clock_service(label: &str) -> (HistoryService, PathBuf, String, EngramBudgetC
 }
 
 /// Writes one launcher request; returns its run id and run directory.
-fn clock_registration_request(root: &FsPath, owner: &str, case: &str) -> (String, PathBuf) {
+pub(super) fn clock_registration_request(
+    root: &FsPath,
+    owner: &str,
+    case: &str,
+) -> (String, PathBuf) {
     let id = format!("test-clock-{case}-{}", Uuid::new_v4());
     let directory = root.join(".git").join("review-runs").join(&id);
     fs::create_dir_all(&directory).unwrap();
@@ -75,7 +81,7 @@ fn post_clock_registration(
     })
 }
 
-fn finish_clock_service(mut service: HistoryService, outcome: std::thread::Result<()>) {
+pub(super) fn finish_clock_service(mut service: HistoryService, outcome: std::thread::Result<()>) {
     let cleanup_errors = service.stop_all();
     if let Err(panic) = outcome {
         for error in cleanup_errors {

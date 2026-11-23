@@ -2,6 +2,8 @@
 // detail route. Selection and identity fences stay with the existing exact
 // query; this projection never truncates or changes durable run evidence.
 
+use super::*;
+
 #[derive(Deserialize)]
 pub(crate) struct TestRunDetailQuery {
     pub(crate) view: Option<TestRunDetailView>,
@@ -16,7 +18,7 @@ pub(crate) enum TestRunDetailView {
 
 const TEST_RUN_REGISTRATION_CONFIRMATION_MAX_BYTES: usize = 64 * 1024;
 
-fn test_run_registration_confirmation(
+pub(super) fn test_run_registration_confirmation(
     response: TestRunDetailResponse,
 ) -> Result<Response, ApiError> {
     let bound = response.registration_bound;

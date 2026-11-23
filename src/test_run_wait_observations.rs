@@ -1,6 +1,8 @@
 // Host observations in the existing run wait. Owns source identity and lookup,
 // not command recognition, artifact judging, verification or a separate queue.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TestRunWaitObservationLabel {
@@ -34,7 +36,7 @@ impl TestRunWaitObservationLabel {
 
 // Resolve the actual execution identity, including installed retained proof.
 // No global overview, artifact rescan or prefix alone can invent a row.
-fn test_run_wait_exact_observation<'a>(
+pub(super) fn test_run_wait_exact_observation<'a>(
     inner: &'a StateInner,
     id: &str,
 ) -> Option<&'a TestRunCommandObservation> {
@@ -53,7 +55,9 @@ fn test_run_wait_exact_observation<'a>(
     retained.next().is_none().then_some(row)
 }
 
-fn test_run_wait_observation_run_label(row: &TestRunCommandObservation) -> TestRunWaitRunLabel {
+pub(super) fn test_run_wait_observation_run_label(
+    row: &TestRunCommandObservation,
+) -> TestRunWaitRunLabel {
     TestRunWaitRunLabel {
         remote: None,
         observation: Some(TestRunWaitObservationLabel::from_row(row)),
@@ -70,7 +74,7 @@ fn test_run_wait_observation_run_label(row: &TestRunCommandObservation) -> TestR
     }
 }
 
-fn test_run_wait_matching_observation<'a>(
+pub(super) fn test_run_wait_matching_observation<'a>(
     inner: &'a StateInner,
     label: &TestRunWaitRunLabel,
 ) -> Option<&'a TestRunCommandObservation> {
@@ -82,7 +86,7 @@ fn test_run_wait_matching_observation<'a>(
         .then_some(row)
 }
 
-fn test_run_wait_observation_verdict(
+pub(super) fn test_run_wait_observation_verdict(
     inner: &StateInner,
     label: &TestRunWaitRunLabel,
     project_removed: bool,
@@ -113,7 +117,7 @@ fn test_run_wait_observation_verdict(
     })
 }
 
-fn test_run_wait_observation_section(
+pub(super) fn test_run_wait_observation_section(
     label: &TestRunWaitRunLabel,
     summary: Option<&TestRunSummary>,
     verdict: Option<TestRunWaitVerdict>,

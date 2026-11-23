@@ -1,10 +1,12 @@
 // Owns the read-only agent facade over existing federation/utilization HTTP
 // projections. Does not sample, infer link authority, persist, or recover peers.
 // New bridge adapter; runtime and projection owners remain unchanged.
+
+use super::*;
 const AGENT_FEDERATION_SOURCE_BYTES: u64 = 18 * 1024 * 1024;
 const AGENT_FEDERATION_OUTPUT_BYTES: usize = 1024 * 1024;
 
-fn federation_status_tool_definition() -> Value {
+pub(super) fn federation_status_tool_definition() -> Value {
     json!({
         "name": "termal_federation_status",
         "description": "Read this host's federation and host-utilization projections through the existing routes. Reports roles, peers, worker stages and CPU/memory/disk metrics with source freshness, states and reasons. No running-build claim, placement or recovery action. Utilization refusal is reported separately without fabricating an empty roster. Root sessions only. Takes no arguments.",

@@ -1,5 +1,7 @@
 // Add columns through the existing coordination migration transaction. The
 // historical table definitions remain frozen for schema admission and import.
+
+use super::*;
 pub(crate) const MAILBOX_TEST_REQUEST_CUSTODY_SCHEMA_SQL: &str = "
     ALTER TABLE mailbox_messages ADD COLUMN test_request_json TEXT;
     ALTER TABLE mailbox_messages ADD COLUMN test_request_scope_json TEXT;
@@ -33,11 +35,13 @@ pub(crate) fn remove_empty_test_request_custody_columns_for_test(
     }
 }
 
-fn validate_coordination_test_request_custody(connection: &rusqlite::Connection) -> Result<()> {
+pub(super) fn validate_coordination_test_request_custody(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     validate_coordination_test_request_custody_rows(connection, false)
 }
 
-fn validate_coordination_test_request_custody_with_legacy_quarantine(
+pub(super) fn validate_coordination_test_request_custody_with_legacy_quarantine(
     connection: &rusqlite::Connection,
 ) -> Result<()> {
     validate_coordination_test_request_custody_rows(connection, true)

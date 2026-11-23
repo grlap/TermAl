@@ -3418,5 +3418,9 @@ fn is_terminal_delegation_status(status: &str) -> bool {
 #[path = "delegation_mcp_tests.rs"]
 pub(crate) mod delegation_mcp_tests;
 
-include!("delegation_mcp_projection.rs");
-include!("delegation_mcp_federation.rs");
+#[path = "delegation_mcp_projection.rs"]
+mod delegation_mcp_projection;
+pub(crate) use delegation_mcp_projection::*;
+#[path = "delegation_mcp_federation.rs"]
+mod delegation_mcp_federation;
+use delegation_mcp_federation::*;

@@ -4,6 +4,8 @@
 // Included by test_run_observations.rs beside its borrowed projection owner.
 // Session bodies, runtime state and persistence waiters are not summary inputs.
 
+use super::*;
+
 pub(crate) struct TestRunProjectionSession {
     pub(crate) id: String,
     pub(crate) name: String,

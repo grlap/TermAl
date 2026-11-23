@@ -1,6 +1,8 @@
 // Bounded diagnostic facts captured before watcher queueing/conversion.
 // These clocks describe receipt and processing, never the time of the write.
 // They do not authorize a source-event exemption or identify an OS writer.
+
+use super::*;
 #[derive(Clone, Copy)]
 pub(crate) struct WorkspaceWatchObservation {
     pub(crate) observed: u64,

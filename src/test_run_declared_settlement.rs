@@ -2,6 +2,8 @@
 // Artifact readers retain verdict ownership; waits only observe whether the
 // original producer has applied that verdict. No verification authority here.
 
+use super::*;
+
 // A late event may name a previous turn. Reuse only an original binding still
 // retained for this exact observation; current declaration files cannot supply it.
 fn test_run_late_declared_binding(

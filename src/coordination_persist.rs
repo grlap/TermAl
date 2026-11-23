@@ -27,9 +27,15 @@ pub(crate) const COORDINATION_CAUSAL_PENDING_PREDECESSOR: &str =
 pub(crate) const COORDINATION_SQLITE_SCHEMA_VERSION: &str =
     "8-direct-prompt-1-test-request-custody-1-remote-verification-1-causal-pending-1";
 
-include!("coordination_test_request_custody.rs");
-include!("coordination_remote_verification.rs");
-include!("coordination_causal_pending.rs");
+#[path = "coordination_test_request_custody.rs"]
+mod coordination_test_request_custody;
+pub(crate) use coordination_test_request_custody::*;
+#[path = "coordination_remote_verification.rs"]
+mod coordination_remote_verification;
+pub(crate) use coordination_remote_verification::*;
+#[path = "coordination_causal_pending.rs"]
+mod coordination_causal_pending;
+pub(crate) use coordination_causal_pending::*;
 
 // Built only by boot-time schema admission, before the mailbox connection mutex
 // exists. The covering key range keeps orphaned archive reads off message bodies.

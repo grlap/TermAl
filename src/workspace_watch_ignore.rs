@@ -2,6 +2,8 @@
 // this module does not walk repositories or alter check-credit observations.
 // Queries are batched per workdir, off the watcher callback and StateInner.
 
+use super::*;
+
 fn parse_check_ignore_matches(requests: &[Vec<u8>], output: &[u8]) -> Result<HashSet<Vec<u8>>> {
     if requests.is_empty() && output.is_empty() {
         return Ok(HashSet::new());
@@ -131,7 +133,7 @@ thread_local! {
 }
 
 impl AppState {
-    fn filter_workspace_publication(
+    pub(super) fn filter_workspace_publication(
         &self,
         changes: Vec<WorkspaceFileChangeEvent>,
     ) -> Vec<WorkspaceFileChangeEvent> {

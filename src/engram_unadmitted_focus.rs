@@ -3,10 +3,12 @@
 // report. Validate one prospective root off-thread; publish its cache only
 // while the same session is still between turns.
 
+use super::*;
+
 // Focus chooses a future opening, not the owner of an already observed turn.
 // Continue only an exact, still-held claim and the named root confirmed at
 // that turn's start. An omitted, unavailable or changed claim proves nothing.
-fn runtime_observation_keeps_opening_scope(
+pub(super) fn runtime_observation_keeps_opening_scope(
     job: &EngramRuntimeClosingJob,
     held: &EngramHeldClaims,
 ) -> bool {
@@ -31,7 +33,7 @@ fn runtime_observation_keeps_opening_scope(
         })
 }
 
-fn runtime_observation_forward_revision(
+pub(super) fn runtime_observation_forward_revision(
     previous: &EngramControlWorkBinding,
     current: &EngramControlWorkBinding,
 ) -> bool {

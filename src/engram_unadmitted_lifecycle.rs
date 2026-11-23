@@ -1,8 +1,14 @@
 use super::*;
 
-include!("engram_registered_check_notices.rs");
-include!("engram_registered_closing_baseline.rs");
-include!("engram_received_check_notice.rs");
+#[path = "engram_registered_check_notices.rs"]
+mod engram_registered_check_notices;
+pub(crate) use engram_registered_check_notices::*;
+#[path = "engram_registered_closing_baseline.rs"]
+mod engram_registered_closing_baseline;
+pub(crate) use engram_registered_closing_baseline::*;
+#[path = "engram_received_check_notice.rs"]
+mod engram_received_check_notice;
+pub(crate) use engram_received_check_notice::*;
 
 // Shared observation lifecycle after the existing runtime/turn ownership fence.
 // Ordinary host-started turns and adopted runtime-started turns use the same

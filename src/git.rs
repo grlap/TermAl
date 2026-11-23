@@ -152,7 +152,9 @@ where
     })
 }
 
-include!("git_status.rs");
+#[path = "git_status.rs"]
+mod git_status;
+pub(crate) use git_status::*;
 
 /// Normalizes Git working directory path.
 pub(crate) fn normalize_git_workdir_path(path: &FsPath) -> Result<PathBuf, ApiError> {

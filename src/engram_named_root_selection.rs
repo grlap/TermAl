@@ -2,6 +2,8 @@
 // owns validation and acknowledgement; dispatch owns the opening and commit.
 // Restore keeps its existing work-binding rule and restores no selection.
 
+use super::*;
+
 #[derive(Clone)]
 pub(crate) struct EngramPendingNamingSelection {
     pub(crate) store: EngramAuthorityStoreKey,
@@ -42,7 +44,7 @@ fn naming_report_has_scope(
             .all(|envelope| envelope.request.get("binding") == Some(&json!(binding)))
 }
 
-fn engram_naming_has_pending_scope(
+pub(super) fn engram_naming_has_pending_scope(
     record: &SessionRecord,
     store: &EngramAuthorityStoreKey,
     connection: &EngramConnectionConfig,
@@ -66,15 +68,15 @@ fn engram_naming_has_pending_scope(
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct EngramNamingCustody {
-    generation: u64,
-    turn_ref: Option<String>,
+pub(super) struct EngramNamingCustody {
+    pub(super) generation: u64,
+    pub(super) turn_ref: Option<String>,
     closed_turn_ref: Option<String>,
-    binding: Option<EngramControlWorkBinding>,
+    pub(super) binding: Option<EngramControlWorkBinding>,
 }
 
 impl EngramNamingCustody {
-    fn capture(record: &SessionRecord) -> Self {
+    pub(super) fn capture(record: &SessionRecord) -> Self {
         Self {
             generation: record.active_turn_generation,
             turn_ref: record
@@ -277,7 +279,7 @@ impl AppState {
     // Naming has acknowledged its root image, but that does not acknowledge
     // the session's closing jobs. Freeze this cut, read its row off-lock, then
     // compare custody before staging. A later save cannot enroll another job.
-    fn stage_engram_named_root_selection<'a>(
+    pub(super) fn stage_engram_named_root_selection<'a>(
         &'a self,
         mut inner: StateMutexGuard<'a, StateInner>,
         session: &str,

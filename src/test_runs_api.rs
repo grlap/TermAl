@@ -252,7 +252,9 @@ pub(crate) async fn get_test_run(
     .await
 }
 
-include!("test_run_registration_query.rs");
+#[path = "test_run_registration_query.rs"]
+mod test_run_registration_query;
+pub(crate) use test_run_registration_query::*;
 
 pub(crate) fn get_test_run_observed(
     state: AppState,

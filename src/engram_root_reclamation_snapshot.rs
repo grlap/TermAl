@@ -3,6 +3,8 @@
 // complete histories. Cross-table lookups and planning happen after unlock.
 // This is a candidate plan, not authority: the worker still revalidates each
 // exact root, journal and reader against current state before doing a read.
+
+use super::*;
 pub(crate) struct EngramRootReclamationSnapshot {
     pub(crate) roots: Vec<EngramWorkSourceRoot>,
     pub(crate) unpublished: Vec<EngramWorkSourceRoot>,

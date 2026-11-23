@@ -16,9 +16,15 @@
 
 use super::*;
 
-include!("workspace_watch_observation.rs");
-include!("workspace_watch_pending.rs");
-include!("workspace_watch_ignore.rs");
+#[path = "workspace_watch_observation.rs"]
+mod workspace_watch_observation;
+pub(crate) use workspace_watch_observation::*;
+#[path = "workspace_watch_pending.rs"]
+mod workspace_watch_pending;
+pub(crate) use workspace_watch_pending::*;
+#[path = "workspace_watch_ignore.rs"]
+mod workspace_watch_ignore;
+pub(crate) use workspace_watch_ignore::*;
 
 // Display/transport limits are independent of the pending generation's
 // storage budget. Authority observers receive the original facts first.

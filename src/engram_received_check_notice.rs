@@ -3,6 +3,8 @@
 // EngramOtherRootNoticeRead moved here from engram_turn_checks.rs, extended
 // with receipt presentation; its existing owned-observer lifecycle is reused.
 // Presentation confirms receipt of the registered run's historical record.
+
+use super::*;
 pub(crate) const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,7 +81,7 @@ impl ReceivedCheckNotice {
         })
     }
 
-    fn matches_root(
+    pub(super) fn matches_root(
         &self,
         root: &EngramWorkSourceRoot,
         binding: &EngramControlWorkBinding,
@@ -148,7 +150,10 @@ impl ReceivedCheckNotice {
     }
 }
 
-fn registered_launcher_notice(run: &TestRunRegistration, state: &TestRunState) -> String {
+pub(super) fn registered_launcher_notice(
+    run: &TestRunRegistration,
+    state: &TestRunState,
+) -> String {
     let status = match state {
         TestRunState::Passed => "passed; consult its terminal result record",
         TestRunState::Failed => "failed; consult its terminal result record",
@@ -185,7 +190,10 @@ impl AppState {
     // Terminal paths publish their original native correlation first. The
     // existing cancellable observer reads settled receipts off the provider
     // reader. One absolute budget covers the whole batch.
-    fn schedule_received_launcher_notices(&self, mut prepared: Vec<RegisteredCheckNotice>) {
+    pub(super) fn schedule_received_launcher_notices(
+        &self,
+        mut prepared: Vec<RegisteredCheckNotice>,
+    ) {
         prepared.retain(|notice| {
             notice.runs.iter().any(|(run, _)| {
                 matches!(

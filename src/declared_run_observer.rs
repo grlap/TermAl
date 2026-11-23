@@ -7,7 +7,8 @@
 
 use super::*;
 
-include!("declared_run_task_end.rs");
+#[path = "declared_run_task_end.rs"]
+mod declared_run_task_end;
 
 // The owner may use 60 s to capture source. Opening also reserves the existing
 // margin for local declaration/preimage and publication stages;

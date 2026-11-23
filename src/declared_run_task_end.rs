@@ -2,6 +2,8 @@
 // Reuses the original observation's start binding and the existing artifact
 // reader. Owns no verification reservation, source capture or tracker credit.
 
+use super::*;
+
 impl AppState {
     pub(crate) fn end_observed_declared_task(
         &self,

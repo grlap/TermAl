@@ -1,16 +1,18 @@
 // Owns disposable launcher-shaped history, including real failure diagnostics.
 // Does not prefill the parse cache, registration map, or retention rows.
 
-struct HistorySeed {
-    directories: Vec<PathBuf>,
-    ended: Vec<String>,
-    digests: HashMap<String, String>,
-    failures: HashMap<String, String>,
-    bytes: usize,
+use super::*;
+
+pub(super) struct HistorySeed {
+    pub(super) directories: Vec<PathBuf>,
+    pub(super) ended: Vec<String>,
+    pub(super) digests: HashMap<String, String>,
+    pub(super) failures: HashMap<String, String>,
+    pub(super) bytes: usize,
 }
 
 impl HistorySeed {
-    fn new(root: &FsPath, owner: &str, count: usize) -> Self {
+    pub(super) fn new(root: &FsPath, owner: &str, count: usize) -> Self {
         assert_eq!(count % 16, 0);
         let started = std::time::Instant::now();
         let common = root.join(".git");
@@ -71,7 +73,7 @@ impl HistorySeed {
         seed
     }
 
-    fn write_results(&mut self, generation: usize) {
+    pub(super) fn write_results(&mut self, generation: usize) {
         self.digests.clear();
         self.failures.clear();
         for (ordinal, directory) in self.directories.iter().enumerate() {

@@ -1,6 +1,8 @@
 // Ordinary-turn notice preparation. Reuses durable launcher registration and
 // the original tool's explicit artifact association; never verification authority.
 // All native path, artifact and process reads precede the terminal state lock.
+
+use super::*;
 #[derive(Clone)]
 pub(crate) struct RegisteredCheckNotice {
     pub(crate) generation: u64,
@@ -8,7 +10,7 @@ pub(crate) struct RegisteredCheckNotice {
     pub(crate) check: EngramTurnCheck,
     pub(crate) observation: Option<TestRunCommandObservation>,
     pub(crate) runs: Vec<(TestRunRegistration, Option<TestRunState>)>,
-    clean_commit_runs: Vec<String>,
+    pub(super) clean_commit_runs: Vec<String>,
     pub(crate) received: Option<ReceivedCheckNotice>,
 }
 
@@ -162,7 +164,7 @@ impl AppState {
     }
 }
 
-fn read_received_registered_check_notices_until(
+pub(super) fn read_received_registered_check_notices_until(
     prepared: &mut [RegisteredCheckNotice],
     deadline: std::time::Instant,
 ) {

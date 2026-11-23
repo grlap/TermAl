@@ -4,6 +4,8 @@
 // Preserve its original time and binding/root image; ordinary checkpoints
 // keep precedence and queued/uncertain observations remain immutable.
 
+use super::*;
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EngramEvaluationCheckpoint {
@@ -39,13 +41,13 @@ pub(crate) fn evaluation_closing_checkpoint(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct EngramEvaluationCheckpointScope {
-    host_turn_ref: String,
-    generation: u64,
-    opening: EngramRuntimeOpeningRoot,
+pub(super) struct EngramEvaluationCheckpointScope {
+    pub(super) host_turn_ref: String,
+    pub(super) generation: u64,
+    pub(super) opening: EngramRuntimeOpeningRoot,
 }
 
-fn evaluation_checkpoint_scope_locked(
+pub(super) fn evaluation_checkpoint_scope_locked(
     inner: &StateInner,
     owner: &str,
     place: &EngramBasisPlace,
@@ -84,7 +86,7 @@ fn evaluation_checkpoint_scope_locked(
 }
 
 impl AppState {
-    fn retain_evaluation_checkpoint(
+    pub(super) fn retain_evaluation_checkpoint(
         &self,
         owner: &str,
         place: &EngramBasisPlace,

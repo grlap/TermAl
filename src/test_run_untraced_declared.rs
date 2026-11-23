@@ -2,6 +2,8 @@
 // Reuses the original row's binding and the ordinary exit-aware judge;
 // owns no native reservation, registration or verification authority.
 
+use super::*;
+
 impl AppState {
     pub(crate) fn end_untraced_declared_observation(
         &self,

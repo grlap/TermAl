@@ -1,6 +1,8 @@
 // Callback-owned dirty paths. One component trie is shared by every scope;
 // overflow widens a notification instead of discarding it. No filesystem I/O
 // or session lookup runs while this structure is locked.
+
+use super::*;
 pub(crate) const WORKSPACE_PENDING_NODES: usize = 4096;
 pub(crate) const WORKSPACE_PENDING_BYTES: usize = 256 * 1024;
 const WORKSPACE_PENDING_CHILDREN: usize = 64;
@@ -225,7 +227,7 @@ impl WorkspacePendingChanges {
         self.ingest_observed(result, arrival, now, observation);
     }
 
-    fn ingest_observed(
+    pub(super) fn ingest_observed(
         &mut self,
         result: notify::Result<NotifyEvent>,
         arrival: EngramWatcherArrival,
@@ -334,7 +336,7 @@ impl WorkspacePendingChanges {
     }
 
     // The callback logs outside this mutex, with no backend-controlled text.
-    fn error_log_due(&mut self, now: std::time::Instant) -> bool {
+    pub(super) fn error_log_due(&mut self, now: std::time::Instant) -> bool {
         if self
             .last_error_log
             .is_some_and(|at| now.saturating_duration_since(at) < Duration::from_secs(30))

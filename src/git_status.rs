@@ -2,6 +2,8 @@
 // formerly in git.rs with NUL-delimited porcelain v2. Diff previews and
 // mutations stay in git.rs.
 
+use super::*;
+
 const GIT_SUBMODULE_FILE_LIMIT: usize = 100;
 
 #[derive(Default)]

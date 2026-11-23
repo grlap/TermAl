@@ -19,7 +19,9 @@ use super::*;
 /// work back to the session's workdir.
 pub(crate) const ENGRAM_WORK_SOURCE_ROOT_LIMIT: usize = 64;
 
-include!("engram_named_root_selection.rs");
+#[path = "engram_named_root_selection.rs"]
+mod engram_named_root_selection;
+pub(crate) use engram_named_root_selection::*;
 
 /// One work's source root, persisted so a restart keeps it. It applies to the
 /// work's claim `claim_id` only, so a new claim on the same work does not

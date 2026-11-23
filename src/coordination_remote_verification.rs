@@ -1,15 +1,19 @@
 // Extends the ORIGINAL send owner through the existing boot-time transaction.
 // Older readers refuse this floor before loading or rewriting any custody.
+
+use super::*;
 pub(crate) const MAILBOX_TEST_REQUEST_SETTLEMENT_SCHEMA_SQL: &str = "
     ALTER TABLE mailbox_messages ADD COLUMN test_request_settlement_json TEXT;
     ALTER TABLE mailbox_relay_intents ADD COLUMN test_request_settlement_json TEXT;
 ";
 
-fn validate_coordination_test_request_settlement(connection: &rusqlite::Connection) -> Result<()> {
+pub(super) fn validate_coordination_test_request_settlement(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     validate_coordination_test_request_settlement_rows(connection, false)
 }
 
-fn validate_coordination_test_request_settlement_with_legacy_quarantine(
+pub(super) fn validate_coordination_test_request_settlement_with_legacy_quarantine(
     connection: &rusqlite::Connection,
 ) -> Result<()> {
     validate_coordination_test_request_settlement_rows(connection, true)
@@ -57,7 +61,9 @@ fn validate_coordination_test_request_settlement_rows(
 }
 
 #[cfg(test)]
-fn remove_empty_test_request_settlement_columns_for_test(connection: &rusqlite::Connection) {
+pub(super) fn remove_empty_test_request_settlement_columns_for_test(
+    connection: &rusqlite::Connection,
+) {
     remove_empty_causal_pending_columns_for_test(connection);
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
         let columns = connection

@@ -1,5 +1,7 @@
 // One-way coordination extension. Pending membership is written by the original
 // send transaction; only this upgrade discovers pre-extension in-flight sends.
+
+use super::*;
 pub(crate) const MAILBOX_CAUSAL_PENDING_SCHEMA_SQL: &str = "
     ALTER TABLE mailbox_messages ADD COLUMN test_request_pending_json TEXT;
     ALTER TABLE mailbox_messages ADD COLUMN test_request_pending_order INTEGER;
@@ -11,7 +13,7 @@ pub(crate) const MAILBOX_CAUSAL_PENDING_SCHEMA_SQL: &str = "
       WHERE test_request_pending_json IS NOT NULL;
 ";
 
-fn seed_causal_pending(connection: &rusqlite::Connection) -> Result<()> {
+pub(super) fn seed_causal_pending(connection: &rusqlite::Connection) -> Result<()> {
     let store = mailbox_relay_store_id(connection)?;
     for intents in [false, true] {
         let table = CausalPendingRow { intents, row_id: 0 }.table();
@@ -80,7 +82,9 @@ fn causal_pending_custody_digest(row: &rusqlite::Row<'_>) -> Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
-fn validate_coordination_causal_pending(connection: &rusqlite::Connection) -> Result<()> {
+pub(super) fn validate_coordination_causal_pending(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
         let mut statement = connection.prepare(&format!(
             "SELECT test_request_pending_json,test_request_pending_order FROM {table}
@@ -103,7 +107,7 @@ fn validate_coordination_causal_pending(connection: &rusqlite::Connection) -> Re
 // Only a failure explicitly retained by the one-time predecessor migration can
 // be quarantined, and its original bytes must still fail the SAME closed check.
 // Repaired rows and ordinary current sends therefore receive strict validation.
-fn causal_pending_legacy_quarantine(
+pub(super) fn causal_pending_legacy_quarantine(
     connection: &rusqlite::Connection,
     intents: bool,
 ) -> Result<BTreeSet<i64>> {
@@ -136,7 +140,7 @@ fn causal_pending_legacy_quarantine(
 }
 
 #[cfg(test)]
-fn remove_empty_causal_pending_columns_for_test(connection: &rusqlite::Connection) {
+pub(super) fn remove_empty_causal_pending_columns_for_test(connection: &rusqlite::Connection) {
     for table in ["mailbox_messages", "mailbox_relay_intents"] {
         let columns = connection
             .prepare(&format!("PRAGMA table_info({table})"))

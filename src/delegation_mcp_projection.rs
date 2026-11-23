@@ -2,6 +2,8 @@
 // Owns compact spawn metadata and own-message body omission. Does not change
 // HTTP responses, durable session/mailbox records, or receipt issuance/ack.
 
+use super::*;
+
 fn mcp_selected_fields(value: &Value, fields: &[&str]) -> Value {
     Value::Object(
         fields
@@ -70,7 +72,10 @@ pub(crate) fn compact_mcp_spawn_result(response: Value) -> Value {
     result
 }
 
-fn mcp_mailbox_messages(messages: &[MailboxMessage], reader_session_id: &str) -> Result<Value> {
+pub(super) fn mcp_mailbox_messages(
+    messages: &[MailboxMessage],
+    reader_session_id: &str,
+) -> Result<Value> {
     let mut projected =
         serde_json::to_value(messages).context("failed to encode mailbox messages")?;
     if let Some(messages) = projected.as_array_mut() {

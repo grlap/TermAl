@@ -3,7 +3,9 @@
 
 use super::*;
 
-include!("engram_evaluation_checkpoint.rs");
+#[path = "engram_evaluation_checkpoint.rs"]
+mod engram_evaluation_checkpoint;
+pub(crate) use engram_evaluation_checkpoint::*;
 
 pub(crate) const ACCEPTANCE_SOURCE_ID_MAX_BYTES: usize = 1_048_576;
 pub(crate) const ACCEPTANCE_PRIVATE_PAGE_MAX_BYTES: usize = 2_113_536;

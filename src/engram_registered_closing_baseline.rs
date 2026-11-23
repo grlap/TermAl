@@ -1,6 +1,8 @@
 // Closing fallback from this turn's original registered owner checks. Reuses
 // terminal preparation; never captures source, sends evidence or waits for it.
 
+use super::*;
+
 // Off-lock only. Rebuild the ordinary native record from the same bytes the
 // terminal disk read identified, without freezing or sending another record.
 pub(crate) fn registered_closing_clean_input(

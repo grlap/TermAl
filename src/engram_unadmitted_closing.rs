@@ -5,8 +5,11 @@
 
 use super::*;
 
-include!("engram_unadmitted_focus.rs");
-include!("engram_adopted_predecessor.rs");
+#[path = "engram_unadmitted_focus.rs"]
+mod engram_unadmitted_focus;
+pub(crate) use engram_unadmitted_focus::*;
+#[path = "engram_adopted_predecessor.rs"]
+mod engram_adopted_predecessor;
 
 /// The test build's diagnostic line for one closing-capture attempt: the
 /// attempt number, the capture budget, the time its source measurement took,

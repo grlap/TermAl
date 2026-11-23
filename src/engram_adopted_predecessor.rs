@@ -1,8 +1,10 @@
 // An unsolicited adopted successor cannot be paused. Preserve the predecessor's
 // already observed facts under its own opening, with no source sighting or credit.
 // This path never authorizes measurement across a scope transition.
+
+use super::*;
 impl AppState {
-    fn capture_adopted_predecessor_unadmitted(
+    pub(super) fn capture_adopted_predecessor_unadmitted(
         &self,
         session: &str,
         job: &EngramRuntimeClosingJob,

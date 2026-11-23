@@ -175,7 +175,9 @@ pub(crate) fn engram_root_pass_attempt_text(
     })
 }
 
-include!("engram_root_reclamation_snapshot.rs");
+#[path = "engram_root_reclamation_snapshot.rs"]
+mod engram_root_reclamation_snapshot;
+pub(crate) use engram_root_reclamation_snapshot::*;
 
 #[cfg(test)]
 thread_local! {
