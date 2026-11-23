@@ -1,0 +1,30 @@
+{
+  "id": "01a206ba-8533-7f42-8aae-2e6913e7ae8c",
+  "external_ref": null,
+  "title": "Refresh Claude Engram eligibility for automatic Human queue starts after reload",
+  "outcome": "After a host state reload, an automatic drain or activation can start a local root Claude for an already queued Human prompt before the declaration cache is warm. The launch omits Engram in an enabled, declared project. Apply the appropriate launch-local eligibility handling for these automatic routes while preserving queue ownership and retry behavior.",
+  "acceptance": [
+    "With a persisted eligible local root Claude session and a queued Human prompt, automatic drain and exact activation build the scoped Engram descriptor when a fresh runtime starts after reload.",
+    "Unavailable declarations preserve the automatic route's queue ownership and recovery behavior, and the eligibility check leaves sibling runtimes untouched.",
+    "A behavior test covers this cold-cache start without requiring the earlier omission of Engram."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "engram-integration",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

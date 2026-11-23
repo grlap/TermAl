@@ -1,0 +1,30 @@
+{
+  "id": "01a206e6-3bf3-7460-b53a-25061c7586c2",
+  "external_ref": null,
+  "title": "Keep a stopped idle queue paused when an earlier Human Send resumes",
+  "outcome": "An explicit Human Send can retain its envelope through a successful idle Stop, then start it after Stop has advanced the queue's pause epoch. ID and payload checks alone do not distinguish the earlier Send from an explicit Resume requested after Stop.",
+  "acceptance": [
+    "A Human Send that durably enqueues before a successful idle Stop keeps its exact prompt queued and leaves the Stop pause in effect when the stale promotion resumes.",
+    "After a new explicit Resume, the retained prompt can dispatch once. Valid off-lock runtime reset ownership remains usable without accepting an unrelated Stop or pause generation.",
+    "A behavior regression interleaves the real idle Stop on a live test-run or delegation wait with the original off-lock Send promotion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claude",
+    "queue",
+    "stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

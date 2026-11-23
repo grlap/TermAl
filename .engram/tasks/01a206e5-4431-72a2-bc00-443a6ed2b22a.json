@@ -1,0 +1,29 @@
+{
+  "id": "01a206e5-4431-72a2-bc00-443a6ed2b22a",
+  "external_ref": null,
+  "title": "Refresh changed Engram declarations after warm Claude queue actions",
+  "outcome": "An explicit Human Send that wakes an older ordinary User head or a selected Resume can reuse warm Claude. The explicit route defers checking whether .engram-project was added or removed, so this turn can continue with the runtime's prior descriptor until an independent refresh detects the change. Decide and test a deferred reconciliation that keeps warm enqueue responsive and avoids sibling runtime invalidation.",
+  "acceptance": [
+    "A warm explicit action continues without waiting for a declaration read, and a subsequent reconciliation observes a changed project declaration with a documented runtime effect.",
+    "Reconciliation preserves queue ownership and warms only the intended session's next launch, with no sibling reset caused by the explicit action."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "engram-integration",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

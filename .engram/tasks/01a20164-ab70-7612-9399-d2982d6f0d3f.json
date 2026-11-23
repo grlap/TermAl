@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed and installed the cold-resume notice for attached and previously stopped root Codex threads. It gives the operator a same-project fresh-session workaround. The real-stop regression passed in the 95/95 Central focused run with verification ad602725aa9d44a0b6b3f6a12644aeec. Both R2 reviews were clean; the exact DL560 full gate and independent acceptance 9a192e2aec78477db793e6d91e340754 passed. Opus2 confirmed install at 04:48:06Z with binary SHA-256 DC5A03BCAA13BAAB391DFE1C1F74165E0C5A19C1926798E18691EA7B32A837B2 (install note d793d2c4bdd849afb540d5e759bd4931). The running host requires the coordinated restart to use it.",
+    "completed_at": "2026-11-23T04:49:01.814604500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

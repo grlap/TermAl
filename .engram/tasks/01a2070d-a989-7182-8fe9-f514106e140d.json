@@ -1,0 +1,30 @@
+{
+  "id": "01a2070d-a989-7182-8fe9-f514106e140d",
+  "external_ref": null,
+  "title": "Keep the Claude declaration refusal on manual unselected Resume of a known-unsent User head",
+  "outcome": "When the first projected row is historical, the UI sends manual queue Resume without a selection. The backend captures the next known-unsent ordinary User prompt but uses a metadata-only declaration check. This can dispatch the same head that a preceding explicit Human Send held after the strict declaration probe failed.",
+  "acceptance": [
+    "After reload with a leading retained historical row and a known-unsent ordinary User prompt, manual unselected Resume keeps the exact runnable prompt paused when the enabled project's declaration is unreadable and gives the reason and remediation.",
+    "When access returns, manual unselected Resume starts that same prompt with scoped Engram. Automatic, activation, capacity and receipted/delegation wake behavior remain unchanged.",
+    "A regression covers the real unselected UI/HTTP route and verifies the retained historical row remains untouched."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claude",
+    "engram-integration",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
