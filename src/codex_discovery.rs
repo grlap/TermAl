@@ -10,7 +10,7 @@
 // `apply_discovered_codex_thread` action that materializes a new session
 // from the discovery payload.
 //
-// Extracted from state.rs into its own `include!()` fragment so state.rs
+// Extracted from state.rs into its own module so state.rs
 // stays focused on the core state model.
 
 use super::*;

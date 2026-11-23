@@ -13,7 +13,7 @@
 // quietly-broken state — see `validate_persisted_session_fields` and
 // the `persisted_state_requires_*` tests in tests/persist.rs).
 //
-// Extracted from state.rs into its own `include!()` fragment so state.rs
+// Extracted from state.rs into its own module so state.rs
 // stays focused on the runtime model rather than the serde schema.
 
 use super::*;

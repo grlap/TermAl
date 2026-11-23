@@ -1706,6 +1706,7 @@ pub(crate) fn collect_workspace_layout_summaries<'a>(
 pub(crate) struct EngramProjectResetFences {
     pub(crate) next_generation: u64,
     pub(crate) owners: HashMap<String, u64>,
+    last_generation: HashMap<String, u64>,
     /// Exact live connection-transition claim, never restored from history.
     pub(crate) claimed_at: HashMap<String, EngramProjectResetClaim>,
 }
@@ -1713,6 +1714,10 @@ pub(crate) struct EngramProjectResetFences {
 impl EngramProjectResetFences {
     pub(crate) fn contains(&self, project_id: &str) -> bool {
         self.owners.contains_key(project_id)
+    }
+
+    pub(crate) fn last_generation(&self, project_id: &str) -> u64 {
+        self.last_generation.get(project_id).copied().unwrap_or(0)
     }
 
     #[cfg(test)]
@@ -1731,6 +1736,8 @@ impl EngramProjectResetFences {
         self.next_generation = self.next_generation.wrapping_add(1).max(1);
         let generation = self.next_generation;
         self.owners.insert(project_id.to_owned(), generation);
+        self.last_generation
+            .insert(project_id.to_owned(), generation);
         self.claimed_at.insert(
             project_id.to_owned(),
             EngramProjectResetClaim::new(generation, clock),

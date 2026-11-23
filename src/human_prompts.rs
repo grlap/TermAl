@@ -535,7 +535,9 @@ impl AppState {
                 };
                 let started = owner
                     .map(|owner| {
-                        self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner)
+                        self.dispatch_next_queued_turn_for_resume_with_prompt(
+                            session_id, owner, true,
+                        )
                     })
                     .transpose();
                 let started = match started {
@@ -682,24 +684,30 @@ impl AppState {
         if let Some(hook) = TEST_HUMAN_BEFORE_RUNTIME_RESET.with(|slot| slot.borrow_mut().take()) {
             hook();
         }
-        if let Err(error) = self.prepare_dedicated_runtime_reset_for_human_off_lock(
-            session_id,
-            &selected.0,
-            &selected.1,
-            explicit_resume,
-            selection.as_deref_mut(),
-        ) {
-            if error.downcast_ref::<HumanPromptOwnerChanged>().is_some() {
-                return Ok(HumanPromptDrain::Held);
+        let mut rechecked_launch = false;
+        let (started, fence) = loop {
+            if let Err(error) = self.prepare_dedicated_runtime_reset_for_human_off_lock(
+                session_id,
+                &selected.0,
+                &selected.1,
+                explicit_resume,
+                selection.as_deref_mut(),
+            ) {
+                if error.downcast_ref::<HumanPromptOwnerChanged>().is_some() {
+                    return Ok(HumanPromptDrain::Held);
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-        #[cfg(test)]
-        if let Some(hook) = TEST_HUMAN_BEFORE_PROMOTION.with(|slot| slot.borrow_mut().take()) {
-            hook();
-        }
-        self.engram_host().turn_starting(session_id);
-        let (started, fence) = {
+            let engram_declaration = if explicit_resume {
+                self.prepare_engram_declaration_for_claude_launch_off_lock(session_id)
+            } else {
+                None
+            };
+            #[cfg(test)]
+            if let Some(hook) = TEST_HUMAN_BEFORE_PROMOTION.with(|slot| slot.borrow_mut().take()) {
+                hook();
+            }
+            self.engram_host().turn_starting(session_id);
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_visible_session_index(session_id) else {
                 return Ok(HumanPromptDrain::Absent);
@@ -738,12 +746,28 @@ impl AppState {
             {
                 return Ok(HumanPromptDrain::Held);
             }
+            let mcp = if explicit_resume
+                && is_local_root_claude_locked(&inner, index)
+                && claude_runtime_needs_launch(record)
+            {
+                let Some(declaration) =
+                    engram_declaration.filter(|_| !claude_reset_needs_off_lock_cleanup(record))
+                else {
+                    if rechecked_launch {
+                        bail!("Claude runtime changed while preparing its launch. Resume to retry");
+                    }
+                    rechecked_launch = true;
+                    continue;
+                };
+                declaration.runtime_config(&inner, session_id)?
+            } else {
+                engram_mcp_runtime_config_for_session_locked(&inner, session_id)
+            };
             if !self.prompt_delivery_gate_locked(&mut inner, index, &queued.pending_prompt.id, true)
             {
                 return Ok(HumanPromptDrain::Held);
             }
             let snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
-            let mcp = engram_mcp_runtime_config_for_session_locked(&inner, session_id);
             let host_only = session_is_acceptance_evaluator_child_locked(&inner, session_id);
             // Place only this envelope at the promotion boundary. Every older
             // retained record returns to the same relative position afterwards.
@@ -852,13 +876,13 @@ impl AppState {
                 fence
             };
             self.publish_started_turn_message_delta(&inner, revision, started.message_delta);
-            (
+            break (
                 StartedQueuedTurn {
                     dispatch: started.dispatch,
                     queued,
                 },
                 fence,
-            )
+            );
         };
         let confirmation = fence.and_then(|fence| self.confirm_human_prompt_persistence(fence));
         if let Err(error) = confirmation {

@@ -1710,57 +1710,58 @@ impl AppState {
         let _ = self.agent_readiness_snapshot();
 
         let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let mut preferences = inner.preferences.clone();
         let mut changed = false;
 
         set_agent_default_model_if_present(
-            &mut inner.preferences,
+            &mut preferences,
             &mut changed,
             request.default_codex_model,
             Agent::Codex,
             |preferences| &mut preferences.default_codex_model,
         )?;
         if let Some(default_codex_sandbox_mode) = request.default_codex_sandbox_mode {
-            if inner.preferences.default_codex_sandbox_mode != default_codex_sandbox_mode {
-                inner.preferences.default_codex_sandbox_mode = default_codex_sandbox_mode;
+            if preferences.default_codex_sandbox_mode != default_codex_sandbox_mode {
+                preferences.default_codex_sandbox_mode = default_codex_sandbox_mode;
                 changed = true;
             }
         }
         if let Some(default_codex_approval_policy) = request.default_codex_approval_policy {
-            if inner.preferences.default_codex_approval_policy != default_codex_approval_policy {
-                inner.preferences.default_codex_approval_policy = default_codex_approval_policy;
+            if preferences.default_codex_approval_policy != default_codex_approval_policy {
+                preferences.default_codex_approval_policy = default_codex_approval_policy;
                 changed = true;
             }
         }
         set_agent_default_model_if_present(
-            &mut inner.preferences,
+            &mut preferences,
             &mut changed,
             request.default_claude_model,
             Agent::Claude,
             |preferences| &mut preferences.default_claude_model,
         )?;
         set_agent_default_model_if_present(
-            &mut inner.preferences,
+            &mut preferences,
             &mut changed,
             request.default_cursor_model,
             Agent::Cursor,
             |preferences| &mut preferences.default_cursor_model,
         )?;
         set_agent_default_model_if_present(
-            &mut inner.preferences,
+            &mut preferences,
             &mut changed,
             request.default_gemini_model,
             Agent::Gemini,
             |preferences| &mut preferences.default_gemini_model,
         )?;
         set_agent_default_model_if_present(
-            &mut inner.preferences,
+            &mut preferences,
             &mut changed,
             request.default_kimi_model,
             Agent::Kimi,
             |preferences| &mut preferences.default_kimi_model,
         )?;
         set_agent_default_model_if_present(
-            &mut inner.preferences,
+            &mut preferences,
             &mut changed,
             request.default_opencode_model,
             Agent::OpenCode,
@@ -1768,48 +1769,48 @@ impl AppState {
         )?;
 
         if let Some(mode) = request.default_opencode_approval_mode {
-            if inner.preferences.default_opencode_approval_mode != mode {
-                inner.preferences.default_opencode_approval_mode = mode;
+            if preferences.default_opencode_approval_mode != mode {
+                preferences.default_opencode_approval_mode = mode;
                 changed = true;
             }
         }
 
         if let Some(mode) = request.default_kimi_approval_mode {
-            if inner.preferences.default_kimi_approval_mode != mode {
-                inner.preferences.default_kimi_approval_mode = mode;
+            if preferences.default_kimi_approval_mode != mode {
+                preferences.default_kimi_approval_mode = mode;
                 changed = true;
             }
         }
 
         if let Some(effort) = default_kimi_effort {
-            if inner.preferences.default_kimi_effort != effort {
-                inner.preferences.default_kimi_effort = effort;
+            if preferences.default_kimi_effort != effort {
+                preferences.default_kimi_effort = effort;
                 changed = true;
             }
         }
 
         if let Some(default_codex_reasoning_effort) = request.default_codex_reasoning_effort {
-            if inner.preferences.default_codex_reasoning_effort != default_codex_reasoning_effort {
-                inner.preferences.default_codex_reasoning_effort = default_codex_reasoning_effort;
+            if preferences.default_codex_reasoning_effort != default_codex_reasoning_effort {
+                preferences.default_codex_reasoning_effort = default_codex_reasoning_effort;
                 changed = true;
             }
         }
 
         if let Some(default_claude_approval_mode) = request.default_claude_approval_mode {
-            if inner.preferences.default_claude_approval_mode != default_claude_approval_mode {
-                inner.preferences.default_claude_approval_mode = default_claude_approval_mode;
+            if preferences.default_claude_approval_mode != default_claude_approval_mode {
+                preferences.default_claude_approval_mode = default_claude_approval_mode;
                 changed = true;
             }
         }
 
         if let Some(default_claude_effort) = request.default_claude_effort {
-            if inner.preferences.default_claude_effort != default_claude_effort {
-                inner.preferences.default_claude_effort = default_claude_effort;
+            if preferences.default_claude_effort != default_claude_effort {
+                preferences.default_claude_effort = default_claude_effort;
                 changed = true;
             }
         }
 
-        let mut remote_config_publication = None;
+        let mut remote_event_bridge_rearms = None;
         if let Some(normalized_remotes) = normalized_remotes {
             let next_remote_ids: HashSet<&str> = normalized_remotes
                 .iter()
@@ -1825,9 +1826,8 @@ impl AppState {
                     project.remote_id, project.name
                 )));
             }
-            if inner.preferences.remotes != normalized_remotes {
-                let previous_remote_ids = inner
-                    .preferences
+            if preferences.remotes != normalized_remotes {
+                let previous_remote_ids = preferences
                     .remotes
                     .iter()
                     .map(|remote| remote.id.as_str())
@@ -1843,25 +1843,30 @@ impl AppState {
                     })
                     .map(|remote| remote.id.clone())
                     .collect::<Vec<_>>();
-                inner.preferences.remotes = normalized_remotes.clone();
-                // Publish registry authority before this state guard is
-                // released. Live connection teardown happens below, after the
-                // guard is dropped, but requests in that interval already fail
-                // closed against the new authoritative map.
-                let publication = self
-                    .remote_registry
-                    .publish_configs_with_event_bridge_rearms(
-                        &normalized_remotes,
-                        &event_bridge_rearms,
-                    );
-                for remote_id in &publication.changed_ids {
-                    let _ = self.clear_remote_applied_revision_locked(&mut inner, remote_id);
-                    let _ = self.clear_remote_sse_fallback_resync(remote_id);
-                }
-                remote_config_publication = Some(publication);
+                preferences.remotes = normalized_remotes;
+                remote_event_bridge_rearms = Some(event_bridge_rearms);
                 changed = true;
             }
         }
+
+        if changed {
+            inner.preferences = preferences;
+        }
+        // Registry authority changes under the same state guard. Live connection
+        // teardown follows after the guard is dropped.
+        let remote_config_publication = remote_event_bridge_rearms.map(|event_bridge_rearms| {
+            let publication = self
+                .remote_registry
+                .publish_configs_with_event_bridge_rearms(
+                    &inner.preferences.remotes,
+                    &event_bridge_rearms,
+                );
+            for remote_id in &publication.changed_ids {
+                let _ = self.clear_remote_applied_revision_locked(&mut inner, remote_id);
+                let _ = self.clear_remote_sse_fallback_resync(remote_id);
+            }
+            publication
+        });
 
         let remote_routing_dirty =
             inner.remote_settings_persist_dirty || remote_config_publication.is_some();

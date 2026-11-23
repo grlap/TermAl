@@ -226,6 +226,134 @@ impl Drop for EngramContextNudgeReadClaim {
     }
 }
 
+#[derive(PartialEq)]
+struct ClaudeEngramProject {
+    id: String,
+    root: String,
+    remote_id: String,
+    settings: Option<EngramProjectSettings>,
+    reset_generation: u64,
+}
+
+impl ClaudeEngramProject {
+    fn capture(inner: &StateInner, project: &Project) -> Self {
+        Self {
+            id: project.id.clone(),
+            root: project.root_path.clone(),
+            remote_id: project.remote_id.clone(),
+            settings: project.engram.clone(),
+            reset_generation: inner.engram_project_resets.last_generation(&project.id),
+        }
+    }
+
+    fn for_session(inner: &StateInner, session_id: &str) -> Option<Self> {
+        engram_project_for_session_locked(inner, session_id)
+            .map(|project| Self::capture(inner, project))
+    }
+}
+
+pub(crate) struct ClaudeEngramLaunchCheck {
+    project: Option<ClaudeEngramProject>,
+    result: Result<bool>,
+}
+
+pub(crate) fn is_local_root_claude_locked(inner: &StateInner, index: usize) -> bool {
+    let record = &inner.sessions[index];
+    record.is_local_session()
+        && record.session.agent == Agent::Claude
+        && record.session.parent_delegation_id.is_none()
+        && inner
+            .find_delegation_index_by_child_session_id(&record.session.id)
+            .is_none()
+}
+
+pub(crate) fn claude_runtime_needs_launch(record: &SessionRecord) -> bool {
+    matches!(record.runtime, SessionRuntime::None) || record.runtime_reset_required
+}
+
+impl ClaudeEngramLaunchCheck {
+    pub(crate) fn runtime_config(
+        self,
+        inner: &StateInner,
+        session_id: &str,
+    ) -> Result<Option<EngramMcpRuntimeConfig>> {
+        if self.project != ClaudeEngramProject::for_session(inner, session_id) {
+            bail!(
+                "Engram project configuration changed before Claude could launch. Resume after the project settings settle"
+            );
+        }
+        Ok(engram_mcp_runtime_config_with_declaration_locked(
+            inner,
+            session_id,
+            Some(self.result?),
+        ))
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_CLAUDE_BEFORE_DECLARATION_READ: std::cell::RefCell<Option<Box<dyn FnOnce(&FsPath)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
+    pub(crate) static TEST_CLAUDE_BEFORE_ENGRAM_LAUNCH_CHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn check_claude_engram_declaration_readable(path: &FsPath) -> io::Result<()> {
+    use std::io::Read;
+
+    #[cfg(test)]
+    if let Some(before_read) =
+        TEST_CLAUDE_BEFORE_DECLARATION_READ.with(|slot| slot.borrow_mut().take())
+    {
+        before_read(path);
+    }
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A concurrent replacement with a FIFO must not block the open.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "the declaration is no longer a regular file",
+        ));
+    }
+    file.read_exact(&mut [0])
+}
+
+fn check_claude_engram_declaration(project_root: &FsPath) -> Result<bool> {
+    let declaration = project_root.join(".engram-project");
+    let result = match fs::metadata(&declaration) {
+        Ok(metadata) if metadata.is_file() && metadata.len() > 0 => {
+            check_claude_engram_declaration_readable(&declaration).map(|()| true)
+        }
+        Ok(_) => Ok(false),
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                && project_root.is_dir()
+                && fs::symlink_metadata(&declaration)
+                    .is_err_and(|error| error.kind() == io::ErrorKind::NotFound) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    };
+    result.with_context(|| {
+        format!(
+            "Engram eligibility is unavailable because TermAl could not inspect {}. Restore access to the project directory and its declaration, then Resume",
+            declaration.display()
+        )
+    })
+}
+
 impl AppState {
     #[allow(dead_code)]
     pub(crate) fn engram_mcp_stdio_config_for_session(
@@ -368,6 +496,53 @@ impl AppState {
             }
         }
         declared
+    }
+
+    /// Reads the declaration for this explicit Claude launch without publishing
+    /// the result to the shared project cache.
+    pub(crate) fn prepare_engram_declaration_for_claude_launch_off_lock(
+        &self,
+        session_id: &str,
+    ) -> Option<ClaudeEngramLaunchCheck> {
+        #[cfg(all(test, windows))]
+        if let Some(hook) =
+            TEST_CLAUDE_BEFORE_ENGRAM_LAUNCH_CHECK.with(|slot| slot.borrow_mut().take())
+        {
+            hook();
+        }
+        let (project, resetting) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_session_index(session_id)?;
+            if !is_local_root_claude_locked(&inner, index)
+                || !claude_runtime_needs_launch(&inner.sessions[index])
+            {
+                return None;
+            }
+            let project = ClaudeEngramProject::for_session(&inner, session_id);
+            let resetting = project
+                .as_ref()
+                .is_some_and(|project| inner.engram_project_resets.contains(&project.id));
+            (project, resetting)
+        };
+        let result = match project.as_ref() {
+            Some(project)
+                if project.remote_id == LOCAL_REMOTE_ID
+                    && project
+                        .settings
+                        .as_ref()
+                        .is_some_and(EngramProjectSettings::is_base_enabled) =>
+            {
+                if resetting {
+                    Err(anyhow!(
+                        "Engram project settings are being changed. Resume after the project settings settle"
+                    ))
+                } else {
+                    check_claude_engram_declaration(FsPath::new(&project.root))
+                }
+            }
+            _ => Ok(false),
+        };
+        Some(ClaudeEngramLaunchCheck { project, result })
     }
 
     /// Ordinary sends only inspect local state and reserve an advisory read.
@@ -1120,6 +1295,14 @@ pub(crate) fn engram_mcp_runtime_config_for_session_locked(
     inner: &StateInner,
     session_id: &str,
 ) -> Option<EngramMcpRuntimeConfig> {
+    engram_mcp_runtime_config_with_declaration_locked(inner, session_id, None)
+}
+
+fn engram_mcp_runtime_config_with_declaration_locked(
+    inner: &StateInner,
+    session_id: &str,
+    declared: Option<bool>,
+) -> Option<EngramMcpRuntimeConfig> {
     let session = inner
         .find_session_index(session_id)
         .and_then(|index| inner.sessions.get(index))?;
@@ -1139,7 +1322,7 @@ pub(crate) fn engram_mcp_runtime_config_for_session_locked(
     }
     let command = settings.binary_path.as_deref()?.to_owned();
     let home = settings.home.as_deref()?;
-    if !inner.engram_declared_project_ids.contains(&project.id) {
+    if !declared.unwrap_or_else(|| inner.engram_declared_project_ids.contains(&project.id)) {
         return None;
     }
     let project_file = PathBuf::from(&project.root_path).join(".engram-project");

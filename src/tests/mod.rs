@@ -100,6 +100,7 @@ mod engram_batch_binds;
 mod engram_budget_clock_boundary;
 mod engram_budget_watchdog_unwind;
 mod engram_child_temp;
+mod engram_claude_resume;
 mod engram_compaction;
 mod engram_host_adapter;
 mod engram_import_hold_decision;

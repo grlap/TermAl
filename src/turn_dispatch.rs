@@ -94,6 +94,21 @@ pub(crate) fn ordinary_queue_dispatch_is_held(
         || (record.orchestrator_auto_dispatch_blocked && !allow_blocked_dispatch)
 }
 
+/// Dedicated Windows jobs need confirmed off-lock cleanup before reset.
+pub(crate) fn claude_reset_needs_off_lock_cleanup(record: &SessionRecord) -> bool {
+    #[cfg(windows)]
+    {
+        record.runtime_reset_required
+            && matches!(&record.runtime, SessionRuntime::Claude(handle)
+                if handle.process_tree.as_ref().is_some_and(|tree| !tree.is_confirmed()))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = record;
+        false
+    }
+}
+
 /// Adds transport context that a receiving agent cannot infer from its own
 /// repository instructions. Peer sessions may live in entirely different
 /// projects, so the prompt must explain both the context boundary and the
@@ -280,6 +295,16 @@ impl AppState {
         index: usize,
         allow_blocked_dispatch: bool,
     ) -> Result<Option<StartedTurn>> {
+        self.start_next_queued_turn_with_engram_locked(inner, index, allow_blocked_dispatch, None)
+    }
+
+    fn start_next_queued_turn_with_engram_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+        allow_blocked_dispatch: bool,
+        checked_engram_mcp: Option<Option<EngramMcpRuntimeConfig>>,
+    ) -> Result<Option<StartedTurn>> {
         let record = &inner.sessions[index];
         if engram_named_selection_capture_pending(record)
             || session_resource_reset_in_progress(inner, record)
@@ -305,7 +330,8 @@ impl AppState {
             return Ok(None);
         }
         let session_id = inner.sessions[index].session.id.clone();
-        let engram_mcp = engram_mcp_runtime_config_for_session_locked(inner, &session_id);
+        let engram_mcp = checked_engram_mcp
+            .unwrap_or_else(|| engram_mcp_runtime_config_for_session_locked(inner, &session_id));
         let host_mcp_servers_only =
             session_is_acceptance_evaluator_child_locked(inner, &session_id);
         let host_shutdown = self.shutdown_signal_tx.borrow();
@@ -1204,14 +1230,15 @@ impl AppState {
         owner: QueuedTurnOwner,
     ) -> Result<Option<TurnDispatch>> {
         Ok(self
-            .dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner)?
+            .dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner, false)?
             .map(|started| started.dispatch))
     }
 
     pub(crate) fn dispatch_next_queued_turn_for_resume_with_prompt(
         &self,
         session_id: &str,
-        owner: QueuedTurnOwner,
+        queue: QueuedTurnOwner,
+        explicit_human: bool,
     ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
             eprintln!(
@@ -1223,7 +1250,10 @@ impl AppState {
             session_id,
             true,
             false,
-            Some(QueuedDrainOwner::Resume(owner)),
+            Some(QueuedDrainOwner::Resume {
+                queue,
+                explicit_human,
+            }),
         )
     }
 
@@ -1254,8 +1284,12 @@ impl AppState {
         orphaned_workflow_only: bool,
         owner: Option<QueuedDrainOwner>,
     ) -> Result<Option<StartedQueuedTurn>> {
-        if let Some(QueuedDrainOwner::Resume(expected) | QueuedDrainOwner::Activation(expected)) =
-            &owner
+        if let Some(
+            QueuedDrainOwner::Resume {
+                queue: expected, ..
+            }
+            | QueuedDrainOwner::Activation(expected),
+        ) = &owner
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner
@@ -1268,7 +1302,9 @@ impl AppState {
         let mut selected_human = None;
         let human_owner = match owner.as_ref() {
             None => true,
-            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner)) => {
+            Some(
+                QueuedDrainOwner::Resume { queue: owner, .. } | QueuedDrainOwner::Activation(owner),
+            ) => {
                 let inner = self.inner.lock().expect("state mutex poisoned");
                 inner.find_session_index(session_id).is_some_and(|index| {
                     let record = &inner.sessions[index];
@@ -1294,7 +1330,7 @@ impl AppState {
             // the exact receipted Resume owner may carry that pause bypass;
             // explicit Human UI actions call their own promotion path.
             let human_resume = allow_blocked_dispatch
-                && matches!(owner.as_ref(), Some(QueuedDrainOwner::Resume(_)));
+                && matches!(owner.as_ref(), Some(QueuedDrainOwner::Resume { .. }));
             let drained = self.start_human_queued_turn_with_selection(
                 session_id,
                 human_resume,
@@ -1478,9 +1514,9 @@ impl AppState {
                 .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
         });
         let ordinary_owner = match owner.as_mut() {
-            Some(QueuedDrainOwner::Resume(owner) | QueuedDrainOwner::Activation(owner)) => {
-                Some(owner)
-            }
+            Some(
+                QueuedDrainOwner::Resume { queue: owner, .. } | QueuedDrainOwner::Activation(owner),
+            ) => Some(owner),
             _ => automatic_owner.as_mut(),
         };
         if matches!(
@@ -1505,8 +1541,15 @@ impl AppState {
             Some(QueuedDrainOwner::MailboxRelay(owner)) => Some(owner.clone()),
             _ => None,
         };
-        let bypass_owner = match owner {
-            Some(QueuedDrainOwner::Resume(owner)) => Some(owner),
+        let explicit_human = matches!(
+            &owner,
+            Some(QueuedDrainOwner::Resume {
+                explicit_human: true,
+                ..
+            })
+        );
+        let mut bypass_owner = match owner {
+            Some(QueuedDrainOwner::Resume { queue, .. }) => Some(queue),
             Some(_) => None,
             None => allow_blocked_dispatch
                 .then(|| {
@@ -1517,13 +1560,37 @@ impl AppState {
                 })
                 .flatten(),
         };
-        // Runtime descriptors need the current local declaration before spawn;
-        // this filesystem probe performs no Engram/context transport read.
-        self.refresh_engram_project_declaration_for_session_off_lock(session_id);
-        self.schedule_engram_context_nudge(session_id);
+        let explicit_claude = if explicit_human {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return Ok(None);
+            };
+            let record = &inner.sessions[index];
+            if !bypass_owner
+                .as_ref()
+                .is_some_and(|owner| owner.matches(record))
+            {
+                return Ok(None);
+            }
+            is_local_root_claude_locked(&inner, index)
+                && ordinary_queue_position(record).is_some_and(|position| {
+                    ordinary_known_unpromoted_head(record, &record.queued_prompts[position])
+                })
+        } else {
+            false
+        };
+        let mut engram_declaration = if explicit_claude {
+            self.prepare_engram_declaration_for_claude_launch_off_lock(session_id)
+        } else {
+            // Preserve the shared declaration refresh for ordinary drains.
+            self.refresh_engram_project_declaration_for_session_off_lock(session_id);
+            self.schedule_engram_context_nudge(session_id);
+            None
+        };
+        let mut rechecked_launch = false;
         // Context is advisory. Only already available local context is composed
         // into this prompt; no refresh or ownership wait precedes enqueue.
-        {
+        loop {
             let relay_authority = self
                 .prepare_front_mailbox_relay_authority(session_id)
                 .map_err(|error| mailbox_relay_admission_held(error.message))?;
@@ -1594,6 +1661,39 @@ impl AppState {
             else {
                 return Ok(None);
             };
+            let checked_engram_mcp = if explicit_human
+                && is_local_root_claude_locked(&inner, index)
+                && ordinary_known_unpromoted_head(record, &queued)
+                && claude_runtime_needs_launch(record)
+            {
+                let Some(declaration) = engram_declaration
+                    .take()
+                    .filter(|_| !claude_reset_needs_off_lock_cleanup(record))
+                else {
+                    if rechecked_launch {
+                        bail!("Claude runtime changed while preparing its launch. Resume to retry");
+                    }
+                    drop(inner);
+                    drop(_relay_link);
+                    if matches!(
+                        self.prepare_dedicated_runtime_reset_for_ordinary_queue_off_lock(
+                            session_id,
+                            bypass_owner.as_mut(),
+                            None,
+                        )?,
+                        RuntimeResetPreparation::Held
+                    ) {
+                        return Ok(None);
+                    }
+                    engram_declaration =
+                        self.prepare_engram_declaration_for_claude_launch_off_lock(session_id);
+                    rechecked_launch = true;
+                    continue;
+                };
+                Some(declaration.runtime_config(&inner, session_id)?)
+            } else {
+                None
+            };
             // Write-ahead acknowledgement belongs to this exact prompt;
             // a held entry never writes or consumes a handoff.
             if !queued_prompt_held_for_durability(record, &queued)
@@ -1607,8 +1707,12 @@ impl AppState {
                 return Ok(None);
             }
             let promotion_snapshot = inner.sessions[index].capture_queue_promotion_snapshot();
-            let Some(started) =
-                self.start_next_queued_turn_locked(&mut inner, index, allow_blocked_dispatch)?
+            let Some(started) = self.start_next_queued_turn_with_engram_locked(
+                &mut inner,
+                index,
+                allow_blocked_dispatch,
+                checked_engram_mcp,
+            )?
             else {
                 return Ok(None);
             };
@@ -2343,5 +2447,9 @@ pub(crate) enum QueuedDrainOwner {
     /// Same-process activation of one durable remote wake; never a pause bypass.
     FederationWake(FederationExecutorLiveOwner),
     /// An explicit Resume of the head its caller checked.
-    Resume(QueuedTurnOwner),
+    Resume {
+        queue: QueuedTurnOwner,
+        /// A Human UI action can drive an older known-unsent ordinary head.
+        explicit_human: bool,
+    },
 }

@@ -510,7 +510,12 @@ impl AppState {
         let delivery = {
             #[cfg(test)]
             let _local = self.test_api_phase_timer("resume_local_mutation", Some(session_id));
-            self.resume_local_session_queue(session_id, None)?
+            self.cancel_provider_capacity_retry(session_id);
+            // A historical projected row can leave the manual action without a
+            // choice. The ordinary drain still captures its exact runnable head.
+            self.resume_local_session_queue_inner_with_selection(
+                session_id, None, None, None, true,
+            )?
         };
         if let Some(delivery) = delivery {
             delivery.into_public_result()?;
@@ -546,6 +551,7 @@ impl AppState {
             owner,
             capacity_nonce,
             None,
+            false,
         )
     }
 
@@ -555,6 +561,7 @@ impl AppState {
         mut owner: Option<QueuedTurnOwner>,
         capacity_nonce: Option<&str>,
         ordinary_selection: Option<&HumanPromptSelection>,
+        explicit_human: bool,
     ) -> Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
         let (checked_head, receipted) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -670,7 +677,8 @@ impl AppState {
                 ReceiptedResume::Refused(reason) => return Err(ApiError::conflict(reason)),
             }
         }
-        let dispatch = self.drain_resumed_queue(session_id, owner.clone())?;
+        let dispatch =
+            self.drain_resumed_queue_with_human_intent(session_id, owner.clone(), explicit_human)?;
         let dispatch =
             self.finish_resume_drain(session_id, owner, checked_head.as_deref(), dispatch)?;
         Ok(dispatch.map(|started| self.deliver_queued_turn_dispatch(started)))
@@ -683,8 +691,21 @@ impl AppState {
         session_id: &str,
         owner: Option<QueuedTurnOwner>,
     ) -> std::result::Result<Option<StartedQueuedTurn>, ApiError> {
+        self.drain_resumed_queue_with_human_intent(session_id, owner, false)
+    }
+
+    fn drain_resumed_queue_with_human_intent(
+        &self,
+        session_id: &str,
+        owner: Option<QueuedTurnOwner>,
+        explicit_human: bool,
+    ) -> std::result::Result<Option<StartedQueuedTurn>, ApiError> {
         match owner {
-            Some(owner) => self.dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner),
+            Some(owner) => self.dispatch_next_queued_turn_for_resume_with_prompt(
+                session_id,
+                owner,
+                explicit_human,
+            ),
             None => self.dispatch_next_queued_turn_with_prompt(session_id, true),
         }
         .map_err(|err| {

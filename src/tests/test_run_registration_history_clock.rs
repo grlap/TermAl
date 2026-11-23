@@ -1,6 +1,6 @@
 // Deterministic witnesses for the registration durability budget running on
-// the state's budget clock, included into test_run_registration_history.rs for
-// its HistoryService (the real router and an actual SQLite fence writer).
+// the state's budget clock, a child module of test_run_registration_history.rs
+// that uses its HistoryService (the real router and an actual SQLite fence writer).
 // Owns: the real-time deadline still measured from the instant before the
 // capture lock, a held writer acknowledging after an observed scripted-clock
 // wait without advancing that clock, and an advanced scripted clock still giving

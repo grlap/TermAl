@@ -34,6 +34,11 @@ pub(crate) const CLAUDE_TRANSIENT_API_RETRY_ATTEMPTS: u32 = 5;
 const CLAUDE_TRANSIENT_API_RETRY_BASE_DELAY: Duration = Duration::from_millis(200);
 const CLAUDE_RATE_LIMIT_RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_CLAUDE_EXECUTABLE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 // Readiness and spawning share this resolver. In particular, Windows batch
 // shims are not native executables and this runtime does not launch a shell.
 // Unlike find_command_on_path (Codex's shim-capable adapter), this deliberately
@@ -665,8 +670,14 @@ pub(crate) fn spawn_claude_runtime_with_environment(
         &delegation_mcp_config,
     )?;
     let mut command = dedicated_provider_command(|| {
-        let executable = resolve_claude_executable()
-            .ok_or_else(|| anyhow!("a launchable Claude CLI was not found on PATH"))?;
+        #[cfg(test)]
+        let executable = TEST_CLAUDE_EXECUTABLE
+            .with(|slot| slot.borrow_mut().take())
+            .or_else(resolve_claude_executable);
+        #[cfg(not(test))]
+        let executable = resolve_claude_executable();
+        let executable =
+            executable.ok_or_else(|| anyhow!("a launchable Claude CLI was not found on PATH"))?;
         let mut command = Command::new(executable);
         command.current_dir(&cwd);
         command.args(claude_cli_persistent_args(

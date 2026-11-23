@@ -1,6 +1,7 @@
 // Real router, SQLite registration fence and shipped Node adapter witness for
-// large source identities. Included beside the existing owned HistoryService;
-// no live store, source capture, stage execution or verification credit.
+// large source identities. A child module of test_run_registration_history.rs,
+// beside the existing owned HistoryService; no live store, source capture,
+// stage execution or verification credit.
 
 use super::*;
 

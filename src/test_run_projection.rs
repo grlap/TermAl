@@ -1,7 +1,7 @@
 // Immutable inputs for the existing test-run projection. A scan materializes
 // summaries off-lock, then validates these exact inputs at its commit cut.
 // This is disposable work, not a cache; unstamped mutations are compared too.
-// Included by test_run_observations.rs beside its borrowed projection owner.
+// A child module of test_run_observations.rs, beside its borrowed projection owner.
 // Session bodies, runtime state and persistence waiters are not summary inputs.
 
 use super::*;

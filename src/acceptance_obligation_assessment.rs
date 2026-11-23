@@ -15,7 +15,7 @@
 // in which they shrink (acceptance_evaluation.rs), or the tracker's own
 // `show --note` text, which holders read through the tracker and TermAl passes
 // through untouched.
-// Split from: new code, included from acceptance_evidence_selection.rs beside
+// Split from: new code, a child module of acceptance_evidence_selection.rs beside
 // the exact record reads it extends.
 
 use super::*;

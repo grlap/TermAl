@@ -11,10 +11,11 @@ CLI args
      -> repl      -> run_turn_blocking() -> recorder callbacks -> stdout
      -> delegation-mcp -> run_delegation_mcp_bridge() -> parent-scoped MCP tools
      -> sessions / mailbox -> run_coordination_cli() -> loopback mailbox and session tools
-The crate still compiles as one module so shared backend types stay crate-visible
-without a dense web of pub mod exports, but the behavior is split across
+Most files are modules, and main.rs imports what they share with `use x::*;`, so
+shared backend types stay reachable by their bare names without a dense web of
+pub mod exports. The behavior is split across
 src/api.rs, src/state.rs, src/runtime.rs, src/turns.rs, src/remote.rs,
-src/orchestrators.rs, and the Telegram relay fragments named below.
+src/orchestrators.rs, and the Telegram relay modules named below.
 */
 
 #[global_allocator]

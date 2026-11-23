@@ -79,7 +79,6 @@ impl HumanResumeOwner {
     }
 }
 
-#[cfg(test)]
 pub(crate) fn ordinary_known_unpromoted_head(
     record: &SessionRecord,
     head: &QueuedPromptRecord,
@@ -219,6 +218,7 @@ impl AppState {
             Some(owner),
             None,
             Some(&selection),
+            true,
         )? {
             outcome.into_public_result()?;
         }

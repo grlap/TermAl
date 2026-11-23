@@ -647,6 +647,93 @@ fn suppress_orphaned_codex_thread_blocks_discovery_reimport() {
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
+#[test]
+fn rejects_mixed_app_settings_with_invalid_model_without_applying_any_changes() {
+    let state = test_app_state();
+    state
+        .update_app_settings(update_app_settings_request_for_agent_model(
+            Agent::Codex,
+            "gpt-5.5".to_owned(),
+        ))
+        .unwrap();
+
+    let mut request =
+        update_app_settings_request_for_agent_model(Agent::Claude, "--help".to_owned());
+    request.default_codex_model = Some("gpt-5.6".to_owned());
+    assert_mixed_app_settings_request_rejected(
+        &state,
+        request,
+        "Claude default model must not start with `-`",
+    );
+}
+
+#[test]
+fn rejects_mixed_app_settings_removing_in_use_remote_without_applying_any_changes() {
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-lab".to_owned(),
+        name: "SSH Lab".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("fixture.invalid".to_owned()),
+        port: Some(22),
+        user: Some("alice".to_owned()),
+    };
+    state.inner.lock().unwrap().projects.push(Project {
+        id: "remote-project".to_owned(),
+        name: "Remote Project".to_owned(),
+        root_path: "/workspace/demo".to_owned(),
+        remote_id: remote.id.clone(),
+        remote_project_id: Some("project-1".to_owned()),
+        environment: ProjectEnvironment::default(),
+        engram: None,
+        engram_cleanup_warning: None,
+    });
+    let mut initial =
+        update_app_settings_request_for_agent_model(Agent::Codex, "gpt-5.5".to_owned());
+    initial.remotes = Some(vec![RemoteConfig::local(), remote]);
+    state.update_app_settings(initial).unwrap();
+
+    let mut request =
+        update_app_settings_request_for_agent_model(Agent::Codex, "gpt-5.6".to_owned());
+    request.remotes = Some(vec![RemoteConfig::local()]);
+    assert_mixed_app_settings_request_rejected(
+        &state,
+        request,
+        "cannot remove remote `ssh-lab` because project `Remote Project` still uses it",
+    );
+}
+
+fn assert_mixed_app_settings_request_rejected(
+    state: &AppState,
+    request: UpdateAppSettingsRequest,
+    expected_message: &str,
+) {
+    let before = state.snapshot();
+    let mut events = state.subscribe_events();
+    let error = state
+        .update_app_settings(request)
+        .err()
+        .expect("mixed request should be rejected");
+    assert_eq!(error.status, StatusCode::BAD_REQUEST);
+    assert_eq!(error.message, expected_message);
+
+    let after = state.snapshot();
+    let persisted = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .expect("fixture settings should be persisted");
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(persisted.preferences, before.preferences);
+    assert!(matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    assert_eq!(
+        after.preferences, before.preferences,
+        "a rejected update must leave effective preferences unchanged"
+    );
+}
+
 // pins that update_app_settings writes the global preferences to disk
 // and that a freshly loaded AppState inherits those defaults when
 // creating new Codex, Claude, Cursor, and Gemini sessions. guards against app-settings
