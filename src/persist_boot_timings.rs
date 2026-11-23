@@ -56,7 +56,11 @@ impl BootStateLoadTimings {
         self.enabled.then(std::time::Instant::now)
     }
 
-    pub(crate) fn finish(&mut self, phase: BootStateLoadPhase, started: Option<std::time::Instant>) {
+    pub(crate) fn finish(
+        &mut self,
+        phase: BootStateLoadPhase,
+        started: Option<std::time::Instant>,
+    ) {
         if let Some(started) = started {
             let elapsed = started.elapsed();
             let measurement = self.measurements.entry(phase).or_default();

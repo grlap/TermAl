@@ -83,7 +83,10 @@ mod ordinary_handoff_reader_floor_tests {
 
     fn predecessor_metadata(metadata: &PersistedState) -> Value {
         let mut value = serde_json::to_value(metadata).unwrap();
-        value.as_object_mut().unwrap().remove("engramSessionObligations");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("engramSessionObligations");
         value.as_object_mut().unwrap().remove("remoteTestRunFacts");
         value
     }
@@ -93,21 +96,39 @@ mod ordinary_handoff_reader_floor_tests {
     fn predecessor_comparison(encoded: &str) -> PersistedState {
         let mut value: Value = serde_json::from_str(encoded).unwrap();
         assert!(value.get("engramSessionObligations").is_none());
-        value["engramSessionObligations"] = serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
+        value["engramSessionObligations"] =
+            serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap();
         serde_json::from_value(value).unwrap()
     }
 
-    fn database_image(connection: &rusqlite::Connection) -> Vec<(String, String, Vec<Vec<rusqlite::types::Value>>)> {
+    fn database_image(
+        connection: &rusqlite::Connection,
+    ) -> Vec<(String, String, Vec<Vec<rusqlite::types::Value>>)> {
         let tables = connection.prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").unwrap()
             .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).unwrap()
             .collect::<rusqlite::Result<Vec<_>>>().unwrap();
-        tables.into_iter().map(|(name, schema)| {
-            let mut statement = connection.prepare(&format!("SELECT * FROM \"{}\" ORDER BY 1,2", name.replace('"', "\"\""))).unwrap();
-            let columns = statement.column_count();
-            let rows = statement.query_map([], |row| (0..columns).map(|index| row.get(index)).collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()).unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>().unwrap();
-            (name, schema, rows)
-        }).collect()
+        tables
+            .into_iter()
+            .map(|(name, schema)| {
+                let mut statement = connection
+                    .prepare(&format!(
+                        "SELECT * FROM \"{}\" ORDER BY 1,2",
+                        name.replace('"', "\"\"")
+                    ))
+                    .unwrap();
+                let columns = statement.column_count();
+                let rows = statement
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|index| row.get(index))
+                            .collect::<rusqlite::Result<Vec<rusqlite::types::Value>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                (name, schema, rows)
+            })
+            .collect()
     }
 
     fn prepare(connection: &rusqlite::Connection, load: bool) -> Result<()> {
@@ -144,10 +165,24 @@ mod ordinary_handoff_reader_floor_tests {
         )
     }
 
-    fn joint_extension(mut predecessor: (PersistMetadataUnits, u64, Vec<(String, String)>, String)) -> (PersistMetadataUnits, u64, Vec<(String, String)>, String) {
-        assert!(!predecessor.0.keys().any(|(field, _)| field == "engramSessionObligations"));
-        predecessor.0.extend(metadata_value_to_units(json!({"engramSessionObligations": EngramSessionObligationLedger::empty()})).unwrap());
-        predecessor.0.extend(metadata_value_to_units(json!({"remoteTestRunFacts": {}})).unwrap());
+    fn joint_extension(
+        mut predecessor: (PersistMetadataUnits, u64, Vec<(String, String)>, String),
+    ) -> (PersistMetadataUnits, u64, Vec<(String, String)>, String) {
+        assert!(
+            !predecessor
+                .0
+                .keys()
+                .any(|(field, _)| field == "engramSessionObligations")
+        );
+        predecessor.0.extend(
+            metadata_value_to_units(
+                json!({"engramSessionObligations": EngramSessionObligationLedger::empty()}),
+            )
+            .unwrap(),
+        );
+        predecessor
+            .0
+            .extend(metadata_value_to_units(json!({"remoteTestRunFacts": {}})).unwrap());
         predecessor.1 += 2;
         predecessor
     }
@@ -203,23 +238,30 @@ mod ordinary_handoff_reader_floor_tests {
                 let before = database_image(&connection);
                 let metadata = read_persisted_metadata_json(&connection).unwrap().unwrap();
                 connection
-                    .execute_batch(
-                        &format!("CREATE TRIGGER refuse_handoff_floor BEFORE UPDATE OF value ON meta
+                    .execute_batch(&format!(
+                        "CREATE TRIGGER refuse_handoff_floor BEFORE UPDATE OF value ON meta
                     WHEN new.key='schema_version' AND new.value='{SQLITE_SCHEMA_VERSION}'
-                    BEGIN SELECT RAISE(ABORT,'injected handoff floor failure'); END;"),
-                    )
+                    BEGIN SELECT RAISE(ABORT,'injected handoff floor failure'); END;"
+                    ))
                     .unwrap();
                 let error = prepare(&connection, load).unwrap_err();
                 assert!(format!("{error:#}").contains("injected handoff floor failure"));
                 assert_eq!(version(&connection), source);
-                assert_eq!(database_image(&connection), before, "all stages roll back together");
+                assert_eq!(
+                    database_image(&connection),
+                    before,
+                    "all stages roll back together"
+                );
                 assert!(connection.is_autocommit());
                 connection
                     .execute_batch("DROP TRIGGER refuse_handoff_floor")
                     .unwrap();
                 prepare(&connection, load).unwrap();
                 assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
-                assert_eq!(read_metadata_units(&connection).unwrap(), project_metadata_units(&predecessor_comparison(&metadata)).unwrap());
+                assert_eq!(
+                    read_metadata_units(&connection).unwrap(),
+                    project_metadata_units(&predecessor_comparison(&metadata)).unwrap()
+                );
             }
         }
     }
@@ -293,9 +335,15 @@ mod ordinary_handoff_reader_floor_tests {
     #[test]
     fn admission_contract_reader_floor_rejects_unknown_formats_before_mutation() {
         for load in [false, true] {
-            for unknown in ["1", "3", "4", "future", "2-metadata-units-2-handoff-2",
+            for unknown in [
+                "1",
+                "3",
+                "4",
+                "future",
+                "2-metadata-units-2-handoff-2",
                 "2-metadata-units-2-handoff-1-obligations-1",
-                "2-metadata-units-2-handoff-1-obligations-1-unadmitted-outbox-1"] {
+                "2-metadata-units-2-handoff-1-obligations-1-unadmitted-outbox-1",
+            ] {
                 let connection = units_store();
                 connection
                     .execute(
@@ -339,7 +387,10 @@ mod ordinary_handoff_reader_floor_tests {
             assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
             let metadata = read_persisted_metadata_json(&connection).unwrap().unwrap();
             let persisted: PersistedState = serde_json::from_str(&metadata).unwrap();
-            assert_eq!(serde_json::to_value(persisted.engram_session_obligations).unwrap(), serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap());
+            assert_eq!(
+                serde_json::to_value(persisted.engram_session_obligations).unwrap(),
+                serde_json::to_value(EngramSessionObligationLedger::empty()).unwrap()
+            );
             assert_eq!(metadata_unit_generation(&connection).unwrap(), 1);
             let before = database_image(&connection);
             prepare(&connection, load).unwrap();
@@ -368,11 +419,11 @@ mod ordinary_handoff_reader_floor_tests {
                 .unwrap();
             before = database_image(&connection);
             connection
-                .execute_batch(
-                    &format!("CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
+                .execute_batch(&format!(
+                    "CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
                 WHEN new.value='{SQLITE_SCHEMA_VERSION}'
-                BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;"),
-                )
+                BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;"
+                ))
                 .unwrap();
             assert!(prepare(&connection, true).is_err());
             assert_eq!(version(&connection), "2");
@@ -388,7 +439,10 @@ mod ordinary_handoff_reader_floor_tests {
             .unwrap();
         prepare(&connection, true).unwrap();
         assert_eq!(version(&connection), SQLITE_SCHEMA_VERSION);
-        assert_eq!(read_metadata_units(&connection).unwrap(), project_metadata_units(&predecessor_comparison(&metadata)).unwrap());
+        assert_eq!(
+            read_metadata_units(&connection).unwrap(),
+            project_metadata_units(&predecessor_comparison(&metadata)).unwrap()
+        );
     }
 
     #[test]
@@ -440,11 +494,11 @@ mod ordinary_handoff_reader_floor_tests {
         let connection = rusqlite::Connection::open(&path).unwrap();
         seed_units_store(&connection);
         connection
-            .execute_batch(
-                &format!("CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
+            .execute_batch(&format!(
+                "CREATE TRIGGER fail_feature BEFORE UPDATE OF value ON meta
             WHEN new.value='{SQLITE_SCHEMA_VERSION}'
-            BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;"),
-            )
+            BEGIN SELECT RAISE(ABORT,'feature floor unavailable'); END;"
+            ))
             .unwrap();
         let before = image(&connection);
         let mut inner = StateInner::new();

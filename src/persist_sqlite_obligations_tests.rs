@@ -227,8 +227,13 @@ mod session_obligation_storage_tests {
                     "normalized recovery authority remains byte exact"
                 );
                 let before = connection.total_changes();
-                for old_floor in [SQLITE_OBSERVATION_PREDECESSOR, SQLITE_OBSERVATION_SCHEMA_VERSION] {
-                    assert!(validate_sqlite_state_schema_for_version(&connection, old_floor).is_err());
+                for old_floor in [
+                    SQLITE_OBSERVATION_PREDECESSOR,
+                    SQLITE_OBSERVATION_SCHEMA_VERSION,
+                ] {
+                    assert!(
+                        validate_sqlite_state_schema_for_version(&connection, old_floor).is_err()
+                    );
                 }
                 assert_eq!(
                     connection.total_changes(),
@@ -307,31 +312,60 @@ mod session_obligation_storage_tests {
 
     #[test]
     fn project_containment_storage_rejects_hidden_observation_keys_before_legacy_normalization() {
-        for old_version in ["2", "2-metadata-units-1", SQLITE_METADATA_UNITS_VERSION,
-            SQLITE_OBSERVATION_PREDECESSOR] {
-            for key in ["engramRuntimeCheckpoint", "engramUnadmittedActiveTurn",
-                "engramUnadmittedClosingJobs", "engramUnadmittedReports"] {
+        for old_version in [
+            "2",
+            "2-metadata-units-1",
+            SQLITE_METADATA_UNITS_VERSION,
+            SQLITE_OBSERVATION_PREDECESSOR,
+        ] {
+            for key in [
+                "engramRuntimeCheckpoint",
+                "engramUnadmittedActiveTurn",
+                "engramUnadmittedClosingJobs",
+                "engramUnadmittedReports",
+            ] {
                 for value in [Value::Null, json!([]), json!({})] {
                     for load in [false, true] {
                         let connection = connection();
                         predecessor(&connection, old_version);
                         let raw = json!({(key): value}).to_string();
-                        connection.execute("INSERT INTO sessions(id,value_json) VALUES('hidden',?1)", [&raw]).unwrap();
+                        connection
+                            .execute(
+                                "INSERT INTO sessions(id,value_json) VALUES('hidden',?1)",
+                                [&raw],
+                            )
+                            .unwrap();
                         let metadata = read_persisted_metadata_json(&connection).unwrap();
                         let tables = sqlite_state_user_table_names(&connection).unwrap();
                         let generation = metadata_unit_generation(&connection).unwrap();
                         let changes = connection.total_changes();
                         let result = if load {
                             ensure_sqlite_state_schema_for_load(&connection).map(|_| ())
-                        } else { ensure_sqlite_state_schema(&connection) };
-                        assert!(format!("{:#}", result.unwrap_err()).contains("observation custody"), "{old_version}/{key}");
+                        } else {
+                            ensure_sqlite_state_schema(&connection)
+                        };
+                        assert!(
+                            format!("{:#}", result.unwrap_err()).contains("observation custody"),
+                            "{old_version}/{key}"
+                        );
                         assert_eq!(connection.total_changes(), changes);
                         assert_eq!(sqlite_state_user_table_names(&connection).unwrap(), tables);
                         assert_eq!(read_persisted_metadata_json(&connection).unwrap(), metadata);
                         assert_eq!(metadata_unit_generation(&connection).unwrap(), generation);
-                        assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), old_version);
-                        assert_eq!(connection.query_row("SELECT value_json FROM sessions WHERE id='hidden'", [],
-                            |row| row.get::<_, String>(0)).unwrap(), raw);
+                        assert_eq!(
+                            required_state_meta_value(&connection, "schema_version").unwrap(),
+                            old_version
+                        );
+                        assert_eq!(
+                            connection
+                                .query_row(
+                                    "SELECT value_json FROM sessions WHERE id='hidden'",
+                                    [],
+                                    |row| row.get::<_, String>(0)
+                                )
+                                .unwrap(),
+                            raw
+                        );
                     }
                 }
             }
@@ -339,38 +373,79 @@ mod session_obligation_storage_tests {
     }
 
     #[test]
-    fn project_containment_storage_outbox_extension_rolls_back_ledger_generation_and_commit_failures() {
+    fn project_containment_storage_outbox_extension_rolls_back_ledger_generation_and_commit_failures()
+     {
         for fault in ["ledger", "generation", "commit"] {
             let connection = connection();
             predecessor(&connection, SQLITE_OBSERVATION_SCHEMA_VERSION);
             let original = read_metadata_units_unchecked(&connection).unwrap();
             let generation = metadata_unit_generation(&connection).unwrap();
             match fault {
-                "ledger" => connection.execute_batch("CREATE TEMP TRIGGER refuse_ledger BEFORE INSERT ON state_metadata_units
+                "ledger" => connection
+                    .execute_batch(
+                        "CREATE TEMP TRIGGER refuse_ledger BEFORE INSERT ON state_metadata_units
                     WHEN NEW.field_name='engramSessionObligations'
-                    BEGIN SELECT RAISE(ABORT,'injected ledger failure'); END;").unwrap(),
-                "generation" => connection.execute_batch("CREATE TEMP TRIGGER refuse_generation BEFORE UPDATE ON meta
+                    BEGIN SELECT RAISE(ABORT,'injected ledger failure'); END;",
+                    )
+                    .unwrap(),
+                "generation" => connection
+                    .execute_batch(
+                        "CREATE TEMP TRIGGER refuse_generation BEFORE UPDATE ON meta
                     WHEN OLD.key='metadata_units_generation'
-                    BEGIN SELECT RAISE(ABORT,'injected generation failure'); END;").unwrap(),
-                "commit" => connection.execute_batch("PRAGMA foreign_keys=ON;
+                    BEGIN SELECT RAISE(ABORT,'injected generation failure'); END;",
+                    )
+                    .unwrap(),
+                "commit" => connection
+                    .execute_batch(
+                        "PRAGMA foreign_keys=ON;
                     CREATE TEMP TABLE commit_fault(id INTEGER PRIMARY KEY,
                         parent INTEGER REFERENCES commit_fault(id) DEFERRABLE INITIALLY DEFERRED);
                     CREATE TEMP TRIGGER refuse_commit AFTER INSERT ON state_metadata_units
                     WHEN NEW.field_name='engramSessionObligations' AND NEW.item_key=''
-                    BEGIN INSERT INTO commit_fault(id,parent) VALUES(1,2); END;").unwrap(),
+                    BEGIN INSERT INTO commit_fault(id,parent) VALUES(1,2); END;",
+                    )
+                    .unwrap(),
                 _ => unreachable!(),
             }
-            let error = ensure_sqlite_state_schema_for_load(&connection).err().expect("injected boundary must fail");
+            let error = ensure_sqlite_state_schema_for_load(&connection)
+                .err()
+                .expect("injected boundary must fail");
             let diagnostic = format!("{error:#}");
             if fault == "commit" {
-                assert!(diagnostic.contains("failed to commit joint state reader-floor migration"), "{diagnostic}");
-            } else { assert!(diagnostic.contains(&format!("injected {fault} failure")), "{diagnostic}"); }
-            assert_eq!(read_metadata_units_unchecked(&connection).unwrap(), original);
+                assert!(
+                    diagnostic.contains("failed to commit joint state reader-floor migration"),
+                    "{diagnostic}"
+                );
+            } else {
+                assert!(
+                    diagnostic.contains(&format!("injected {fault} failure")),
+                    "{diagnostic}"
+                );
+            }
+            assert_eq!(
+                read_metadata_units_unchecked(&connection).unwrap(),
+                original
+            );
             assert_eq!(metadata_unit_generation(&connection).unwrap(), generation);
-            assert_eq!(required_state_meta_value(&connection, "schema_version").unwrap(), SQLITE_OBSERVATION_SCHEMA_VERSION);
-            assert_eq!(connection.query_row("SELECT count(*) FROM messages", [], |row| row.get::<_, u64>(0)).unwrap(), 0);
+            assert_eq!(
+                required_state_meta_value(&connection, "schema_version").unwrap(),
+                SQLITE_OBSERVATION_SCHEMA_VERSION
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT count(*) FROM messages", [], |row| row
+                        .get::<_, u64>(0))
+                    .unwrap(),
+                0
+            );
             if fault == "commit" {
-                assert_eq!(connection.query_row("SELECT count(*) FROM commit_fault", [], |row| row.get::<_, u64>(0)).unwrap(), 0);
+                assert_eq!(
+                    connection
+                        .query_row("SELECT count(*) FROM commit_fault", [], |row| row
+                            .get::<_, u64>(0))
+                        .unwrap(),
+                    0
+                );
             }
             assert!(connection.is_autocommit());
         }
@@ -393,7 +468,12 @@ mod session_obligation_storage_tests {
         ensure_sqlite_state_schema_for_load(&connection).unwrap();
         assert_eq!(metadata_unit_generation(&connection).unwrap(), 9);
         let mut upgraded = read_metadata_units_unchecked(&connection).unwrap();
-        upgraded.retain(|(field, _), _| !matches!(field.as_str(), "engramSessionObligations" | "remoteTestRunFacts"));
+        upgraded.retain(|(field, _), _| {
+            !matches!(
+                field.as_str(),
+                "engramSessionObligations" | "remoteTestRunFacts"
+            )
+        });
         assert_eq!(
             upgraded, original,
             "unrelated unit bytes are not reserialized"
@@ -456,38 +536,41 @@ mod session_obligation_storage_tests {
 
     #[test]
     fn project_containment_storage_refuses_mixed_predecessor_ledger_or_orphan_mirror() {
-        for old_version in [SQLITE_OBSERVATION_PREDECESSOR, SQLITE_OBSERVATION_SCHEMA_VERSION] {
-        for defect in ["ledger", "mirror"] {
-            let connection = connection();
-            predecessor(&connection, old_version);
-            if defect == "ledger" {
-                let mut units = read_metadata_units_unchecked(&connection).unwrap();
-                units.extend(
+        for old_version in [
+            SQLITE_OBSERVATION_PREDECESSOR,
+            SQLITE_OBSERVATION_SCHEMA_VERSION,
+        ] {
+            for defect in ["ledger", "mirror"] {
+                let connection = connection();
+                predecessor(&connection, old_version);
+                if defect == "ledger" {
+                    let mut units = read_metadata_units_unchecked(&connection).unwrap();
+                    units.extend(
                     metadata_value_to_units(
                         json!({"engramSessionObligations": EngramSessionObligationLedger::empty()}),
                     )
                     .unwrap(),
                 );
-                replace_metadata(&connection, &metadata_units_to_value(&units).unwrap());
-            } else {
-                connection.execute("INSERT INTO sessions(id,value_json) VALUES('orphan','{\"session\":{},\"engramCheckpointOperation\":{}}')", []).unwrap();
+                    replace_metadata(&connection, &metadata_units_to_value(&units).unwrap());
+                } else {
+                    connection.execute("INSERT INTO sessions(id,value_json) VALUES('orphan','{\"session\":{},\"engramCheckpointOperation\":{}}')", []).unwrap();
+                }
+                let original = read_metadata_units_unchecked(&connection).unwrap();
+                let changes = connection.total_changes();
+                assert!(
+                    ensure_sqlite_state_schema_for_load(&connection).is_err(),
+                    "{defect}"
+                );
+                assert_eq!(connection.total_changes(), changes);
+                assert_eq!(
+                    read_metadata_units_unchecked(&connection).unwrap(),
+                    original
+                );
+                assert_eq!(
+                    required_state_meta_value(&connection, "schema_version").unwrap(),
+                    old_version
+                );
             }
-            let original = read_metadata_units_unchecked(&connection).unwrap();
-            let changes = connection.total_changes();
-            assert!(
-                ensure_sqlite_state_schema_for_load(&connection).is_err(),
-                "{defect}"
-            );
-            assert_eq!(connection.total_changes(), changes);
-            assert_eq!(
-                read_metadata_units_unchecked(&connection).unwrap(),
-                original
-            );
-            assert_eq!(
-                required_state_meta_value(&connection, "schema_version").unwrap(),
-                old_version
-            );
-        }
         }
     }
 

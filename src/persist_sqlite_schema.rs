@@ -3,7 +3,9 @@
 // Does not own connection lifetimes, path locks, transaction orchestration,
 // physical message layout conversion, overview backfill or transcript reads.
 
-pub(crate) fn sqlite_state_user_table_names(connection: &rusqlite::Connection) -> Result<BTreeSet<String>> {
+pub(crate) fn sqlite_state_user_table_names(
+    connection: &rusqlite::Connection,
+) -> Result<BTreeSet<String>> {
     let mut statement = connection
         .prepare(
             "SELECT name
@@ -228,7 +230,10 @@ pub(crate) fn reject_unsupported_state_schema(detail: impl std::fmt::Display) ->
     )
 }
 
-pub(crate) fn required_state_meta_value(connection: &rusqlite::Connection, key: &str) -> Result<String> {
+pub(crate) fn required_state_meta_value(
+    connection: &rusqlite::Connection,
+    key: &str,
+) -> Result<String> {
     connection
         .query_row(
             "SELECT value FROM meta WHERE key = ?1",
@@ -438,7 +443,9 @@ fn sqlite_state_schema_header(
     Ok((actual_tables, stored_schema_version))
 }
 
-pub(crate) fn validate_current_sqlite_state_schema(connection: &rusqlite::Connection) -> Result<()> {
+pub(crate) fn validate_current_sqlite_state_schema(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     // The import-reconciliation successor keeps every table of the current
     // floor; only its metadata inventory differs. Activation is explicit;
     // migration of an already activated predecessor preserves that state.
