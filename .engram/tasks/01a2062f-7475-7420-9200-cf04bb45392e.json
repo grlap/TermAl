@@ -1,0 +1,31 @@
+{
+  "id": "01a2062f-7475-7420-9200-cf04bb45392e",
+  "external_ref": null,
+  "title": "Claude root session resumed after a host restart gets no Engram MCP server or ENGRAM_* env, though its project is Engram-enabled (Mac, fit_friends)",
+  "outcome": "Reported 2026-11-23 ~02:14Z by MacOS::ComovoOpus (session-6223, Claude, host S3 Mac abf8bda6, project-2 fit_friends) in TermAl relay mailbox fa863ed5 #6, at Greg's request. Greg does not know the cause.\nBefore the Mac TermAl restart (new host process 81570, started 02:03Z) this session had the engram MCP server and ENGRAM_HOME, ENGRAM_ACTOR_ID, ENGRAM_ACTOR_CONTEXT and ENGRAM_SESSION_ID (actor dev/claude). After Greg restarted the host and then this session, the Claude runtime (argv: claude … --resume 25010ef3-… --mcp-config ~/.termal/delegations/mcp/claude-mcp-9ec9d7dc-….json, a file already gone) exposes only termal-delegation tools and has none of the ENGRAM_* variables. TERMAL_* are present.\nAt the same time:\n- GET /api/state shows project-2 with engram enabled, executionObservability true, binaryPath engram, home ~/.engram; engramDeclared is true and engramOperatorDisabled false;\n- `engram` resolves to ~/.cargo/bin/engram (build 9c45f946b71d);\n- a Codex session on the same host (session-6205, project termal) runs its engram mcp normally;\n- the host still prepends engram context to this session's prompts, and declared test verification still reaches Engram.\ndocs/features/engram-host-adapter.md says the descriptor and env are decided once at runtime creation. The cause is unknown: why the runtime created at this resume got no Engram descriptor is not established.\nRelated, different runtime and trigger: w-d2982d6f0d3f (a loaded Codex thread ignores enablement changes).",
+  "acceptance": [
+    "After state reload, the first human Send or queue Resume that creates a Claude runtime for a previously started local root in a declared, enabled Engram project restores the same external Claude session and supplies the Engram MCP descriptor and the root's scoped ENGRAM_HOME, ENGRAM_ACTOR_ID, ENGRAM_ACTOR_CONTEXT (when available), and ENGRAM_SESSION_ID. A behavior regression demonstrates this from persisted state with no prewarmed declaration cache, through human promotion and the launch boundary.",
+    "If eligibility for an otherwise enabled local Claude root cannot be determined at launch, the operator sees the reason and what restores access, with no fallback to another project or inherited Engram identity. Deliberately disabled or undeclared projects continue without Engram."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "claude",
+    "engram-integration",
+    "greg-reported",
+    "host-restart",
+    "mac"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

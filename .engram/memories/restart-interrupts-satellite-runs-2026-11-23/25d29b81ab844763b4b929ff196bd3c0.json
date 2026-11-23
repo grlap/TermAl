@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-interrupts-satellite-runs-2026-11-23",
+    "revision_id": "25d29b81ab844763b4b929ff196bd3c0",
+    "previous": null,
+    "body_sha256": "1a3e22333b5eb068ab6db41139c4e6d704d5223a9107bc6ecd9683c3be138886",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-23T01:49:28.837079300Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-23 ~01:50Z; my own miss). A TermAl restart is NOT confined to Central. Greg restarts TermAl on every host (see central-restart-cargo-run-rebuilds-exe), and in-flight runs on satellites die with it. Observed at the b35c79d1 restart (notice 01:45:20Z): Windows B's BATCH5 full run test-594b0728 lost its tool session and launcher PID 17060, and the runner recovered it as INTERRUPTED (sourceIdAfter null, not eligible). Opus2 confirmed that Windows B's runner was restarted too.\nRule:\n- Before proposing \"restart now\", list every in-flight launcher run and delegation child on ALL hosts (Central, Windows B, DL560 s4/C6, Mac), not only on Central.\n- Either wait for them to end, or tell Greg which runs will be lost and that each gets one recover plus one repeat on identical input.\n- Never write \"off-Central runs are unaffected\".\n- After the restart, each runner recovers its run once (node scripts/test-launcher.mjs recover RUN_DIR) and repeats once on identical input in a fresh root. A test failure is never repeated."
+}

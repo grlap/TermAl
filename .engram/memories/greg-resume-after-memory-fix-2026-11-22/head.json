@@ -3,9 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "greg-resume-after-memory-fix-2026-11-22",
   "head": {
-    "state": "active",
-    "chain": [
-      "50a6eab1954e4f4aa6c2d1cba7725cb0"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-23T01:31:09.863457600Z"
+    }
   }
 }

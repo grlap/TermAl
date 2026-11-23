@@ -10,7 +10,7 @@
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 0,
+  "priority": 1,
   "labels": [
     "federation",
     "nondeterministic",

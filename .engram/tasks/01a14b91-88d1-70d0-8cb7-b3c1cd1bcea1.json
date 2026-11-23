@@ -40,12 +40,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a147c0-22a0-7983-8bb2-b17b985f5dbc",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Finished delegation children now keep no resident transcript, and boot reads no tail for them. That includes a child whose own delegations are all terminal, unless an evaluator's card can still be rewritten. Persistence trims them once their delegation is terminal and nothing transient holds them, and every wake that can release a held child rechecks it. Tail, history, delegation result-output and the project digest's progress read them from SQLite on demand. A follow-up or review capture makes the window resident again; so does a follow-up for the parent whose card it rewrites.\n\nThe change landed in batch b35c79d17bf7dcbb5bb2477a56b6176e18355c45 on master (fast-forwarded and pushed by Opus2 at 2026-11-23T01:27:55Z). The batch also carries the federation fixture diagnostics for w-2f9db62028e0.\n\nEvidence:\n- Gate: the registered Central FULL test-97ff3e1a-d755-4628-9255-81ae79fff74b passed every stage, with request, before and after source_id all equal.\n- Reviews: pairs 10-13 (adopted for the byte-identical paths) and pair 14 (the merge and the diagnostics), all clean. Filed Lows: w-3962f4264b02, w-cb5b05a6aa48, w-8953bfe333a3.\n- Acceptance: evaluation 98840ed7786d4851b585e6decb97912d passed 3 of 3.\n- The post-restart measurement is carried by w-e5a0838445b6.",
+    "completed_at": "2026-11-23T01:30:25.875237100Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -9,10 +9,11 @@
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 2,
+  "priority": 1,
   "labels": [
     "codex",
     "engram",
+    "greg-reported",
     "macos"
   ],
   "assigned_to": null,

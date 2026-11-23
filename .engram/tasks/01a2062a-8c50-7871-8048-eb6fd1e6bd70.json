@@ -1,0 +1,29 @@
+{
+  "id": "01a2062a-8c50-7871-8048-eb6fd1e6bd70",
+  "external_ref": null,
+  "title": "Existing Codex root thread keeps no Engram MCP tools after its project's Engram integration is enabled (Mac, fit_friends)",
+  "outcome": "Existing Codex root thread keeps no Engram MCP tools after its project's Engram integration is enabled (Mac, fit_friends)",
+  "acceptance": [
+    "Existing Codex root thread keeps no Engram MCP tools after its project's Engram integration is enabled (Mac, fit_friends) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "codex",
+    "engram-integration",
+    "greg-reported",
+    "mac"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a20164-ab70-7612-9399-d2982d6f0d3f",
+  "disposal_reason": "Duplicate (coordinator Fable2 #7640): it's the same Mac session-6211, the same fit_friends project and the same fresh-child contrast as w-d2982d6f0d3f. That item is already in progress under Sol-8e1f, with a behavioural RED on 33b6a031. My search missed it. The Mac runner's #2885 observations, recorded here, are evidence for w-d298.",
+  "completion": null
+}
