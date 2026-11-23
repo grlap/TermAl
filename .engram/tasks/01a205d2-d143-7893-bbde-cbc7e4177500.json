@@ -1,0 +1,35 @@
+{
+  "id": "01a205d2-d143-7893-bbde-cbc7e4177500",
+  "external_ref": null,
+  "title": "Nested include! slice B, conversion: 28 top-level includes in 15 module files become child modules, by the tool",
+  "outcome": "28 fragments that 15 module files include at their top level (24 product, 4 under src/tests) become child modules of those files, converted by scripts/include-to-mod.mjs: `#[path]` + `mod` in the parent, one glob to hand the names on, `use super::*;` in the child, and `pub(super)` on what the parent or another file uses. Follows the formatting-only candidate of the same slice (sibling item). Unlike slice A, module paths change for the items of the converted fragments, and the 16 tests that three of them hold gain the module's name in their libtest path. Not in this slice: the 19 persist units, the two federation test units, and the 12 inline blocks held out of slice A. The units are listed in a note on this item.",
+  "acceptance": [
+    "On the candidate, none of the listed include!() lines remains; each listed unit is mounted in its parent by a `mod` item, with `#[path]` where the file is not at the module's default location; and `node scripts/include-to-mod.mjs verify BASE CANDIDATE` reports no problem, where BASE is the candidate without this item's contribution.",
+    "The test names printed by `cargo test --bin termal -- --list` on the candidate differ from those of the candidate without this item's contribution only in the listed tests, each of which gains its new module's name as one path segment; the old and new names are recorded on the item.",
+    "Nothing in the repository refers to an old name of a listed test or to a module path that the conversion changes (scripts, docs, termal-tests.toml, the launcher's filters), or each such reference is updated in the candidate; the search and its result are recorded on the item, including every use of module_path!() and type_name that can reach an item of a converted unit.",
+    "`cargo fmt --all -- --check` passes on the candidate, and on Linux and on Windows the candidate's build has no warning that the candidate without this item's contribution lacks, or each such warning is recorded with its cause.",
+    "The coordinator's four patterns were checked on the listed units on the candidate's base and none occurs; the check is recorded on the item.",
+    "No test reads or pins source text for this change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

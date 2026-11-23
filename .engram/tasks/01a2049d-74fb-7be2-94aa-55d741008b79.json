@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the verification-source diagnostic fix in exact batch 4de80b742124b4300c680a3da6d08b38192e19dd. The acceptance brief separately explains missing identity, incomparable source formats and a confirmed difference. The same exact-source checks still govern citation, and non-equal cases remain context-only. The historical complaint came from an unbound brief that lacked a complete private identity. Behavior tests exercise equal and different compact identities through bound preparation, legacy controls and the mixed-format diagnostic.",
+    "completed_at": "2026-11-23T00:32:24.044468900Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

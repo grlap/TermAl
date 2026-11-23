@@ -3,7 +3,11 @@
   "external_ref": "tm-d8v",
   "title": "Keep live command cards collapsed from first render",
   "outcome": "Agent turns can emit many command cards, so running, successful, and failed commands must render as compact summaries from their first frame. Details open only by explicit user action or active conversation search, and remain stable across running-to-success/error updates. Remove the automatic height-collapse animation that fights live bottom-follow, and add component plus scroll regression coverage.",
-  "acceptance": [],
+  "acceptance": [
+    "A running, successful, or failed command card starts as a compact summary. Its input and output detail panels stay closed, and the collapsed failed card visibly indicates the error.",
+    "Explicitly opened details stay open when that command changes from running to success or failure. An active conversation search opens details on a matching card, and clearing the search restores the card's previous manual open or closed state.",
+    "When a collapsed command completes, it stays compact without an automatic height-collapse animation. The virtualized list uses a compact height estimate for running, successful, and failed cards and keeps the visible command anchored when measured command pages shrink above it."
+  ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "task",

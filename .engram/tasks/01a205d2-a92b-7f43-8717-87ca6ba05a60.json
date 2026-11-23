@@ -1,0 +1,34 @@
+{
+  "id": "01a205d2-a92b-7f43-8717-87ca6ba05a60",
+  "external_ref": null,
+  "title": "Nested include! slice B, formatting only: rustfmt the fragment files of 28 top-level includes before they become modules",
+  "outcome": "Slice B of w-05336c2d00a3 converts 28 fragments that 15 module files include at their top level into child modules, with scripts/include-to-mod.mjs. `cargo fmt` does not reach an included file; 19 of the 29 files the conversion will bring within its reach (the 28 fragments and one module file a fragment declares) are not what rustfmt prints, so the conversion would fail `cargo fmt --all -- --check`. This candidate formats those files with rustfmt alone and changes nothing else, so that the conversion that follows is only the tool's output. The units are listed in a note on this item.",
+  "acceptance": [
+    "This item's contribution to the candidate commit changes only files under src that slice B's conversion brings within `cargo fmt`'s reach: the fragment files of the listed units and the module files those fragments declare; every other path the commit changes belongs to another item, whose contribution is recorded with it.",
+    "For every path of this item's contribution, `git show PARENT:path | rustfmt --edition 2024` prints exactly the candidate's content of that path, where PARENT is the candidate's parent commit; the rustfmt version is recorded with the check.",
+    "The set of test names printed by `cargo test --bin termal -- --list` is the same on the candidate as on the candidate without this item's contribution, on one host; for a candidate that holds only this item's contribution that is its parent.",
+    "No test reads or pins source text for this change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "formatting",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

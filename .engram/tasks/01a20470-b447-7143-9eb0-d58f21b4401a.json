@@ -4,14 +4,14 @@
   "title": "Docs: telegram-markdown-documents.md still calls telegram_document_safety.rs \"included\" after the slice A wiring",
   "outcome": "Found by the Codex reviewer of the slice A wiring pair (WAB12-PAIR1-4223AAA0, delegation-dd7d491f-de3b-45db-a5db-661e0dc28d86, a Note outside the diff). docs/features/telegram-markdown-documents.md:118 says \"`src/tests/telegram_documents.rs` and its included `src/tests/telegram_document_safety.rs`\". Once the wiring of w-ab12952d085c lands, that file is a child module declared with `#[path]`, not included text, so the sentence is stale. To do only after that wiring is on master. A Markdown-only change. The same follow-up can carry any comment in the converted files that still says a file is \"included\" by another; the reviewers found none in the 20 changed files of slice A. Criteria are to be worded and concurred when it is scheduled.",
   "acceptance": [
-    "Docs: telegram-markdown-documents.md still calls telegram_document_safety.rs \"included\" after the slice A wiring is done"
+    "docs/features/telegram-markdown-documents.md no longer says that src/tests/telegram_document_safety.rs is included by src/tests/telegram_documents.rs; it describes it as a child module of that file.",
+    "This item's contribution to the candidate commit changes only Markdown files, namely docs/features/telegram-markdown-documents.md; every other path the commit changes belongs to another item, whose contribution is recorded with it. The doc link check passes on the candidate commit."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "chore",
   "priority": 3,
   "labels": [
-    "acceptance-needed",
     "architecture",
     "docs",
     "greg-directed",
