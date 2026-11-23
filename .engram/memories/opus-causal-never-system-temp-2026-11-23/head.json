@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus-causal-never-system-temp-2026-11-23",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d8994b5a303745239b5c04b047f3063c"
+    ]
+  }
+}

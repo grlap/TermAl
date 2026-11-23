@@ -1,0 +1,27 @@
+{
+  "id": "01a2092f-a226-7962-8852-4cd1835be126",
+  "external_ref": null,
+  "title": "A run wait's second resume holds a settled record until every marked run's record is final",
+  "outcome": "Each marked run's verification record is named to the waiting session as soon as it reaches its last state, without waiting for the wait's other marked runs.",
+  "acceptance": [
+    "A run wait's second resume holds a settled record until every marked run's record is final is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

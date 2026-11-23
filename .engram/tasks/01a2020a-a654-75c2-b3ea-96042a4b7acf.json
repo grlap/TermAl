@@ -24,12 +24,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a200e2-c8eb-78b0-9147-e50841447cd8",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "src/main.rs, src/codex_discovery.rs and src/persisted_state.rs no longer describe the crate as one include!()-assembled module or a file as its own include!() fragment: main.rs now says most files are modules that main.rs imports with `use x::*;`, and the two files extracted from state.rs say they moved into their own module, keeping why. src/instructions.rs and src/review.rs already said \"imported\" (landed in fe5f485f). Comment text only; non-comment tokens identical to the base in all three files. Reviewed in the comment batch dd0f22e6 (W533B-PAIR1: Codex clean; Kimi for the refused Claude reviewer, clean) and landed inside batch 6, fa9539220882d6126da63bb542c657786b1400c3 (fast-forward by Opus2 at 2026-11-23T08:00:47Z, pushed to origin master). Gates on fa953922: Linux test-c500875d, Windows test-3a63f1f5. Acceptance evaluation fbb55c27, 6/6. Moved out of this item: src/persist.rs to slice C's comment follow-up, src/tests/mod.rs to w-b672ed047507.",
+    "completed_at": "2026-11-23T08:02:35.662723700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -1,0 +1,27 @@
+{
+  "id": "01a2092f-9255-7913-8f6a-d73a959467a1",
+  "external_ref": null,
+  "title": "A session waiting on another session's run is not told when the run's record settles after its wait ended on a route reason",
+  "outcome": "A run wait whose second resume named a retryable route reason (such as no_connection) still lets the waiting session learn the record id when the producer later settles it, even when the waiting session is not the run's owner.",
+  "acceptance": [
+    "A session waiting on another session's run is not told when the run's record settles after its wait ended on a route reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

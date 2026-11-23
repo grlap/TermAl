@@ -1,0 +1,34 @@
+{
+  "id": "01a20928-a0d9-7840-9634-2422bd1d69b0",
+  "external_ref": null,
+  "title": "Nested include! slice C, formatting only: rustfmt the persist fragment files before 16 of them become modules",
+  "outcome": "Slice C of w-05336c2d00a3 converts 16 of the 19 fragments that src/persist.rs includes into child modules of persist.rs, with scripts/include-to-mod.mjs (a sibling item). `cargo fmt` does not reach an included file; 6 of the 19 files that conversion brings within its reach (the 16 fragments and three module files they declare) are not what rustfmt prints: src/persist_boot_timings.rs, src/persist_sqlite_maintenance_tests.rs, src/persist_sqlite_obligations_tests.rs, src/persist_sqlite_reader_floor_tests.rs, src/persist_sqlite_schema.rs and the declared module src/tests/native_test_completion_reader_floor.rs. This candidate formats those files with rustfmt alone and changes nothing else, so that the conversion that follows is only the tool's output. The 16 units are listed in a note on this item. Not in this slice: persist_direct_prompt.rs, persist_metadata_tracking.rs and persist_metadata_units_codec.rs (refused by the tool; coordinator's rulings in TermAl mailbox 30a7a691 #149).",
+  "acceptance": [
+    "This item's contribution to the candidate commit changes only files under src that slice C's conversion brings within `cargo fmt`'s reach: the fragment files of the listed units and the module files those fragments declare; every other path the commit changes belongs to another item, whose contribution is recorded with it.",
+    "For every path of this item's contribution, `git show PARENT:path | rustfmt --edition 2024` prints exactly the candidate's content of that path, where PARENT is the candidate's parent commit; the rustfmt version is recorded with the check.",
+    "The set of test names printed by `cargo test --bin termal -- --list` is the same on the candidate as on the candidate without this item's contribution, on one host; for a candidate that holds only this item's contribution that is its parent.",
+    "No test reads or pins source text for this change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "formatting",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

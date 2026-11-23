@@ -16,12 +16,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed with Batch 6. App settings requests validate a copy of the preferences before applying changes. An invalid agent default or removal of a remote still in use returns 400 without leaking other settings. The two rejection regressions and successful mixed update passed in the exact 97/97 Central run (verification 6a5ecf997305460998b977a8a6945815). Both reviews cover the identical contribution; Batch 6 passed Linux test-c500875d and Windows test-3a63f1f5 and has fresh independent acceptance 9b2f4c28b5d7410988fa8960e5b357cd. Opus2 recorded landing at 08:00:47Z and authorized completion in mailbox #1740, with Batch 6 installation to follow. Removed my exact temporary author-test ref for standalone 6b87cfbb at 08:02Z and confirmed it absent.",
+    "completed_at": "2026-11-23T08:02:46.505905600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

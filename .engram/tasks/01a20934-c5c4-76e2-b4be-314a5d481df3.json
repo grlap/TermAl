@@ -1,0 +1,31 @@
+{
+  "id": "01a20934-c5c4-76e2-b4be-314a5d481df3",
+  "external_ref": null,
+  "title": "Regression: delegation sessions (review pairs) appear in the main Sessions list after the restart, including remote-host ones",
+  "outcome": "Reported by Greg after the 2026-11-23 restart onto fa953922 (Central host started 15:58Z), relayed by Engram::Asistant (TermAl mailbox 588693a8 #2601, 16:19Z), verbatim: „delegacje pojawily sie w liscie sesji” (\"delegations appeared in the session list\").\nOn his Sessions screen (All projects / All hosts) he sees delegation children such as \"2B72-PAIR-1721C899: Claude /review-code\" and \"2B72-PAIR-792831BE: Codex /review-code\", and many other pairs, shown with the remote-host icon.\nThe standing requirement is that delegations are available on demand only and do not fill the list of ordinary sessions.\nNot yet established, no guessing:\n- which hosts' delegations appear: Central's own, remote or federated, or both;\n- whether this started with the fa953922 build or the restart. The previous running build was b35c79d1, from about 01:45Z; the change range since is b35c79d1..fa953922.\nConstraint: diagnose and fix without deleting any session or delegation data.",
+  "acceptance": [
+    "Exclude native local and mirrored remote delegation children from the main Sessions list for every project and host filter, retain ordinary roots, and keep child transcript/detail reachable through the owning host's existing parent or delegation view. Cover local and mirrored behavior through the actual summary/delta and detail paths.",
+    "No cleanup, deletion, or transcript/delegation rewrite; record the marker loss, its older introducing commits, and the inspected restart range."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "delegations",
+    "federation",
+    "greg-reported",
+    "regression",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

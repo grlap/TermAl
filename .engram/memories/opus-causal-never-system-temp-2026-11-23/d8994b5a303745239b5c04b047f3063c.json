@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus-causal-never-system-temp-2026-11-23",
+    "revision_id": "d8994b5a303745239b5c04b047f3063c",
+    "previous": null,
+    "body_sha256": "b3994f7864006d16b6e17e6943e50d499b480fa48361120d31e5b90eda4bfece",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-23T17:14:44.115038200Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus-Causal, 2026-11-23, my own slip, confirmed by Fable2 d84e975b #20): never write to the system temp folder. In the Bash tool, Git Bash's /tmp is C:\\Users\\<user>\\AppData\\Local\\Temp, OUTSIDE the repository. A throwaway `> /tmp/x` redirect therefore breaks the repository-folder rule. Scratch files go only under the repository's .tmp/ (e.g. C:/github/Personal/TermAl/.tmp/<name>), and are removed when done. Before any redirect or mktemp in a shell command, check that the target path is inside the repository.\nRelated trap from the same day (w-4483f709da27): a test state booted with spawning enabled (AppState::new_with_paths…_for_test), with no registered provider fixture, can launch the real `codex` from PATH. TermAl then seeds that server's Codex home from the user's, copying auth.json into the product test temp dir. Any change that routes sessions to a newly launched provider must gate that launch under cfg(test) on a registered fixture."
+}

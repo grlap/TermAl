@@ -23,12 +23,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The header comments of src/acceptance_obligation_assessment.rs, src/test_run_projection.rs, src/tests/test_run_registration_history_clock.rs and src/tests/test_run_registration_view.rs now call each file a child module of its parent instead of an included file, keeping what each said about its origin and what it owns. Comment text only; non-comment tokens identical to the base in all four files. Reviewed as comment batch dd0f22e6 (W533B-PAIR1: Codex clean; Kimi for the Claude reviewer refused on its usage limit, clean) and landed inside batch 6, fa9539220882d6126da63bb542c657786b1400c3 (fast-forward by Opus2 at 2026-11-23T08:00:47Z, pushed to origin master), whose 7-path slice for this batch is byte-identical to dd0f22e6. Gates on fa953922: Linux test-c500875d, Windows test-3a63f1f5, both with equal source ids. Acceptance evaluation 51357218, 4/4. Author-test ref author-test/w-533ba410e0c7-dd0f22e6 (pushed 06:49:00Z) deleted with an explicit refspec at 08:02:19Z.",
+    "completed_at": "2026-11-23T08:02:31.560996Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

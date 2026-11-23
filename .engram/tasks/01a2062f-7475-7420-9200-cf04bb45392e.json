@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Restored scoped Engram MCP on explicit cold-launch Send and queue Resume for persisted local Claude root sessions, with the original Claude resume identity. Declaration access failures retain the same prompt and give the operator a recovery reason. The fix is on origin/master in exact Batch 6 commit fa9539220882d6126da63bb542c657786b1400c3.",
+    "completed_at": "2026-11-23T08:03:19.274740200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

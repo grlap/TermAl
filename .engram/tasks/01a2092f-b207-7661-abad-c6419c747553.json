@@ -1,0 +1,27 @@
+{
+  "id": "01a2092f-b207-7661-abad-c6419c747553",
+  "external_ref": null,
+  "title": "The shared check-credit line merge can cut undelivered record ids when several late settlements queue for one session",
+  "outcome": "Check-credit notices queued for one session between prompts are never cut before delivery: every queued record id reaches the session's next accepted prompt.",
+  "acceptance": [
+    "The shared check-credit line merge can cut undelivered record ids when several late settlements queue for one session is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

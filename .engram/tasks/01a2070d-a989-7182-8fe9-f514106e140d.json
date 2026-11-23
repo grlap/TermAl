@@ -19,12 +19,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a2062f-7475-7420-9200-cf04bb45392e",
+  "disposal_reason": "Fable2 mailbox #2326 directs superseding this duplicate once CF04 lands. The exact behavior shipped in fa953922: manual empty-body Resume carries intent to the owner-bound known-unsent User prompt behind a historical row, holds the same prompt with the Engram access reason, and restores scoped launch after repair. The persisted HTTP regression and independent criterion 2 passed. CF04 completion seal aed5131d45444fccac65f57a0c8d71e2.",
   "completion": null
 }
