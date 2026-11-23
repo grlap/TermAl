@@ -383,7 +383,11 @@ impl AcceptanceAssessmentPages {
     /// whole page is checked before anything of it is kept, so a page rejected
     /// for any reason leaves no count, total or row behind.
     fn add_summary(&mut self, page: &Value) -> Result<(), &'static str> {
-        let number = |key: &str| page.get(key).and_then(Value::as_u64).ok_or("malformed_page");
+        let number = |key: &str| {
+            page.get(key)
+                .and_then(Value::as_u64)
+                .ok_or("malformed_page")
+        };
         let total = number("total")?;
         let record_position = Some(number("record_position")?);
         let cut_position = Some(number("cut_position")?);
@@ -399,14 +403,19 @@ impl AcceptanceAssessmentPages {
             .collect::<Result<Vec<_>, ()>>()
             .map_err(|()| "malformed_page")?;
         // One count per status and reason, compared as a set across pages.
-        groups.sort_by(|left, right| (&left.status, &left.reason).cmp(&(&right.status, &right.reason)));
+        groups.sort_by(|left, right| {
+            (&left.status, &left.reason).cmp(&(&right.status, &right.reason))
+        });
         if groups
             .windows(2)
             .any(|pair| (&pair[0].status, &pair[0].reason) == (&pair[1].status, &pair[1].reason))
         {
             return Err("malformed_page");
         }
-        let rows = page.get("must_show").and_then(Value::as_array).ok_or("malformed_page")?;
+        let rows = page
+            .get("must_show")
+            .and_then(Value::as_array)
+            .ok_or("malformed_page")?;
         let counted = groups
             .iter()
             .try_fold(0_u64, |sum, group| sum.checked_add(group.count))
@@ -425,8 +434,14 @@ impl AcceptanceAssessmentPages {
             || self.assessment.total.is_some()
                 && (self.assessment.record_position != record_position
                     || self.assessment.cut_position != cut_position)
-            || self.assessment.must_show_total.is_some_and(|known| known != must_show_total)
-            || self.summary_groups.as_ref().is_some_and(|known| *known != groups)
+            || self
+                .assessment
+                .must_show_total
+                .is_some_and(|known| known != must_show_total)
+            || self
+                .summary_groups
+                .as_ref()
+                .is_some_and(|known| *known != groups)
             || earlier != self.assessment.rows_read;
         if changed {
             return Err("assessment_changed");
@@ -451,12 +466,19 @@ impl AcceptanceAssessmentPages {
     /// non-negative integer, and the rows an array; a page that does not say
     /// so is malformed.
     fn add_rows(&mut self, page: &Value) -> Result<(), &'static str> {
-        let number = |key: &str| page.get(key).and_then(Value::as_u64).ok_or("malformed_page");
+        let number = |key: &str| {
+            page.get(key)
+                .and_then(Value::as_u64)
+                .ok_or("malformed_page")
+        };
         let total = number("total")?;
         let earlier = number("earlier")?;
         let record_position = Some(number("record_position")?);
         let cut_position = Some(number("cut_position")?);
-        let rows = page.get("rows").and_then(Value::as_array).ok_or("malformed_page")?;
+        let rows = page
+            .get("rows")
+            .and_then(Value::as_array)
+            .ok_or("malformed_page")?;
         self.same_cut(total, record_position, cut_position)?;
         // Each page must start where the rows read end: no gap, no repeat.
         if earlier != self.assessment.rows_read
@@ -528,20 +550,25 @@ impl AcceptanceAssessmentPages {
                     let rank = |group: &AcceptanceObligationGroup| {
                         acceptance_obligation_group_rank(&group.status, None)
                     };
-                    (rank(left), &left.status, &left.reason)
-                        .cmp(&(rank(right), &right.status, &right.reason))
+                    (rank(left), &left.status, &left.reason).cmp(&(
+                        rank(right),
+                        &right.status,
+                        &right.reason,
+                    ))
                 });
                 groups
             }
             None => self
                 .counts
                 .into_iter()
-                .map(|((_, status, reason, recorded), count)| AcceptanceObligationGroup {
-                    status,
-                    reason,
-                    recorded,
-                    count,
-                })
+                .map(
+                    |((_, status, reason, recorded), count)| AcceptanceObligationGroup {
+                        status,
+                        reason,
+                        recorded,
+                        count,
+                    },
+                )
                 .collect(),
         };
         self.assessment
@@ -577,7 +604,10 @@ fn acceptance_assessment_first_page(
     result: &Value,
     locator: &str,
 ) -> Result<Option<Value>, &'static str> {
-    let note = result.get("note").filter(|note| note.is_object()).ok_or("invalid_receipt")?;
+    let note = result
+        .get("note")
+        .filter(|note| note.is_object())
+        .ok_or("invalid_receipt")?;
     if note.get("locator").and_then(Value::as_str) != Some(locator)
         || note.get("kind").and_then(Value::as_str) != Some("verification")
         || note.get("non_holder").and_then(Value::as_bool) == Some(true)
@@ -648,7 +678,8 @@ pub(crate) fn read_acceptance_obligation_assessments(
             Ok(None) => continue,
             Ok(Some(page)) => page,
             Err(reason) => {
-                task.obligation_assessments.push(pages.finish(Some(reason), None));
+                task.obligation_assessments
+                    .push(pages.finish(Some(reason), None));
                 continue;
             }
         };
@@ -671,10 +702,12 @@ pub(crate) fn read_acceptance_obligation_assessments(
             // The read is not whole and names no next page this host can
             // follow: the cursor that fetched this page is the last point at
             // the captured cut, if there is one.
-            let Some(token) = page
-                .get("continuation")
-                .and_then(Value::as_str)
-                .and_then(|continuation| acceptance_assessment_continuation_token(continuation, &locator))
+            let Some(token) =
+                page.get("continuation")
+                    .and_then(Value::as_str)
+                    .and_then(|continuation| {
+                        acceptance_assessment_continuation_token(continuation, &locator)
+                    })
             else {
                 break (Some("missing_continuation"), fetched_by, true);
             };
@@ -750,9 +783,10 @@ fn acceptance_obligation_row_line(row: &AcceptanceObligationRow) -> String {
 }
 
 fn acceptance_obligation_total(assessment: &AcceptanceObligationAssessment) -> String {
-    assessment
-        .total
-        .map_or_else(|| "an unknown number of".to_owned(), |total| total.to_string())
+    assessment.total.map_or_else(
+        || "an unknown number of".to_owned(),
+        |total| total.to_string(),
+    )
 }
 
 /// How much of an incomplete read was read: rows of the total, or must_show
@@ -837,7 +871,9 @@ fn acceptance_obligation_history_text(assessment: &AcceptanceObligationAssessmen
 }
 
 /// One record's summary as the brief carries it, whole.
-pub(crate) fn render_acceptance_obligation_assessment(assessment: &AcceptanceObligationAssessment) -> String {
+pub(crate) fn render_acceptance_obligation_assessment(
+    assessment: &AcceptanceObligationAssessment,
+) -> String {
     let positions = match (assessment.record_position, assessment.cut_position) {
         (Some(record), Some(cut)) => format!(" (record position {record}, cut position {cut})"),
         (Some(record), None) => format!(" (record position {record})"),
@@ -845,7 +881,10 @@ pub(crate) fn render_acceptance_obligation_assessment(assessment: &AcceptanceObl
     };
     let reason = assessment.incomplete_reason.as_deref().unwrap_or("unknown");
     let state = match (assessment.complete, assessment.must_show_total) {
-        (true, None) => format!("{} rows, read whole.", acceptance_obligation_total(assessment)),
+        (true, None) => format!(
+            "{} rows, read whole.",
+            acceptance_obligation_total(assessment)
+        ),
         (true, Some(must_show)) => format!(
             "{} rows, read whole: the {must_show} must_show rows are listed below, the rest only counted.",
             acceptance_obligation_total(assessment)
@@ -899,7 +938,9 @@ pub(crate) fn render_acceptance_obligation_assessment(assessment: &AcceptanceObl
 /// The line that names a summary the brief has no room for. It keeps what
 /// the summary would have said of the read itself: whether it was whole, how
 /// many rows were read, why it stopped and where to resume.
-pub(crate) fn acceptance_obligation_not_carried_line(assessment: &AcceptanceObligationAssessment) -> String {
+pub(crate) fn acceptance_obligation_not_carried_line(
+    assessment: &AcceptanceObligationAssessment,
+) -> String {
     let state = if assessment.complete {
         format!(
             "{}, read whole, {} to be listed in full",
@@ -912,7 +953,11 @@ pub(crate) fn acceptance_obligation_not_carried_line(assessment: &AcceptanceObli
             acceptance_obligation_read_extent(assessment),
             assessment.incomplete_reason.as_deref().unwrap_or("unknown"),
             assessment.rows.len(),
-            if assessment.must_show_total.is_some() { "must_show row" } else { "row" }
+            if assessment.must_show_total.is_some() {
+                "must_show row"
+            } else {
+                "row"
+            }
         )
     };
     let resume = assessment
@@ -942,7 +987,10 @@ fn acceptance_obligation_section(
     const HEADER: &str = "Obligation assessments of the cited verification records (rows another record closed are counted, not listed, except mismatches, which are always listed; every other row is listed in full):\n";
     // The summary view decides which rows are listed: the tracker's must_show.
     const SUMMARY_HEADER: &str = "Obligation assessments of the cited verification records (rows another record closed are counted, not listed, except mismatches, which are always listed; every other row is listed in full; for a record in the tracker's summary view, its must_show rows are listed in full and every other row is only counted):\n";
-    let header = if assessments.iter().any(|assessment| assessment.must_show_total.is_some()) {
+    let header = if assessments
+        .iter()
+        .any(|assessment| assessment.must_show_total.is_some())
+    {
         SUMMARY_HEADER
     } else {
         HEADER
@@ -985,10 +1033,8 @@ pub(crate) fn acceptance_prompt_with_obligations(
     let Some(at) = acceptance_brief_anchor_offset(&prompt, anchor) else {
         return prompt;
     };
-    let section = acceptance_obligation_section(
-        assessments,
-        max_bytes.saturating_sub(prompt.len()),
-    );
+    let section =
+        acceptance_obligation_section(assessments, max_bytes.saturating_sub(prompt.len()));
     if section.is_empty() {
         return prompt;
     }
@@ -1078,10 +1124,10 @@ fn acceptance_brief_protected_rendering(
             lines.push(line);
         }
     }
-    let index = render_acceptance_criterion_evidence(task, plan.index_detail, &fully_rendered, false);
+    let index =
+        render_acceptance_criterion_evidence(task, plan.index_detail, &fully_rendered, false);
     (lines, index)
 }
-
 
 /// Fits the summaries into `prompt`, then names before the anchor any record
 /// still not named, if the result fits `max_bytes`.
@@ -1133,9 +1179,13 @@ pub(crate) fn acceptance_independent_brief_with_obligations(
         assessments,
         max_bytes,
     );
-    let Some(reserve) = acceptance_obligation_names_line(&fitted, assessments).map(|line| line.len())
+    let Some(reserve) =
+        acceptance_obligation_names_line(&fitted, assessments).map(|line| line.len())
     else {
-        return AcceptanceEvaluatorBrief { prompt: fitted, ..base };
+        return AcceptanceEvaluatorBrief {
+            prompt: fitted,
+            ..base
+        };
     };
     let plan = base.plan;
     let protected = acceptance_brief_protected_rendering(task, &plan);
@@ -1150,12 +1200,14 @@ pub(crate) fn acceptance_independent_brief_with_obligations(
         .map(move |clipped| (plan.shown, clipped))
         .chain((0..plan.shown).rev().map(|shown| (shown, shown)));
     let candidates = details.flat_map(move |detail| {
-        windows.clone().map(move |(shown, clipped)| AcceptanceBriefPlan {
-            shown,
-            clipped,
-            detail,
-            ..plan
-        })
+        windows
+            .clone()
+            .map(move |(shown, clipped)| AcceptanceBriefPlan {
+                shown,
+                clipped,
+                detail,
+                ..plan
+            })
     });
     for candidate in candidates.filter(|candidate| *candidate != plan) {
         if acceptance_brief_protected_rendering(task, &candidate) != protected {
@@ -1187,7 +1239,10 @@ pub(crate) fn acceptance_independent_brief_with_obligations(
             return AcceptanceEvaluatorBrief { prompt, ..rebuilt };
         }
     }
-    AcceptanceEvaluatorBrief { prompt: fitted, ..base }
+    AcceptanceEvaluatorBrief {
+        prompt: fitted,
+        ..base
+    }
 }
 
 /// The same-session brief with its assessment summaries. The same rule as
@@ -1199,7 +1254,12 @@ pub(crate) fn acceptance_independent_brief_with_obligations(
 pub(crate) fn acceptance_same_session_brief_with_obligations(
     task: &AcceptanceEvaluationTask,
     source_fingerprint: Option<&str>,
-    base: (String, AcceptanceBriefCuts, AcceptanceOmissionDetail, AcceptanceOmissionDetail),
+    base: (
+        String,
+        AcceptanceBriefCuts,
+        AcceptanceOmissionDetail,
+        AcceptanceOmissionDetail,
+    ),
     assessments: &mut [AcceptanceObligationAssessment],
     max_bytes: usize,
 ) -> (String, AcceptanceBriefCuts) {
@@ -1210,18 +1270,21 @@ pub(crate) fn acceptance_same_session_brief_with_obligations(
         assessments,
         max_bytes,
     );
-    let Some(reserve) = acceptance_obligation_names_line(&fitted, assessments).map(|line| line.len())
+    let Some(reserve) =
+        acceptance_obligation_names_line(&fitted, assessments).map(|line| line.len())
     else {
         return (fitted, cuts);
     };
-    for lower in [AcceptanceOmissionDetail::Compact, AcceptanceOmissionDetail::Minimal]
-        .into_iter()
-        .filter(|lower| match detail {
-            AcceptanceOmissionDetail::Full => true,
-            AcceptanceOmissionDetail::Compact => *lower == AcceptanceOmissionDetail::Minimal,
-            AcceptanceOmissionDetail::Minimal => false,
-        })
-    {
+    for lower in [
+        AcceptanceOmissionDetail::Compact,
+        AcceptanceOmissionDetail::Minimal,
+    ]
+    .into_iter()
+    .filter(|lower| match detail {
+        AcceptanceOmissionDetail::Full => true,
+        AcceptanceOmissionDetail::Compact => *lower == AcceptanceOmissionDetail::Minimal,
+        AcceptanceOmissionDetail::Minimal => false,
+    }) {
         let rebuilt = render_same_session_acceptance_brief_with_index_detail(
             task,
             source_fingerprint,

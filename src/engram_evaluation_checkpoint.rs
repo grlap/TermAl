@@ -20,7 +20,12 @@ pub(crate) fn evaluation_closing_checkpoint(
 ) -> Option<EngramRuntimeCheckpointBasis> {
     let retained = retained?;
     let checkpoint = &retained.checkpoint;
-    let EngramNamedRootState::Bound { workspace_id, generation, .. } = &scope.root else {
+    let EngramNamedRootState::Bound {
+        workspace_id,
+        generation,
+        ..
+    } = &scope.root
+    else {
         return None;
     };
     (retained.store == scope.store
@@ -30,7 +35,7 @@ pub(crate) fn evaluation_closing_checkpoint(
         && &checkpoint.endpoint.workspace_id == workspace_id
         && checkpoint.source_root_generation == Some(*generation)
         && checkpoint.source_root_state == Some(EngramSourceRootState::Named))
-        .then(|| checkpoint.clone())
+    .then(|| checkpoint.clone())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,9 +65,13 @@ fn evaluation_checkpoint_scope_locked(
     }
     let opening = trace.opening_root.as_ref()?;
     if runtime_observation_opening_root(inner, owner).as_ref() != Some(opening)
-        || !matches!(opening.provenance, EngramRootCapture::Recorded {
-            state: EngramSourceRootState::Named, ..
-        })
+        || !matches!(
+            opening.provenance,
+            EngramRootCapture::Recorded {
+                state: EngramSourceRootState::Named,
+                ..
+            }
+        )
         || opening.source_root.as_ref()?.place() != *place
     {
         return None;
@@ -89,13 +98,17 @@ impl AppState {
         let Some(root) = scope.opening.source_root.as_ref() else {
             return;
         };
-        let Some(basis) = scope.opening.provenance.stamp(Some(EngramExecutionSourceBasis {
-            workspace_id: root.root.clone(),
-            source_revision: String::new(),
-            source_id: Some(source_id.clone()),
-            source_root_generation: None,
-            source_root_state: None,
-        })) else {
+        let Some(basis) = scope
+            .opening
+            .provenance
+            .stamp(Some(EngramExecutionSourceBasis {
+                workspace_id: root.root.clone(),
+                source_revision: String::new(),
+                source_id: Some(source_id.clone()),
+                source_root_generation: None,
+                source_root_state: None,
+            }))
+        else {
             return;
         };
         let checkpoint = EngramRuntimeCheckpointBasis::of_sighting(

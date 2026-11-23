@@ -115,7 +115,7 @@ Every refusal returns `{ "error": "<message>", "code": "<code>" }`:
 - `src/telegram_document_handle.rs`: platform handle and namespace checks.
 - `src/telegram_document_upload.rs`: the multipart `sendDocument` upload and
   the `TelegramDocumentSender` seam.
-- Tests: `src/tests/telegram_documents.rs` and its included
+- Tests: `src/tests/telegram_documents.rs` and its child module
   `src/tests/telegram_document_safety.rs`, using a fake sender. No test reaches
   Telegram: under `cfg(test)` the route's real client refuses to connect.
 

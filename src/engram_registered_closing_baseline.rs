@@ -3,7 +3,10 @@
 
 // Off-lock only. Rebuild the ordinary native record from the same bytes the
 // terminal disk read identified, without freezing or sending another record.
-pub(crate) fn registered_closing_clean_input(registration: &TestRunRegistration, disk: &TestRunDisk) -> bool {
+pub(crate) fn registered_closing_clean_input(
+    registration: &TestRunRegistration,
+    disk: &TestRunDisk,
+) -> bool {
     let directory = FsPath::new(&registration.run_directory);
     let TestRunJson::Parsed(request, _, _) = test_run_read_json(&directory.join("request.json"))
     else {
@@ -44,14 +47,20 @@ pub(crate) fn registered_closing_clean_input(registration: &TestRunRegistration,
         return false;
     }
     let retained = engram_verification_record_frozen(directory, &registration.run_id);
-    let Ok(body) = engram_verification_record_build_body(registration, &request, &results,
-        retained.as_ref().map(|frozen| &frozen.body.input)) else {
+    let Ok(body) = engram_verification_record_build_body(
+        registration,
+        &request,
+        &results,
+        retained.as_ref().map(|frozen| &frozen.body.input),
+    ) else {
         return false;
     };
     match &registration.verification_record {
         None => true,
-        Some(TestRunVerificationAck::Rejected { .. }
-            | TestRunVerificationAck::LocalUnclassified { .. }) => false,
+        Some(
+            TestRunVerificationAck::Rejected { .. }
+            | TestRunVerificationAck::LocalUnclassified { .. },
+        ) => false,
         Some(ack) => {
             ack.body_digest() == Some(engram_verification_record_body_digest(&body).as_str())
         }
@@ -158,7 +167,9 @@ pub(crate) fn registered_closing_baselines_locked(
                 && notice.clean_commit_runs.contains(&run.run_id)
                 && matches!(state, Some(TestRunState::Passed | TestRunState::Failed))
                 && inner.test_runs.registered.contains(&run.run_id)
-                && inner.test_run_registrations.get(&run.run_id)
+                && inner
+                    .test_run_registrations
+                    .get(&run.run_id)
                     .is_some_and(|actual| actual.matches_registration_snapshot(run))
                 && engram_verification_record_row_matches(row, run)
                 && run.owning_session_id == record.session.id
@@ -184,7 +195,8 @@ pub(crate) fn registered_closing_baselines_locked(
             source.workspace_id == *workspace_id
                 && source.source_root_generation == Some(*generation)
                 && source.source_root_state == Some(EngramSourceRootState::Named)
-                && source.source_id.is_some() && source.source_revision.is_empty()
+                && source.source_id.is_some()
+                && source.source_revision.is_empty()
         };
         let ordered = || -> Option<bool> {
             let start = EngramHost::check_timestamp(&check.started_at)?;

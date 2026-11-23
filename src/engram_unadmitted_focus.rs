@@ -333,12 +333,24 @@ impl AppState {
             return Ok(());
         }
         let notice = if engram_named_selection_capture_pending(record) {
-            let waiting: Vec<_> = record.engram.pending_naming_selection.as_ref()
-                .expect("pending naming capture").predecessors.iter()
-                .filter(|member| !member.capture_durable && member.terminal_no_report.is_none()
-                    && engram_turn_capture_pending(record, &member.turn_ref))
-                .map(|member| member.turn_ref.as_str()).collect();
-            format!("[TermAl] Prospective focus publication is pending: acknowledged predecessor captures {} are waiting for durable report readback or their own terminal outcome. The current source association is retained. The observation worker continues its existing retries; the named root can apply at a later opening after these captures settle.", waiting.join(", "))
+            let waiting: Vec<_> = record
+                .engram
+                .pending_naming_selection
+                .as_ref()
+                .expect("pending naming capture")
+                .predecessors
+                .iter()
+                .filter(|member| {
+                    !member.capture_durable
+                        && member.terminal_no_report.is_none()
+                        && engram_turn_capture_pending(record, &member.turn_ref)
+                })
+                .map(|member| member.turn_ref.as_str())
+                .collect();
+            format!(
+                "[TermAl] Prospective focus publication is pending: acknowledged predecessor captures {} are waiting for durable report readback or their own terminal outcome. The current source association is retained. The observation worker continues its existing retries; the named root can apply at a later opening after these captures settle.",
+                waiting.join(", ")
+            )
         } else {
             "[TermAl] The previous turn's report is retained under its original item. No future source root was installed after the focus change. Name or confirm the focused item's root for a later turn; until then the session's source association still refers to the previous item.".to_owned()
         };

@@ -15,8 +15,11 @@ impl HistorySeed {
         let started = std::time::Instant::now();
         let common = root.join(".git");
         let mut seed = Self {
-            directories: Vec::new(), ended: Vec::new(), digests: HashMap::new(),
-            failures: HashMap::new(), bytes: 0,
+            directories: Vec::new(),
+            ended: Vec::new(),
+            digests: HashMap::new(),
+            failures: HashMap::new(),
+            bytes: 0,
         };
         for ordinal in 0..8 {
             let admin = common.join("worktrees").join(format!("history-{ordinal}"));
@@ -27,7 +30,8 @@ impl HistorySeed {
             let admin = if ordinal < count / 2 {
                 common.clone()
             } else {
-                common.join("worktrees")
+                common
+                    .join("worktrees")
                     .join(format!("history-{}", (ordinal - count / 2) / (count / 16)))
             };
             let id = format!("test-history-{ordinal:04}");
@@ -38,22 +42,32 @@ impl HistorySeed {
             let timestamp = if ordinal < 4 {
                 (chrono::Utc::now() + chrono::TimeDelta::seconds(1))
                     .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            } else { "2026-01-01T00:00:00.000Z".to_owned() };
+            } else {
+                "2026-01-01T00:00:00.000Z".to_owned()
+            };
             let request = json!({
                 "runId":id, "root":test_run_display_path(root), "owner":owner,
                 "full":false, "stages":[{"name":"focused","command":"cargo",
                     "args":["test","history-fixture"]}], "started":timestamp,
                 "creatorPid":std::process::id()
-            }).to_string();
+            })
+            .to_string();
             fs::write(directory.join("request.json"), &request).unwrap();
             seed.bytes += request.len();
             seed.directories.push(directory);
-            seed.ended.push((chrono::DateTime::parse_from_rfc3339(&timestamp).unwrap()
-                + chrono::TimeDelta::seconds(10)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+            seed.ended.push(
+                (chrono::DateTime::parse_from_rfc3339(&timestamp).unwrap()
+                    + chrono::TimeDelta::seconds(10))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            );
         }
         seed.write_results(0);
-        eprintln!("history seed: directories={} linkedAdmins=8 bytes={} wall={:?}",
-            count, seed.bytes, started.elapsed());
+        eprintln!(
+            "history seed: directories={} linkedAdmins=8 bytes={} wall={:?}",
+            count,
+            seed.bytes,
+            started.elapsed()
+        );
         seed
     }
 
@@ -66,7 +80,10 @@ impl HistorySeed {
             let marker = format!("history-failure-{ordinal:04}-generation-{generation}");
             // Generation changes lengths too, so a coarse mtime cannot hide a
             // changed result. The log and embedded excerpt describe the same run.
-            let log = format!("{marker}\n{}\n", "diagnostic context\n".repeat(240 + generation));
+            let log = format!(
+                "{marker}\n{}\n",
+                "diagnostic context\n".repeat(240 + generation)
+            );
             fs::write(directory.join("focused.log"), &log).unwrap();
             let results = json!({
                 "runId":id, "state":if failed {"failed"} else {"passed"},
@@ -74,11 +91,15 @@ impl HistorySeed {
                 "stages":[{"name":"focused", "state":if failed {"failed"} else {"passed"},
                     "code":if failed {101} else {0}, "log":"focused.log",
                     "diagnostics":{"text":log,"truncated":false}}]
-            }).to_string();
+            })
+            .to_string();
             fs::write(directory.join("results.json"), &results).unwrap();
             self.bytes += results.len() + log.len();
-            self.digests.insert(id.clone(), file_content_hash(results.as_bytes()));
-            if failed { self.failures.insert(id, marker); }
+            self.digests
+                .insert(id.clone(), file_content_hash(results.as_bytes()));
+            if failed {
+                self.failures.insert(id, marker);
+            }
         }
     }
 }

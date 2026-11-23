@@ -238,7 +238,9 @@ impl EngramRootReclamationSnapshot {
                         .map(|token| &token.work_id)
                         .into_iter()
                         .chain(target.source_root.as_ref().map(|root| &root.work_id))
-                        .filter_map(move |work| target.store.clone().map(|store| (store, work.clone())))
+                        .filter_map(move |work| {
+                            target.store.clone().map(|store| (store, work.clone()))
+                        })
                 })
                 .collect(),
             pending_releases: inner
@@ -259,17 +261,24 @@ impl EngramRootReclamationSnapshot {
                 .engram_work_naming_history
                 .iter()
                 .flat_map(|history| {
-                    history.retired_runs.iter().map(|retired| (history.store.clone(), retired.binding.clone()))
+                    history
+                        .retired_runs
+                        .iter()
+                        .map(|retired| (history.store.clone(), retired.binding.clone()))
                 })
                 .collect(),
             disposition_cooldowns: schedule.disposition_cooldowns.clone(),
         }
     }
 
-    pub(crate) fn retired(&self, store: &EngramAuthorityStoreKey, binding: &EngramControlWorkBinding) -> bool {
-        self.retired
-            .iter()
-            .any(|(retired_store, retired)| retired_store == store && engram_same_recovery_run(retired, binding))
+    pub(crate) fn retired(
+        &self,
+        store: &EngramAuthorityStoreKey,
+        binding: &EngramControlWorkBinding,
+    ) -> bool {
+        self.retired.iter().any(|(retired_store, retired)| {
+            retired_store == store && engram_same_recovery_run(retired, binding)
+        })
     }
 
     pub(crate) fn journal(&self, root: &EngramWorkSourceRoot) -> Option<&EngramReclamationJournal> {

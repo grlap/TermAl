@@ -936,7 +936,7 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("forces successful command details open during search without an inert toggle", () => {
+  it("restores the previous command details state after search", () => {
     const message: CommandMessage = {
       id: "message-command-search",
       type: "command",
@@ -947,27 +947,22 @@ describe("MessageCard", () => {
       status: "success",
     };
 
-    const { rerender } = render(
+    const commandCard = (searchQuery = "") => (
       <MessageCard
         message={message}
         onApprovalDecision={vi.fn()}
         onUserInputSubmit={vi.fn()}
-      />,
+        searchQuery={searchQuery}
+      />
     );
+    const { rerender } = render(commandCard());
 
     expect(screen.queryByText("IN")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Show command details" }),
     ).toBeInTheDocument();
 
-    rerender(
-      <MessageCard
-        message={message}
-        onApprovalDecision={vi.fn()}
-        onUserInputSubmit={vi.fn()}
-        searchQuery="tests passed"
-      />,
-    );
+    rerender(commandCard("tests passed"));
 
     expect(screen.getByText("IN")).toBeInTheDocument();
     expect(screen.getByText("OUT")).toBeInTheDocument();
@@ -978,18 +973,22 @@ describe("MessageCard", () => {
       screen.queryByRole("button", { name: /command details/i }),
     ).not.toBeInTheDocument();
 
-    rerender(
-      <MessageCard
-        message={message}
-        onApprovalDecision={vi.fn()}
-        onUserInputSubmit={vi.fn()}
-      />,
-    );
+    rerender(commandCard());
 
     expect(screen.queryByText("IN")).not.toBeInTheDocument();
-    expect(
+    fireEvent.click(
       screen.getByRole("button", { name: "Show command details" }),
-    ).toBeInTheDocument();
+    );
+    expect(screen.getByText("all tests passed")).toBeVisible();
+
+    rerender(commandCard("tests passed"));
+    expect(screen.getByLabelText("search match: tests passed")).toBeVisible();
+    rerender(commandCard());
+
+    expect(screen.getByText("all tests passed")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Hide command details" }),
+    ).toBeVisible();
   });
 
   it("keeps command details collapsed from running through success", () => {
@@ -1039,48 +1038,50 @@ describe("MessageCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("preserves an explicit command expansion through completion", () => {
-    const runningMessage: CommandMessage = {
-      id: "message-command-manual-expansion",
-      type: "command",
-      author: "assistant",
-      timestamp: "10:10",
-      command: "npm test",
-      output: "running tests\n",
-      status: "running",
-    };
-    const { rerender } = render(
-      <MessageCard
-        message={runningMessage}
-        onApprovalDecision={vi.fn()}
-        onUserInputSubmit={vi.fn()}
-      />,
-    );
+  it.each([
+    ["success", "all tests passed"],
+    ["error", "failed assertion"],
+  ] as const)(
+    "preserves an explicit command expansion through %s",
+    (status, output) => {
+      const runningMessage: CommandMessage = {
+        id: "message-command-manual-expansion",
+        type: "command",
+        author: "assistant",
+        timestamp: "10:10",
+        command: "npm test",
+        output: "running tests\n",
+        status: "running",
+      };
+      const { rerender } = render(
+        <MessageCard
+          message={runningMessage}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show command details" }),
-    );
-    expect(screen.getByText("IN")).toBeInTheDocument();
-    expect(screen.getByText(/running tests/)).toBeInTheDocument();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Show command details" }),
+      );
+      expect(screen.getByText("IN")).toBeInTheDocument();
+      expect(screen.getByText(/running tests/)).toBeInTheDocument();
 
-    rerender(
-      <MessageCard
-        message={{
-          ...runningMessage,
-          output: "all tests passed\n",
-          status: "success",
-        }}
-        onApprovalDecision={vi.fn()}
-        onUserInputSubmit={vi.fn()}
-      />,
-    );
+      rerender(
+        <MessageCard
+          message={{ ...runningMessage, output, status }}
+          onApprovalDecision={vi.fn()}
+          onUserInputSubmit={vi.fn()}
+        />,
+      );
 
-    expect(screen.getByText("IN")).toBeInTheDocument();
-    expect(screen.getByText(/all tests passed/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Hide command details" }),
-    ).toBeInTheDocument();
-  });
+      expect(screen.getByText("IN")).toBeInTheDocument();
+      expect(screen.getByText(output)).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: "Hide command details" }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("mounts a running command atomically without an entry-height shell", () => {
     const { container } = render(
@@ -1128,6 +1129,7 @@ describe("MessageCard", () => {
     expect(screen.queryByText("IN")).not.toBeInTheDocument();
     expect(screen.queryByText("OUT")).not.toBeInTheDocument();
     expect(screen.queryByText(/failed assertion/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^error$/i)).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Show command details" }),
     ).toBeInTheDocument();

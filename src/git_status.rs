@@ -105,7 +105,9 @@ pub(crate) fn load_git_status_for_path(path: &FsPath) -> Result<GitStatusRespons
     })
 }
 
-pub(crate) fn parse_git_status(output: &[u8]) -> (ParsedGitBranchStatus, Vec<ParsedGitStatusEntry>) {
+pub(crate) fn parse_git_status(
+    output: &[u8],
+) -> (ParsedGitBranchStatus, Vec<ParsedGitStatusEntry>) {
     let mut branch = ParsedGitBranchStatus::default();
     let mut entries = Vec::new();
     let mut records = output.split(|byte| *byte == 0);

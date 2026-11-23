@@ -80,10 +80,17 @@ pub(crate) fn take_workspace_watch_diagnostics() -> Vec<String> {
 }
 
 impl AppState {
-    pub(crate) fn process_workspace_dirty_batch(&self, batch: Vec<(PathBuf, WorkspaceDirtyFact)>) -> Vec<WorkspaceFileChangeEvent> {
-        if batch.is_empty() { return Vec::new(); }
-        let roots = collect_workspace_file_watch_scopes(self).into_iter()
-            .map(|scope| scope.root_path).collect::<Vec<_>>();
+    pub(crate) fn process_workspace_dirty_batch(
+        &self,
+        batch: Vec<(PathBuf, WorkspaceDirtyFact)>,
+    ) -> Vec<WorkspaceFileChangeEvent> {
+        if batch.is_empty() {
+            return Vec::new();
+        }
+        let roots = collect_workspace_file_watch_scopes(self)
+            .into_iter()
+            .map(|scope| scope.root_path)
+            .collect::<Vec<_>>();
         let processed = engram_interference_tick();
         let started_at = std::time::Instant::now();
         let mut publication = Vec::new();
@@ -91,7 +98,9 @@ impl AppState {
             // Re-resolving scopes cannot erase the ingress coverage of a
             // removed selected root. Unknown ingress scopes still use the
             // current-state ignore decision.
-            if !fact.covers_watched_root && workspace_file_event_is_ignored(&path, &roots) { continue; }
+            if !fact.covers_watched_root && workspace_file_event_is_ignored(&path, &roots) {
+                continue;
+            }
             if fact.kind != WorkspaceFileChangeKind::Subtree
                 && fact
                     .raw_kind
@@ -102,8 +111,12 @@ impl AppState {
             }
             // No scope fan-out: consumers match the source path themselves.
             let changes = workspace_file_changes_from_path(&path, fact.kind, &[]);
-            let observation = fact.observation.map(|raw| raw.processing(processed, started_at))
-                .unwrap_or_else(|| "raw_kind=unknown observed=unknown writer_pid=unknown".to_owned());
+            let observation = fact
+                .observation
+                .map(|raw| raw.processing(processed, started_at))
+                .unwrap_or_else(|| {
+                    "raw_kind=unknown observed=unknown writer_pid=unknown".to_owned()
+                });
             let facts = format!(
                 "{} coalesced=true first_order={} last_order={} subtree={}",
                 observation,
@@ -155,7 +168,12 @@ impl AppState {
     ) -> Vec<WorkspaceFileChangeEvent> {
         let mut pending = WorkspacePendingChanges::default();
         pending.watch_roots = scopes.iter().map(|scope| scope.root_path.clone()).collect();
-        pending.ingest_observed(Ok(event.clone()), arrival, std::time::Instant::now(), Some(*observation));
+        pending.ingest_observed(
+            Ok(event.clone()),
+            arrival,
+            std::time::Instant::now(),
+            Some(*observation),
+        );
         self.process_workspace_dirty_batch(pending.take())
     }
 }

@@ -11,13 +11,22 @@
 /// A served registration fixture whose budget clock is a scripted one.
 fn clock_service(label: &str) -> (HistoryService, PathBuf, String, EngramBudgetClock) {
     let state = test_app_state();
-    let root = state.test_temp_root.as_ref().unwrap().path().join(format!("clock-{label}-project"));
+    let root = state
+        .test_temp_root
+        .as_ref()
+        .unwrap()
+        .path()
+        .join(format!("clock-{label}-project"));
     fs::create_dir_all(&root).unwrap();
     run_git_test_command(&root, &["init", "--quiet"]);
     let project = create_test_project(&state, &root, "Registration clock");
     let owner = create_test_project_session(&state, Agent::Codex, &project, &root);
     let service = HistoryService::new(state);
-    let clock = service.state.as_ref().unwrap().select_test_scripted_engram_budget_clock();
+    let clock = service
+        .state
+        .as_ref()
+        .unwrap()
+        .select_test_scripted_engram_budget_clock();
     (service, root, owner, clock)
 }
 
@@ -26,26 +35,41 @@ fn clock_registration_request(root: &FsPath, owner: &str, case: &str) -> (String
     let id = format!("test-clock-{case}-{}", Uuid::new_v4());
     let directory = root.join(".git").join("review-runs").join(&id);
     fs::create_dir_all(&directory).unwrap();
-    fs::write(directory.join("request.json"), json!({
-        "runId": id, "root": test_run_display_path(root), "owner": owner,
-        "full": false, "stages": [{"name": "focused"}],
-        "started": engram_command_started_at(), "creatorPid": std::process::id()
-    }).to_string()).unwrap();
+    fs::write(
+        directory.join("request.json"),
+        json!({
+            "runId": id, "root": test_run_display_path(root), "owner": owner,
+            "full": false, "stages": [{"name": "focused"}],
+            "started": engram_command_started_at(), "creatorPid": std::process::id()
+        })
+        .to_string(),
+    )
+    .unwrap();
     (id, directory)
 }
 
 /// Sends the registration POST on its own thread; returns its status and body.
-fn post_clock_registration(url: &str, owner: &str, id: &str, directory: &FsPath, case: &str)
-    -> std::thread::JoinHandle<(reqwest::StatusCode, Value)>
-{
+fn post_clock_registration(
+    url: &str,
+    owner: &str,
+    id: &str,
+    directory: &FsPath,
+    case: &str,
+) -> std::thread::JoinHandle<(reqwest::StatusCode, Value)> {
     let (url, owner, case) = (url.to_owned(), owner.to_owned(), case.to_owned());
     let body = json!({"runId": id, "runDirectory": test_run_display_path(directory)});
     std::thread::spawn(move || {
         let client = reqwest::blocking::Client::builder()
-            .timeout(phase_sync::DEADLOCK_GUARD).pool_max_idle_per_host(0).build().unwrap();
-        let response = client.post(format!("{url}/api/sessions/{owner}/test-runs"))
+            .timeout(phase_sync::DEADLOCK_GUARD)
+            .pool_max_idle_per_host(0)
+            .build()
+            .unwrap();
+        let response = client
+            .post(format!("{url}/api/sessions/{owner}/test-runs"))
             .header("x-termal-registration-operation", format!("clock-{case}"))
-            .json(&body).send().unwrap();
+            .json(&body)
+            .send()
+            .unwrap();
         let status = response.status();
         (status, response.json().unwrap())
     })
@@ -54,7 +78,9 @@ fn post_clock_registration(url: &str, owner: &str, id: &str, directory: &FsPath,
 fn finish_clock_service(mut service: HistoryService, outcome: std::thread::Result<()>) {
     let cleanup_errors = service.stop_all();
     if let Err(panic) = outcome {
-        for error in cleanup_errors { eprintln!("{error}"); }
+        for error in cleanup_errors {
+            eprintln!("{error}");
+        }
         std::panic::resume_unwind(panic);
     }
     assert!(cleanup_errors.is_empty(), "{cleanup_errors:?}");
@@ -65,12 +91,17 @@ fn the_real_clock_deadline_is_measured_from_the_instant_before_the_capture_lock(
     // Production: the deadline starts at the pre-lock instant, so a
     // capture-lock wait still counts against the budget, as before.
     let requested = std::time::Instant::now() - Duration::from_secs(2);
-    assert_eq!(test_run_registration_deadline(&EngramBudgetClock::Real, requested),
-        requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
+    assert_eq!(
+        test_run_registration_deadline(&EngramBudgetClock::Real, requested),
+        requested + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+    );
     // A scripted fixture clock measures from its own reading instead.
     let clock = EngramBudgetClock::scripted();
     clock.advance(Duration::from_secs(7));
-    assert_eq!(test_run_registration_deadline(&clock, requested), clock.now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET);
+    assert_eq!(
+        test_run_registration_deadline(&clock, requested),
+        clock.now() + TEST_RUN_REGISTRATION_DURABILITY_BUDGET
+    );
 }
 
 #[test]
@@ -86,18 +117,36 @@ fn a_held_registration_waits_on_the_scripted_clock_before_its_durable_ack() {
         // Observe the actual fence waiter on this scripted clock while the
         // writer is held. A regression to the real clock registers no waiter.
         clock.wait_for_scripted_waiter();
-        assert_eq!(clock.now(), scripted_start, "nothing advanced the scripted budget clock");
+        assert_eq!(
+            clock.now(),
+            scripted_start,
+            "nothing advanced the scripted budget clock"
+        );
         release.send(()).unwrap();
         let (status, ack) = post.join().unwrap();
         assert_eq!(status, reqwest::StatusCode::CREATED, "{ack}");
-        assert_eq!(ack, json!({"contract":"termal-durable-test-run-registration",
-            "version":1,"runId":id,"registered":true}));
+        assert_eq!(
+            ack,
+            json!({"contract":"termal-durable-test-run-registration",
+            "version":1,"runId":id,"registered":true})
+        );
         let client = reqwest::blocking::Client::builder()
-            .timeout(phase_sync::DEADLOCK_GUARD).pool_max_idle_per_host(0).build().unwrap();
-        let query: Value = client.get(format!("{}/api/test-runs/{id}", service.url)).send().unwrap().json().unwrap();
+            .timeout(phase_sync::DEADLOCK_GUARD)
+            .pool_max_idle_per_host(0)
+            .build()
+            .unwrap();
+        let query: Value = client
+            .get(format!("{}/api/test-runs/{id}", service.url))
+            .send()
+            .unwrap()
+            .json()
+            .unwrap();
         assert_eq!(query["run"]["registrationState"], "registered");
         assert_eq!(query["run"]["trackingDurability"], "durable");
-        assert!(service.commits.lock().unwrap().contains_key(&id), "the registration was committed to SQLite");
+        assert!(
+            service.commits.lock().unwrap().contains_key(&id),
+            "the registration was committed to SQLite"
+        );
     }));
     finish_clock_service(service, outcome);
 }
@@ -126,12 +175,23 @@ fn advancing_the_scripted_clock_past_the_budget_still_gives_the_typed_durability
         assert_eq!(body["identity"]["runId"], id);
         assert_eq!(body["retry"]["mode"], "same_request");
         let message = body["error"].as_str().unwrap();
-        for field in ["phase=durability_wait", "category=deadline", "fenceError=Deadline",
-            "fenceRemainingMs=0", "durabilityConfirmed=false"] {
+        for field in [
+            "phase=durability_wait",
+            "category=deadline",
+            "fenceError=Deadline",
+            "fenceRemainingMs=0",
+            "durabilityConfirmed=false",
+        ] {
             assert!(message.contains(field), "{field} missing from {message}");
         }
-        let budget_field = format!("fenceBudgetMs={}", TEST_RUN_REGISTRATION_DURABILITY_BUDGET.as_millis());
-        assert!(message.contains(&budget_field), "{budget_field} missing from {message}");
+        let budget_field = format!(
+            "fenceBudgetMs={}",
+            TEST_RUN_REGISTRATION_DURABILITY_BUDGET.as_millis()
+        );
+        assert!(
+            message.contains(&budget_field),
+            "{budget_field} missing from {message}"
+        );
     }));
     finish_clock_service(service, outcome);
 }

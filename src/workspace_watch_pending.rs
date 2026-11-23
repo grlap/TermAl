@@ -109,7 +109,12 @@ impl WorkspaceDirtyNode {
         self.refresh(prefix);
     }
 
-    pub(crate) fn insert(&mut self, parts: &[std::ffi::OsString], fact: WorkspaceDirtyFact, prefix: usize) {
+    pub(crate) fn insert(
+        &mut self,
+        parts: &[std::ffi::OsString],
+        fact: WorkspaceDirtyFact,
+        prefix: usize,
+    ) {
         match &mut self.summary {
             Some(summary) => summary.merge(fact),
             None => self.summary = Some(fact),
@@ -163,12 +168,7 @@ impl WorkspaceDirtyNode {
     ) -> Option<usize> {
         if let Some((head, tail)) = parts.split_first() {
             if let Some(depth) = self.children.get(head).and_then(|child| {
-                child.collapse_candidate(
-                    tail,
-                    need_nodes,
-                    need_bytes,
-                    prefix + head.len() * 2 + 1,
-                )
+                child.collapse_candidate(tail, need_nodes, need_bytes, prefix + head.len() * 2 + 1)
             }) {
                 return Some(depth + 1);
             }
@@ -176,9 +176,7 @@ impl WorkspaceDirtyNode {
         let saved_bytes = (self.bytes + self.delivery).saturating_sub(
             std::mem::size_of::<Self>() + prefix + std::mem::size_of::<WorkspaceDirtyFact>(),
         );
-        (!self.children.is_empty()
-            && self.nodes - 1 >= need_nodes
-            && saved_bytes >= need_bytes)
+        (!self.children.is_empty() && self.nodes - 1 >= need_nodes && saved_bytes >= need_bytes)
             .then_some(0)
     }
 
@@ -285,7 +283,12 @@ impl WorkspacePendingChanges {
         }
     }
 
-    pub(crate) fn insert(&mut self, path: &FsPath, fact: WorkspaceDirtyFact, now: std::time::Instant) {
+    pub(crate) fn insert(
+        &mut self,
+        path: &FsPath,
+        fact: WorkspaceDirtyFact,
+        now: std::time::Instant,
+    ) {
         self.oldest.get_or_insert(now);
         self.newest = Some(now);
         // Only an unplaceable path or backend loss needs a global marker.
@@ -317,14 +320,16 @@ impl WorkspacePendingChanges {
         if nodes > WORKSPACE_PENDING_NODES
             || bytes + self.root.delivery_bytes(0) > WORKSPACE_PENDING_BYTES
         {
-            let depth = self.root.collapse_candidate(
-                &parts,
-                nodes.saturating_sub(WORKSPACE_PENDING_NODES),
-                (bytes + self.root.delivery).saturating_sub(WORKSPACE_PENDING_BYTES),
-                0,
-            ).expect("root collapse always fits the budget");
-            self.root
-                .collapse_at(&parts[..depth], 0);
+            let depth = self
+                .root
+                .collapse_candidate(
+                    &parts,
+                    nodes.saturating_sub(WORKSPACE_PENDING_NODES),
+                    (bytes + self.root.delivery).saturating_sub(WORKSPACE_PENDING_BYTES),
+                    0,
+                )
+                .expect("root collapse always fits the budget");
+            self.root.collapse_at(&parts[..depth], 0);
         }
     }
 
@@ -378,7 +383,11 @@ mod workspace_pending_tests {
 
     #[test]
     fn ingress_ignores_only_descendants_of_the_deepest_known_root() {
-        let base = PathBuf::from(if cfg!(windows) { "C:/watch-fixture" } else { "/watch-fixture" });
+        let base = PathBuf::from(if cfg!(windows) {
+            "C:/watch-fixture"
+        } else {
+            "/watch-fixture"
+        });
         let now = std::time::Instant::now();
         for ancestor in ["target", "dist", "node_modules"] {
             let root = base.join(ancestor).join("project");
@@ -388,8 +397,10 @@ mod workspace_pending_tests {
             };
             let source = root.join("src/main.rs");
             pending.ingest(
-                Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
-                    .add_path(source.clone())),
+                Ok(
+                    NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                        .add_path(source.clone()),
+                ),
                 fact(1).first,
                 now,
             );
@@ -398,8 +409,10 @@ mod workspace_pending_tests {
             assert_eq!(batch[0].0, source);
             for child in ["target", "dist", "node_modules", ".git"] {
                 pending.ingest(
-                    Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
-                        .add_path(root.join(child).join("generated"))),
+                    Ok(
+                        NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                            .add_path(root.join(child).join("generated")),
+                    ),
                     fact(2).first,
                     now,
                 );
@@ -410,8 +423,10 @@ mod workspace_pending_tests {
             pending.watch_roots.push(nested.clone());
             let nested_source = nested.join("src/main.rs");
             pending.ingest(
-                Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
-                    .add_path(nested_source.clone())),
+                Ok(
+                    NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                        .add_path(nested_source.clone()),
+                ),
                 fact(3).first,
                 now,
             );
@@ -419,13 +434,19 @@ mod workspace_pending_tests {
             assert_eq!(batch.len(), 1);
             assert_eq!(batch[0].0, nested_source);
             pending.ingest(
-                Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::Folder))
-                    .add_path(root.join("target"))),
+                Ok(
+                    NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::Folder))
+                        .add_path(root.join("target")),
+                ),
                 fact(4).first,
                 now,
             );
             let batch = pending.take();
-            assert_eq!(batch.len(), 1, "retain coverage of the separately watched repository");
+            assert_eq!(
+                batch.len(),
+                1,
+                "retain coverage of the separately watched repository"
+            );
             assert_eq!(batch[0].0, root.join("target"));
             assert_eq!(batch[0].1.kind, WorkspaceFileChangeKind::Subtree);
         }
@@ -433,17 +454,27 @@ mod workspace_pending_tests {
 
     #[test]
     fn ingress_keeps_unknown_roots_until_scope_refresh() {
-        let root = PathBuf::from(if cfg!(windows) { "C:/watch-fixture" } else { "/watch-fixture" });
+        let root = PathBuf::from(if cfg!(windows) {
+            "C:/watch-fixture"
+        } else {
+            "/watch-fixture"
+        });
         let path = root.join("target/new-project/source.rs");
         let mut pending = WorkspacePendingChanges::default();
         pending.ingest(
-            Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
-                .add_path(path.clone())),
+            Ok(
+                NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                    .add_path(path.clone()),
+            ),
             fact(1).first,
             std::time::Instant::now(),
         );
         let batch = pending.take();
-        assert_eq!(batch.len(), 1, "unknown scope is not evidence to drop a source event");
+        assert_eq!(
+            batch.len(),
+            1,
+            "unknown scope is not evidence to drop a source event"
+        );
         assert_eq!(batch[0].0, path);
     }
 
@@ -505,14 +536,18 @@ mod workspace_pending_tests {
         };
         let mut pending = WorkspacePendingChanges::default();
         pending.ingest(
-            Ok(NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
-                .add_path(path.clone())),
+            Ok(
+                NotifyEvent::new(NotifyEventKind::Create(notify::event::CreateKind::File))
+                    .add_path(path.clone()),
+            ),
             first,
             now,
         );
         pending.ingest(
-            Ok(NotifyEvent::new(NotifyEventKind::Remove(notify::event::RemoveKind::File))
-                .add_path(path.clone())),
+            Ok(
+                NotifyEvent::new(NotifyEventKind::Remove(notify::event::RemoveKind::File))
+                    .add_path(path.clone()),
+            ),
             last,
             now + Duration::from_millis(1),
         );
@@ -542,8 +577,12 @@ mod workspace_pending_tests {
             (2, notify::event::RenameMode::To, &new),
         ] {
             pending.ingest(
-                Ok(NotifyEvent::new(NotifyEventKind::Modify(notify::event::ModifyKind::Name(mode)))
-                    .add_path(path.clone())),
+                Ok(
+                    NotifyEvent::new(NotifyEventKind::Modify(notify::event::ModifyKind::Name(
+                        mode,
+                    )))
+                    .add_path(path.clone()),
+                ),
                 fact(order).first,
                 now,
             );
@@ -551,7 +590,9 @@ mod workspace_pending_tests {
         let batch = pending.take();
         assert_eq!(batch.len(), 2);
         for (path, order) in [(&old, 1), (&new, 2)] {
-            let (_, fact) = batch.iter().find(|(covered, _)| covered == path)
+            let (_, fact) = batch
+                .iter()
+                .find(|(covered, _)| covered == path)
                 .expect("both rename endpoints retained");
             assert_eq!(fact.kind, WorkspaceFileChangeKind::Subtree);
             assert_eq!(fact.first.order, order);
@@ -609,9 +650,8 @@ mod workspace_pending_tests {
     #[test]
     fn byte_budget_does_not_widen_a_deeper_path_in_another_root() {
         let root = std::env::current_dir().unwrap();
-        let isolated = root.join(
-            "isolated-root/one/two/three/four/five/six/seven/eight/nine/source.rs",
-        );
+        let isolated =
+            root.join("isolated-root/one/two/three/four/five/six/seven/eight/nine/source.rs");
         let burst = root.join("burst-root/src");
         let mut pending = WorkspacePendingChanges::default();
         let now = std::time::Instant::now();
@@ -627,14 +667,21 @@ mod workspace_pending_tests {
             assert!(pending.root.bytes + pending.root.delivery <= WORKSPACE_PENDING_BYTES);
         }
         let batch = pending.take();
-        let isolated_fact = batch.iter().find(|(path, _)| path == &isolated)
-            .expect("the unrelated deeper path stays exact").1;
+        let isolated_fact = batch
+            .iter()
+            .find(|(path, _)| path == &isolated)
+            .expect("the unrelated deeper path stays exact")
+            .1;
         assert_eq!(isolated_fact.kind, WorkspaceFileChangeKind::Modified);
         assert_eq!(isolated_fact.first.order, 1);
         assert_eq!(isolated_fact.last.order, 1);
         assert!(batch.iter().any(|(path, fact)| path.starts_with(&burst)
             && fact.kind == WorkspaceFileChangeKind::Subtree));
-        assert!(batch.iter().all(|(path, _)| path == &isolated || path.starts_with(&burst)));
+        assert!(
+            batch
+                .iter()
+                .all(|(path, _)| path == &isolated || path.starts_with(&burst))
+        );
         for path in paths {
             assert!(batch.iter().any(|(cover, fact)| cover == &path
                 || fact.kind == WorkspaceFileChangeKind::Subtree && path.starts_with(cover)));

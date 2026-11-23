@@ -199,21 +199,25 @@ impl TestRunProjectionScope {
         }
     }
     pub(crate) fn observation(&self, row: &TestRunCommandObservation) -> bool {
-        self.complete || row.artifact
-            .as_ref()
-            .is_some_and(|artifact| self.run_ids.contains(&artifact.run_id))
+        self.complete
+            || row
+                .artifact
+                .as_ref()
+                .is_some_and(|artifact| self.run_ids.contains(&artifact.run_id))
     }
     pub(crate) fn session(&self, row: TestRunProjectionSessionRef<'_>) -> bool {
-        self.complete || self.references.contains(row.id)
+        self.complete
+            || self.references.contains(row.id)
             || self
                 .reference_names
                 .contains(&row.name.to_ascii_lowercase())
     }
     pub(crate) fn carried(&self, row: TestRunProjectionCarriedRef<'_>) -> bool {
-        self.complete || row.run_directory.is_some_and(|path| {
-            self.paths
-                .contains(&test_run_path_key(&test_run_display_path(path)))
-        })
+        self.complete
+            || row.run_directory.is_some_and(|path| {
+                self.paths
+                    .contains(&test_run_path_key(&test_run_display_path(path)))
+            })
     }
 }
 
@@ -267,13 +271,24 @@ impl TestRunProjectionCut {
     // catalogue for off-lock overview and paged reads. No files, runtime
     // handles, persistence waiters, or mutable StateInner borrow escape.
     pub(crate) fn capture_history(inner: &StateInner) -> Self {
-        let run_ids = inner.test_runs.entries.iter().map(|row| row.summary.run_id.clone())
+        let run_ids = inner
+            .test_runs
+            .entries
+            .iter()
+            .map(|row| row.summary.run_id.clone())
             .chain(inner.test_run_registrations.keys().cloned())
-            .chain(inner.test_run_compacted.keys().cloned()).collect();
-        Self::capture(inner, TestRunProjectionScope {
-            complete: true, run_ids, references: HashSet::new(),
-            reference_names: HashSet::new(), paths: HashSet::new(),
-        })
+            .chain(inner.test_run_compacted.keys().cloned())
+            .collect();
+        Self::capture(
+            inner,
+            TestRunProjectionScope {
+                complete: true,
+                run_ids,
+                references: HashSet::new(),
+                reference_names: HashSet::new(),
+                paths: HashSet::new(),
+            },
+        )
     }
 
     pub(crate) fn capture(inner: &StateInner, mut scope: TestRunProjectionScope) -> Self {
@@ -376,7 +391,11 @@ impl TestRunProjectionCut {
         };
         Self {
             index,
-            attention_ids: if scope.complete { test_run_attention_ids(inner) } else { HashSet::new() },
+            attention_ids: if scope.complete {
+                test_run_attention_ids(inner)
+            } else {
+                HashSet::new()
+            },
             registrations,
             observations,
             compacted,
@@ -415,12 +434,12 @@ impl TestRunProjectionCut {
 
     pub(crate) fn matches(&self, inner: &StateInner) -> bool {
         let live = &inner.test_runs;
-        if self.scope.complete && (
-            self.registrations.len() != inner.test_run_registrations.len()
+        if self.scope.complete
+            && (self.registrations.len() != inner.test_run_registrations.len()
                 || self.compacted.len() != inner.test_run_compacted.len()
                 || self.index.entries.len() != live.entries.len()
-                || self.attention_ids != test_run_attention_ids(inner)
-        ) {
+                || self.attention_ids != test_run_attention_ids(inner))
+        {
             return false;
         }
         // Revision alone cannot fence unstamped durability or metadata writes.
