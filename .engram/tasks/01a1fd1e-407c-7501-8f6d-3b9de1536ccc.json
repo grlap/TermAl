@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Removed the raw full-inventory review identity, HTTP/CLI/MCP callers and dedicated docs/tests. Shared Engram source_id and Git ranges select review input. Landed exact 24e41d434f983f2ea0b424201c6bd563ca789642 at 23:14:24Z with an adopted clean independent pair and six-stage registered Windows FULL test-94266596-d871-43b3-91e8-d27db384ba0b. Fresh post-landing independent evaluation 2dc508a843b647819c7239180a91398c passed 3/3 on the sealed candidate source. Combined binary install follows separately under Fable2 #7602.",
+    "completed_at": "2026-11-22T23:19:58.656648600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
