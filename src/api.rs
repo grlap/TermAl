@@ -1295,6 +1295,18 @@ impl AppState {
                     .find(|record| record.has_messages)
             })
             .or_else(|| inputs.sessions.last());
+        // A finished delegation child keeps no resident transcript: take its
+        // progress from its last stored window, read off the state lock.
+        let cold_summary_session = summary_session
+            .filter(|record| record.latest_progress_summary.is_none() && record.has_messages)
+            .and_then(|record| {
+                let window = self.read_cold_session_window(&record.id).ok().flatten()?;
+                Some(ProjectDigestSession {
+                    latest_progress_summary: latest_project_progress_summary(&window.messages),
+                    ..record.clone()
+                })
+            });
+        let summary_session = cold_summary_session.as_ref().or(summary_session);
         let summary_session_id = summary_session.map(|record| record.id.clone());
         let prompt_target_session_id = prompt_target_session.map(|record| record.id.clone());
         let summary_deep_link = Some(build_project_deep_link(

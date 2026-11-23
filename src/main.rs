@@ -1776,6 +1776,8 @@ mod session_restart_recovery;
 use session_restart_recovery::*;
 mod state_inner;
 use state_inner::*;
+mod cold_transcript;
+use cold_transcript::*;
 mod delegations;
 use delegations::*;
 mod delegation_inventory;

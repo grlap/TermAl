@@ -268,10 +268,14 @@ impl Pair {
             StatusCode::OK,
             "real O1 fixture must verify: {report}"
         );
+        // The report names each onboarding step's outcome; print it whole so a
+        // failed fixture onboarding is diagnosable from its first occurrence.
+        let complete = serde_json::from_value::<FederationOnboardingReport>(report.clone())
+            .unwrap()
+            .termal_complete();
         assert!(
-            serde_json::from_value::<FederationOnboardingReport>(report)
-                .unwrap()
-                .termal_complete()
+            complete,
+            "real O1 fixture must complete TermAl onboarding: {report}"
         );
         pair
     }

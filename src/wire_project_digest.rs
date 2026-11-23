@@ -469,6 +469,19 @@ pub(crate) fn find_latest_project_pending_nonapproval_interaction<'a>(
     })
 }
 
+/// The latest progress summary within a session's last messages, with the
+/// message it came from, as the projection below finds it in a resident tail.
+pub(crate) fn latest_project_progress_summary(messages: &[Message]) -> Option<(String, String)> {
+    messages
+        .iter()
+        .rev()
+        .take(PROJECT_DIGEST_MESSAGE_SCAN_LIMIT)
+        .find_map(|message| {
+            project_progress_summary_for_message(message)
+                .map(|summary| (message.id().to_owned(), summary))
+        })
+}
+
 /// Projects one session into the bounded metadata needed by project digests.
 pub(crate) fn project_digest_session_from_record(record: &SessionRecord) -> ProjectDigestSession {
     let mut latest_progress_summary = None;
@@ -519,7 +532,7 @@ pub(crate) fn project_digest_session_from_record(record: &SessionRecord) -> Proj
         status: record.session.status,
         preview: record.session.preview.clone(),
         pending_prompt_count: record.session.pending_prompts.len(),
-        has_messages: !record.session.messages.is_empty(),
+        has_messages: session_message_count(record) > 0,
         latest_progress_summary,
         pending_approval_message_id,
         pending_interaction_message_id,

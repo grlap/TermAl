@@ -334,7 +334,7 @@ fn codex_reviewer_mcp_finish_without_submission_queries_before_archive() {
         .find(|record| record.session.id == fixture.child)
         .unwrap();
     assert!(
-        serde_json::to_string(&child.session.messages)
+        serde_json::to_string(&controls::stored_transcript(&fixture, child))
             .unwrap()
             .contains("fixture bridge discovery failed"),
         "bridge diagnostics must be persisted in the child transcript before archive"

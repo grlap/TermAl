@@ -1133,9 +1133,34 @@ pub(crate) fn load_state_from_sqlite_with_timings(
     let persisted = ensure_sqlite_state_schema_for_load_path(&connection, path);
     timings.finish(BootStateLoadPhase::SchemaMetadata, started);
     let persisted = persisted?;
+    // Delegation rows load after serving, so the links that let a finished
+    // child start cold come from a prepass that decodes no records. Without
+    // it every transcript loads as before.
+    let cold_links = match DelegationLinkCut::load(&connection) {
+        Ok(links) => Some(links),
+        Err(err) => {
+            eprintln!(
+                "persist> delegation link prepass failed for `{}`; loading every transcript tail: {err:#}",
+                path.display()
+            );
+            None
+        }
+    };
+    let card_owner_sessions = persisted
+        .as_ref()
+        .map(|persisted| sessions_with_live_test_run_cards(persisted.test_run_cards.values()))
+        .unwrap_or_default();
+    let cold = cold_links.as_ref().map(|links| ColdTranscriptBoot {
+        links,
+        card_owner_sessions: &card_owner_sessions,
+    });
     let started = timings.start();
-    let loaded_sessions =
-        load_session_records_from_sqlite_with_skipped_and_timings(&connection, path, timings);
+    let loaded_sessions = load_session_records_from_sqlite_with_skipped_and_timings(
+        &connection,
+        path,
+        timings,
+        cold.as_ref(),
+    );
     timings.finish(BootStateLoadPhase::Sessions, started);
     let (mut session_records, mut quarantined_session_ids, mut skipped_session_records) =
         loaded_sessions?;
@@ -1175,6 +1200,33 @@ pub(crate) fn load_state_from_sqlite_with_timings(
             path.display()
         );
     }
+    // Every delegation child that boot left resident is rechecked after later
+    // persistence passes: a stored card may go, or its delegation may end,
+    // without the child itself being written again.
+    let resident_children = session_records
+        .iter()
+        .filter(|record| {
+            record.session.parent_delegation_id.is_some() && !record.session.messages.is_empty()
+        })
+        .map(|record| record.session.id.clone())
+        .collect::<Vec<_>>();
+    // A cold child's transcript is not scanned to re-derive its cards, so a
+    // card stored as terminal keeps that flag; it then leaves the index like
+    // any terminal card, and holds no run back.
+    let cold_children = session_records
+        .iter()
+        .filter(|record| {
+            record.session.parent_delegation_id.is_some() && record.session.messages.is_empty()
+        })
+        .map(|record| record.session.id.as_str())
+        .collect::<HashSet<_>>();
+    let cold_terminal_cards = persisted
+        .test_run_cards
+        .iter()
+        .filter(|(_, card)| card.terminal && cold_children.contains(card.session_id.as_str()))
+        .map(|(run_id, _)| run_id.clone())
+        .collect::<Vec<_>>();
+    drop(cold_children);
     // The normalized `sessions` table is authoritative even when every row was
     // skipped. Falling back to the metadata blob here could resurrect stale or
     // structurally invalid sessions after the row-level isolation above.
@@ -1193,6 +1245,12 @@ pub(crate) fn load_state_from_sqlite_with_timings(
     let mut inner = persisted
         .into_inner_with_boot_timings(timings)
         .with_context(|| format!("failed to validate state from `{}`", path.display()))?;
+    inner.cold_transcripts.enroll_candidates(resident_children);
+    for run_id in cold_terminal_cards {
+        if let Some(card) = inner.test_run_cards.get_mut(&run_id) {
+            card.terminal = true;
+        }
+    }
     let started = timings.start();
     let bound = bind_loaded_federation(&mut inner, &connection, path);
     timings.finish(BootStateLoadPhase::FederationBind, started);

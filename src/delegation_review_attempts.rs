@@ -898,6 +898,9 @@ impl AppState {
         // Pinned historical reads take read_review_publication instead.
         self.recover_durable_delegation_review_submission(&child)?;
         self.get_delegation(parent, delegation)?;
+        // The cut and its later rechecks compare the child's raw output under
+        // the state lock; a finished child's window is made resident first.
+        let _cold_window_pin = self.hydrate_cold_session_window(&child)?;
         #[cfg(test)]
         if only_if_unpublished
             && let Some(hook) =

@@ -842,6 +842,7 @@ impl StateInner {
         for session_id in persisted_session_ids {
             drop(self.trim_persisted_session_tail(watermark, session_id));
         }
+        drop(self.trim_cold_transcript_candidates(watermark));
     }
 
     fn trim_persisted_session_tail(
@@ -850,7 +851,7 @@ impl StateInner {
         session_id: &str,
     ) -> Option<(MessageSequence, HashMap<String, usize>)> {
         let index = self.find_session_index(session_id)?;
-        let record = &mut self.sessions[index];
+        let record = &self.sessions[index];
         if record.mutation_stamp > watermark
             || matches!(
                 record.session.status,
@@ -859,7 +860,10 @@ impl StateInner {
         {
             return None;
         }
-        detach_retained_session_messages(record, SESSION_IN_MEMORY_MESSAGE_LIMIT)
+        // A finished delegation child keeps nothing resident once its
+        // transcript is durable; it is read from SQLite on demand.
+        let limit = self.cold_trim_limit(index);
+        detach_retained_session_messages(&mut self.sessions[index], limit)
     }
 
     /// Returns the index of any session, including internal records, by
@@ -1124,6 +1128,26 @@ pub(crate) fn trim_persisted_session_tails_from_shared_state(
         #[cfg(test)]
         observe_persist_tail_trim_boundary(session_id, "unit_complete");
     }
+}
+
+/// After every committed persistence pass, including one that wrote no
+/// session rows: finished children that a transient blocker or a pin kept
+/// resident get their trim here. Their bodies are dropped after release.
+/// Returns when a candidate's file-change grace window ends, the moment a
+/// pass must recheck it even if nothing else is written by then.
+pub(crate) fn trim_cold_transcript_candidates_from_shared_state(
+    inner: &StateMutex<StateInner>,
+    watermark: u64,
+) -> Option<std::time::Instant> {
+    let (retired, recheck_at) = {
+        let mut state = inner.lock().expect("state mutex poisoned");
+        // One clock sample: a window the trim saw open is the one rearmed.
+        let now = std::time::Instant::now();
+        let retired = state.trim_cold_transcript_candidates_at(watermark, now);
+        (retired, state.cold_transcript_grace_recheck_at(now))
+    };
+    drop(retired);
+    recheck_at
 }
 
 #[cfg(test)]

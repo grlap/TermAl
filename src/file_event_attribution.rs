@@ -425,6 +425,10 @@ impl AppState {
             // Direct access: runtime bookkeeping must not stamp persist inputs.
             owners.push(FileChangeOwnerCapture::from_record(record, now));
         }
+        let captured_sessions = owners
+            .iter()
+            .map(|owner| owner.session_id.clone())
+            .collect::<Vec<_>>();
         diagnostic.scan_inclusive = scan_started.elapsed();
         let capture_held = held_started.elapsed();
         drop(inner);
@@ -560,6 +564,14 @@ impl AppState {
             commit_error = self.commit_locked(&mut inner).err();
             diagnostic.commit = started.elapsed();
             diagnostic.commit_failed = commit_error.is_some();
+        }
+        // Every capture has released its tracking now. One that held a
+        // finished child through its recheck wakes another, whatever it matched.
+        if captured_sessions
+            .iter()
+            .any(|session_id| inner.cold_transcripts.is_candidate(session_id))
+        {
+            let _ = self.persist_tx.send(PersistRequest::Delta);
         }
         let held_work = capture_held + held_started.elapsed();
         drop(inner);

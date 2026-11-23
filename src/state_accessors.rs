@@ -39,6 +39,13 @@ const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_millis
 const REMOTE_VISIBLE_SESSION_HYDRATION_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const SESSION_TAIL_DEFAULT_MESSAGES: usize = 20;
 pub(crate) const SESSION_TAIL_HYDRATION_MAX_MESSAGES: usize = 64;
+
+#[cfg(test)]
+thread_local! {
+    /// Runs once between a tail read's classification and its projection.
+    pub(crate) static TEST_SESSION_TAIL_BETWEEN_LOCKS: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
 pub(crate) const SESSION_HISTORY_PAGE_MAX_MESSAGES: usize = 64;
 const SESSION_LIVE_ACTIVITY_SUMMARY_MAX_CHARS: usize = 160;
 
@@ -937,16 +944,25 @@ impl AppState {
         session_id: &str,
         message_limit: usize,
     ) -> Result<SessionResponse, ApiError> {
-        let should_hydrate_remote_proxy = {
+        let tail_limit = message_limit.min(SESSION_TAIL_HYDRATION_MAX_MESSAGES);
+        let (should_hydrate_remote_proxy, needs_durable_tail) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
                 .find_visible_session_index(session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let record = &inner.sessions[index];
-            record.is_remote_proxy()
-                && !record.session.messages_loaded
-                && record.session.messages.is_empty()
+            let wanted = tail_limit.min(session_message_count(record) as usize);
+            (
+                record.is_remote_proxy()
+                    && !record.session.messages_loaded
+                    && record.session.messages.is_empty(),
+                // A finished delegation child keeps no resident transcript.
+                !record.is_remote_proxy() && record.session.messages.len() < wanted,
+            )
         };
+        if needs_durable_tail {
+            return self.get_durable_session_tail(session_id, tail_limit);
+        }
         if should_hydrate_remote_proxy {
             let target = self
                 .remote_session_target(session_id)?
@@ -963,11 +979,26 @@ impl AppState {
             );
         }
 
+        #[cfg(test)]
+        TEST_SESSION_TAIL_BETWEEN_LOCKS.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().take() {
+                hook();
+            }
+        });
         let inner = self.inner.lock().expect("state mutex poisoned");
         let index = inner
             .find_visible_session_index(session_id)
             .ok_or_else(ApiError::local_session_missing)?;
         let record = &inner.sessions[index];
+        // A persistence pass may have trimmed a finished child between the two
+        // acquisitions without moving its stamp: serve it from SQLite then.
+        if !record.is_remote_proxy()
+            && record.session.messages.len()
+                < tail_limit.min(session_message_count(record) as usize)
+        {
+            drop(inner);
+            return self.get_durable_session_tail(session_id, tail_limit);
+        }
         let tail_start_index = Self::session_tail_start_index(record, message_limit);
         let messages_loaded = record.session.messages_loaded && tail_start_index == 0;
         Ok(SessionResponse {
@@ -980,6 +1011,41 @@ impl AppState {
             ),
             server_instance_id: self.server_instance_id.clone(),
         })
+    }
+
+    /// Serves a local tail that is not wholly resident, such as a finished
+    /// delegation child's, from the pinned history snapshot: resident bodies
+    /// stay authoritative and the rest comes from SQLite, read off-lock. The
+    /// metadata comes from the same record version, so a mutation between
+    /// the read and the projection reads the window again.
+    fn get_durable_session_tail(
+        &self,
+        session_id: &str,
+        tail_limit: usize,
+    ) -> Result<SessionResponse, ApiError> {
+        const ATTEMPTS: usize = 3;
+        for _ in 0..ATTEMPTS {
+            let window = self.read_local_session_tail_window(session_id, tail_limit)?;
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner
+                .find_visible_session_index(session_id)
+                .ok_or_else(ApiError::local_session_missing)?;
+            let record = &inner.sessions[index];
+            if record.mutation_stamp != window.session_mutation_stamp {
+                continue;
+            }
+            let mut session = Self::wire_session_from_record(&self.server_instance_id, record);
+            session.messages = window.messages.into();
+            session.messages_loaded = window.start_index == 0;
+            return Ok(SessionResponse {
+                revision: inner.revision,
+                session,
+                server_instance_id: self.server_instance_id.clone(),
+            });
+        }
+        Err(ApiError::conflict(
+            "session transcript kept changing while its tail was read; refresh the session",
+        ))
     }
 
     /// Returns one exclusive-before, ascending transcript page.

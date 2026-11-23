@@ -758,6 +758,56 @@ fn project_digest_routes_error_fix_it_to_non_delegation_session() {
 }
 
 #[test]
+fn project_digest_reads_a_cold_errored_childs_progress_from_its_stored_window() {
+    let state = test_app_state();
+    let root = test_temp_dir().join(format!(
+        "termal-project-cold-error-child-{}",
+        Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root).unwrap();
+
+    let project_id = create_test_project(&state, &root, "Cold Error Child Project");
+    let child_session_id = create_test_project_session(&state, Agent::Codex, &project_id, &root);
+    let child_message_id = state.allocate_message_id();
+    state
+        .push_message(
+            &child_session_id,
+            Message::Text {
+                attachments: Vec::new(),
+                id: child_message_id.clone(),
+                timestamp: stamp_now(),
+                author: Author::Assistant,
+                text: "Delegation failed while checking the project.".to_owned(),
+                expanded_text: None,
+                source: None,
+            },
+        )
+        .unwrap();
+    {
+        let mut inner = state.inner.lock().expect("state mutex poisoned");
+        let child_index = inner.find_session_index(&child_session_id).unwrap();
+        inner.sessions[child_index].session.parent_delegation_id =
+            Some("delegation-failed".to_owned());
+        inner.sessions[child_index].session.status = SessionStatus::Error;
+        state.commit_locked(&mut inner).unwrap();
+        // The failed child is stored and keeps no resident transcript, as a
+        // persistence pass leaves a finished delegation child.
+        persist_state(state.persistence_path.as_ref(), &inner).unwrap();
+        drop(detach_retained_session_messages(
+            &mut inner.sessions[child_index],
+            0,
+        ));
+        assert!(inner.sessions[child_index].session.messages.is_empty());
+    }
+
+    let digest = state.project_digest(&project_id).unwrap();
+
+    assert_eq!(digest.source_message_ids, vec![child_message_id]);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn project_digest_prompt_target_skips_errored_parent_sessions() {
     let state = test_app_state();
     let root = test_temp_dir().join(format!(

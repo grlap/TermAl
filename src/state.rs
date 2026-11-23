@@ -2041,6 +2041,8 @@ pub(crate) struct StateInner {
     pub(crate) removed_delegation_ids: BTreeMap<String, u64>,
     /// Indexes currently running read-only delegation records by `delegations` index.
     pub(crate) running_read_only_delegations: BTreeSet<usize>,
+    /// Process-local state of the cold finished-child transcript rule.
+    pub(crate) cold_transcripts: ColdTranscriptState,
     /// Server-backed workspace documents keyed by workspace id.
     pub(crate) workspace_layouts: PersistTracked<BTreeMap<String, WorkspaceLayoutDocument>>,
     /// Monotonic counter used to stamp mutated session records. The persist
@@ -2159,6 +2161,7 @@ impl StateInner {
             delegation_catalog_children: Mutex::new(FederationCatalogChildren::default()),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
+            cold_transcripts: ColdTranscriptState::default(),
             workspace_layouts: PersistTracked::default(),
             last_mutation_stamp: 0,
             removed_session_ids: Vec::new(),

@@ -20,13 +20,22 @@ pub(crate) fn load_session_records_from_sqlite_with_skipped(
         connection,
         path,
         &mut BootStateLoadTimings::new(false),
+        None,
     )
+}
+
+/// What boot knows before delegation rows load: their links, and the sessions
+/// that own a stored test-run card.
+struct ColdTranscriptBoot<'a> {
+    links: &'a DelegationLinkCut,
+    card_owner_sessions: &'a HashSet<String>,
 }
 
 fn load_session_records_from_sqlite_with_skipped_and_timings(
     connection: &rusqlite::Connection,
     path: &FsPath,
     timings: &mut BootStateLoadTimings,
+    cold: Option<&ColdTranscriptBoot<'_>>,
 ) -> Result<(Vec<PersistedSessionRecord>, BTreeSet<String>, usize)> {
     let mut statement = connection
         .prepare("SELECT id, value_json FROM sessions ORDER BY rowid")
@@ -84,10 +93,26 @@ fn load_session_records_from_sqlite_with_skipped_and_timings(
                 })?;
                 record
             };
-            let started = timings.start();
-            let tail = load_persisted_session_tail(connection, path, &mut record);
-            timings.finish(BootStateLoadPhase::TranscriptTails, started);
-            tail?;
+            // A finished delegation child reads no transcript row here; its
+            // tail, history and result output are read from SQLite on demand,
+            // and that read refuses a missing position, a body that does not
+            // parse or a mismatched id, as a loaded tail's check does at boot.
+            if cold.is_some_and(|cold| {
+                persisted_session_transcript_starts_cold(
+                    &record,
+                    cold.links,
+                    cold.card_owner_sessions,
+                )
+            }) {
+                start_persisted_session_cold(&mut record);
+            } else {
+                let started = timings.start();
+                let tail = load_persisted_session_tail(connection, path, &mut record);
+                timings.finish(BootStateLoadPhase::TranscriptTails, started);
+                #[cfg(test)]
+                BOOT_TAIL_LOADS.with(|loads| loads.borrow_mut().push(session_id.clone()));
+                tail?;
+            }
             let started = timings.start();
             let history = load_persisted_prompt_history(connection, path, &mut record);
             timings.finish(BootStateLoadPhase::PromptHistories, started);
@@ -161,22 +186,10 @@ fn load_persisted_prompt_history(
             })?,
         ),
         None => {
-            // A single indexed existence probe includes rows older than the
-            // loaded tail without reading bodies or retired author metadata.
-            // Present history rows skip this probe entirely.
-            let has_messages: bool = connection
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM messages WHERE session_id = ?1)",
-                    rusqlite::params![record.session.id],
-                    |row| row.get(0),
-                )
-                .with_context(|| {
-                    format!(
-                        "failed to inspect persisted transcript presence for `{}`",
-                        record.session.id
-                    )
-                })?;
-            missing_history_with_messages = has_messages;
+            // The stored message count says whether the session has a
+            // transcript, rows older than the loaded tail included, without
+            // touching the transcript table.
+            missing_history_with_messages = record.session.message_count > 0;
             Vec::new()
         }
     };
@@ -306,6 +319,13 @@ pub(crate) fn load_persisted_session_tail(
     record.session.messages = messages.into();
     record.session.messages_loaded = start_index == 0;
     Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Sessions whose transcript tail a boot loaded on this thread, in order.
+    pub(crate) static BOOT_TAIL_LOADS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 pub(crate) fn persisted_message_position(

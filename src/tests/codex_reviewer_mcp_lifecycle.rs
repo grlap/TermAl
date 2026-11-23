@@ -96,7 +96,7 @@ fn codex_reviewer_mcp_notification_secret_is_withheld_in_result_and_transcript()
         .find(|r| r.session.id == fixture.child)
         .unwrap();
     assert!(
-        !serde_json::to_string(&child.session.messages)
+        !serde_json::to_string(&super::controls::stored_transcript(&fixture, child))
             .unwrap()
             .contains("routing-secret-private")
     );

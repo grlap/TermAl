@@ -66,6 +66,7 @@ mod coordination_instructions;
 mod crash_restart_drill;
 mod cursor;
 mod delegation_child_links;
+mod delegation_cold_history;
 mod delegation_followup_admission;
 mod delegation_lifecycle;
 mod delegation_metadata;

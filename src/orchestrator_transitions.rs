@@ -963,7 +963,7 @@ pub(crate) fn build_orchestrator_destination_prompt(
 ) -> String {
     let prompt = rendered_prompt.trim();
     let instructions = instructions.trim();
-    let should_prefix_instructions = destination_record.session.messages.is_empty()
+    let should_prefix_instructions = session_message_count(destination_record) == 0
         && destination_record.queued_prompts.is_empty()
         && !instructions.is_empty();
 

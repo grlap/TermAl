@@ -37,6 +37,13 @@ pub(crate) const MAX_DELEGATION_RESULT_FINDINGS: usize = 100;
 // caller to reconstruct arbitrarily large UTF-8 output via nextOffsetBytes.
 pub(crate) const DEFAULT_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 4 * 1024;
 pub(crate) const MIN_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 256;
+
+#[cfg(test)]
+thread_local! {
+    /// Runs once between a result-output read's window check and its lock.
+    pub(crate) static TEST_RESULT_OUTPUT_AFTER_WINDOW_CHECK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
 const MAX_DELEGATION_RESULT_OUTPUT_PAGE_BYTES: usize = 8 * 1024;
 // Result packets are expected near the end of long assistant output.
 pub(crate) const DELEGATION_RESULT_PACKET_SEARCH_BYTES: usize = 32 * 1024;
@@ -1191,7 +1198,18 @@ impl AppState {
         if needs_result_refresh {
             self.get_delegation_result(parent_session_id, delegation_id)?;
         }
-        let (revision, child_session_id, page, total_bytes, summary_fallback) = {
+        // A finished child's transcript may not be resident: read the window
+        // its output comes from off-lock, then use it only for the same
+        // record version.
+        let mut window_reads = 0;
+        let (revision, child_session_id, page, total_bytes, summary_fallback) = loop {
+            let cold_child_window = self.read_cold_session_window(&child_session_id)?;
+            #[cfg(test)]
+            TEST_RESULT_OUTPUT_AFTER_WINDOW_CHECK.with(|hook| {
+                if let Some(hook) = hook.borrow_mut().take() {
+                    hook();
+                }
+            });
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
@@ -1204,14 +1222,48 @@ impl AppState {
                     .result
                     .as_ref()
                     .is_some_and(|result| result.worker_output_unavailable == Some(true));
+            let child = inner
+                .find_session_index(&delegation.child_session_id)
+                .and_then(|child_index| inner.sessions.get(child_index));
+            // A persistence pass may have trimmed the child after its window
+            // was checked, without moving its stamp: read the window again.
+            if cold_child_window.is_none()
+                && child.is_some_and(|child| {
+                    child.is_local_session()
+                        && child.session.messages.len()
+                            < SESSION_IN_MEMORY_MESSAGE_LIMIT
+                                .min(session_message_count(child) as usize)
+                })
+            {
+                window_reads += 1;
+                if window_reads < 3 {
+                    continue;
+                }
+                return Err(ApiError::conflict(
+                    "the delegation child's transcript kept moving while its output was read; retry",
+                ));
+            }
+            let cold_session = match (child, &cold_child_window) {
+                (Some(child), Some(window)) => {
+                    if child.mutation_stamp != window.session_mutation_stamp {
+                        return Err(ApiError::conflict(
+                            "the delegation child changed while its output was read; retry",
+                        ));
+                    }
+                    let mut session = child.session.clone();
+                    session.messages = window.messages.clone().into();
+                    Some(session)
+                }
+                _ => None,
+            };
             let transcript_output = if unavailable_worker_output {
                 None
             } else {
-                inner
-                    .find_session_index(&delegation.child_session_id)
-                    .and_then(|child_index| inner.sessions.get(child_index))
-                    .and_then(|child| {
-                        delegation_child_authoritative_output(&child.session, delegation.status)
+                cold_session
+                    .as_ref()
+                    .or(child.map(|child| &child.session))
+                    .and_then(|session| {
+                        delegation_child_authoritative_output(session, delegation.status)
                     })
             };
             let (output, summary_fallback) = match transcript_output {
@@ -1227,7 +1279,7 @@ impl AppState {
                 ),
             };
             let page = delegation_result_output_page(output, offset_bytes, limit_bytes)?;
-            (
+            break (
                 // The output page and its revision must describe the same
                 // locked snapshot. A lifecycle refresh may have returned an
                 // earlier revision before another state commit acquired this
@@ -1237,7 +1289,7 @@ impl AppState {
                 page,
                 output.len(),
                 summary_fallback,
-            )
+            );
         };
 
         Ok(DelegationResultOutputResponse {
@@ -1596,6 +1648,13 @@ impl AppState {
             child
         };
         self.recover_durable_delegation_review_submission(&child_session_id)?;
+        // A finished child may keep no resident transcript. Review capture,
+        // the previous prompt anchor and worker handoff read the same window
+        // as before, so make it resident before anything reads it.
+        let _cold_window_pin = self.hydrate_cold_session_window(&child_session_id)?;
+        // Re-arming the delegation rewrites its card in the parent, which may
+        // be a finished child with no resident transcript itself.
+        let _parent_window_pin = self.hydrate_cold_session_window(parent_session_id)?;
 
         // Complete post-commit release before re-arming; while waiting, status
         // readers must still see the previous terminal result, not an idle

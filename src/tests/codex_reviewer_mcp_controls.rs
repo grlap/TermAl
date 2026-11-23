@@ -78,6 +78,21 @@ pub(super) fn archive_and_result(fixture: &ReviewerFixture) -> DelegationResult 
         .result
 }
 
+/// The child's whole stored transcript. A reload keeps no resident messages
+/// for a child whose delegation is terminal, so they are read from SQLite.
+pub(super) fn stored_transcript(fixture: &ReviewerFixture, child: &SessionRecord) -> Vec<Message> {
+    load_persisted_message_range(
+        fixture.state.persistence_path.as_path(),
+        &child.session.id,
+        0,
+        session_message_count(child) as usize,
+    )
+    .unwrap()
+    .into_iter()
+    .map(|(_, message)| message)
+    .collect()
+}
+
 pub(super) fn assert_observation(
     fixture: &ReviewerFixture,
     result: &DelegationResult,
@@ -106,7 +121,7 @@ pub(super) fn assert_observation(
         .find(|r| r.session.id == fixture.child)
         .unwrap();
     assert!(
-        serde_json::to_string(&child.session.messages)
+        serde_json::to_string(&stored_transcript(fixture, child))
             .unwrap()
             .contains(
                 &serde_json::to_string(observation)

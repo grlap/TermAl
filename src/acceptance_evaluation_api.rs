@@ -480,9 +480,25 @@ impl Drop for AcceptanceEvaluationSubmissionInFlight {
             .acceptance_evaluation_submissions_in_flight
             .remove(&self.delegation_id)
             .unwrap_or(false);
-        let child = inner
-            .find_delegation_index(&self.delegation_id)
-            .map(|i| inner.delegations[i].child_session_id.clone());
+        let delegation = inner.find_delegation_index(&self.delegation_id).map(|i| {
+            let delegation = &inner.delegations[i];
+            (
+                delegation.child_session_id.clone(),
+                delegation.parent_session_id.clone(),
+            )
+        });
+        // Leaving the in-progress set may let a persistence pass trim a
+        // finished parent whose card the refresh below rewrites after this
+        // lock is released: keep its window until then. Releasing the pin
+        // wakes that pass's recheck.
+        let _parent_window_pin = delegation
+            .as_ref()
+            .filter(|_| !poisoned)
+            .map(|(_, parent)| {
+                self.state
+                    .pin_cold_session_window_locked(&mut inner, parent)
+            });
+        let child = delegation.map(|(child, _)| child);
         drop(inner);
         // Never hold the state lock across lifecycle settlement or provider
         // cleanup. Preserve the poison-recovery guarantee of this guard.
@@ -3137,7 +3153,7 @@ impl AppState {
                     .map(|child| &inner.sessions[child])
                     .is_some_and(|child| {
                         matches!(child.runtime, SessionRuntime::None)
-                            && child.session.messages.is_empty()
+                            && session_message_count(child) == 0
                             && child.queued_prompts.is_empty()
                     });
             if !untouched {

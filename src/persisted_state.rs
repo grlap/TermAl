@@ -674,6 +674,7 @@ impl PersistedState {
             delegation_catalog_children: Mutex::new(delegation_catalog_children),
             removed_delegation_ids: BTreeMap::new(),
             running_read_only_delegations: BTreeSet::new(),
+            cold_transcripts: ColdTranscriptState::default(),
             workspace_layouts: self.workspace_layouts.into(),
             sessions: sessions.into(),
             quarantined_persisted_session_ids: self.quarantined_persisted_session_ids,

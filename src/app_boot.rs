@@ -65,6 +65,9 @@ pub(crate) struct PersistWorkerRetryState {
     pub(crate) retry_after_failure: bool,
     pub(crate) retry_delay: Duration,
     pub(crate) fence_retry_delay: Option<Duration>,
+    /// When a finished child's file-change grace window ends, so the pass
+    /// that rechecks it runs even if nothing else is written by then.
+    pub(crate) cold_transcript_recheck_at: Option<std::time::Instant>,
 }
 
 impl Default for PersistWorkerRetryState {
@@ -73,6 +76,7 @@ impl Default for PersistWorkerRetryState {
             retry_after_failure: false,
             retry_delay: PERSIST_RETRY_SEED_DELAY,
             fence_retry_delay: None,
+            cold_transcript_recheck_at: None,
         }
     }
 }
@@ -172,12 +176,19 @@ impl CoordinationCleanupRetryState {
 
 impl PersistWorkerRetryState {
     pub(crate) fn next_tick_delay(&self) -> Option<Duration> {
-        match (
+        let retry = match (
             self.retry_after_failure.then_some(self.retry_delay),
             self.fence_retry_delay,
         ) {
             (Some(failure), Some(fence)) => Some(failure.min(fence)),
             (failure, fence) => failure.or(fence),
+        };
+        let recheck = self
+            .cold_transcript_recheck_at
+            .map(|at| at.saturating_duration_since(std::time::Instant::now()));
+        match (retry, recheck) {
+            (Some(retry), Some(recheck)) => Some(retry.min(recheck)),
+            (retry, recheck) => retry.or(recheck),
         }
     }
 
@@ -691,6 +702,8 @@ impl AppState {
 
                     let mut timings = PersistTickTimings::default();
                     let mut bookkeeping_started = None;
+                    // A failed tick sets none: its own retry recomputes it.
+                    let mut cold_transcript_recheck_at = None;
                     let result: Result<()> = (|| {
                         fences.mark_in_tick();
                         persist_observe_phase("collect");
@@ -777,6 +790,11 @@ impl AppState {
                             next_watermark,
                             &persisted_session_ids,
                         );
+                        cold_transcript_recheck_at =
+                            trim_cold_transcript_candidates_from_shared_state(
+                                &inner_for_persist,
+                                next_watermark,
+                            );
                         // The captured bodies must outlive COMMIT and trim,
                         // then release outside StateInner. The baseline owns
                         // only weak identities and may now discard dead prefixes.
@@ -801,6 +819,7 @@ impl AppState {
                         eprintln!("[termal] background persist failed: {err:#}");
                     }
                     timings.log_if_slow();
+                    retry_state.cold_transcript_recheck_at = cold_transcript_recheck_at;
                     let should_exit = retry_state.finish_fenced_tick(
                         &result,
                         should_exit_after_tick,

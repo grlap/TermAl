@@ -551,7 +551,7 @@ pub(crate) fn discovered_codex_thread_refresh_needed(
         || record.external_session_id.as_deref() != Some(thread.id.as_str())
         || record.session.external_session_id.as_deref() != Some(thread.id.as_str())
         || record.session.codex_thread_state != Some(discovered_codex_thread_state(thread))
-        || (record.session.messages.is_empty()
+        || (session_message_count(record) == 0
             && record.session.status == SessionStatus::Idle
             && record.session.preview != discovered_codex_thread_preview(thread))
 }
@@ -601,7 +601,7 @@ pub(crate) fn apply_discovered_codex_thread(
         }
     }
 
-    if record.session.messages.is_empty() && matches!(record.session.status, SessionStatus::Idle) {
+    if session_message_count(record) == 0 && matches!(record.session.status, SessionStatus::Idle) {
         record.session.preview = discovered_codex_thread_preview(thread).to_owned();
     }
 }

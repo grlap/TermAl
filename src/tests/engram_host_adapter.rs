@@ -335,7 +335,17 @@ fn s0_without_project_engram_is_byte_stable_and_never_calls_transport() {
         transport.shutdowns().is_empty(),
         "an unconfigured project must never reap an Engram sidecar"
     );
-    let transcript_before_restart = {
+    // The whole stored transcript: a finished delegation child is reloaded
+    // with no resident messages, so both sides are read from SQLite.
+    let stored_transcript = |path: &std::path::Path, message_count: usize| {
+        let messages = load_persisted_message_range(path, &child_id, 0, message_count)
+            .expect("stored transcript should read")
+            .into_iter()
+            .map(|(_, message)| message)
+            .collect::<Vec<_>>();
+        serde_json::to_vec(&messages).expect("transcript should serialize deterministically")
+    };
+    let (resident_before_restart, message_count_before_restart) = {
         let inner = state.inner.lock().expect("state mutex poisoned");
         assert!(inner.sessions.iter().all(|record| {
             record
@@ -349,9 +359,17 @@ fn s0_without_project_engram_is_byte_stable_and_never_calls_transport() {
             .iter()
             .find(|record| record.session.id == child_id)
             .expect("child should exist");
-        serde_json::to_vec(&child.session.messages)
-            .expect("transcript should serialize deterministically")
+        (
+            serde_json::to_vec(&child.session.messages)
+                .expect("transcript should serialize deterministically"),
+            session_message_count(child) as usize,
+        )
     };
+    let transcript_before_restart = stored_transcript(
+        state.persistence_path.as_path(),
+        message_count_before_restart,
+    );
+    assert_eq!(transcript_before_restart, resident_before_restart);
 
     let persisted = persisted_session_json(&state, &child_id);
     assert!(!persisted.contains("engramRoutingToken"));
@@ -363,17 +381,21 @@ fn s0_without_project_engram_is_byte_stable_and_never_calls_transport() {
         state.orchestrator_templates_path.as_path().to_path_buf(),
     )
     .expect("Engram-off state should restart without an Engram binary");
-    let transcript_after_restart = {
+    let message_count_after_restart = {
         let inner = restarted.inner.lock().expect("state mutex poisoned");
         let child = inner
             .sessions
             .iter()
             .find(|record| record.session.id == child_id)
             .expect("child should reload");
-        serde_json::to_vec(&child.session.messages)
-            .expect("reloaded transcript should serialize deterministically")
+        session_message_count(child) as usize
     };
     restarted.shutdown_persist_blocking();
+    assert_eq!(message_count_after_restart, message_count_before_restart);
+    let transcript_after_restart = stored_transcript(
+        restarted.persistence_path.as_path(),
+        message_count_after_restart,
+    );
 
     assert_eq!(transcript_after_restart, transcript_before_restart);
 }

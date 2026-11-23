@@ -271,6 +271,40 @@ impl AppState {
     }
 }
 
+/// The last messages of a local session, read through one pinned history
+/// snapshot whatever part of them is resident, with the record version they
+/// were captured at.
+pub(crate) struct LocalSessionTailWindow {
+    pub(crate) messages: Vec<Message>,
+    pub(crate) start_index: usize,
+    pub(crate) session_mutation_stamp: u64,
+}
+
+impl AppState {
+    pub(crate) fn read_local_session_tail_window(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<LocalSessionTailWindow, ApiError> {
+        let selector = SessionHistorySelector {
+            before: None,
+            after: None,
+            around: None,
+            start: None,
+            from_start: false,
+            limit,
+        };
+        let snapshot = self.capture_local_session_history(session_id, selector)?;
+        let session_mutation_stamp = snapshot.session_mutation_stamp;
+        let page = snapshot.page(session_id, selector, self.server_instance_id.clone())?;
+        Ok(LocalSessionTailWindow {
+            messages: page.messages,
+            start_index: page.message_start_index,
+            session_mutation_stamp,
+        })
+    }
+}
+
 impl LocalSessionHistorySnapshot {
     pub(crate) fn page(
         self,

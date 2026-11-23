@@ -435,6 +435,40 @@ The normalized transcript schema and bounded HTTP reads are implemented:
 - Startup loads at most the latest 64 messages per session. After a successful
   persistence pass, idle in-memory session records are trimmed to the same
   64-message suffix; older pages are read from SQLite only on demand.
+- A finished delegation child keeps no messages in memory at all: the child
+  of exactly one terminal delegation, idle or failed, with no runtime, nothing
+  queued and no pending recovery, whose own delegations are all terminal too.
+  An evaluator among them whose submission is still in progress, or that
+  failed over a write since recorded but not yet shown, keeps it resident,
+  because settling that submission rewrites the evaluator's card in its
+  transcript; the settlement rechecks it, and the next pass trims it. Startup
+  reads none of its transcript rows, deciding from the stored delegation links
+  before the delegation rows themselves load. Its rows are checked when they
+  are first read on demand: a missing position, a body that is not valid JSON
+  or an embedded id that differs from its row makes that read fail with the
+  position named, instead of startup quarantining the session. A child that
+  owns a stored card of a still-live test run has something running: it keeps
+  its tail at startup, because the first scan re-derives that card from its
+  transcript. A child whose stored cards are all of terminal runs starts cold,
+  and those cards keep their stored terminal flag. A persistence pass trims it to nothing once
+  its delegation is terminal and nothing transient holds it: an open
+  file-change grace window, an in-flight late capture, a pinned operation or
+  a test-run card in the index. A child held only by those is rechecked after
+  every later persistence pass and trimmed when they clear; releasing the last
+  pin wakes such a pass, and so do the end of the earliest open grace window,
+  a late capture that held the child and a scan that drops its test-run card,
+  so an idle host needs no unrelated write to trim it. Every delegation child
+  that startup leaves resident is rechecked the same way. A stored delegation row that is not valid JSON, which the
+  inventory quarantines, is no link for this rule either. Its tail, history
+  pages, delegation result output and, when the project digest summarizes
+  it, its latest progress message are read from SQLite on demand without
+  making it resident. Roots, children of open delegations, parents of open
+  delegations, dangling links and hidden sessions keep the 64-message suffix. A follow-up or a
+  review capture first makes the child's last 64 messages resident again, for
+  the record version they were read from, and pins them until the operation
+  ends; a follow-up does the same for the parent whose card it rewrites.
+  Before delegation recovery runs, a session that is still cold but has
+  an open link gets the same window.
 - Startup treats each normalized session/delegation row as an isolation
   boundary: malformed metadata, invalid embedded ids/settings, or unreadable
   transcript rows are reported and skipped without making every other session

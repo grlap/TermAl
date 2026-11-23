@@ -225,6 +225,17 @@ impl AppState {
                 fingerprint,
             ))
         })();
+        // Off-lock: windows that recovery may read for sessions still cold.
+        let loaded = loaded.and_then(|loaded| {
+            let windows = self.read_windows_for_open_links(&loaded.0).map_err(|err| {
+                anyhow::anyhow!("failed to read cold transcript windows: {err:?}")
+            })?;
+            Ok((loaded, windows))
+        });
+        let (loaded, cold_windows) = match loaded {
+            Ok((loaded, windows)) => (Ok(loaded), windows),
+            Err(error) => (Err(error), Vec::new()),
+        };
         observe("before_publish");
         let writer = sqlite_state_write_lock(&self.persistence_path);
         let mut publication = None;
@@ -279,6 +290,19 @@ impl AppState {
                     .get_mut()
                     .expect("catalog child index poisoned") = catalog_children;
                 inner.repair_delegation_child_session_links_with(links);
+                for (session_id, window) in cold_windows {
+                    let Some(index) = inner.find_session_index(&session_id) else {
+                        continue;
+                    };
+                    if install_cold_session_window(&mut inner.sessions[index], window).is_err() {
+                        inner.delegation_inventory = DelegationInventoryState::Failed {
+                            reason: "coldTranscriptWindowConflict",
+                        };
+                        anyhow::bail!(
+                            "session `{session_id}` changed while its transcript window was read for delegation recovery"
+                        );
+                    }
+                }
                 inner.delegation_inventory = DelegationInventoryState::Ready;
                 // Publication is linearized while external SQL writers are
                 // excluded. Release before recovery can synchronously persist.

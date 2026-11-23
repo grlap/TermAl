@@ -323,7 +323,7 @@ pub(crate) struct HandoffTickReport {
 /// Where the current offer's prompt is, read from its owner's session by the
 /// exact prompt id the row holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum HandoffOfferDelivery {
+pub(crate) enum HandoffOfferDelivery {
     /// The prompt started the owner's turn.
     Delivered,
     /// The prompt is still queued, for this reason.
@@ -1145,13 +1145,7 @@ impl AppState {
         else {
             return Ok(record);
         };
-        let (delivery, block) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            (
-                handoff_offer_delivery_locked(&inner, &owner, &prompt_id),
-                handoff_owner_block_locked(&inner, &owner),
-            )
-        };
+        let (delivery, block) = self.handoff_prompt_delivery(&owner, &prompt_id);
         let next = match delivery {
             HandoffOfferDelivery::Delivered => {
                 let mut next = record.next(
@@ -1288,13 +1282,7 @@ impl AppState {
             }
             return Ok(());
         };
-        let (delivery, block) = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            (
-                handoff_offer_delivery_locked(&inner, owner, &prompt_id),
-                handoff_owner_block_locked(&inner, owner),
-            )
-        };
+        let (delivery, block) = self.handoff_prompt_delivery(owner, &prompt_id);
         if delivery != HandoffOfferDelivery::Missing || block.is_some() || record.settle_requeued {
             // Queued or delivered; the owner cannot take it now (it is queued
             // once it can); or its one more queueing was spent.
@@ -1307,6 +1295,40 @@ impl AppState {
             self.enqueue_handoff_settlement(&next, owner);
         }
         Ok(())
+    }
+
+    /// Where an offer or settlement prompt is, and what blocks its owner. A
+    /// finished delegation child keeps no resident transcript, so a prompt
+    /// missing from the resident window is looked up in SQLite, off the state
+    /// lock, before it counts as lost and is queued again under its id. Only
+    /// the prefix below the resident window is read there: a replaced
+    /// transcript restarts its window at 0 before its rows are rewritten, so
+    /// a row of the old transcript never counts.
+    pub(crate) fn handoff_prompt_delivery(
+        &self,
+        owner: &str,
+        prompt_id: &str,
+    ) -> (HandoffOfferDelivery, Option<String>) {
+        let (delivery, block, resident_start) = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            (
+                handoff_offer_delivery_locked(&inner, owner, prompt_id),
+                handoff_owner_block_locked(&inner, owner),
+                inner
+                    .find_session_index(owner)
+                    .map_or(0, |index| inner.sessions[index].message_start_index),
+            )
+        };
+        if delivery == HandoffOfferDelivery::Missing
+            && resident_start > 0
+            && matches!(
+                persisted_message_position(self.persistence_path.as_ref(), owner, prompt_id),
+                Ok(Some(position)) if position < resident_start
+            )
+        {
+            return (HandoffOfferDelivery::Delivered, block);
+        }
+        (delivery, block)
     }
 
     fn enqueue_handoff_settlement(&self, record: &HandoffRecord, owner: &str) {

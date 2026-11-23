@@ -762,6 +762,7 @@ impl AppState {
         let reevaluate =
             inner.test_runs.cards_enabled && std::mem::take(&mut inner.test_runs.cards_reevaluate);
         let mut deltas = Vec::new();
+        let mut released_owners = Vec::new();
         for entry in entries {
             let run_id = &entry.summary.run_id;
             let first_sight =
@@ -793,6 +794,7 @@ impl AppState {
                     TestRunCardLookup::Cold => continue,
                     TestRunCardLookup::Gone => {
                         inner.test_run_cards.remove(run_id);
+                        released_owners.push(card.session_id.clone());
                         if !card.terminal {
                             // A live card no longer holds its run back.
                             inner.test_runs.compaction_examined_revision = None;
@@ -888,6 +890,7 @@ impl AppState {
                 TestRunCardLookup::Cold => {}
                 TestRunCardLookup::Gone => {
                     inner.test_run_cards.remove(&run_id);
+                    released_owners.push(card.session_id.clone());
                     // Orphans are never terminal: the removed card no
                     // longer holds its run back from compaction.
                     inner.test_runs.compaction_examined_revision = None;
@@ -918,7 +921,16 @@ impl AppState {
             };
             if !recent {
                 inner.test_run_cards.remove(&run_id);
+                released_owners.push(card.session_id);
             }
+        }
+        // A card that held a finished child resident is gone, and nothing
+        // here may write the child: wake the pass that rechecks it.
+        if released_owners
+            .iter()
+            .any(|owner| inner.cold_transcripts.is_candidate(owner))
+        {
+            let _ = self.persist_tx.send(PersistRequest::Delta);
         }
         // First sights are kept only for runs still indexed.
         inner

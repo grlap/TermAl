@@ -8,6 +8,41 @@ const ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY: &str = "Evaluator finished with an 
 pub(crate) const ACCEPTANCE_UNCONFIRMED_RESULT_FINDING: &str =
     "The tracker write outcome remains unknown; the retained write was preserved.";
 
+/// A failed evaluator carrying the host's unavailable projection over a write
+/// the tracker has since recorded: the refresh below replaces that projection,
+/// and with it the parent's card.
+fn recorded_acceptance_result_awaits_refresh(delegation: &DelegationRecord) -> bool {
+    if delegation.mode != DelegationMode::Evaluator
+        || delegation.status != DelegationStatus::Failed
+        || !delegation_submission_recorded(delegation)
+    {
+        return false;
+    }
+    let Some(result) = delegation.result.as_ref() else {
+        return false;
+    };
+    result.status == DelegationStatus::Failed
+        && result.summary == ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY
+        && result.findings.len() == 1
+        && result.findings[0].severity == "Unavailable"
+        // Recognize the host's older persisted finding after a restart too.
+        && (result.findings[0].message == ACCEPTANCE_UNCONFIRMED_RESULT_FINDING
+            || result.findings[0].message
+                == "Submission recording remains pending or unconfirmed; the retained write was preserved.")
+}
+
+/// Whether the parent's card of this terminal delegation can still be
+/// rewritten: an evaluator submission in progress, or a failed evaluator whose
+/// recorded write the refresh below has yet to project. An open write an ended
+/// evaluator left behind is settled only by a replay, which only a root parent
+/// can request, so it is not counted.
+pub(crate) fn acceptance_card_may_still_change(
+    delegation: &DelegationRecord,
+    submission_in_flight: bool,
+) -> bool {
+    submission_in_flight || recorded_acceptance_result_awaits_refresh(delegation)
+}
+
 // Only replace the host's unavailable projection. Real child/transport failures
 // and the separately retained diagnostic output remain unchanged. Running this
 // on terminal reads also repairs the projection after a restart.
@@ -16,9 +51,7 @@ pub(crate) fn refresh_recorded_acceptance_result_locked(
     index: usize,
 ) -> Option<DelegationLifecycleDelta> {
     let delegation = inner.delegations.get(index)?.clone();
-    if delegation.mode != DelegationMode::Evaluator
-        || delegation.status != DelegationStatus::Failed
-        || !delegation_submission_recorded(&delegation)
+    if !recorded_acceptance_result_awaits_refresh(&delegation)
         || inner
             .acceptance_evaluation_submissions_in_flight
             .contains_key(&delegation.id)
@@ -26,17 +59,6 @@ pub(crate) fn refresh_recorded_acceptance_result_locked(
         return None;
     }
     let mut result = delegation.result.clone()?;
-    if result.status != DelegationStatus::Failed
-        || result.summary != ACCEPTANCE_UNCONFIRMED_RESULT_SUMMARY
-        || result.findings.len() != 1
-        || result.findings[0].severity != "Unavailable"
-        // Recognize the host's older persisted finding after a restart too.
-        || (result.findings[0].message != ACCEPTANCE_UNCONFIRMED_RESULT_FINDING
-            && result.findings[0].message
-                != "Submission recording remains pending or unconfirmed; the retained write was preserved.")
-    {
-        return None;
-    }
     result.summary = acceptance_evaluation_outcome_line(delegation.acceptance_evaluation.as_ref()?);
     result.status = DelegationStatus::Completed;
     result.findings.clear();
@@ -53,6 +75,9 @@ pub(crate) fn refresh_recorded_acceptance_result_locked(
         ParallelAgentStatus::Completed,
         delegation_result_card_detail(&delegation, &result),
     );
+    // The pending repair held a finished parent resident; the write that
+    // persists this delegation runs the recheck that may now release it.
+    inner.enroll_cold_transcript_recheck(&delegation.parent_session_id);
     Some(DelegationLifecycleDelta::Completed {
         delegation_id: delegation.id,
         result,

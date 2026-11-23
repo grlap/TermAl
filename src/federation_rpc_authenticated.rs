@@ -305,11 +305,11 @@ impl FederationRpcClient {
             );
             *prepared.headers_mut() = headers;
             rpc_stage = "execute";
-            let mut response = self
-                .client
-                .execute(prepared)
-                .await
-                .map_err(|_| federation_transport_unavailable())?;
+            let mut response = self.client.execute(prepared).await.map_err(|_error| {
+                #[cfg(test)]
+                eprintln!("FEDERATION_RPC_DIAGNOSTIC execute error={_error:?}");
+                federation_transport_unavailable()
+            })?;
             let status = response.status();
             rpc_status = Some(status.as_u16());
             let response_headers = response.headers().clone();
@@ -326,11 +326,11 @@ impl FederationRpcClient {
             }
             rpc_stage = "responseBody";
             let mut bytes = Vec::new();
-            while let Some(chunk) = response
-                .chunk()
-                .await
-                .map_err(|_| federation_transport_unavailable())?
-            {
+            while let Some(chunk) = response.chunk().await.map_err(|_error| {
+                #[cfg(test)]
+                eprintln!("FEDERATION_RPC_DIAGNOSTIC responseBody error={_error:?}");
+                federation_transport_unavailable()
+            })? {
                 if chunk.len() > route.response_limit().saturating_sub(bytes.len()) {
                     // A body past the negotiated limit is a protocol
                     // violation, never verified, not a failed read: it fences
@@ -531,6 +531,10 @@ impl FederationRpcClient {
                 Err(federation_transport_unavailable())
             }
             _ if unanswered => {
+                #[cfg(test)]
+                eprintln!(
+                    "FEDERATION_RPC_DIAGNOSTIC unanswered stage={rpc_stage} status={rpc_status:?} timed_out={timed_out}"
+                );
                 // A slow, unanswered, unreadable or undecodable ordinary
                 // request is an UNKNOWN outcome for that request only. It
                 // never tears down the authenticated link; its counter is
