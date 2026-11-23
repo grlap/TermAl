@@ -1,0 +1,27 @@
+{
+  "id": "01a20683-b4b5-7eb3-9aef-e638e92ffc11",
+  "external_ref": null,
+  "title": "termal_evaluate_acceptance refuses with registered_check_root_rebound, and the retired-run exclusion is capped at four, below the five historical same-claim runs",
+  "outcome": "An item whose claim has more than four historical registered runs from an earlier named-root generation can still request its acceptance evaluation on the current exact root: the old runs can be excluded or retired, and the evaluation is admitted.",
+  "acceptance": [
+    "termal_evaluate_acceptance refuses with registered_check_root_rebound, and the retired-run exclusion is capped at four, below the five historical same-claim runs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

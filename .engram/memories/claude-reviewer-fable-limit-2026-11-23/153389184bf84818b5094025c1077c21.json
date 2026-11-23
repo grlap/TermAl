@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "claude-reviewer-fable-limit-2026-11-23",
+    "revision_id": "153389184bf84818b5094025c1077c21",
+    "previous": null,
+    "body_sha256": "9f03d0193a830f67640cbf741d5039edc76119bbe03955fa7c30eb3b58c3ae90",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-23T03:21:02.567013200Z"
+    }
+  },
+  "body": "Fact (Opus2, 2026-11-23 03:20Z, from Claude Live relay #393): on DL560, the Claude /review-code child of the w-cbc7 pair (session-171) was refused at spawn with \"Error: You've hit your Fable limit · resets Nov 29, 5am (UTC). Switch to another model, or manage usage credits at https://claude.ai/settings/usage?from=cc_cli_limit_message, to continue.\" Until 2026-11-29 05:00Z, expect Claude reviewers there to be refused. Per CLAUDE.md, the writer records the refusal text on the item, and Kimi stands in for the Claude slot once per round, never for both reviewers. Central Claude spawns may hit the same limit; check each refusal and do not assume. This retires when the limit resets."
+}

@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "route-federation-pair-new-failures-to-opus3-2026-11-23",
+  "head": {
+    "state": "active",
+    "chain": [
+      "003249fa6e774b51965a6966a6cb5b9b"
+    ]
+  }
+}

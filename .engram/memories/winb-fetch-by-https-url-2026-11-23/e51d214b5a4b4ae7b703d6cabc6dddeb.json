@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-fetch-by-https-url-2026-11-23",
+    "revision_id": "e51d214b5a4b4ae7b703d6cabc6dddeb",
+    "previous": null,
+    "body_sha256": "34237e8b33bfac2b9aa1c0333f43f49bc53cfeb95050630cb995566059494010",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-23T03:44:55.272392Z"
+    }
+  },
+  "body": "Integration-owner rule (Opus2, 2026-11-23, from Windows B relay #938 and Fable2 #7651). On Windows B, `origin` resolves to an SSH URL, and the runner's HTTPS-only guard refuses it: \"fatal: transport 'ssh' not allowed\", exit 128, before any transport runs. Every GO to Windows B names the explicit public URL and an exact refspec, for example `git -c credential.interactive=never -c core.askPass= fetch --no-tags --no-recurse-submodules https://github.com/grlap/TermAl.git refs/heads/test/<item>-<commit8>`, and asks the runner to verify that FETCH_HEAD equals the commit. No remote or config change, never SSH. A prelaunch fetch stop like this is not an environment repeat."
+}

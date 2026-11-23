@@ -1,0 +1,30 @@
+{
+  "id": "01a20684-edc5-7101-8e13-d61f2ce4ec3d",
+  "external_ref": null,
+  "title": "Evaluation admission refuses with registered_check_root_rebound when more than four settled checks belong to a retired root generation (cap on retired-check dispositions)",
+  "outcome": "Reported by Engram::Merger (TermAl mailbox 5cdad9a7 #550, 2026-11-23 03:48Z) on Engram item w-9fcb's prelanding evaluation.\n- What happened: termal_evaluate_acceptance with a valid criterion map was refused at 03:43:51Z with HTTP 409 registered_check_root_rebound on test-b3fb7572-93fe-466b-bddc-51d1d520a847. Supplying that exact retired-check disposition gave the same refusal at about 03:44Z, this time on test-af15db52-5f23-4ddf-b644-bd9bad58aec8.\n- Why: five received or settled checks are tied to the retired root generation 3547 (test-5138a6a5, test-af15db52, test-b3fb7572, test-b8a43aa2, test-ed12aafe), and the current named root is generation 4350. Request-scoped retired-check dispositions are capped at four, so the five cannot all be disposed, and no evaluator spawns.\n- Effect: an item whose history holds more than four settled checks on a retired root cannot be evaluated at all through the disposition route.\n- Workaround proposed by the author: run one recognised focused check in the current named root, then request the evaluator, keeping every historical record.",
+  "acceptance": [
+    "An acceptance evaluation request for an item whose history holds more than four received or settled checks on a retired root generation can be admitted without discarding or rewriting any historical record, either by disposing all of them in one request or by a rule that does not require per-check disposition. A behaviour test covers five such checks.",
+    "When admission still refuses, the refusal names every blocking check and the action that admits the request."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "cross-project",
+    "host-recording",
+    "named-root"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

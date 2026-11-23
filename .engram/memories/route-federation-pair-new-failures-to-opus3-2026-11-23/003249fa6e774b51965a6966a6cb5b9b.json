@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "route-federation-pair-new-failures-to-opus3-2026-11-23",
+    "revision_id": "003249fa6e774b51965a6966a6cb5b9b",
+    "previous": null,
+    "body_sha256": "7f770da07f1a69e13b978f01b74a138d16046bd4cd20fa0a64be7d9564b13997",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-23T03:51:52.886778200Z"
+    }
+  },
+  "body": "Standing request (Fable2 #7652, 2026-11-23 03:51Z, for Opus3 on w-2f9db62028e0, the intermittent federation placement_refuses_enrolled failure). The diagnostics have been live on master since b35c79d1. Whenever any gate on any host shows a federation_entrypoints Pair::new assertion failing, route the run id and host to Opus3 (TermAl mailbox 03723eab); the output now names the failing stage. The integration owner passes this on to runners in GOs. No extra runs are wanted, so it never triggers a rerun. It retires when w-2f9db62028e0 closes."
+}

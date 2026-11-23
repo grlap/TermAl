@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "claude-reviewer-fable-limit-2026-11-23",
+  "head": {
+    "state": "active",
+    "chain": [
+      "153389184bf84818b5094025c1077c21"
+    ]
+  }
+}

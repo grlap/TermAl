@@ -4,7 +4,7 @@
   "title": "A registered run's verification record settles, but no settlement notice reaches the requesting session, which keeps waiting",
   "outcome": "A registered run's verification record settles, but no settlement notice reaches the requesting session, which keeps waiting",
   "acceptance": [
-    "When a registered run's verification record settles (passed or failed), the requesting session receives a settlement notice naming the record, covered by a behaviour test of the notice path for a failed run.",
+    "When a registered run's verification record settles (passed or failed), the requesting session's next turn carries a settlement notice naming the record, even if the run's earlier notice was already delivered, and a session waiting on that run through a run wait is resumed with a prompt that names the settled record; covered by behaviour tests for a failed run.",
     "A session can read a run's settled state through a documented read-only route (for example the launcher's summary) that reports the record id and outcome."
   ],
   "acceptance_bindings": [],
