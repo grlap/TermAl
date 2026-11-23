@@ -1,0 +1,27 @@
+{
+  "id": "01a2073a-8195-7393-b94e-da3de9cb125f",
+  "external_ref": null,
+  "title": "A registered run's settled verification record is not told to its session after the session switched to another claim",
+  "outcome": "When a registered run's Engram verification record settles after the requesting session has switched to another claim in the same store, the session is still told that the record settled. The notice confirms no current-input or ordinary-check credit for the other claim.",
+  "acceptance": [
+    "A registered run's settled verification record is not told to its session after the session switched to another claim is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

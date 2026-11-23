@@ -1,0 +1,31 @@
+{
+  "id": "01a20727-79c9-7401-b021-b672ed047507",
+  "external_ref": null,
+  "title": "Comment: src/tests/mod.rs:8 still says \"include!-based refactors\"; correct it after w-cf04 lands",
+  "outcome": "src/tests/mod.rs lines 8-9 say: \"The local fixtures below keep tests close to real wiring so include!-based refactors still exercise the same cross-file behavior the app depends on.\" After the include! → mod work most files are modules, so the sentence should speak of refactors that move code between modules. Split out of w-96042a4b7acf on the coordinator's word (TermAl mailbox 30a7a691 #145) because w-cf04bb45392e (Sol-c593) changes src/tests/mod.rs; to do only after w-cf04 has landed, on the then-current master, as a comment-only change. Prepared wording, in .tmp/include-to-mod/src-fixes.cjs: \"The local fixtures below keep tests close to real wiring so refactors that move code between modules still exercise the same cross-file behavior the app depends on.\" Criteria are to be worded and concurred when it is scheduled.",
+  "acceptance": [
+    "Comment: src/tests/mod.rs:8 still says \"include!-based refactors\"; correct it after w-cf04 lands is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "architecture",
+    "comments",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

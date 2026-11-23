@@ -24,12 +24,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Slice B of the include! → mod work: the 28 fragments that 15 module files included at their top level are now child modules of those files, converted by scripts/include-to-mod.mjs (`#[path]` + `mod` in each parent, one glob per module, `use super::*;` in each child, `pub(super)` on 45 items and 25 fields), plus rustfmt on seven rewrapped signatures. 23 tests gained the new module's name as one path segment; old and new names are on the item. Landed on master as e0c976cc45cb8f214b0a22a907b5c94a921e7364 (parent f7055d47, fast-forward by Opus2 at 2026-11-23T06:41:19Z, pushed to origin master). Its contribution is byte-identical to the reviewed 5c994d79/0dfa9569 (review pair WCBC7-PAIR1: Codex clean; Kimi for the Claude reviewer refused on its usage limit, four Notes, no change). Gates on e0c976cc: Linux test-2932c121 and Windows test-a5961ac6 (the single repeat after test-0603b20e's rustc access violation), both with equal source ids; warning lists identical to f7055d47 on both platforms; acceptance evaluation eafee266, 6/6 pass. My author-test refs -5c994d79 (pushed 03:14:43Z), -0dfa9569 (03:22:14Z) and -e0c976cc (04:38:18Z) were deleted with explicit refspecs at 2026-11-23T06:42:47Z. No restart needed. Follow-up w-533ba410e0c7 (four stale \"included\" header comments) is now ready.",
+    "completed_at": "2026-11-23T06:43:00.598839800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

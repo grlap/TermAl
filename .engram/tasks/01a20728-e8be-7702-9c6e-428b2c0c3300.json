@@ -1,0 +1,29 @@
+{
+  "id": "01a20728-e8be-7702-9c6e-428b2c0c3300",
+  "external_ref": null,
+  "title": "Windows: every hostless launcher run leaves an undeletable residue of its private userprofile (hidden/system INetCache and PowerShell dirs)",
+  "outcome": "On Windows B, each hostless `node scripts/test-launcher.mjs full --input commit` run gives its child processes a private userprofile under the run's root (.tmp/j/<root>/…/userprofile). After the run, Windows has created hidden/system directories in it, about 25 per root: AppData/Local/Microsoft/Windows/INetCache/IE, with container.dat at 0 B and attrs 8230, and PowerShell/StartupProfileData-NonInteractive. A non-forced `Remove-Item -LiteralPath <root> -Recurse -Confirm:$false` is refused with \"You do not have sufficient access rights … hidden, system, or read only\". The Codex runner's tool policy blocks the forced form, so every run leaves about 1.3–1.5 KB in 39 dirs per root.\nRecorded occurrences on w-b92d241c0154: FE5F, i3h1, BATCH5 b5-full (relay #80), and CBC7, four roots (relay #93).\nWanted: the launcher (or its documented cleanup) leaves no residue that ordinary non-forced removal cannot delete. For example, the launcher removes or normalizes its own private profile at the end of the run, since it created it, or places it where Windows does not create these attributes. No forced deletion and no ACL changes by agents.",
+  "acceptance": [
+    "After a hostless full or focused launcher run on Windows ends, a non-forced recursive removal of its run root succeeds, and no hidden/system residue remains under it; a behaviour test or a recorded Windows run demonstrates this.",
+    "The change does not alter test results, the child processes' isolation from the real user profile, or any path outside the run root."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

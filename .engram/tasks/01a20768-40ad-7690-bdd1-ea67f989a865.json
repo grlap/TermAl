@@ -1,0 +1,27 @@
+{
+  "id": "01a20768-40ad-7690-bdd1-ea67f989a865",
+  "external_ref": null,
+  "title": "A prompt opened before the received-notice worker publishes misses a just-settled verification record",
+  "outcome": "A turn that opens after a registered run's verification record has settled carries the settlement notice, with no window between settlement and the notice becoming visible to turn composition.",
+  "acceptance": [
+    "A prompt opened before the received-notice worker publishes misses a just-settled verification record is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

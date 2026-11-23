@@ -4,7 +4,10 @@
   "title": "Comments: four slice B files still say they are \"included\" by their parent after the include! → mod conversion",
   "outcome": "After the slice B conversion (w-cbc7e4177500) lands, four header comments describe their file as included text, which it no longer is: src/acceptance_obligation_assessment.rs:18 (\"included from acceptance_evidence_selection.rs\"), src/test_run_projection.rs:4 (\"Included by test_run_observations.rs\"), src/tests/test_run_registration_history_clock.rs:2 (\"included into test_run_registration_history.rs\"), src/tests/test_run_registration_view.rs:2 (\"Included beside the existing owned HistoryService\"). Each should call the file a child module of that parent. Comment-only change, to do only after the conversion is on master, kept out of the conversion so that it stays the tool's output alone. Line numbers are as on candidate 0dfa9569. Criteria are to be worded and concurred when it is scheduled.",
   "acceptance": [
-    "Comments: four slice B files still say they are \"included\" by their parent after the include! → mod conversion is done"
+    "This item's contribution to the candidate commit changes only comments in src/acceptance_obligation_assessment.rs, src/test_run_projection.rs, src/tests/test_run_registration_history_clock.rs and src/tests/test_run_registration_view.rs; every other path the commit changes belongs to another item, whose contribution is recorded with it.",
+    "In those four files no comment says that the file is included by or into another file; each says that it is a child module of the parent it names, and keeps what was historically correct in it (which file it was split from or beside, and what it owns).",
+    "With comments removed, each file of this item's contribution is token-for-token identical to its base; the token comparison is recorded on the item.",
+    "No test reads or pins source text for this change."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

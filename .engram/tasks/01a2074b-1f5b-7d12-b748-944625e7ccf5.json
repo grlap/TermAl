@@ -1,0 +1,27 @@
+{
+  "id": "01a2074b-1f5b-7d12-b748-944625e7ccf5",
+  "external_ref": null,
+  "title": "Declared native runs never get the next-turn check-credit line when their verification record settles",
+  "outcome": "When a host-owned declared native run's Engram verification record settles, the owning session's next prompt carries a check-credit line naming the record, as it does for a registered launcher run.",
+  "acceptance": [
+    "Declared native runs never get the next-turn check-credit line when their verification record settles is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

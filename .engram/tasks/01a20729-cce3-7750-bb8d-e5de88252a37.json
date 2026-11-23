@@ -1,0 +1,30 @@
+{
+  "id": "01a20729-cce3-7750-bb8d-e5de88252a37",
+  "external_ref": null,
+  "title": "Raise TermAl's Engram call deadline above Engram's 60 s control-request allowance (to 90 s), so Engram's typed expiry or busy refusals arrive before the host gives up",
+  "outcome": "Requested by Engram::Opus (TermAl mailbox 587a65fb #522, 2026-11-23 06:48Z) for Engram w-8f127d78e960 R1, where both reviewers (Codex 19682, Claude 19683, on a90d1fad) found the same Medium.\nThe mismatch:\n- Engram's CONTROL_REQUEST_ALLOWANCE is now 60 s, measured from the frame's first byte.\n- TermAl's ENGRAM_MAX_CALL_TIMEOUT_MS = ENGRAM_DEFAULT_CALL_TIMEOUT_MS = 60_000 (src/engram_host_adapter.rs:22-23) is measured from the send, so under 60 s of store contention TermAl always times out first.\n- TermAl then sees an UNKNOWN outcome needing exact-key reconciliation, instead of Engram's typed `control_request_expired` (nothing committed; retry the same key) or `control_startup_busy` (re-admission permitted).\nEngram's side, in its own item: control startup shares one 60 s window across all its waits.\nTermAl's side, this item: raise the host-side Engram call deadline (max and default) to 90 s. That respects Greg's rule of no abort under 60 s with a 10 s warning, and lets Engram's typed refusals at 60 s reach TermAl.\nConstraints:\n- The 60 s operation minimum in scripts/engram-call-budget-ms.json, shared with the launcher, and the 10 s warning are unchanged unless a caller's budget arithmetic requires otherwise.\n- Every budget that sums call timeouts (for example src/acceptance_evaluation_api.rs:29-96) is reviewed for the larger value.",
+  "acceptance": [
+    "TermAl's deadline for an ordinary Engram control call is 90 s (maximum and default), the slow-call warning stays at 10 s, and no Engram call is aborted before 60 s.",
+    "When Engram answers a control call with a typed control_request_expired or control_startup_busy refusal after 60 s and before 90 s, TermAl reports that typed outcome instead of an unknown timeout; a deterministic behaviour test with an injected clock or fake transport covers both, with no real-time waits.",
+    "Every budget that adds Engram call timeouts (acceptance evaluation and evidence recovery among them) remains consistent with the new deadline, and the change of each is recorded on the item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "timeouts"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
