@@ -2102,6 +2102,196 @@ fn human_prompt_windows_reset_reaches_the_existing_off_lock_cleanup_owner() {
     assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::Human);
 }
 
+#[cfg(windows)]
+#[test]
+fn fresh_human_send_reports_its_failed_reset_after_an_earlier_idle_stop() {
+    human_send_resets_after_stop(HumanSendResetCase::Direct);
+}
+
+#[cfg(windows)]
+#[test]
+fn human_send_reports_failed_reset_when_activating_an_older_ordinary_head() {
+    human_send_resets_after_stop(HumanSendResetCase::OlderHead);
+}
+
+#[cfg(windows)]
+#[test]
+fn human_send_keeps_reset_ownership_when_the_older_fifo_head_is_canceled() {
+    human_send_resets_after_stop(HumanSendResetCase::CancelOlderHead);
+}
+
+#[cfg(windows)]
+#[test]
+fn canceled_human_send_leaves_the_older_head_paused_and_retires_the_confirmed_runtime() {
+    human_send_resets_after_stop(HumanSendResetCase::CancelAcceptedSend);
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HumanSendResetCase {
+    Direct,
+    OlderHead,
+    CancelOlderHead,
+    CancelAcceptedSend,
+}
+
+#[cfg(windows)]
+fn human_send_resets_after_stop(case: HumanSendResetCase) {
+    use crate::runtime_process_tree::TEST_DEDICATED_EXIT_GATE;
+    use crate::tests::delegation_process_cleanup::ProductionWorkerTree;
+
+    let temp = TestTempRoot::create("human-reset-refused-after-stop");
+    let mut state = test_app_state();
+    state.agent_runtime_spawning_enabled = true;
+    let session = test_session_id(&state, Agent::Claude);
+    let (exit_claimed_tx, exit_claimed_rx) = mpsc::channel();
+    let (exit_release_tx, exit_release_rx) = mpsc::channel();
+    TEST_DEDICATED_EXIT_GATE.with(|slot| {
+        *slot.borrow_mut() = Some(TestStopFenceGate {
+            claimed_tx: exit_claimed_tx,
+            release_rx: exit_release_rx,
+        });
+    });
+    let owner = ProductionWorkerTree::spawn(&state, &session, temp.path(), false);
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session).unwrap();
+        record.session.status = SessionStatus::Idle;
+        record.runtime_reset_required = true;
+        if case != HumanSendResetCase::Direct {
+            queue_prompt_on_record(
+                record,
+                human_choices::selection_prompt("older-ordinary-head"),
+                vec![],
+            );
+        }
+        *inner.test_run_waits = vec![test_run_wait_record("wait-before-new-send", &session)];
+        state.commit_locked(&mut inner).unwrap();
+    }
+    state
+        .request_stop_session(&session)
+        .expect("idle Stop should succeed");
+    state.agent_runtime_spawning_enabled = false;
+
+    let (claimed_tx, claimed_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    *owner.tree.cleanup_gate.lock().unwrap() = Some(TestStopFenceGate {
+        claimed_tx,
+        release_rx,
+    });
+    let sending_state = state.clone();
+    let sending_session = session.clone();
+    let worker = std::thread::spawn(move || {
+        if case == HumanSendResetCase::CancelOlderHead {
+            let cancel_state = sending_state.clone();
+            let cancel_session = sending_session.clone();
+            TEST_HUMAN_BEFORE_FIFO_CAPTURE.with(|slot| {
+                *slot.borrow_mut() = Some(Box::new(move || {
+                    cancel_state
+                        .cancel_queued_prompt(&cancel_session, "older-ordinary-head")
+                        .unwrap();
+                }));
+            });
+        }
+        sending_state.dispatch_human_turn(&sending_session, prompt())
+    });
+    phase_sync::receive(&claimed_rx, "fresh Send owns the dedicated reset");
+    let prompt_id = {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session).unwrap();
+        assert!(record.engram.operator_paused);
+        if case == HumanSendResetCase::CancelOlderHead {
+            assert_eq!(record.queued_prompts.len(), 1);
+            assert_eq!(record.queued_prompts[0].source, QueuedPromptSource::Human);
+        }
+        if case != HumanSendResetCase::CancelAcceptedSend {
+            record.session.claude_effort = Some(ClaudeEffortLevel::High);
+        }
+        record
+            .queued_prompts
+            .back()
+            .unwrap()
+            .pending_prompt
+            .id
+            .clone()
+    };
+    if case == HumanSendResetCase::CancelAcceptedSend {
+        state.cancel_queued_prompt(&session, &prompt_id).unwrap();
+    }
+    release_tx.send(()).unwrap();
+    phase_sync::receive(
+        &exit_claimed_rx,
+        "old Claude root exited before its callback",
+    );
+    assert!(matches!(
+        worker.join().unwrap().unwrap(),
+        DispatchTurnResult::Queued
+    ));
+    let (preview_before_exit_callback, retired_before_exit_callback) = {
+        let inner = state.inner.lock().unwrap();
+        let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+        (
+            record.session.preview.clone(),
+            matches!(record.runtime, SessionRuntime::None),
+        )
+    };
+    exit_release_tx.send(()).unwrap();
+    owner.await_exit();
+    owner.assert_peers_exited();
+
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(
+        retired_before_exit_callback,
+        "the confirmed runtime must be retired before its waiter reports exit"
+    );
+    assert!(record.session.queue_paused);
+    assert!(record.runtime_reset_required);
+    assert_eq!(
+        record.session.preview, preview_before_exit_callback,
+        "the retired runtime's exit cannot replace the retained Send failure"
+    );
+    if case == HumanSendResetCase::CancelAcceptedSend {
+        assert_eq!(record.session.status, SessionStatus::Idle);
+        assert_eq!(record.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+        assert_eq!(record.queued_prompts.len(), 1);
+        let head = &record.queued_prompts[0];
+        assert_eq!(head.pending_prompt.id, "older-ordinary-head");
+        assert_eq!(head.source, QueuedPromptSource::User);
+        assert!(head.promoted_message_index.is_none());
+        return;
+    }
+    assert_eq!(record.session.status, SessionStatus::Error);
+    assert!(
+        record
+            .session
+            .preview
+            .contains("dedicated reset configuration changed"),
+        "preview was {:?}",
+        record.session.preview
+    );
+    assert!(
+        record
+            .session
+            .preview
+            .contains("Resume retries the retained prompt")
+    );
+    assert_eq!(
+        record.queued_prompts.len(),
+        1 + usize::from(case == HumanSendResetCase::OlderHead)
+    );
+    if case == HumanSendResetCase::OlderHead {
+        let head = &record.queued_prompts[0];
+        assert_eq!(head.pending_prompt.id, "older-ordinary-head");
+        assert_eq!(head.source, QueuedPromptSource::User);
+        assert!(head.promoted_message_index.is_none());
+    }
+    let accepted = record.queued_prompts.back().unwrap();
+    assert_eq!(accepted.pending_prompt.id, prompt_id);
+    assert_eq!(accepted.source, QueuedPromptSource::Human);
+    assert!(accepted.promoted_message_index.is_none());
+}
+
 #[tokio::test]
 async fn human_prompt_provider_start_failure_is_accepted_and_resume_reuses_one_original_envelope() {
     let (mut state, _old_receiver) =

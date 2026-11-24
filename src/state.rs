@@ -2481,6 +2481,9 @@ pub(crate) struct SessionRecord {
     /// Resume's continuation bound to the pause it crossed is ended by a later
     /// pause even when the queue reads paused again (prompt_delivery.rs).
     pub(crate) auto_dispatch_pause_epoch: u64,
+    // In-memory ownership of an operator Stop. Cleanup can reassert the
+    // queue latch without superseding a Human Send accepted after that Stop.
+    pub(crate) operator_stop_generation: u64,
     /// An immediate Engram MCP revocation arrived while an ordinary Stop owned
     /// the runtime callback fence. Stop completion consumes this marker: a
     /// successful Stop has no runtime left to revoke, while a failed Stop
@@ -2721,6 +2724,12 @@ impl SessionRecord {
             // source-observation hold that only an explicit Resume lifts.
             self.engram.operator_paused = false;
         }
+    }
+
+    pub(crate) fn pause_queue_for_operator_stop(&mut self) {
+        self.set_auto_dispatch_blocked(true);
+        self.engram.operator_paused = true;
+        self.operator_stop_generation = self.operator_stop_generation.wrapping_add(1);
     }
 
     pub(crate) fn clear_runtime_reset(&mut self) {

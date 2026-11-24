@@ -828,6 +828,7 @@ impl AppState {
             None,
             None,
             None,
+            None,
         )
         .map(|_| ())
     }
@@ -835,16 +836,15 @@ impl AppState {
     pub(crate) fn prepare_dedicated_runtime_reset_for_human_off_lock(
         &self,
         session_id: &str,
-        prompt_id: &str,
-        intent: &str,
-        explicit: bool,
+        target: HumanResetTarget<'_>,
         selected: Option<&mut HumanResumeOwner>,
     ) -> Result<()> {
         self.prepare_dedicated_runtime_reset_with_owner_off_lock(
             session_id,
             false,
-            Some((prompt_id, intent, explicit)),
+            Some(target),
             selected,
+            None,
             None,
             None,
         )
@@ -856,6 +856,7 @@ impl AppState {
         session_id: &str,
         owner: Option<&mut QueuedTurnOwner>,
         automatic_queue: Option<bool>,
+        resume_intent: Option<QueuedResumeIntent>,
     ) -> Result<RuntimeResetPreparation> {
         self.prepare_dedicated_runtime_reset_with_owner_off_lock(
             session_id,
@@ -864,18 +865,19 @@ impl AppState {
             None,
             owner,
             automatic_queue,
+            resume_intent,
         )
     }
 
-    #[cfg_attr(not(windows), allow(unused_mut))]
     fn prepare_dedicated_runtime_reset_with_owner_off_lock(
         &self,
         session_id: &str,
         model_refresh: bool,
-        human: Option<(&str, &str, bool)>,
-        mut selected: Option<&mut HumanResumeOwner>,
-        mut ordinary: Option<&mut QueuedTurnOwner>,
+        human: Option<HumanResetTarget<'_>>,
+        selected: Option<&mut HumanResumeOwner>,
+        ordinary: Option<&mut QueuedTurnOwner>,
         ordinary_queue: Option<bool>,
+        ordinary_resume: Option<QueuedResumeIntent>,
     ) -> Result<RuntimeResetPreparation> {
         {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -900,21 +902,19 @@ impl AppState {
             }) {
                 return Err(anyhow!(HumanPromptOwnerChanged));
             }
-            if let Some((prompt, intent, explicit)) = human {
+            if let Some(target) = human.as_ref() {
                 require_human_runtime_reset_owner(
                     &inner,
                     session_id,
-                    prompt,
-                    intent,
                     &self.server_instance_id,
-                    explicit,
+                    target,
                 )?;
             }
         }
         self.retry_retained_dedicated_cleanup(session_id)?;
         #[cfg(not(windows))]
         {
-            let _ = model_refresh;
+            let _ = (model_refresh, ordinary_resume);
             if ordinary_queue.is_none() {
                 return Ok(RuntimeResetPreparation::Ready);
             }
@@ -952,14 +952,12 @@ impl AppState {
                 }) {
                     return Err(anyhow!(HumanPromptOwnerChanged));
                 }
-                if let Some((prompt, intent, explicit)) = human {
+                if let Some(target) = human.as_ref() {
                     require_human_runtime_reset_owner(
                         &inner,
                         session_id,
-                        prompt,
-                        intent,
                         &self.server_instance_id,
-                        explicit,
+                        target,
                     )?;
                 }
                 let Some(index) = inner.find_session_index(session_id) else {
@@ -994,8 +992,9 @@ impl AppState {
                     .expect("dedicated runtime token");
                 let context = dedicated_reset_context(record);
                 let installed = record.engram_mcp_installed.clone();
-                let human_resume =
-                    human.and_then(|(prompt, _, _)| capture_human_reset_resume(record, prompt));
+                let human_resume = human
+                    .as_ref()
+                    .and_then(|target| capture_human_reset_resume(record, target.prompt_id));
                 let generation =
                     record.claim_runtime_stop(RuntimeStopOwnerKind::DedicatedReset, token.clone());
                 (
@@ -1039,9 +1038,19 @@ impl AppState {
                 let _ = self.handle_runtime_exit_if_matches(session_id, &token, None);
                 return Err(error);
             }
+            let accepted_human_send =
+                matches!(ordinary_resume, Some(QueuedResumeIntent::HumanSend(_)))
+                    || human.as_ref().is_some_and(|target| target.intake.is_some());
             if !same_context {
                 record.set_auto_dispatch_blocked(true);
                 inner.stamp_session_at_index(index);
+                if accepted_human_send {
+                    // Cleanup confirmed the old runtime is gone. Retire its
+                    // token before the Send reports the changed configuration,
+                    // so a late exit cannot overwrite that failure or its pause.
+                    self.retire_dedicated_reset_runtime_locked(&mut inner, index, false)?;
+                    return Err(anyhow!("dedicated reset configuration changed"));
+                }
                 self.commit_locked(&mut inner)?;
                 return Err(anyhow!(
                     "dedicated reset configuration changed; callbacks retained for exact retry"
@@ -1053,77 +1062,111 @@ impl AppState {
             {
                 record.set_auto_dispatch_blocked(true);
                 inner.stamp_session_at_index(index);
-                self.commit_locked(&mut inner)?;
+                if accepted_human_send {
+                    self.retire_dedicated_reset_runtime_locked(&mut inner, index, false)?;
+                } else {
+                    self.commit_locked(&mut inner)?;
+                }
                 return Err(anyhow!(
                     "the exact human receipt or choice changed during dedicated reset"
                 ));
             }
-            if let Some(owner) = selected.as_deref_mut() {
-                // The receipt's own transfer above and this exact cleanup's
-                // runtime ownership prove the only allowed Stop transition.
-                if let Some(resume) = owner.queue.receipt_resume.as_mut() {
-                    resume.stop_generation = generation;
-                }
-                if !owner.matches_with_stop(record, generation) {
-                    return Err(anyhow!(HumanPromptOwnerChanged));
-                }
-                owner.stop_generation = generation;
+            let continuation =
+                transfer_dedicated_reset_queue_owners(record, generation, selected, ordinary);
+            if continuation.is_ok() || accepted_human_send {
+                // Cancellation revokes the Send's queue owner. The confirmed
+                // cleanup still owns retirement of this exact runtime token.
+                self.retire_dedicated_reset_runtime_locked(
+                    &mut inner,
+                    index,
+                    continuation.is_ok(),
+                )?;
             }
-            if let Some(owner) = ordinary.as_deref_mut() {
-                let mut transferred = owner.clone();
-                transferred.stop_generation = generation;
-                let mut probe = transferred.clone();
-                probe.receipt_resume = None;
-                if !probe.matches(record) {
-                    bail!("ordinary queue owner changed during runtime reset");
-                }
-                if let Some(resume) = &mut transferred.receipt_resume {
-                    let Some(delivery) =
-                        record
-                            .prompt_deliveries
-                            .get_mut(&owner.prompt_id)
-                            .filter(|delivery| {
-                                delivery.resume == owner.receipt_resume
-                                    && delivery.write_ahead == resume.write_ahead
-                                    && delivery.turn_generation.is_none()
-                                    && delivery.write_ahead_acknowledged
-                            })
-                    else {
-                        bail!("ordinary delivery receipt changed during runtime reset");
-                    };
-                    resume.stop_generation = generation;
-                    delivery.resume = Some(resume.clone());
-                }
-                if !transferred.matches(record) {
-                    bail!("ordinary queue owner changed during runtime reset");
-                }
-                *owner = transferred;
-            }
-            // The reset runtime's turn, captured before it is retired.
-            let ending_turn = record.active_turn_generation;
-            record.clear_runtime();
-            record.clear_runtime_reset();
-            clear_all_pending_requests(record);
-            self.commit_locked(&mut inner)?;
-            // Only after the reset is durable are its deferred callbacks
-            // discarded (unsent hand-offs first), and whatever the reset
-            // runtime never acknowledged settled, under the same lock and in
-            // their own commit (prompt_delivery.rs).
-            // Through the stamping accessor, so this commit rewrites the row.
-            let record = inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid");
-            let discarded = discard_deferred_stop_callbacks(record);
-            if (settle_retired_runtime_attempt(record, ending_turn) || discarded)
-                && let Err(error) = self.commit_locked(&mut inner)
-            {
-                // The reset itself is durable; only the receipts' settlement
-                // is not, and a restart settles them conservatively.
-                eprintln!(
-                    "prompt delivery> failed to persist the receipts settled by the reset of `{session_id}`: {error:#}"
-                );
-            }
+            continuation?;
             Ok(RuntimeResetPreparation::Ready)
         }
     }
+
+    #[cfg(windows)]
+    fn retire_dedicated_reset_runtime_locked(
+        &self,
+        inner: &mut StateInner,
+        index: usize,
+        reset_applied: bool,
+    ) -> Result<()> {
+        let record = &mut inner.sessions[index];
+        let ending_turn = record.active_turn_generation;
+        record.clear_runtime();
+        if reset_applied {
+            record.clear_runtime_reset();
+        }
+        clear_all_pending_requests(record);
+        self.commit_locked(inner)?;
+        // After retirement is durable, settle deferred unsent hand-offs and
+        // anything the retired runtime never acknowledged in a separate write.
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        let session_id = record.session.id.clone();
+        let discarded = discard_deferred_stop_callbacks(record);
+        if (settle_retired_runtime_attempt(record, ending_turn) || discarded)
+            && let Err(error) = self.commit_locked(inner)
+        {
+            eprintln!(
+                "prompt delivery> failed to persist the receipts settled by the reset of `{session_id}`: {error:#}"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn transfer_dedicated_reset_queue_owners(
+    record: &mut SessionRecord,
+    generation: u64,
+    selected: Option<&mut HumanResumeOwner>,
+    ordinary: Option<&mut QueuedTurnOwner>,
+) -> Result<()> {
+    if let Some(owner) = selected {
+        // The receipt's own transfer and exact runtime ownership prove the
+        // only allowed Stop transition.
+        if let Some(resume) = owner.queue.receipt_resume.as_mut() {
+            resume.stop_generation = generation;
+        }
+        if !owner.matches_with_stop(record, generation) {
+            return Err(anyhow!(HumanPromptOwnerChanged));
+        }
+        owner.stop_generation = generation;
+    }
+    if let Some(owner) = ordinary {
+        let mut transferred = owner.clone();
+        transferred.stop_generation = generation;
+        let mut probe = transferred.clone();
+        probe.receipt_resume = None;
+        if !probe.matches(record) {
+            bail!("ordinary queue owner changed during runtime reset");
+        }
+        if let Some(resume) = &mut transferred.receipt_resume {
+            let Some(delivery) =
+                record
+                    .prompt_deliveries
+                    .get_mut(&owner.prompt_id)
+                    .filter(|delivery| {
+                        delivery.resume == owner.receipt_resume
+                            && delivery.write_ahead == resume.write_ahead
+                            && delivery.turn_generation.is_none()
+                            && delivery.write_ahead_acknowledged
+                    })
+            else {
+                bail!("ordinary delivery receipt changed during runtime reset");
+            };
+            resume.stop_generation = generation;
+            delivery.resume = Some(resume.clone());
+        }
+        if !transferred.matches(record) {
+            bail!("ordinary queue owner changed during runtime reset");
+        }
+        *owner = transferred;
+    }
+    Ok(())
 }

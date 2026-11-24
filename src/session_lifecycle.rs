@@ -704,7 +704,11 @@ impl AppState {
             Some(owner) => self.dispatch_next_queued_turn_for_resume_with_prompt(
                 session_id,
                 owner,
-                explicit_human,
+                if explicit_human {
+                    QueuedResumeIntent::HumanResume
+                } else {
+                    QueuedResumeIntent::Continuation
+                },
             ),
             None => self.dispatch_next_queued_turn_with_prompt(session_id, true),
         }
@@ -811,8 +815,7 @@ impl AppState {
         {
             let record = &mut inner.sessions[index];
             clear_provider_capacity_retry(record);
-            record.set_auto_dispatch_blocked(true);
-            record.engram.operator_paused = true;
+            record.pause_queue_for_operator_stop();
             record.session.status = SessionStatus::Idle;
             record.session.preview = "Provider capacity recovery stopped; queue paused.".to_owned();
             inner.stamp_session_at_index(index);
@@ -827,8 +830,7 @@ impl AppState {
         if inner.sessions[index].session.status == SessionStatus::Stopping {
             if options.pause_automatic_resumes_on_success {
                 let record = &mut inner.sessions[index];
-                record.set_auto_dispatch_blocked(true);
-                record.engram.operator_paused = true;
+                record.pause_queue_for_operator_stop();
                 inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner).map_err(|error| {
                     ApiError::internal(format!("failed to persist operator pause: {error:#}"))
@@ -869,8 +871,7 @@ impl AppState {
             record.session.status = SessionStatus::Stopping;
             record.session.preview = SESSION_STOPPING_MESSAGE.to_owned();
             if options.pause_automatic_resumes_on_success {
-                record.set_auto_dispatch_blocked(true);
-                record.engram.operator_paused = true;
+                record.pause_queue_for_operator_stop();
                 // A promoted delivery may still be racing this Stop.
                 // Keep that exact owner until shutdown commits or rolls back;
                 // ordinary Orchestrator successors retain Stop's drop policy.
@@ -1407,9 +1408,7 @@ impl AppState {
                 discard_deferred_stop_callbacks(record);
                 settle_retired_runtime_attempt(record, ending_turn);
                 if suppress_automatic_resume {
-                    record.set_auto_dispatch_blocked(true);
-                    // The operator's pause, marked where the latch is set.
-                    record.engram.operator_paused = true;
+                    record.pause_queue_for_operator_stop();
                     // A wait may already have completed and queued its fan-in
                     // before Stop acquired the state lock. Drop all automatic
                     // workflow continuations here; user and mailbox prompts

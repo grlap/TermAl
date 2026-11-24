@@ -186,6 +186,7 @@ impl StateInner {
             runtime_stop_owner: None,
             runtime_stop_generation: 0,
             auto_dispatch_pause_epoch: 0,
+            operator_stop_generation: 0,
             engram_mcp_revocation_pending: false,
             deferred_stop_callbacks: Vec::new(),
             engram: EngramSessionState::default(),

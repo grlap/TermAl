@@ -1231,7 +1231,11 @@ impl AppState {
         owner: QueuedTurnOwner,
     ) -> Result<Option<TurnDispatch>> {
         Ok(self
-            .dispatch_next_queued_turn_for_resume_with_prompt(session_id, owner, false)?
+            .dispatch_next_queued_turn_for_resume_with_prompt(
+                session_id,
+                owner,
+                QueuedResumeIntent::Continuation,
+            )?
             .map(|started| started.dispatch))
     }
 
@@ -1239,7 +1243,7 @@ impl AppState {
         &self,
         session_id: &str,
         queue: QueuedTurnOwner,
-        explicit_human: bool,
+        intent: QueuedResumeIntent,
     ) -> Result<Option<StartedQueuedTurn>> {
         if let Err(err) = self.reconcile_never_woken_mailbox_notifications_for_session(session_id) {
             eprintln!(
@@ -1251,10 +1255,7 @@ impl AppState {
             session_id,
             true,
             false,
-            Some(QueuedDrainOwner::Resume {
-                queue,
-                explicit_human,
-            }),
+            Some(QueuedDrainOwner::Resume { queue, intent }),
         )
     }
 
@@ -1332,10 +1333,18 @@ impl AppState {
             // explicit Human UI actions call their own promotion path.
             let human_resume = allow_blocked_dispatch
                 && matches!(owner.as_ref(), Some(QueuedDrainOwner::Resume { .. }));
-            let drained = self.start_human_queued_turn_with_selection(
+            let intake = match owner.as_ref() {
+                Some(QueuedDrainOwner::Resume {
+                    intent: QueuedResumeIntent::HumanSend(intake),
+                    ..
+                }) => Some(*intake),
+                _ => None,
+            };
+            let drained = self.start_human_queued_turn_owned(
                 session_id,
                 human_resume,
                 selected_human.as_mut(),
+                intake,
             );
             let drained = match drained {
                 Err(error)
@@ -1514,6 +1523,10 @@ impl AppState {
                 .find_session_index(session_id)
                 .and_then(|index| QueuedTurnOwner::capture(&inner.sessions[index]))
         });
+        let resume_intent = match &owner {
+            Some(QueuedDrainOwner::Resume { intent, .. }) => Some(*intent),
+            _ => None,
+        };
         let ordinary_owner = match owner.as_mut() {
             Some(
                 QueuedDrainOwner::Resume { queue: owner, .. } | QueuedDrainOwner::Activation(owner),
@@ -1525,6 +1538,7 @@ impl AppState {
                 session_id,
                 ordinary_owner,
                 automatic_queue,
+                resume_intent,
             )?,
             RuntimeResetPreparation::Held
         ) {
@@ -1543,11 +1557,8 @@ impl AppState {
             _ => None,
         };
         let explicit_human = matches!(
-            &owner,
-            Some(QueuedDrainOwner::Resume {
-                explicit_human: true,
-                ..
-            })
+            resume_intent,
+            Some(QueuedResumeIntent::HumanResume | QueuedResumeIntent::HumanSend(_))
         );
         let mut bypass_owner = match owner {
             Some(QueuedDrainOwner::Resume { queue, .. }) => Some(queue),
@@ -1681,6 +1692,7 @@ impl AppState {
                             session_id,
                             bypass_owner.as_mut(),
                             None,
+                            resume_intent,
                         )?,
                         RuntimeResetPreparation::Held
                     ) {
@@ -2450,7 +2462,14 @@ pub(crate) enum QueuedDrainOwner {
     /// An explicit Resume of the head its caller checked.
     Resume {
         queue: QueuedTurnOwner,
-        /// A Human UI action can drive an older known-unsent ordinary head.
-        explicit_human: bool,
+        intent: QueuedResumeIntent,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueuedResumeIntent {
+    Continuation,
+    HumanResume,
+    // An accepted Human Send can activate an earlier ordinary FIFO head.
+    HumanSend(HumanIntakeGenerations),
 }

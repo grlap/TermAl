@@ -9,6 +9,7 @@ thread_local! {
     pub(crate) static TEST_HUMAN_PROMOTION_CAPTURE_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     pub(crate) static TEST_HUMAN_BEFORE_RUNTIME_RESET: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
     pub(crate) static TEST_HUMAN_BEFORE_PROMOTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_HUMAN_BEFORE_FIFO_CAPTURE: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[derive(Debug)]
@@ -110,10 +111,11 @@ pub(crate) enum HumanPromptDrain {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct HumanIntakeGenerations {
+pub(crate) struct HumanIntakeGenerations {
     pause: u64,
     stop: u64,
     turn: u64,
+    operator_stop: u64,
 }
 
 impl HumanIntakeGenerations {
@@ -122,7 +124,12 @@ impl HumanIntakeGenerations {
             pause: record.auto_dispatch_pause_epoch,
             stop: record.runtime_stop_generation,
             turn: record.active_turn_generation,
+            operator_stop: record.operator_stop_generation,
         }
+    }
+
+    fn matches_operator_stop(self, record: &SessionRecord) -> bool {
+        self.operator_stop == record.operator_stop_generation
     }
 }
 
@@ -137,30 +144,46 @@ fn human_queue_entry_is_eligible(
         && ordinary_queue_entry_is_runnable(record, queued)
 }
 
+pub(crate) struct HumanResetTarget<'a> {
+    pub(crate) prompt_id: &'a str,
+    pub(crate) intent: &'a str,
+    pub(crate) explicit: bool,
+    pub(crate) intake: Option<HumanIntakeGenerations>,
+}
+
 pub(crate) fn require_human_runtime_reset_owner(
     inner: &StateInner,
     session_id: &str,
-    prompt_id: &str,
-    intent: &str,
     instance: &str,
-    explicit: bool,
+    target: &HumanResetTarget<'_>,
 ) -> Result<()> {
     let index = inner
         .find_session_index(session_id)
         .ok_or_else(|| anyhow!(HumanPromptOwnerChanged))?;
     let record = &inner.sessions[index];
+    if target
+        .intake
+        .is_some_and(|intake| !intake.matches_operator_stop(record))
+    {
+        return Err(anyhow!(HumanPromptOwnerChanged));
+    }
     let Some(position) = record
         .queued_prompts
         .iter()
-        .position(|queued| queued.pending_prompt.id == prompt_id)
+        .position(|queued| queued.pending_prompt.id == target.prompt_id)
     else {
         return Err(anyhow!(HumanPromptOwnerChanged));
     };
-    if !human_position_may_start(inner, record, position, explicit)
-        || human_start_is_held(inner, index, &record.queued_prompts[position], explicit)
+    if !human_position_may_start(inner, record, position, target.explicit)
+        || human_start_is_held(
+            inner,
+            index,
+            &record.queued_prompts[position],
+            target.explicit,
+        )
         || !record.queued_prompts.iter().any(|queued| {
-            queued.pending_prompt.id == prompt_id
-                && receipted_prompt_intent(queued) == intent
+            queued.pending_prompt.id == target.prompt_id
+                && receipted_prompt_intent(queued) == target.intent
                 && human_queue_entry_is_eligible(inner, record, queued, instance)
         })
     {
@@ -486,35 +509,40 @@ impl AppState {
             (
                 id,
                 human_prompt_persistence_fence(&inner, session_id),
-                followup
-                    .is_none()
-                    .then(|| HumanIntakeGenerations::capture(&inner.sessions[index])),
+                HumanIntakeGenerations::capture(&inner.sessions[index]),
             )
         };
         let confirmation = fence
             .map_err(HumanPromptPersistenceFailure::Local)
             .and_then(|image| self.confirm_human_prompt_persistence_typed(image));
         if let Err(error) = confirmation {
-            let deadline_generations = match error {
-                HumanPromptPersistenceFailure::Acknowledgement(PersistFenceError::Deadline) => {
-                    intake_generations
-                }
-                _ => None,
-            };
-            return Ok(self.retain_accepted_human_start_failure_with_deadline(
+            let deadline = followup.is_none()
+                && matches!(
+                    error,
+                    HumanPromptPersistenceFailure::Acknowledgement(PersistFenceError::Deadline)
+                );
+            return Ok(self.retain_accepted_human_start_failure_if_current(
                 session_id,
                 &accepted_id,
                 &error.into_api_error().message,
-                deadline_generations,
+                Some(intake_generations),
+                deadline,
             ));
         }
-        let started = match self.start_human_queued_turn(session_id, true) {
+        let started = match self.start_human_queued_turn_owned(
+            session_id,
+            true,
+            None,
+            Some(intake_generations),
+        ) {
             Ok(started) => started,
             Err(error) => {
-                return Ok(self.retain_accepted_human_start_failure(
+                return Ok(self.retain_accepted_human_start_failure_if_current(
                     session_id,
                     &accepted_id,
                     &format!("{error:#}"),
+                    Some(intake_generations),
+                    false,
                 ));
             }
         };
@@ -523,6 +551,12 @@ impl AppState {
                 Ok(DispatchTurnResult::DispatchedAfterQueue(started.dispatch))
             }
             HumanPromptDrain::Absent => {
+                #[cfg(test)]
+                if let Some(hook) =
+                    TEST_HUMAN_BEFORE_FIFO_CAPTURE.with(|slot| slot.borrow_mut().take())
+                {
+                    hook();
+                }
                 // A new explicit Send also activates an older dormant FIFO
                 // head. Its exact ordinary queue owner remains required;
                 // missing historical delivery disposition is never inferred.
@@ -530,23 +564,37 @@ impl AppState {
                     let inner = self.inner.lock().expect("state mutex poisoned");
                     inner.find_session_index(session_id).and_then(|index| {
                         let record = &inner.sessions[index];
-                        QueuedTurnOwner::capture(record)
+                        if !intake_generations.matches_operator_stop(record) {
+                            return None;
+                        }
+                        let accepted = record
+                            .queued_prompts
+                            .iter()
+                            .find(|row| row.pending_prompt.id == accepted_id)?;
+                        let mut owner = QueuedTurnOwner::capture(record)?;
+                        owner.required_queued_prompt =
+                            Some((accepted_id.clone(), receipted_prompt_intent(accepted)));
+                        Some(owner)
                     })
                 };
                 let started = owner
                     .map(|owner| {
                         self.dispatch_next_queued_turn_for_resume_with_prompt(
-                            session_id, owner, true,
+                            session_id,
+                            owner,
+                            QueuedResumeIntent::HumanSend(intake_generations),
                         )
                     })
                     .transpose();
                 let started = match started {
                     Ok(started) => started.flatten(),
                     Err(error) => {
-                        return Ok(self.retain_accepted_human_start_failure(
+                        return Ok(self.retain_accepted_human_start_failure_if_current(
                             session_id,
                             &accepted_id,
                             &format!("{error:#}"),
+                            Some(intake_generations),
+                            false,
                         ));
                     }
                 };
@@ -569,15 +617,18 @@ impl AppState {
         prompt_id: &str,
         reason: &str,
     ) -> DispatchTurnResult {
-        self.retain_accepted_human_start_failure_with_deadline(session_id, prompt_id, reason, None)
+        self.retain_accepted_human_start_failure_if_current(
+            session_id, prompt_id, reason, None, false,
+        )
     }
 
-    fn retain_accepted_human_start_failure_with_deadline(
+    fn retain_accepted_human_start_failure_if_current(
         &self,
         session_id: &str,
         prompt_id: &str,
         reason: &str,
-        deadline_generations: Option<HumanIntakeGenerations>,
+        intake: Option<HumanIntakeGenerations>,
+        persistence_deadline: bool,
     ) -> DispatchTurnResult {
         eprintln!(
             "human prompt> session={session_id} prompt={prompt_id} retained after start failure: {reason}"
@@ -585,9 +636,11 @@ impl AppState {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(index) = inner.find_visible_session_index(session_id) {
             let record = &mut inner.sessions[index];
-            if deadline_generations
-                .is_some_and(|generations| generations != HumanIntakeGenerations::capture(record))
-            {
+            if intake.is_some_and(|expected| {
+                let current = HumanIntakeGenerations::capture(record);
+                expected.operator_stop != current.operator_stop
+                    || (persistence_deadline && expected != current)
+            }) {
                 return DispatchTurnResult::Queued;
             }
             if record.queued_prompts.iter().any(|queued| {
@@ -610,7 +663,7 @@ impl AppState {
                 } else {
                     "Content retained; delivery confirmation requires recovery before replay."
                 };
-                record.session.preview = if deadline_generations.is_some() && unsent {
+                record.session.preview = if persistence_deadline && unsent {
                     "Persistence acknowledgement missed its deadline. Resume the queued prompt."
                         .to_owned()
                 } else {
@@ -639,7 +692,17 @@ impl AppState {
         &self,
         session_id: &str,
         explicit_resume: bool,
+        selection: Option<&mut HumanResumeOwner>,
+    ) -> Result<HumanPromptDrain> {
+        self.start_human_queued_turn_owned(session_id, explicit_resume, selection, None)
+    }
+
+    pub(crate) fn start_human_queued_turn_owned(
+        &self,
+        session_id: &str,
+        explicit_resume: bool,
         mut selection: Option<&mut HumanResumeOwner>,
+        intake: Option<HumanIntakeGenerations>,
     ) -> Result<HumanPromptDrain> {
         let selected = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -647,6 +710,9 @@ impl AppState {
                 return Ok(HumanPromptDrain::Absent);
             };
             let record = &inner.sessions[index];
+            if intake.is_some_and(|owner| !owner.matches_operator_stop(record)) {
+                return Ok(HumanPromptDrain::Held);
+            }
             if selection
                 .as_ref()
                 .is_some_and(|owner| !owner.matches(record))
@@ -688,9 +754,12 @@ impl AppState {
         let (started, fence) = loop {
             if let Err(error) = self.prepare_dedicated_runtime_reset_for_human_off_lock(
                 session_id,
-                &selected.0,
-                &selected.1,
-                explicit_resume,
+                HumanResetTarget {
+                    prompt_id: &selected.0,
+                    intent: &selected.1,
+                    explicit: explicit_resume,
+                    intake,
+                },
                 selection.as_deref_mut(),
             ) {
                 if error.downcast_ref::<HumanPromptOwnerChanged>().is_some() {
@@ -713,6 +782,9 @@ impl AppState {
                 return Ok(HumanPromptDrain::Absent);
             };
             let record = &inner.sessions[index];
+            if intake.is_some_and(|owner| !owner.matches_operator_stop(record)) {
+                return Ok(HumanPromptDrain::Held);
+            }
             if selection
                 .as_ref()
                 .is_some_and(|owner| !owner.matches(record))

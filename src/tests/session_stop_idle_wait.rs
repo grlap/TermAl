@@ -411,6 +411,125 @@ fn stop_on_an_idle_waiting_session_drops_continuations_and_keeps_other_prompts_p
 }
 
 #[test]
+fn stop_before_human_fifo_capture_keeps_both_prompts_queued() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input) = test_claude_runtime_handle("idle-stop-before-fifo-capture");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session_id).unwrap();
+        record.runtime = SessionRuntime::Claude(runtime);
+        queue_seeded_prompt(record, "older-fifo-head", QueuedPromptSource::User);
+        *inner.test_run_waits = vec![test_run_wait_record(
+            "wait-before-fifo-capture",
+            &session_id,
+        )];
+        state.commit_locked(&mut inner).unwrap();
+    }
+    let stopping_state = state.clone();
+    let stopping_session = session_id.clone();
+    TEST_HUMAN_BEFORE_FIFO_CAPTURE.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            stopping_state
+                .request_stop_session(&stopping_session)
+                .unwrap();
+        }));
+    });
+    let mut accepted = None;
+    let result = state
+        .dispatch_human_turn_with_acceptance(
+            &session_id,
+            user_prompt("Keep my Send behind the stopped head."),
+            &mut accepted,
+        )
+        .unwrap();
+    assert!(matches!(result, DispatchTurnResult::Queued));
+    let stopped = session_record(&state, &session_id);
+    assert!(state.inner.lock().unwrap().test_run_waits.is_empty());
+    assert!(stopped.session.queue_paused);
+    assert_eq!(stopped.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+    assert_eq!(stopped.queued_prompts.len(), 2);
+    assert_eq!(
+        stopped.queued_prompts[0].pending_prompt.id,
+        "older-fifo-head"
+    );
+    assert_eq!(
+        stopped.queued_prompts[1].pending_prompt.id,
+        accepted.unwrap()
+    );
+    assert!(
+        stopped
+            .queued_prompts
+            .iter()
+            .all(|row| row.promoted_message_index.is_none())
+    );
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[test]
+fn idle_stop_keeps_an_earlier_human_send_queued_until_fresh_resume() {
+    let state = test_app_state();
+    let session_id = test_session_id(&state, Agent::Claude);
+    let (runtime, input) = test_claude_runtime_handle("idle-stop-before-human-promotion");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.sessions[index].runtime = SessionRuntime::Claude(runtime);
+        *inner.test_run_waits = vec![test_run_wait_record("wait-during-human-send", &session_id)];
+        state.commit_locked(&mut inner).unwrap();
+    }
+
+    let stopping_state = state.clone();
+    let stopping_session = session_id.clone();
+    TEST_HUMAN_BEFORE_PROMOTION.with(|slot| {
+        slot.replace(Some(Box::new(move || {
+            stopping_state
+                .request_stop_session(&stopping_session)
+                .expect("Stop should consume the Idle session's pending run wait");
+        })));
+    });
+    let prompt = "Keep this accepted prompt behind Stop.";
+    let mut accepted = None;
+    let result = state
+        .dispatch_human_turn_with_acceptance(&session_id, user_prompt(prompt), &mut accepted)
+        .expect("the Human Send was durably accepted");
+    let accepted_id = accepted.expect("the Send should report the accepted prompt ID");
+    assert!(
+        matches!(result, DispatchTurnResult::Queued),
+        "the pre-Stop Send must stay queued when it reaches promotion"
+    );
+    assert!(state.inner.lock().unwrap().test_run_waits.is_empty());
+    let stopped = session_record(&state, &session_id);
+    assert_eq!(stopped.session.status, SessionStatus::Idle);
+    assert!(stopped.session.queue_paused);
+    assert_eq!(stopped.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+    assert_eq!(stopped.queued_prompts.len(), 1);
+    let retained = &stopped.queued_prompts[0];
+    assert_eq!(retained.pending_prompt.id, accepted_id);
+    assert_eq!(retained.pending_prompt.text, prompt);
+    assert!(retained.promoted_message_index.is_none());
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+
+    state
+        .resume_session_queue(&session_id)
+        .expect("a new explicit Resume should dispatch the retained prompt");
+    assert!(matches!(
+        input.try_recv(),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(prompt)
+    ));
+    let resumed = session_record(&state, &session_id);
+    assert!(!resumed.session.queue_paused);
+    assert_eq!(
+        resumed
+            .human_prompt_turn
+            .as_ref()
+            .map(|turn| &turn.prompt_id),
+        Some(&accepted_id)
+    );
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[test]
 fn one_stop_of_an_idle_waiting_session_consumes_all_of_its_waits() {
     let state = test_app_state();
     let session_id = test_session_id(&state, Agent::Codex);

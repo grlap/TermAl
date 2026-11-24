@@ -66,9 +66,7 @@ impl AppState {
             let record = inner
                 .session_mut_by_index(index)
                 .expect("session index should be valid");
-            record.set_auto_dispatch_blocked(true);
-            // The operator's pause, marked where the latch is set.
-            record.engram.operator_paused = true;
+            record.pause_queue_for_operator_stop();
             // A wait that settled just before Stop may already have queued
             // its continuation; user and mailbox prompts stay, paused.
             drop_queued_workflow_continuations_keeping_held_head(record);

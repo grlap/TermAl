@@ -221,6 +221,206 @@ fn concurrent_human_sends_ack_latest_rows_and_deliver_each_prompt_once() {
 }
 
 #[test]
+fn idle_stop_during_human_intake_ack_keeps_the_older_fifo_head_paused() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = FenceFixture::new();
+    let mut state = fixture.app_state();
+    state.inner = fixture.inner.clone();
+    let project = create_test_project(&state, fixture.root.path(), "Idle Stop during intake");
+    let session = create_test_project_session(&state, Agent::Claude, &project, fixture.root.path());
+    let (runtime, input) = test_claude_runtime_handle("idle-stop-during-human-intake");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner
+            .projects
+            .iter_mut()
+            .find(|entry| entry.id == project)
+            .unwrap()
+            .engram = Some(EngramProjectSettings::default());
+        let record = inner.session_mut(&session).unwrap();
+        record.runtime = SessionRuntime::Claude(runtime);
+        queue_ordinary_prompt(record, "older-fifo-head");
+        *inner.test_run_waits = vec![test_run_wait_record("wait-during-intake", &session)];
+        state.commit_locked(&mut inner).unwrap();
+    }
+    state.persist_tx = fixture.tx.clone();
+
+    let sending_state = state.clone();
+    let sending_session = session.clone();
+    let worker = std::thread::spawn(move || {
+        sending_state.dispatch_human_turn(&sending_session, human_request("new Human Send"))
+    });
+    let intake = accept_human_fence(&mut fixture);
+    assert_eq!(poll(&intake), None);
+    state
+        .request_stop_session(&session)
+        .expect("Idle Stop must consume the pending run wait");
+    fixture.write(&fixture.collect()).unwrap();
+    assert_eq!(poll(&intake), Some(Ok(())));
+    assert!(matches!(
+        worker.join().unwrap().unwrap(),
+        DispatchTurnResult::Queued
+    ));
+
+    let inner = state.inner.lock().unwrap();
+    let record = &inner.sessions[inner.find_session_index(&session).unwrap()];
+    assert!(inner.test_run_waits.is_empty());
+    assert_eq!(record.session.status, SessionStatus::Idle);
+    assert!(record.session.queue_paused);
+    assert_eq!(record.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+    assert_eq!(record.queued_prompts.len(), 2);
+    assert_eq!(
+        record.queued_prompts[0].pending_prompt.id,
+        "older-fifo-head"
+    );
+    assert_eq!(
+        record.queued_prompts[1].pending_prompt.text,
+        "new Human Send"
+    );
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[test]
+fn clean_idle_exit_during_intake_keeps_a_post_stop_human_send_runnable() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = FenceFixture::new();
+    let mut state = fixture.app_state();
+    state.inner = fixture.inner.clone();
+    let project = create_test_project(&state, fixture.root.path(), "Idle exit after Stop");
+    let session = create_test_project_session(&state, Agent::Claude, &project, fixture.root.path());
+    let (runtime, _old_input) = test_claude_runtime_handle("old-claude-after-stop");
+    let token = RuntimeToken::Claude(runtime.runtime_id.clone());
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner
+            .projects
+            .iter_mut()
+            .find(|entry| entry.id == project)
+            .unwrap()
+            .engram = Some(EngramProjectSettings::default());
+        inner.session_mut(&session).unwrap().runtime = SessionRuntime::Claude(runtime);
+        *inner.test_run_waits = vec![test_run_wait_record("wait-before-idle-exit", &session)];
+        state.commit_locked(&mut inner).unwrap();
+    }
+    state.request_stop_session(&session).unwrap();
+    state.persist_tx = fixture.tx.clone();
+
+    let sending_state = state.clone();
+    let sending_session = session.clone();
+    let prompt = "Send this after Stop, even if the old runtime exits.";
+    let worker = std::thread::spawn(move || {
+        sending_state.dispatch_human_turn(&sending_session, human_request(prompt))
+    });
+    let intake = accept_human_fence(&mut fixture);
+    assert_eq!(poll(&intake), None);
+
+    state
+        .handle_runtime_root_exit_if_matches(&session, &token, None)
+        .unwrap();
+    let (replacement, input) = test_claude_runtime_handle("replacement-after-idle-exit");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session).unwrap();
+        assert!(record.session.queue_paused);
+        assert_eq!(record.session.preview, SESSION_STOPPED_BY_USER_MESSAGE);
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        record.runtime = SessionRuntime::Claude(replacement);
+    }
+
+    fixture.write(&fixture.collect()).unwrap();
+    assert_eq!(poll(&intake), Some(Ok(())));
+    let promotion = accept_human_fence(&mut fixture);
+    fixture.write(&fixture.collect()).unwrap();
+    assert_eq!(poll(&promotion), Some(Ok(())));
+    let DispatchTurnResult::DispatchedAfterQueue(dispatch) = worker.join().unwrap().unwrap() else {
+        panic!("a Send accepted after Stop must start on the replacement runtime");
+    };
+    deliver_turn_dispatch(&state, dispatch)
+        .into_public_result()
+        .unwrap();
+    assert!(matches!(
+        input.try_recv(),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(prompt)
+    ));
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[cfg(windows)]
+#[test]
+fn completed_model_refresh_reset_does_not_park_an_accepted_human_send() {
+    use crate::tests::delegation_process_cleanup::ProductionWorkerTree;
+
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = FenceFixture::new();
+    let mut state = fixture.app_state();
+    state.inner = fixture.inner.clone();
+    let project = create_test_project(&state, fixture.root.path(), "Models during intake");
+    let session = create_test_project_session(&state, Agent::Claude, &project, fixture.root.path());
+    state.agent_runtime_spawning_enabled = true;
+    let owner = ProductionWorkerTree::spawn(&state, &session, fixture.root.path(), false);
+    state.agent_runtime_spawning_enabled = false;
+    let (pause_epoch, stop_generation) = {
+        let mut inner = state.inner.lock().unwrap();
+        inner
+            .projects
+            .iter_mut()
+            .find(|entry| entry.id == project)
+            .unwrap()
+            .engram = Some(EngramProjectSettings::default());
+        let record = inner.session_mut(&session).unwrap();
+        record.session.status = SessionStatus::Idle;
+        let generations = (
+            record.auto_dispatch_pause_epoch,
+            record.runtime_stop_generation,
+        );
+        state.commit_locked(&mut inner).unwrap();
+        generations
+    };
+    state.persist_tx = fixture.tx.clone();
+    let sending_state = state.clone();
+    let sending_session = session.clone();
+    let prompt = "Send this to the refreshed Claude runtime.";
+    let worker = std::thread::spawn(move || {
+        sending_state.dispatch_human_turn(&sending_session, human_request(prompt))
+    });
+    let intake = accept_human_fence(&mut fixture);
+    assert_eq!(poll(&intake), None);
+
+    state
+        .prepare_dedicated_runtime_reset_off_lock(&session, true)
+        .expect("the model refresh reset should retire the old runtime");
+    owner.await_exit();
+    owner.assert_peers_exited();
+    let (replacement, input) = test_claude_runtime_handle("replacement-after-model-refresh");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session).unwrap();
+        assert_ne!(record.runtime_stop_generation, stop_generation);
+        assert_eq!(record.auto_dispatch_pause_epoch, pause_epoch);
+        assert!(!record.session.queue_paused);
+        assert!(matches!(record.runtime, SessionRuntime::None));
+        record.runtime = SessionRuntime::Claude(replacement);
+    }
+
+    fixture.write(&fixture.collect()).unwrap();
+    assert_eq!(poll(&intake), Some(Ok(())));
+    let promotion = accept_human_fence(&mut fixture);
+    fixture.write(&fixture.collect()).unwrap();
+    assert_eq!(poll(&promotion), Some(Ok(())));
+    let DispatchTurnResult::DispatchedAfterQueue(dispatch) = worker.join().unwrap().unwrap() else {
+        panic!("the accepted prompt must start on the refreshed runtime");
+    };
+    deliver_turn_dispatch(&state, dispatch)
+        .into_public_result()
+        .unwrap();
+    assert!(matches!(
+        input.try_recv(),
+        Ok(ClaudeRuntimeCommand::Prompt(command)) if command.text.contains(prompt)
+    ));
+    assert!(matches!(input.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[test]
 fn human_row_proof_rejects_old_stamps_and_siblings_but_accepts_later_cancellation() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let mut fixture = FenceFixture::new();
