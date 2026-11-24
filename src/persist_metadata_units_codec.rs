@@ -1,8 +1,16 @@
 // Metadata unit shape, bounded inventory and validated read projections.
+//
+// Owns the metadata-unit field inventories, the projection between metadata
+// and units, and the validated reads of stored metadata. Does not own the unit
+// types or the capture and write paths, which stay in persist_metadata_units.rs.
+// A child module of persist_metadata_units.rs, which included this file with
+// include!() before.
+
+use super::*;
 
 // Frozen units-2/handoff inventory. Later safety fields are never accepted
 // merely because the current writer knows how to project them.
-pub(super) const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
+pub(in crate::persist) const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
     "federation",
     "preferences",
     "revision",
@@ -220,7 +228,9 @@ pub(crate) fn metadata_value_to_units(value: Value) -> Result<PersistMetadataUni
     Ok(units)
 }
 
-pub(crate) fn read_metadata_units(connection: &rusqlite::Connection) -> Result<PersistMetadataUnits> {
+pub(crate) fn read_metadata_units(
+    connection: &rusqlite::Connection,
+) -> Result<PersistMetadataUnits> {
     let units = read_metadata_units_unchecked(connection)?;
     if units.is_empty() && metadata_units_are_uninitialized(connection)? {
         return Ok(units);
@@ -295,7 +305,7 @@ fn validate_metadata_unit_inventory_for_fields(
     Ok(())
 }
 
-fn metadata_units_are_uninitialized(connection: &rusqlite::Connection) -> Result<bool> {
+pub(super) fn metadata_units_are_uninitialized(connection: &rusqlite::Connection) -> Result<bool> {
     if metadata_unit_generation(connection)? != 0 {
         return Ok(false);
     }
@@ -390,7 +400,9 @@ pub(crate) fn metadata_units_to_value(units: &PersistMetadataUnits) -> Result<Va
     Ok(Value::Object(fields))
 }
 
-pub(crate) fn persisted_metadata_storage_version(connection: &rusqlite::Connection) -> Result<String> {
+pub(crate) fn persisted_metadata_storage_version(
+    connection: &rusqlite::Connection,
+) -> Result<String> {
     let version: Option<String> = connection
         .query_row(
             "SELECT value FROM meta WHERE key='schema_version'",
@@ -431,7 +443,9 @@ pub(crate) fn persisted_metadata_storage_version(connection: &rusqlite::Connecti
     }
 }
 
-pub(crate) fn read_persisted_metadata_json(connection: &rusqlite::Connection) -> Result<Option<String>> {
+pub(crate) fn read_persisted_metadata_json(
+    connection: &rusqlite::Connection,
+) -> Result<Option<String>> {
     let version = persisted_metadata_storage_version(connection)?;
     if version == "2-metadata-units-1" {
         let units = read_metadata_units_unchecked(connection)?;

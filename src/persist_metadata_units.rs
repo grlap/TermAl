@@ -8,7 +8,11 @@ pub(crate) type PersistMetadataUnitKey = (String, String);
 pub(crate) type PersistMetadataUnitValue = (String, String);
 pub(crate) type PersistMetadataUnits = BTreeMap<PersistMetadataUnitKey, PersistMetadataUnitValue>;
 
-include!("persist_metadata_tracking.rs");
+#[path = "persist_metadata_tracking.rs"]
+mod persist_metadata_tracking;
+pub(crate) use persist_metadata_tracking::{
+    PersistMetadataStamp, PersistMetadataWatermarks, PersistTracked,
+};
 
 #[derive(Clone)]
 pub(crate) struct PersistMetadataCollectionCapture {
@@ -129,7 +133,9 @@ pub(crate) struct PersistMetadataUnitCache {
     pub(super) changed_checkpoint_owners: BTreeSet<String>,
 }
 
-include!("persist_metadata_units_codec.rs");
+#[path = "persist_metadata_units_codec.rs"]
+mod persist_metadata_units_codec;
+pub(crate) use persist_metadata_units_codec::*;
 
 pub(crate) fn metadata_counter(units: &PersistMetadataUnits, name: &str) -> Result<u64> {
     let Some((kind, encoded)) = units.get(&(name.to_owned(), String::new())) else {
