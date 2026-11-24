@@ -1,0 +1,27 @@
+{
+  "id": "01a20d35-92c8-70b2-95b7-e94aa326ebe0",
+  "external_ref": null,
+  "title": "Tell unsupported run-file entries apart from transient read failures in the run JSON reader",
+  "outcome": "test_run_read_json reports a run file that is not a regular file, or is a symlink, as its own outcome, distinct from an io error or a version race. The verification-record producer and the run-wait follow-up then treat an unsupported request or results entry as definite (no record) rather than retrying it forever, while genuine transient read failures still retry.",
+  "acceptance": [
+    "Tell unsupported run-file entries apart from transient read failures in the run JSON reader is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

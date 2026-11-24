@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "evaluators-read-criterion-limits-literally-2026-11-24",
+    "revision_id": "e9f9c8c4f44e4a38bbed77ebef5a227e",
+    "previous": null,
+    "body_sha256": "9eaf9cdb32c0fb0e447cfee5c236bacc8f021f5490575cadc35fb9bb0485a975",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-24T11:58:35.939331500Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-24). Seen on w-cf04 R6, and on w-56f3 evaluations 4 and 5.\n\nAcceptance evaluators read each criterion and its stated limits literally, and they test edge cases against the exact words. A \"file it, it's inside the limit\" ruling is overturned whenever the case is only arguably inside the limit. Example: the limit said \"if the host's look leaves the record pending for a reason ...\", and the evaluator read \"the host's look\" as the CURRENT look, so a release on a stale mirror reason failed.\n\nRules for rulings:\n(1) Before filing a Medium as \"inside the stated limit\", check that the limit's exact words cover it with no interpretation. If it takes an argument, fix it, or reword the limit explicitly with concurrence.\n(2) Prefer designs that make the authoritative state single and current, for example an in-memory latest look for every outcome, over fallbacks to persisted copies that can go stale.\n(3) When a criterion promises the physically impossible, such as killing a process in uninterruptible sleep, correct it explicitly with a tracked item. Never leave the evaluator to discover it."
+}

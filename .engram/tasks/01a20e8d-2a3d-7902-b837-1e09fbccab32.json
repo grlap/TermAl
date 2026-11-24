@@ -1,0 +1,28 @@
+{
+  "id": "01a20e8d-2a3d-7902-b837-1e09fbccab32",
+  "external_ref": null,
+  "title": "Hostless runners pin an Engram whose source_id shape differs from Central's, so their gate values cannot be compared with Central-recorded ones",
+  "outcome": "Every landing-gate runner produces a source_id in the same shape as the integration owner records, so a gate's request/before/after values compare literally with the recorded value.",
+  "acceptance": [
+    "The hostless runners (DL560 C6/C7, Windows B) and Central produce the same source_id shape for the same clean commit, or the landing procedure names which producer's shape is the recorded one per gate.",
+    "The procedure for recording a candidate's complete source_id before a test-ref push names the producer binary and its build."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "landing-gate",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a20e3a-7674-7423-85dd-dd9d5f9f56d3",
+  "external_ref": null,
+  "title": "A run's full detail can show another artifact's native completion refusal under a reused run id",
+  "outcome": "A run's full detail (GET /api/test-runs/{id}) carries a native completion refusal only from the registration, or retained registration or observation, of the artifact the detail was selected for, never from one under a reused run id for another request.",
+  "acceptance": [
+    "test_run_native_completion_refusal_for_detail attaches a refusal only when the registration (live or retained) matches the request identity the exact or retained selection recorded for the detail; covered by a behaviour test in which a same-id registration for another request lends the detail nothing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

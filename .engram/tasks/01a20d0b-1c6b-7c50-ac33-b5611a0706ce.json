@@ -1,0 +1,27 @@
+{
+  "id": "01a20d0b-1c6b-7c50-ac33-b5611a0706ce",
+  "external_ref": null,
+  "title": "The other-root placement warning can repeat a settled record's text that the dedicated settled line already carries",
+  "outcome": "A record whose dedicated \"[TermAl] Verification record settled:\" line is pending appears once in the owner's prompt; the other-root placement warning does not append the same record's historical receipt text again.",
+  "acceptance": [
+    "The other-root placement warning can repeat a settled record's text that the dedicated settled line already carries is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

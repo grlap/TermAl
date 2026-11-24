@@ -1,0 +1,27 @@
+{
+  "id": "01a20d69-1a7a-7c92-891f-c20b7779e213",
+  "external_ref": null,
+  "title": "A marked run wait can end on a stale state file while a resend of its record is in flight",
+  "outcome": "While the producer resends a record whose latest pending reason the host keeps in memory, a marked run wait does not fall back to an older wait-ending state file beside the run: the in-memory reason (or an in-flight marker) stays until the send step records the new outcome, and the run's own files no longer making a record still end the wait.",
+  "acceptance": [
+    "A marked run wait can end on a stale state file while a resend of its record is in flight is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a2057b-821d-7ff1-b471-56f386fdd7d3",
+  "disposal_reason": "Per Termal::Fable2 (#6075): the evaluation of w-56f3 on b32c2858 (2c014f1a) failed criterion 1 on exactly this window, because the evaluator reads \"the host's look\" as the current look. It is fixed inside w-56f3 by candidate 34, a1049152f65d61b4d2e5abdcb9af06d8f411b5a0. The in-memory look is now Pending(reason) or NoBlocker, written on every producer outcome, and a run wait decides from it, never from the state file.",
+  "completion": null
+}

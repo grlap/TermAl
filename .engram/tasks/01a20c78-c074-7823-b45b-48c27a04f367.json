@@ -1,0 +1,24 @@
+{
+  "id": "01a20c78-c074-7823-b45b-48c27a04f367",
+  "external_ref": null,
+  "title": "Behaviour tests for the owned Codex server's watchdog fallback and for a release that cannot run",
+  "outcome": "Behaviour tests for the owned Codex server's watchdog fallback and for a release that cannot run",
+  "acceptance": [
+    "Behaviour tests for the owned Codex server's watchdog fallback and for a release that cannot run is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

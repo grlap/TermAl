@@ -1,0 +1,28 @@
+{
+  "id": "01a20e7c-5d55-7f81-bb08-3f277c6e3ef1",
+  "external_ref": null,
+  "title": "Regression: dragging TermAl tabs between Chrome browser tabs or windows stopped working (Greg, P0)",
+  "outcome": "Reported by Greg at about 16:55Z on 2026-11-24, relayed by Engram::Asistant (TermAl mailbox 588693a8 #2650). Verbatim: „drag and drop tab'ow pomiedzy tabami chroma przestalo dzialac!!\" (\"drag and drop of tabs between Chrome tabs stopped working!!\"). Asistant adds: it is about dragging TermAl tabs BETWEEN Chrome browser tabs or windows. Do not assume it is only reordering within one browser tab.\n\nFacts so far (Termal::Fable2, read-only):\n- The running host is fbc6fd0c, restarted at about 03:43Z. ui/dist/index.html was rebuilt at about 06:38Z on 2026-11-24, after the restart.\n- No commit since 2026-11-15 touches UI drag code: `git log -G 'dataTransfer|dragstart|drag' -- ui/src` is empty. ui/src/tab-drag.ts and session-drag.ts are unchanged since 2026-11-10.\n- So the cause is not an obvious drag-code change. Candidates to check: the ui/dist build itself (what was served before the rebuild versus now); server-side state that cross-window drag relies on, such as the workspace-layout or session APIs and any cross-tab channel; a Chrome update; and the w-314a session-list filter, if a dragged tab carries a session the new filter hides or rejects.\n\nWanted:\n- Reproduce it.\n- Identify the cause with evidence: the exact behaviour, and the console or network errors.\n- Fix it, with a behaviour test where feasible.\n- Report the cause and an ETA to the coordinator.",
+  "acceptance": [
+    "Regression: dragging TermAl tabs between Chrome browser tabs or windows stopped working (Greg, P0) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "regression",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Withdrawn by Greg ~16:56Z 2026-11-24 (Engram::Asistant 588693a8 #2651): „false alarm, mialem wersje dev i release, dziala wszystko! uff\". No regression; dev and release instances were mixed. No code change.",
+  "completion": null
+}

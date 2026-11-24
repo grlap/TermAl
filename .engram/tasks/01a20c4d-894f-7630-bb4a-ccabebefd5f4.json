@@ -1,0 +1,35 @@
+{
+  "id": "01a20c4d-894f-7630-bb4a-ccabebefd5f4",
+  "external_ref": null,
+  "title": "Nested include! slice D1, hand-written: persist_metadata_units_codec.rs and persist_metadata_tracking.rs become child modules of persist_metadata_units.rs",
+  "outcome": "The last two files that src/persist_metadata_units.rs includes become its child modules, by hand, because the tool refuses both: codec (\"pub(super) at offset 219 would change meaning\" — METADATA_UNIT_PREDECESSOR_FIELDS, which slice C2 made pub(super) and which persist_sqlite_obligations.rs uses) and tracking (\"inline mod persist_metadata_tracking has the unit's own name\"). Codec: `#[path]` + `mod` + one glob in the parent, `use super::*;` in the file, pub(super) on metadata_units_are_uninitialized (the parent uses it), and pub(in crate::persist) instead of pub(super) on METADATA_UNIT_PREDECESSOR_FIELDS, which is exactly its present visibility; the tool's plan for the unit is 17 definitions: 14 already visible, 1 made pub(super), 2 private. Tracking: the file's inline `mod persist_metadata_tracking { … }` wrapper is removed so the file itself is that module, mounted by `#[path]` + `mod` in the parent, and its `pub(crate) use persist_metadata_tracking::{…};` line moves to the parent unchanged; the module path of its items stays crate::persist::persist_metadata_units::persist_metadata_tracking. No test is renamed. One candidate for both, on Fable2's ruling (#158). Follows w-f13ee9dd84c4.",
+  "acceptance": [
+    "On the candidate, src/persist_metadata_units.rs has no include!() line; persist_metadata_units_codec.rs and persist_metadata_tracking.rs are each mounted by `#[path]` and `mod`; and a token comparison recorded on the item shows that, apart from rustfmt's layout and header comment lines, the only differences from the candidate without this item's contribution are: the wiring in the parent, `use super::*;` in the codec file, `pub(super)` on metadata_units_are_uninitialized, `pub(super)` becoming `pub(in crate::persist)` on METADATA_UNIT_PREDECESSOR_FIELDS, the removed inline `mod persist_metadata_tracking {` wrapper and its closing brace, and the tracking re-export line moved from the file to the parent unchanged.",
+    "Each of the two files starts with a header comment that says what it owns, what it does not own, and that it is a child module of persist_metadata_units.rs, formerly included by it.",
+    "The test names printed by `cargo test --bin termal -- --list` on the candidate equal those of the candidate without this item's contribution.",
+    "Nothing in the repository refers to a module path that this change alters, or each such reference is updated; the search is recorded on the item, including every use of module_path!() and type_name that can reach an item of the two files.",
+    "`cargo fmt --all -- --check` passes on the candidate, and on Linux and on Windows the candidate's build has no warning that the candidate without this item's contribution lacks, or each such warning is recorded with its cause.",
+    "No test reads or pins source text for this change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [
+    "architecture",
+    "greg-directed",
+    "include-to-mod",
+    "rust",
+    "unscheduled"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a20dcf-bf1e-7b02-8bef-53bb0ce6ced2",
+  "external_ref": null,
+  "title": "A background launcher run started as documented ('launch in background, then end the turn') can fail registration with 409 when the turn ends before the run is published",
+  "outcome": "Observed by Termal::Opus3 on 2026-11-24 at about 13:46Z (TermAl mailbox 03723eab #6090). The w-56f3 c40 focused run, test-9c35b03b (preserved), failed registration before any test ran: 409 \"test run source owner configuration changed before publication\", with a slow state lock (stateInnerWaitMs 1478).\n\nOpus3's reading: the registration fence includes the session's active_turn_generation (src/engram_source_owner.rs:454). Opus3 ended the turn right after starting the run in the Bash tool's background mode, so the generation moved before the launcher published the registration. The slow state lock widened that window.\n\nConflict with the documented procedure:\n- CLAUDE.md (Engram work tracker section) tells a root session to launch a long run in the Bash tool's background mode \"... then end the turn\".\n- docs/test.md says only that the launcher prints TRACKED after registration (lines 499-501). It never tells a session to wait for TRACKED before ending the turn. Waiting for STARTED is documented only for --detach (line 714).\nSo the documented procedure can lose a run's registration whenever host publication is slower than the turn's end.\n\nWorkaround in use: confirm TRACKED in the output before ending the turn.\n\nWanted, one of:\n(a) A registration requested within a turn stays valid if that turn ends before publication, provided source owner, root and claim are unchanged. The generation guard should not refuse a run the same session started legitimately.\n(b) Document the wait: every background-launch instruction says to wait for TRACKED before ending the turn. Any change to CLAUDE.md wording follows its own change rules.\nEstablish first whether active_turn_generation is really the moving field.",
+  "acceptance": [
+    "A background launcher run started as documented ('launch in background, then end the turn') can fail registration with 409 when the turn ends before the run is published is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

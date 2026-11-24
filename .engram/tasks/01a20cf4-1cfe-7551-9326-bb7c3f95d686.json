@@ -1,0 +1,24 @@
+{
+  "id": "01a20cf4-1cfe-7551-9326-bb7c3f95d686",
+  "external_ref": null,
+  "title": "Kill killable descendants of a child stuck in uninterruptible sleep",
+  "outcome": "Kill killable descendants of a child stuck in uninterruptible sleep",
+  "acceptance": [
+    "Kill killable descendants of a child stuck in uninterruptible sleep is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

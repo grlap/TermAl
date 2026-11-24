@@ -1,0 +1,30 @@
+{
+  "id": "01a20e7c-4e16-7b72-997a-d9fda269d9c0",
+  "external_ref": null,
+  "title": "Dragging a tab between two Chrome tabs running TermAl stopped working",
+  "outcome": "A TermAl tab dragged from one Chrome tab (TermAl window) to another lands there again, as it did before the regression.",
+  "acceptance": [
+    "Dragging a TermAl tab from one Chrome tab showing TermAl and dropping it in another Chrome tab showing TermAl moves the tab there, verified in the running app.",
+    "The commit that broke cross-Chrome-tab drag is identified, and a test that fails without the fix covers the transfer path.",
+    "Tab reordering inside one Chrome tab still works."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "greg-reported",
+    "regression",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Withdrawn by Greg, relayed by Engram::Asistant (TermAl mailbox a456e443 #118, 16:56Z), verbatim: \"false alarm, mialem wersje dev i release, dziala wszystko! uff\". He had a dev and a release build open at once; drag and drop between Chrome tabs works. No fix needed.",
+  "completion": null
+}

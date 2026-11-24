@@ -1,0 +1,24 @@
+{
+  "id": "01a20ca4-5942-76a1-9be4-318e056ab501",
+  "external_ref": null,
+  "title": "Failed delegation start results carry the full internal error chain, including host-local paths",
+  "outcome": "Failed delegation start results carry the full internal error chain, including host-local paths",
+  "acceptance": [
+    "Failed delegation start results carry the full internal error chain, including host-local paths is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

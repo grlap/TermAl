@@ -1,0 +1,27 @@
+{
+  "id": "01a20e28-6a87-7841-b57d-9fbc00e13964",
+  "external_ref": null,
+  "title": "A single transient failed index read after a run's record settled can resume its wait without the run's diagnostics",
+  "outcome": "A run wait on a bound run whose record settled resumes with the run's failure diagnostics whenever a later index read could still supply them, rather than giving the record-derived verdict on the first transient failed read.",
+  "acceptance": [
+    "When the index's last good read of a bound run was still running and its next read fails once after the run's record settled, the wait takes the record-derived verdict only once that failure persists past the index's grace (for example read_failures >= 2), so a following successful read supplies the diagnostics; covered by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

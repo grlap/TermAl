@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "run-file-tampering-premise-stopping-rule-2026-11-24",
+    "revision_id": "b2aaf8eca065486abf7a4cb606069d4b",
+    "previous": null,
+    "body_sha256": "d916059166ee98477d8e2b5758826631b64c75a82bbbb272295df60f95f1ea7a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-24T15:58:59.064268200Z"
+    }
+  },
+  "body": "Coordinator stopping rule (Termal::Fable2, 2026-11-24, from w-56f386fdd7d3 after 33 review rounds and 8 evaluations).\n\nThe launcher writes a run's request.json, results.json and other run files, and never rewrites them after its terminal write. A finding that needs those files REWRITTEN or REPLACED by something else after the terminal write is tampering. Under Greg's rule against hypothetical protections, it is not fixed in feature work: it is filed on w-3c1dd299f0f6 (run-file tampering), and the criterion states the premise explicitly, so evaluators judge against it rather than discovering it.\n\nStill in scope and handled normally:\n- removal of the run directory (cleanup, legitimate);\n- files becoming unreadable (permissions, antivirus locks; environment);\n- races between legitimate writers (the launcher, the host).\n\nWhy the rule exists: adversarial file-rewrite scenarios are unbounded. Without a stated premise, every review round can produce another Medium."
+}

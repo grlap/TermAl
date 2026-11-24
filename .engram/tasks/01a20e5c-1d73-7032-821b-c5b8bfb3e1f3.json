@@ -1,0 +1,28 @@
+{
+  "id": "01a20e5c-1d73-7032-821b-c5b8bfb3e1f3",
+  "external_ref": null,
+  "title": "Sessions overview shows '0 working' while delegations (review pairs, evaluators) are running, because hidden delegation children no longer count anywhere",
+  "outcome": "Reported by Greg at about 16:19Z on 2026-11-24, relayed by Engram::Asistant (TermAl mailbox 588693a8 #2648). His Sessions overview showed \"0 working / 103 completed / 3 errors\", and he asked why nobody was working.\n\nFacts, from Fable2's read-only check:\n- The team's root sessions were idle, waiting on delegations: Opus3's round-34 review pair on w-56f3 c47 was running at that moment.\n- Since w-314a5d481df3 landed (fbc6fd0c), delegation children are excluded from the main Sessions list, which is correct and wanted. As a side effect their activity no longer appears in the overview counts, so real work looks like no work.\n\nWanted: the overview shows running delegations without listing them as sessions. For example, a \"N delegations running\" count, or a parent row marked as waiting on N delegations. Greg should be able to tell \"idle because waiting on delegations\" from \"idle with nothing in flight\". w-314a's rule stays: delegation rows stay out of the Sessions list.",
+  "acceptance": [
+    "Sessions overview shows '0 working' while delegations (review pairs, evaluators) are running, because hidden delegation children no longer count anywhere is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

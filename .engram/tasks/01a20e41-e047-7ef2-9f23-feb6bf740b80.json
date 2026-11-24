@@ -1,0 +1,28 @@
+{
+  "id": "01a20e41-e047-7ef2-9f23-feb6bf740b80",
+  "external_ref": null,
+  "title": "Acceptance evaluator on a long-history item spends its per-attempt evidence read allowance before reading the cited records, and ends 'failed' with no verdict",
+  "outcome": "Reported by Engram::Opus in TermAl mailbox 587a65fb #529. It blocks Engram's P0 w-8f127d78e960 from landing.\n\nCall: termal_evaluate_acceptance on Engram w-8f127d78e960, independent_session, Codex gpt-6.2-sol, named root op-limits-8f12-7284 at 9d5163b3. The item has 441 note and gate entries.\n- Attempt 1: delegation-cf5d2e1a, child session-19936, about 15:42Z on 2026-11-24, no criterionEvidence.\n- Attempt 2: delegation-40a7a5da, child session-19937, about 15:46Z, with 16 cited records in criterionEvidence.\nBoth ended \"failed\": \"evidence recovery unfinished; no verdict was sent. the attempt's evidence read allowance is spent.\"\n- Attempt 1 found the key records but ran out before reading them.\n- Attempt 2 got further, but the inventory it needed was in older records it could not reach.\nThe host brief left out 25 entries and clipped 5; 397 older entries went unread (entry_limit).\n\nExpected:\n(1) Requester-cited records (criterionEvidence) are read first and are not charged against the discovery allowance, or the allowance covers them.\n(2) An attempt that runs out of allowance still returns a verdict per criterion, with \"insufficient evidence\" or \"not established\" as a fail-with-reason. It must never end with NO verdict, because that blocks the item without saying what is missing.\n(3) Optionally, a larger allowance, or paging, scaled to the size of the item's history.\n\nWorkaround in use: a consolidated holder note restating the evidence per criterion (Engram note 0de696f566c244d6954b0f2c855ca8ef), then a fresh evaluation that cites it.\n\nOwner: TermAl, which runs the acceptance-evaluation delegation and its read allowance. If the allowance or brief limits come from Engram, coordinate with Engram::Fable.",
+  "acceptance": [
+    "On a long-history item, the independent evaluator can read and use valid requester-cited criterionEvidence records older than the initial brief before optional discovery, without spending the optional discovery allowance on those records. A regression exercises cited evidence beyond the brief's catalog limit.",
+    "When an independent attempt exhausts its evidence discovery allowance on an otherwise current basis, the same attempt can record one verdict per criterion through the normal submission route, using insufficient evidence with a reason for criteria whose proof was not read. Stale evidence, lost authority and unvalidated reads still cannot establish a verdict. A regression exercises quota exhaustion through recorded per-criterion submission and preserves the stale-basis refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "greg-reported-adjacent"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

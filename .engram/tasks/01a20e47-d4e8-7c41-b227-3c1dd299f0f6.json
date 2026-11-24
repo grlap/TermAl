@@ -1,0 +1,27 @@
+{
+  "id": "01a20e47-d4e8-7c41-b227-3c1dd299f0f6",
+  "external_ref": null,
+  "title": "Run files rewritten by something other than the launcher after the run's terminal write: waits and run details may report from the rewritten files",
+  "outcome": "Scoped out of w-56f386fdd7d3 by Termal::Fable2 on 2026-11-24, under Greg's rule against hypothetical protections. The launcher writes a run's request.json, results.json and its other run files, and never rewrites them after its terminal write. A later rewrite or replacement by anything else is tampering.\n\nCases found by the w-56f3 reviewers and kept here (TermAl mailbox 03723eab #6105, round 33 on c46 7132ce0b):\n- MC: a failed bound run is indexed and the producer holds a frozen body. Its results.json is then rewritten to valid terminal JSON without a committed-input section, before the wait's off-lock input read. The first resume says \"none; no committed-input record\" and consumes the wait, while the settlement still completes from the frozen body. Proposed fix, unbuilt: an in-flight-look and frozen-body set in StateInner, so the resume defers or marks instead.\n- MD: an exact detail selection caches the request identity, then test_run_detail re-reads the current files. Replacing request.json and results.json in place with another valid request under the same id before the next rescan attaches the old record to the new artifact's detail. Proposed fix, unbuilt: test_run_detail_read returns the identity it parsed, and a mismatch answers 409 \"test run identity changed during query; retry\".\n\nNOT covered here and handled in w-56f3: removal of the run directory (cleanup), which is legitimate, and files becoming unreadable (permissions, antivirus locks), which is an environment condition.\n\nWanted: decide whether TermAl should defend against run-file tampering at all. If yes, implement the fixes above. If no, close this item with that decision documented in docs/test.md.",
+  "acceptance": [
+    "Run files rewritten by something other than the launcher after the run's terminal write: waits and run details may report from the rewritten files is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-runs",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

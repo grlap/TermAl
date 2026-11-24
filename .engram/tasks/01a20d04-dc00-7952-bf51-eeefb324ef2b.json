@@ -1,0 +1,29 @@
+{
+  "id": "01a20d04-dc00-7952-bf51-eeefb324ef2b",
+  "external_ref": null,
+  "title": "Behaviour test: the stdin-watchdog fallback never kills an owned Codex keeper still in the unfinished set, and the Linux sandbox is adopted by the keeper before teardown",
+  "outcome": "Tests pin that the watchdog fallback routes an unfinished owned server to the keeper-safe end path, and that the Linux tree test covers a sandbox already re-parented to the keeper.",
+  "acceptance": [
+    "A behaviour test registers an owned Codex server over a stand-in child that blocks on its input, ends it, makes the exit cascade fail, drives poll_shared_codex_stdin_watchdog, and shows the child still running and later exiting successfully when its input closes; it uses no timing thresholds.",
+    "On Linux, the delegation process-tree test waits until the sandbox's launcher has exited and the sandbox reports the keeper as its parent before it triggers completion or cancellation, and then shows the tree gone."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

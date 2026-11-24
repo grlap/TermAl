@@ -1,0 +1,27 @@
+{
+  "id": "01a20e05-1f49-78d2-bcf2-c060fdd38a18",
+  "external_ref": null,
+  "title": "A forged terminal results.json in a declared native run can end a run wait as 'files rewritten' before the host publishes its own terminal",
+  "outcome": "A run wait on a declared native run is not ended as 'not sent; files rewritten' by a results.json an agent wrote before the host recorded the run's own terminal, when the host then publishes its terminal and the record settles.",
+  "acceptance": [
+    "A declared native run whose directory holds an agent-written terminal-looking results.json before the host records its terminal does not mark a run wait for its record until the host's own terminal is recorded, or the wait names the settled record once the host's record settles; covered by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -24,7 +24,7 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a2020a-bf6e-7192-b351-05336c2d00a3",
   "child_requirement": "required",
   "prerequisites": [
@@ -33,5 +33,12 @@
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed: master fast-forwarded fbc6fd0c -> af85a417 by Opus2 (06:33:23Z), installed 06:42:49Z (sha256 B12FC11D…). 16 fragments of src/persist.rs are child modules, by scripts/include-to-mod.mjs; review pair clean (adopted from cf81f171 by identical contribution), Linux and Windows full gates passed on the exact commit, warning identity equal to the own parent on both platforms, evaluation 2 passed 6/6 (delegation-5cbf85e4).",
+    "completed_at": "2026-11-24T06:43:11.168511800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

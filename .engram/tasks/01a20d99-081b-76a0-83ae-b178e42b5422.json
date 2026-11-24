@@ -1,0 +1,27 @@
+{
+  "id": "01a20d99-081b-76a0-83ae-b178e42b5422",
+  "external_ref": null,
+  "title": "Run-wait guide labels the no-record ending only as \"not sent\", although a held receipt resumes as \"received, not yet settled\"",
+  "outcome": "docs/features/test-runs.md's second-resume bullet for a run whose request or results no longer make a record says the line reads `not sent`, or `received, not yet settled` with Engram's record ids when Engram already holds the receipt.",
+  "acceptance": [
+    "Run-wait guide labels the no-record ending only as \"not sent\", although a held receipt resumes as \"received, not yet settled\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

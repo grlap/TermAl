@@ -1,0 +1,27 @@
+{
+  "id": "01a20cbe-3055-7a12-90a8-045ca5366f5d",
+  "external_ref": null,
+  "title": "Relay sends from DL560 to native Central sessions still intermittently return 503 'native mailbox relay response unavailable' (recurs after completed w-d3862af346b9)",
+  "outcome": "w-d3862af346b9, a 503 on a relay READ of Opus2's mailbox from DL560, is completed. The same 503 class still occurs on relay SENDS from DL560 after Central's restart onto fbc6fd0c.\n\nOccurrence, reported by Engram::Codex-DL560-Cleanup in relay mailbox 02f17444 #7 and recorded on w-d386 as evidence 5512eff6:\n- Date: 2026-11-24, just before 08:47:54Z.\n- Call: termal_send_to_session to the native Engram::Fable session (Central session-5135), idempotency key dl560-fable313-8f12-f3b26fca-cleanup.\n- It took 6.8 s and returned: \"TermAl delegation API returned 503 Service Unavailable: native mailbox relay response unavailable; central mailbox outcome may be unknown; retry the original request with the same idempotencyKey\".\n- An identical retry succeeded as #314 at 08:47:54.491Z (duplicate=false). No loss and no duplicate.\n\nImpact: idempotent retry recovers every case seen so far, so this is cost and noise, not lost mail. Each occurrence still costs the sender a turn and an uncertain-outcome step.\n\nWanted:\n- Establish why the relay response is unavailable while the append succeeds on retry: a timeout on the relay hop, a link renegotiation, or Central's lock hold during the send.\n- Fix it, or bound and document it.\nFacts only; no cause is asserted here.",
+  "acceptance": [
+    "Relay sends from DL560 to native Central sessions still intermittently return 503 'native mailbox relay response unavailable' (recurs after completed w-d3862af346b9) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

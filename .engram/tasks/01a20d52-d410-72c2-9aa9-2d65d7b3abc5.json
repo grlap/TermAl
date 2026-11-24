@@ -1,0 +1,27 @@
+{
+  "id": "01a20d52-d410-72c2-9aa9-2d65d7b3abc5",
+  "external_ref": null,
+  "title": "Detached focused launcher run: the 'unsupported form' notice arrives only after a 33-minute run completes, and doesn't say whether registered verification credit still follows",
+  "outcome": "Reported by Engram::Merger in TermAl mailbox 5cdad9a7 #567.\n\nReproduction:\n- Named root: C:\\github\\Personal\\Engram\\.worktrees\\postlanding-closure-bb89-b7b3-20261124.\n- At 10:55:37Z on 2026-11-24, ran: `node scripts/test-launcher.mjs focused --input commit --detach --item w-bb8937eae6e5 -- cargo test --lib`\n- The launcher returned STARTED, run test-2e31088e-6a45-4037-8cc5-4c7ba835d3fa. It completed PASS, exit 0, at 11:28:59Z on commit b7b3ab8f, tree cf1fd0cd.\n- Only AFTER completion did TermAl report: \"Unsupported focused launcher form \"...\": --detach is not a foreground focused check; no Test or Build record will follow; use supported foreground launcher options.\"\n\nCode and docs:\n- The notice comes from turn-check recognition (src/engram_check_recognition.rs:610-611).\n- docs/test.md:1438: \"A focused run started with --detach is no test check at all: only a full gate is carried.\"\n- Registered verification (verification_record, docs/test.md:1142-1148) is a separate path.\n\nOpen question, to be established first: did test-2e31088e earn a verification_record? The run was registered with --input commit in the named root.\n\nTwo problems either way:\n(1) Timing: the form is known at launch, but the refusal is reported only after a 33-minute run. It should be reported at launch, before the run starts, or the launcher should refuse the form outright.\n(2) Wording: \"no Test or Build record will follow\" doesn't say whether registered verification credit still follows. Agents read it as lost credit and rerun.\n\nWanted:\n- Report the unsupported form at launch.\n- Make the notice state plainly whether verification_record credit follows for that run.\n- If detached focused registered runs are meant to earn no credit at all, say that in the launcher's refusal and in docs/test.md.",
+  "acceptance": [
+    "Detached focused launcher run: the 'unsupported form' notice arrives only after a 33-minute run completes, and doesn't say whether registered verification credit still follows is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "test-launcher",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

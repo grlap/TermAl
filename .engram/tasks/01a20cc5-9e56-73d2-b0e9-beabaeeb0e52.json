@@ -1,0 +1,27 @@
+{
+  "id": "01a20cc5-9e56-73d2-b0e9-beabaeeb0e52",
+  "external_ref": null,
+  "title": "A run wait's first resume can defer without bound when the index keeps a run Failed while its results stay unreadable",
+  "outcome": "A run wait's first resume can defer without bound when the index keeps a run Failed while its results stay unreadable",
+  "acceptance": [
+    "A run wait's first resume can defer without bound when the index keeps a run Failed while its results stay unreadable is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "run-waits",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a20c6b-a48e-7e23-a348-b0e686a058f3",
+  "external_ref": null,
+  "title": "The turn-close received-notice worker now does nothing but reads files and takes the state lock",
+  "outcome": "The turn-close received-notice worker now does nothing but reads files and takes the state lock",
+  "acceptance": [
+    "The turn-close received-notice worker now does nothing but reads files and takes the state lock is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "cleanup",
+    "notifications",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

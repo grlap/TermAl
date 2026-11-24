@@ -1,0 +1,27 @@
+{
+  "id": "01a20ce2-7f38-78f0-b7f1-18b141354e32",
+  "external_ref": null,
+  "title": "The launcher summary hides a settled verification record when the run's results.json cannot be parsed",
+  "outcome": "The launcher summary hides a settled verification record when the run's results.json cannot be parsed",
+  "acceptance": [
+    "The launcher summary hides a settled verification record when the run's results.json cannot be parsed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "test-launcher",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

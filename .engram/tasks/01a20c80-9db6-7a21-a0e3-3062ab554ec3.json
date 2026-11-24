@@ -1,0 +1,28 @@
+{
+  "id": "01a20c80-9db6-7a21-a0e3-3062ab554ec3",
+  "external_ref": null,
+  "title": "An Engram settings reset racing a prompt handoff can tell a settled verification record a second time",
+  "outcome": "An Engram settings reset racing a prompt handoff can tell a settled verification record a second time",
+  "acceptance": [
+    "An Engram settings reset racing a prompt handoff can tell a settled verification record a second time is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

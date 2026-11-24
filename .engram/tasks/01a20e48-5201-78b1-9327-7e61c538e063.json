@@ -1,0 +1,28 @@
+{
+  "id": "01a20e48-5201-78b1-9327-7e61c538e063",
+  "external_ref": null,
+  "title": "Run-wait wording and detail completeness: an accurate UNKNOWN reason for a record-derived verdict on a Running row, and the detail's record on the global tail and shadowed retained rows",
+  "outcome": "A run wait that takes its verdict from the host's record for a run the index still reads as running gives an accurate UNKNOWN reason rather than \"results unreadable\", and a run's full detail carries the verification record of the artifact it describes wherever that artifact's own registration exists.",
+  "acceptance": [
+    "A run wait resumed from an Indeterminate, refused or locally refused record of a run the index still reads as running with a successful read names an UNKNOWN reason that does not say the results were unreadable; covered by a behaviour test.",
+    "GET /api/test-runs/{id} carries detail.verificationRecord for an artifact served from the global-summary tail or a compacted retained row whose run id now has a different live registration, taken from the registration matching the selection's request identity (live, else the retained row's own); covered by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

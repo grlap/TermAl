@@ -1,0 +1,27 @@
+{
+  "id": "01a20dc7-fda7-77d0-a358-4a085fd1b6b3",
+  "external_ref": null,
+  "title": "view=verification answers 404 \"unknown test run\" for a run the host knows but has not registered",
+  "outcome": "GET /api/test-runs/{id}?view=verification and docs/test.md distinguish a run with no registration (for example a plain-input, hostless or not-yet-published run, which the full detail route does return) from an unknown run. Either the 404 message says the run has no registration, or the docs state that the view knows only registered runs, and that null means a registration exists without an acknowledgement.",
+  "acceptance": [
+    "view=verification answers 404 \"unknown test run\" for a run the host knows but has not registered is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a20d04-c1c7-7382-8415-da2d954a2918",
+  "external_ref": null,
+  "title": "An owned Codex server whose stdin watchdog fails to start keeps its runtime id in the unfinished set for the life of TermAl",
+  "outcome": "When an owned delegation server's start fails after registration, its runtime id leaves the unfinished set once its process has exited, without ever killing the process.",
+  "acceptance": [
+    "When a delegation-owned Codex server fails to start after it was registered (for example the stdin watchdog thread cannot be spawned), its runtime id is removed from the unfinished set once the process TermAl holds has exited, and is never removed while that process is still running; a behaviour test drives that failure and shows the id cleared after the exit."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
