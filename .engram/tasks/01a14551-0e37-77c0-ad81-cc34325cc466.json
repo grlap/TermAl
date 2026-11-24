@@ -13,7 +13,8 @@
   "labels": [
     "acceptance-needed",
     "engram-interop",
-    "work-view"
+    "work-view",
+    "work-visualizer"
   ],
   "assigned_to": null,
   "deferred_until": null,

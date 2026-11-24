@@ -1,0 +1,24 @@
+{
+  "id": "01a20c07-aa59-7b90-af58-68a4f620a775",
+  "external_ref": null,
+  "title": "Unused spawn_codex_runtime in non-test builds after delegation-owned app-servers",
+  "outcome": "Unused spawn_codex_runtime in non-test builds after delegation-owned app-servers",
+  "acceptance": [
+    "Unused spawn_codex_runtime in non-test builds after delegation-owned app-servers is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 1,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Local and owner-classified mirrored delegation children are filtered from the main Sessions surfaces across project and host filters. Ordinary roots and owning-host detail access are retained. The fix retains transcripts, documents the earlier marker loss and introducing commits, and is merged and installed at fbc6fd0c.",
+    "completed_at": "2026-11-24T03:45:39.267233100Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

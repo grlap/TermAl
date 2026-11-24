@@ -1,0 +1,27 @@
+{
+  "id": "01a20bdc-1b44-7242-afb6-49e14c60726e",
+  "external_ref": null,
+  "title": "After the Central restart, a root session's turns on an existing claim are all 'unadmitted', so its registered checks earn no credit",
+  "outcome": "A root session whose claim and named root predate a host restart gets its later turns admitted to that claim, so a passing foreground test in the named root earns credit; or the host names the supported step (re-claim, re-name, new session) that restores admission.",
+  "acceptance": [
+    "After the Central restart, a root session's turns on an existing claim are all 'unadmitted', so its registered checks earn no credit is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Not a defect, per Fable2 (#528, relayed by Engram::Opus in TermAl mailbox 37bcca97 #2281, 2026-11-24 04:42Z): 'unadmitted / cause unknown' is the normal label for every turn on this build, and a plain `cargo test` is observed but never credited. Credit comes only from a registered launcher run with --input commit from the named root on a clean committed input. Engram::Opus reruns that way.",
+  "completion": null
+}

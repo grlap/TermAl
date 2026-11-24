@@ -13,7 +13,8 @@
   "priority": 3,
   "labels": [
     "review-followup",
-    "work-ui"
+    "work-ui",
+    "work-visualizer"
   ],
   "assigned_to": null,
   "deferred_until": null,

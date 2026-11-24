@@ -1,0 +1,32 @@
+{
+  "id": "01a20c1d-9221-7a40-9c10-b657bf4491ca",
+  "external_ref": null,
+  "title": "Work UI: show label groups as a compact overview before expanding tasks",
+  "outcome": "A person opening Labels in the TermAl Work panel can choose an area and see which group needs attention before reading individual tasks.",
+  "acceptance": [
+    "Labels initially shows collapsed, readable group headings with counts calculated from the already filtered rows, including how many tasks are blocked.",
+    "Opening a heading reveals its existing tasks and inline details. A task selected through another Work view remains reachable when switching to Labels.",
+    "Labels retains existing filters, multi-label grouping, and Engram read behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "ui",
+    "work-visualizer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a20bd7-0b99-7be0-8f6f-6a35305f5dd1",
+  "external_ref": null,
+  "title": "The run-wait indicator keeps saying it waits for test runs while a resumed wait follows up a verification record",
+  "outcome": "The run-wait indicator keeps saying it waits for test runs while a resumed wait follows up a verification record",
+  "acceptance": [
+    "The run-wait indicator keeps saying it waits for test runs while a resumed wait follows up a verification record is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "notifications",
+    "test-runs",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a20c3b-cb1f-7352-93e3-a702b21c18b1",
+  "external_ref": null,
+  "title": "Registered foreground focused cargo-test runs stay 'verification received, not settled' while cargo-check runs settle",
+  "outcome": "A registered focused cargo-test launcher run that passes eligibly on the named root settles its verification onto the launch row the same way a cargo-check run does, or the host says why it stays received and what settles it.",
+  "acceptance": [
+    "Registered foreground focused cargo-test runs stay 'verification received, not settled' while cargo-check runs settle is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

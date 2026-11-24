@@ -16,12 +16,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1d626-f425-7c63-9d04-84132b835175",
+  "disposal_reason": "Coordinator spot check by Termal::Fable2 (2026-11-24 about 05:56Z), under the backlog triage w-930e4d333f07, at AstraUI's request relayed by Engram::Asistant in TermAl mailbox 588693a8 #2637.\n- This item's own SUPERSEDED FREEZE note (2026-11-13 18:57Z) records that candidate a4c4e298 would not be gated. I verified that a4c4e298 is not an ancestor of origin/master.\n- The scroll fix itself completed as w-84132b835175, in 491dd015. I verified with `git merge-base --is-ancestor` that 491dd015 is on origin/master.\n- This retires the abandoned integration record. The completed product item is unchanged.",
   "completion": null
 }

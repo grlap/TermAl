@@ -1,0 +1,28 @@
+{
+  "id": "01a20bc2-e35d-70f2-81e7-2bbc77740d37",
+  "external_ref": null,
+  "title": "Settled Codex child release barriers keep a dedicated server's process handle until the session is removed",
+  "outcome": "CodexDelegationRelease::record_archive_origin keeps (runtime_id, Arc<SharedChild>, profile) after the archive settles. With delegation-owned servers each completed child now retains a different exited process (a handle on Windows) until its barrier is replaced or the session removed. Keep the origin process only while an ambiguous archive still needs exit proof.",
+  "acceptance": [
+    "Once a child's archive outcome is known, its release barrier holds no process handle of the server; a behaviour test shows the handle released after a settled archive."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "codex",
+    "delegation",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

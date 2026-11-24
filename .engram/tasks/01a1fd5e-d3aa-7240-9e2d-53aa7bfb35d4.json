@@ -16,12 +16,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1fd9e-2904-7c61-88c3-d33c599c38cc",
+  "disposal_reason": "Coordinator spot check by Termal::Fable2 (2026-11-24 about 05:56Z), under the backlog triage w-930e4d333f07, at AstraUI's request relayed by Engram::Asistant in TermAl mailbox 588693a8 #2637.\n- The integration owner's note 96100323df4b47c69fa68c0fa1c5ccf0 retires combo88 and names w-d33c599c38cc as its successor.\n- The successor's note b50adb3526c84edc90face6ded6904a2 records landing c1f44ca3 after its gate. I verified with `git merge-base --is-ancestor` that c1f44ca3 is on origin/master.\n- This supersedes the old batch record only. The contributions excluded from the successor keep their own items unchanged.",
   "completion": null
 }

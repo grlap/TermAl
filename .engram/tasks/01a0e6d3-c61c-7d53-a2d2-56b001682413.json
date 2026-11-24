@@ -12,7 +12,8 @@
   "priority": 2,
   "labels": [
     "beads-in-progress",
-    "beads-migrated"
+    "beads-migrated",
+    "work-visualizer"
   ],
   "assigned_to": null,
   "deferred_until": null,

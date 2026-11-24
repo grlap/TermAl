@@ -1,0 +1,28 @@
+{
+  "id": "01a20bc2-f680-7561-be83-516cab3d7b6f",
+  "external_ref": null,
+  "title": "Codex home re-seed for a shared launch rewrites files in place under live delegation-owned servers and can hold the state lock",
+  "outcome": "(1) A shared launch re-seeds the profile's Codex home (auth.json, config.toml, models_cache.json and the rules, memories and skills trees, copied in place, not atomically) while delegation-owned servers on the same home are running, so one can read a partly written file or have an auth.json it refreshed overwritten. (2) A delegation launch under the state lock waits on the prepared_homes lock while an off-lock shared seed runs. Fix directions: skip the re-seed while owned servers of the profile are registered, or write through temp files and rename; decide and seed the home before taking the state lock.",
+  "acceptance": [
+    "A shared launch never rewrites a Codex home file in place while a delegation-owned server of that profile runs, and a delegation launch never waits on another launch's home seed while holding the state lock."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "codex",
+    "delegation",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

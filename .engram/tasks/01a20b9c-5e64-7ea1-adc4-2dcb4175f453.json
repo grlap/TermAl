@@ -1,0 +1,27 @@
+{
+  "id": "01a20b9c-5e64-7ea1-adc4-2dcb4175f453",
+  "external_ref": null,
+  "title": "A run waiter learns persist_failed only from a mirror file that can't be written for the same reason",
+  "outcome": "A run wait kept for its verification-record follow-up learns that the host left the record pending (persist_failed or any other reason) from host-owned state, so it resumes even when the run directory's mirror file cannot be written.",
+  "acceptance": [
+    "A run waiter learns persist_failed only from a mirror file that can't be written for the same reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

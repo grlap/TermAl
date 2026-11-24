@@ -1,0 +1,28 @@
+{
+  "id": "01a20c3b-e476-7322-a46a-d161ac4c7d30",
+  "external_ref": null,
+  "title": "A registered foreground focused cargo-test run's verification record stays received and never settles on the host, while check runs settle",
+  "outcome": "A registered foreground focused cargo-test run's verification record stays received and never settles on the host, while check runs settle",
+  "acceptance": [
+    "A registered foreground focused cargo-test run's verification record stays received and never settles on the host, while check runs settle is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "host-recording",
+    "test-runs",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a20c3b-cb1f-7352-93e3-a702b21c18b1",
+  "disposal_reason": "Duplicate: Opus2 filed the same observation as w-a702b21c18b1 a minute earlier (TermAl mailbox f852105e #2652), with a contrast from other sessions' focused runs that did settle. The run ids and the code-reading hypothesis recorded here belong with that item.",
+  "completion": null
+}

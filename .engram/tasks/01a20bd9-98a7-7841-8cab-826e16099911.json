@@ -1,0 +1,31 @@
+{
+  "id": "01a20bd9-98a7-7841-8cab-826e16099911",
+  "external_ref": null,
+  "title": "Linux owned-server drain: /proc scan ignores the drain deadline, and descriptor exhaustion abandons live children",
+  "outcome": "(1) The 30 s drain deadline is checked only after children_of returns, so on a very large process table a scan that crosses the deadline still reads every remaining /proc stat before the stopped server is killed, delaying other queued cleanups on the one worker. (2) Each signalled child keeps its pidfd through the round; under low descriptor headroom later pidfd_open calls get EMFILE and those pids are permanently abandoned, so live children can be orphaned when the server is killed.",
+  "acceptance": [
+    "The /proc enumeration honours the drain deadline and returns a partial result, so the root kill is reached when the budget expires.",
+    "EMFILE on pidfd_open is retried within the deadline after the round's pins are dropped, instead of abandoning the pid; a behaviour test with a lowered descriptor limit shows all children ended."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "linux",
+    "process-cleanup",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

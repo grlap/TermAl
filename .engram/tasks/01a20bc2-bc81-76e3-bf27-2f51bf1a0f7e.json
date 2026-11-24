@@ -1,0 +1,29 @@
+{
+  "id": "01a20bc2-bc81-76e3-bf27-2f51bf1a0f7e",
+  "external_ref": null,
+  "title": "Ending a delegation-owned Codex server needs a new OS thread inside the cleanup worker",
+  "outcome": "kill_child_process calls wait_for_shared_child_exit_timeout, which spawns a thread before sending the kill. Under thread exhaustion a spawn failure panics the owned-server cleanup worker, discarding queued cleanup, and on Linux can leave the current server SIGSTOPped. The prestarted worker could signal the known SharedChild directly and let its existing waiter reap it.",
+  "acceptance": [
+    "Ending a delegation-owned server needs no new thread once the cleanup worker runs; a behaviour test shows teardown completing when thread creation is refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "process-cleanup",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

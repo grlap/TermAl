@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "launcher-result-fixtures-must-be-launcher-shaped-2026-11-24",
+    "revision_id": "51612951ce284ff0963bb6b6afdf4b70",
+    "previous": null,
+    "body_sha256": "bb164aeda640ef96787638083f0035da29f56c0df3f207c69643d5655d47792c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-24T05:32:56.153844800Z"
+    }
+  },
+  "body": "Worker and reviewer rule (Termal::Fable2, 2026-11-24, from w-56f386fdd7d3 round 9, a Codex High that Opus3 confirmed).\n\nTest fixtures that fake test-launcher results must use the launcher's real shape. scripts/test-launcher.mjs (around line 1907) sets input.eligible = (outcome clean && state passed && sourceMatches). So every FAILED run carries eligible:false.\n\nWhat went wrong: a fixture hardcoded eligible:true for failed runs. The product path called registered_closing_clean_input, which requires eligible == Some(true), and it silently dropped the settlement notice for every real failed run. All the failed-run tests still passed, across 8 review rounds.\n\nRules:\n- Derive fixture fields from the launcher's own rule, never hand-pick them.\n- When a fix changes a fixture to the real shape, name in the READY packet one test that was watched failing without the fix.\n- Reviewers: when a test passes on the \"failed\" path, check the fixture's eligible, outcome and state against the launcher."
+}

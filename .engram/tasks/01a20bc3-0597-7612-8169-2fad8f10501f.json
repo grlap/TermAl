@@ -1,0 +1,30 @@
+{
+  "id": "01a20bc3-0597-7612-8169-2fad8f10501f",
+  "external_ref": null,
+  "title": "Regression tests: Codex stdin writer ends after server exit; delegation model refresh starts no owned server",
+  "outcome": "Two behaviours added by the delegation-owned app-server change have no regression test: (1) the stdin writer and its watchdog end after the server exits while the input sender stays alive (ServerExited); (2) a delegation child with SessionRuntime::None refreshing its model list launches no owned server (live_server_count stays 0) and attaches no runtime.",
+  "acceptance": [
+    "A behaviour test shows the Codex stdin writer and watchdog ending after the app-server exits while a sender stays alive.",
+    "A behaviour test shows a delegation child without a runtime refreshing its model list launches no owned server and attaches no runtime."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "review-finding",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

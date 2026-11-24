@@ -16,7 +16,8 @@
     "browser-validation",
     "greg-directed",
     "review-follow-up",
-    "work-ui"
+    "work-ui",
+    "work-visualizer"
   ],
   "assigned_to": null,
   "deferred_until": null,

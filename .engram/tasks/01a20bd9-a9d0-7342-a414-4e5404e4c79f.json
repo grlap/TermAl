@@ -1,0 +1,30 @@
+{
+  "id": "01a20bd9-a9d0-7342-a414-4e5404e4c79f",
+  "external_ref": null,
+  "title": "Process-tree tests should cover the server-only fallback on Linux kernels without pidfds",
+  "outcome": "The codex_delegation_process_tree tests run on every Linux build and require the delegation's descendants to exit. On a kernel without pidfd_open (for example 4.19) the documented production fallback ends only the server, so both tests fail there. Gate the full-tree assertions on the containment capability, and verify the server-only fallback when it is unavailable.",
+  "acceptance": [
+    "On a Linux kernel without pidfd_open the process-tree tests assert the server-only fallback instead of the full-tree outcome, and on kernels with pidfds they keep asserting the full tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "codex",
+    "delegation",
+    "linux",
+    "review-finding",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

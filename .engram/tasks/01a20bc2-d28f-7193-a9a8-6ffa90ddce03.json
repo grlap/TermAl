@@ -1,0 +1,28 @@
+{
+  "id": "01a20bc2-d28f-7193-a9a8-6ffa90ddce03",
+  "external_ref": null,
+  "title": "Codex stdin writer can stay blocked after its server exits when a descendant holds the pipe and a write is in flight",
+  "outcome": "The waiter's ServerExited command queues behind commands already accepted. If a write is in progress, or a command ahead of the marker writes, when the server exits while a surviving descendant still holds the stdin read end, the write can block and the writer never reaches the marker; the watchdog cannot unblock it by ending a server that already exited. Exit could be propagated out of band and writes made interruptible by it.",
+  "acceptance": [
+    "After a Codex app-server exits, its stdin writer ends even when a descendant keeps the pipe's read end open and a write was in flight; a fixture keeping the read end open shows it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "process-cleanup",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

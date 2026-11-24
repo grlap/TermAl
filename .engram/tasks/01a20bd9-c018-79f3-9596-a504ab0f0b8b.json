@@ -1,0 +1,28 @@
+{
+  "id": "01a20bd9-c018-79f3-9596-a504ab0f0b8b",
+  "external_ref": null,
+  "title": "Owned-server drain diagnostics and docs: readdir errors, deadline message, missing-NStgid reason, Linux fail-closed cases",
+  "outcome": "(1) children_of silently skips a /proc readdir entry error, so a partly failed scan can count as clean; count it as unclean or record it. (2) 'the drain ran out of time with children left' is reported even when a round finished with nothing pending at the deadline; report it only for a cut-short or still-pending round. (3) On kernels without NStgid the failure says '/proc is not in this process's PID namespace'; name the real cause. (4) agent-delegation-sessions.md says every descendant ends on Linux, without the fail-closed cases that shared-codex-app-server.md documents (namespace mismatch or missing NStgid, kernels before 5.3, seccomp blocking pidfd_open, unreadable records).",
+  "acceptance": [
+    "A readdir error marks the scan unclean; the deadline message appears only when children were left; the missing-NStgid case reports its real cause; agent-delegation-sessions.md states the Linux fail-closed cases or links them."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "codex",
+    "delegation",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
