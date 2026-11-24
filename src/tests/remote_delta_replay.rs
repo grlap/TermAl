@@ -799,6 +799,21 @@ fn remote_delta_replay_key_includes_state_mutating_payload_fields() {
         }),
         "SessionCreated replay identity must include the session payload"
     );
+    let mut classified_session = session_a.clone();
+    classified_session.mirrored_delegation_child = true;
+    assert_ne!(
+        replay_key(DeltaEvent::SessionCreated {
+            revision: 3,
+            session_id: session_a.id.clone(),
+            session: test_state_session_summary_from_session(&session_a),
+        }),
+        replay_key(DeltaEvent::SessionCreated {
+            revision: 3,
+            session_id: classified_session.id.clone(),
+            session: test_state_session_summary_from_session(&classified_session),
+        }),
+        "a same-revision classification update must not be suppressed as a replay"
+    );
 
     let message_created = |message_text: &str, preview: &str| DeltaEvent::MessageCreated {
         session_seq: None,

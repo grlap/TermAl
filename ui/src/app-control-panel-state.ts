@@ -389,15 +389,16 @@ export function useAppControlPanelState({
     dockedControlPanelNearestSession,
     activeSession,
   ].filter((session): session is Session => Boolean(session));
-  const controlPanelContextSession = selectedProject
-    ? (dockedControlPanelSessionCandidates.find(
-        (session) => session.projectId === selectedProject.id,
-      ) ??
-        projectScopedSessions[0] ??
-        null)
-    : (dockedControlPanelSessionCandidates[0] ??
-      sessionListVisibleSessions[0] ??
-      null);
+  const controlPanelContextSession =
+    dockedControlPanelSessionCandidates.find(
+      (session) => !selectedProject || session.projectId === selectedProject.id,
+    ) ??
+    sessions.find(
+      (session) =>
+        !session.parentDelegationId &&
+        (!selectedProject || session.projectId === selectedProject.id),
+    ) ??
+    null;
   const derivedControlPanelWorkspaceRoot = resolveControlPanelWorkspaceRoot(
     selectedProject,
     controlPanelContextSession?.workdir ?? null,

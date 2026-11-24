@@ -512,6 +512,46 @@ fn persisted_state_reload_keeps_regular_session_visible_when_marker_is_quoted() 
 }
 
 #[test]
+fn persisted_proxy_reload_does_not_infer_a_native_link_from_a_cached_bootstrap() {
+    let root = TestTempRoot::create("cached-proxy-link-boot");
+    for (file_name, cached_parent) in [
+        ("unknown.db", None),
+        ("stale.db", Some("delegation-cached")),
+    ] {
+        let (mut inner, parent_id, proxy_id) = delegation_link_inner();
+        let prompt = build_delegation_prompt(&test_delegation_record(
+            "delegation-cached",
+            &parent_id,
+            &proxy_id,
+        ));
+        push_text_message(&mut inner, &proxy_id, Author::You, prompt.clone());
+        let proxy_index = inner.find_session_index(&proxy_id).unwrap();
+        let proxy = inner.session_mut_by_index(proxy_index).unwrap();
+        proxy.remote_id = Some("offline-owner".to_owned());
+        proxy.remote_session_id = Some(proxy_id.clone());
+        proxy.session.parent_delegation_id = cached_parent.map(str::to_owned);
+
+        let path = root.join(file_name);
+        persist_state(&path, &inner).expect("persist cached proxy");
+        let restored = load_state(&path)
+            .expect("reload cached proxy")
+            .expect("state exists");
+        let proxy_index = restored.find_session_index(&proxy_id).unwrap();
+        let proxy = &restored.sessions[proxy_index];
+        assert!(proxy.is_remote_proxy());
+        let summary = AppState::wire_session_summary_from_record("local-instance", proxy);
+        assert!(summary.parent_delegation_id.is_none());
+        assert!(!summary.mirrored_delegation_child);
+        let detail = AppState::wire_session_from_record("local-instance", proxy);
+        assert!(detail.parent_delegation_id.is_none());
+        assert!(matches!(
+            detail.messages.first(),
+            Some(Message::Text { text, .. }) if text == &prompt
+        ));
+    }
+}
+
+#[test]
 fn repair_delegation_child_session_links_skips_already_correct_link_without_bumping_stamp() {
     let (mut inner, parent_id, child_id) = delegation_link_inner();
     let delegation_id = "delegation-link-test";

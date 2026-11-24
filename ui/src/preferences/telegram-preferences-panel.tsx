@@ -23,7 +23,6 @@ import {
   normalizeTelegramUiConfig,
   type ComboboxOption,
 } from "../session-model-utils";
-import { isSessionVisibleInSessionList } from "../session-list-filter";
 import { ThemedCombobox } from "./themed-combobox";
 
 type TelegramSettingsDraft = {
@@ -270,7 +269,7 @@ export function TelegramPreferencesPanel({
         (session) =>
           draft.defaultProjectId &&
           session.projectId === draft.defaultProjectId &&
-          isSessionVisibleInSessionList(session),
+          !session.parentDelegationId,
       ),
     [draft.defaultProjectId, sessions],
   );

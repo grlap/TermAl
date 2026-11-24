@@ -273,6 +273,7 @@ impl StateInner {
                 queue_projection_hash: None,
                 session_mutation_stamp: None,
                 parent_delegation_id: None,
+                mirrored_delegation_child: false,
             },
         };
 
@@ -315,7 +316,7 @@ impl StateInner {
         mut links: BTreeMap<String, String>,
     ) {
         for record in &self.sessions {
-            if links.contains_key(&record.session.id) {
+            if !record.is_local_session() || links.contains_key(&record.session.id) {
                 continue;
             }
             if let Some(delegation_id) = delegation_id_from_child_session_marker(record) {
@@ -324,6 +325,11 @@ impl StateInner {
         }
 
         for child_index in 0..self.sessions.len() {
+            // The owning host classifies a proxy. A cached bootstrap can
+            // contain an upstream session id equal to this host's proxy id.
+            if !self.sessions[child_index].is_local_session() {
+                continue;
+            }
             let child_session_id = self.sessions[child_index].session.id.clone();
             let expected_delegation_id = links.get(&child_session_id);
             if let Some(delegation_id) = expected_delegation_id {

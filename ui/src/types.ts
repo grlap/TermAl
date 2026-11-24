@@ -438,6 +438,7 @@ export type Session = {
   queueProjectionHash?: string | null;
   sessionMutationStamp?: number | null;
   parentDelegationId?: string | null;
+  mirroredDelegationChild?: boolean;
   /** Upstream per-session body snapshot sequence; absent on older peers. */
   bodySeq?: number;
   bodySeqEpoch?: string;
@@ -1246,6 +1247,7 @@ export type SessionCreatedEvent = {
   revision: number;
   sessionId: string;
   session: StateSessionSummary;
+  mirroredDelegationChildIds?: string[];
 };
 
 export type CommandUpdateEvent = {
@@ -1330,6 +1332,7 @@ export type OrchestratorsUpdatedEvent = {
   revision: number;
   orchestrators: OrchestratorInstance[];
   sessions?: StateSessionSummary[];
+  mirroredDelegationChildIds?: string[];
 };
 
 export type DelegationCreatedEvent = {

@@ -78,6 +78,7 @@ export type StateResponse = {
   orchestrators: OrchestratorInstance[];
   workspaces: WorkspaceLayoutSummary[];
   sessions: StateSessionSummary[];
+  mirroredDelegationChildIds?: string[];
   delegations?: DelegationStateSummary[];
   delegationWaits?: DelegationWaitRecord[];
   /** Sessions whose current Stop owner will finish an Engram MCP revocation. */

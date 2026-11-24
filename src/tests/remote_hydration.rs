@@ -299,6 +299,7 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
     .into();
     remote_session.messages_loaded = true;
     remote_session.message_count = 1;
+    remote_session.parent_delegation_id = Some("delegation-41".to_owned());
 
     let mut delta_receiver = state.subscribe_delta_events();
     state
@@ -327,7 +328,11 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
     let payload = delta_receiver
         .try_recv()
         .expect("localized sessionCreated delta should be published");
-    let delta: DeltaEvent = serde_json::from_str(&payload).expect("delta should decode");
+    let legacy: DeltaEvent = serde_json::from_str(&payload)
+        .expect("strict summary rows must decode without envelope support");
+    assert_eq!(legacy.session_summaries()[0].id, local_session_id);
+    let delta = remote_sync::remote_summary_compat::decode_delta_event(&payload)
+        .expect("delta with mirror classification should decode");
     match delta {
         DeltaEvent::SessionCreated {
             revision,
@@ -338,6 +343,8 @@ fn remote_session_created_delta_republishes_metadata_only_session_summary() {
             assert_eq!(session_id, local_session_id);
             assert_eq!(session.id, local_session_id);
             assert_eq!(session.message_count, stored_message_count);
+            assert!(session.mirrored_delegation_child);
+            assert!(session.parent_delegation_id.is_none());
         }
         _ => panic!("expected sessionCreated delta"),
     }
@@ -975,6 +982,7 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
         record.session.id.clone()
     };
 
+    full_remote_session.parent_delegation_id = Some("delegation-42".to_owned());
     let (port, requests, server) = spawn_remote_session_response_server(SessionResponse {
         revision: 3,
         session: full_remote_session,
@@ -1022,6 +1030,19 @@ fn get_session_hydrates_unloaded_remote_proxy_from_remote_owner() {
     );
     join_test_server(server);
 
+    assert!(response.session.mirrored_delegation_child);
+    assert!(stored.mirrored_delegation_child);
+    assert!(response.session.parent_delegation_id.is_none());
+    assert!(stored.parent_delegation_id.is_none());
+
+    // Telegram reads the broad state wire payload to resolve an explicit target.
+    let telegram_state: TelegramStateSessionsResponse =
+        serde_json::from_value(serde_json::to_value(state.summary_snapshot()).unwrap()).unwrap();
+    assert_eq!(
+        find_telegram_project_session(&telegram_state, &local_project_id, &local_session_id)
+            .map(|session| session.id.as_str()),
+        Some(local_session_id.as_str())
+    );
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 
@@ -2513,6 +2534,7 @@ fn remote_session_create_forwards_configured_default_model() {
         queue_projection_hash: None,
         session_mutation_stamp: None,
         parent_delegation_id: None,
+        mirrored_delegation_child: false,
     };
     let remote_response = serde_json::to_string(&CreateSessionResponse {
         session_id: remote_session.id.clone(),
@@ -3378,25 +3400,34 @@ fn remote_summary_state_snapshot_preserves_existing_proxy_transcript() {
         .cloned()
         .expect("local proxy should be present in snapshot");
     remote_session.id = "remote-session-1".to_owned();
-    remote_session.preview = "Summary-only remote update.".to_owned();
     remote_session.session_mutation_stamp = Some(42);
+    remote_session.parent_delegation_id = Some("delegation-43".to_owned());
     remote_state.sessions = vec![remote_session];
 
     state
         .apply_remote_state_snapshot(&remote.id, remote_state)
         .expect("summary remote snapshot should apply");
 
-    let inner = state.inner.lock().expect("state mutex poisoned");
-    let record = inner
-        .find_session_index(&local_session_id)
-        .and_then(|index| inner.sessions.get(index))
-        .expect("local proxy should remain");
-    assert_eq!(record.session.preview, "Summary-only remote update.");
-    assert!(record.session.messages_loaded);
-    assert_eq!(record.session.messages.len(), 1);
-    assert_eq!(record.session.messages[0].id(), "message-1");
-    assert_eq!(record.message_positions.get("message-1").copied(), Some(0));
+    {
+        let inner = state.inner.lock().expect("state mutex poisoned");
+        let record = inner
+            .find_session_index(&local_session_id)
+            .and_then(|index| inner.sessions.get(index))
+            .expect("local proxy should remain");
+        assert!(record.session.messages_loaded);
+        assert_eq!(record.session.messages.len(), 1);
+        assert_eq!(record.session.messages[0].id(), "message-1");
+        assert_eq!(record.message_positions.get("message-1").copied(), Some(0));
+    }
 
+    let updated = state.summary_snapshot();
+    let proxy = updated
+        .sessions
+        .iter()
+        .find(|session| session.id == local_session_id)
+        .expect("local proxy should remain in the published snapshot");
+    assert!(proxy.mirrored_delegation_child);
+    assert!(proxy.parent_delegation_id.is_none());
     let _ = fs::remove_file(state.persistence_path.as_path());
 }
 

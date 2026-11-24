@@ -594,12 +594,17 @@ impl AppState {
         }
     }
 
-    fn remote_delta_session_payload_fingerprint(session: &StateSessionSummary) -> Option<String> {
+    fn remote_delta_session_projection(session: &StateSessionSummary) -> Option<(String, bool)> {
         let mut normalized = session.clone();
         // `localize_remote_session` discards inbound wire ownership, so replay
         // identity must ignore it too.
         normalized.remote_id = None;
-        Self::remote_delta_payload_fingerprint(&normalized)
+        // Classification travels beside the wire summary and so is not
+        // included in its existing fingerprint.
+        Some((
+            Self::remote_delta_payload_fingerprint(&normalized)?,
+            normalized.mirrored_delegation_child,
+        ))
     }
 
     fn remote_delta_text_fingerprint(payload: &str) -> String {
@@ -624,7 +629,7 @@ impl AppState {
             } => RemoteDeltaReplayPayload::SessionCreated {
                 session_id: session_id.clone(),
                 message_count: session.message_count,
-                session_fingerprint: Self::remote_delta_session_payload_fingerprint(session)?,
+                session_projection: Self::remote_delta_session_projection(session)?,
                 session_mutation_stamp: session.session_mutation_stamp,
             },
             DeltaEvent::MessageCreated {
@@ -849,9 +854,9 @@ impl AppState {
                     .iter()
                     .map(Self::remote_delta_payload_fingerprint)
                     .collect::<Option<Vec<_>>>()?,
-                session_fingerprints: sessions
+                session_projections: sessions
                     .iter()
-                    .map(Self::remote_delta_session_payload_fingerprint)
+                    .map(Self::remote_delta_session_projection)
                     .collect::<Option<Vec<_>>>()?,
             },
             DeltaEvent::DelegationCreated { .. }

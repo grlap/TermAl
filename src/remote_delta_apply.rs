@@ -1644,6 +1644,28 @@ impl AppState {
                         inner.orchestrator_instances = rollback_state.2.into();
                         return Err(err);
                     }
+                    // Orchestrator localization only resolves existing proxy IDs.
+                    // Adopt the supplied classification without replacing their
+                    // cached metadata or transcript.
+                    for summary in &sessions {
+                        if inner.should_skip_remote_session_applied_delta_revision(
+                            remote_id,
+                            &summary.id,
+                            remote_revision,
+                        ) {
+                            continue;
+                        }
+                        let Some(index) = inner.find_remote_session_index(remote_id, &summary.id)
+                        else {
+                            continue;
+                        };
+                        let classified = summary.is_delegation_child_for_mirror();
+                        let session = &mut inner.sessions[index].session;
+                        if session.mirrored_delegation_child != classified {
+                            session.mirrored_delegation_child = classified;
+                            inner.stamp_session_at_index(index);
+                        }
+                    }
                     let revision = self.commit_remote_delta_persisted_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
                     (revision, inner.orchestrator_instances.clone())

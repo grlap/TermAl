@@ -82,7 +82,7 @@ import {
   areTelegramUiConfigsEqual,
   resolveAppPreferences,
 } from "./session-model-utils";
-import { resolveAdoptedStateSlices } from "./state-adoption";
+import { applyMirroredDelegationChildIds, resolveAdoptedStateSlices } from "./state-adoption";
 import { useStableEvent } from "./panels/use-stable-event";
 import { applyTestRunDelta, reconcileTestRunSnapshot, type TestRunSummary } from "./test-runs";
 import { NO_TEST_RUN_ACTIVITIES, type TestRunActivities, type TestRunOverview, type TestRunViewRevision } from "./test-run-overview";
@@ -1694,7 +1694,7 @@ export function useAppLiveState(
       options?.openSessionId ?? pendingRecoveryOpenSessionIdRef.current;
     adoptSessions(
       applyDelegationParentIdsFromSummaries(
-        nextState.sessions,
+        applyMirroredDelegationChildIds(nextState.sessions, nextState.mirroredDelegationChildIds),
         nextState.delegations ?? [],
       ),
       resolveAdoptStateSessionOptions(options, fullStateServerInstanceChanged),
@@ -1871,7 +1871,10 @@ export function useAppLiveState(
     // Read before adoptSessions, which may consume the pending open.
     const requestedOpenSessionId = pendingRecoveryOpenSessionIdRef.current;
     adoptSessions(
-      applyDelegationParentIdsFromSummaries(diff.sessions.changed, delegations),
+      applyDelegationParentIdsFromSummaries(
+        applyMirroredDelegationChildIds(diff.sessions.changed, diff.sessions.mirroredDelegationChildIds),
+        delegations,
+      ),
       resolveAdoptStateSessionOptions(undefined, false),
       { removed: diff.sessions.removed, order: diff.sessions.order },
     );

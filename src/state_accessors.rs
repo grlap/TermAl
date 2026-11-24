@@ -200,6 +200,7 @@ mod visible_session_hydration_error_tests {
             queue_projection_hash: Some("remote-queue-projection".to_owned()),
             session_mutation_stamp: Some(7),
             parent_delegation_id: None,
+            mirrored_delegation_child: false,
         };
         state
             .apply_remote_delta_event(
@@ -746,6 +747,7 @@ impl AppState {
             },
             session_mutation_stamp: Some(record.mutation_stamp),
             parent_delegation_id: session.parent_delegation_id.clone(),
+            mirrored_delegation_child: session.mirrored_delegation_child,
         };
         normalize_body_sequence_pair(&mut summary.body_seq, &mut summary.body_seq_epoch);
         Self::debug_assert_session_summary_matches_full_projection(
@@ -814,6 +816,10 @@ impl AppState {
         debug_assert_eq!(summary.markers, full.markers);
         debug_assert_eq!(summary.session_mutation_stamp, full.session_mutation_stamp);
         debug_assert_eq!(summary.parent_delegation_id, full.parent_delegation_id);
+        debug_assert_eq!(
+            summary.mirrored_delegation_child,
+            full.mirrored_delegation_child
+        );
     }
 
     #[cfg(not(debug_assertions))]
@@ -1301,6 +1307,9 @@ impl AppState {
             session.test_run_activity =
                 SessionTestRunActivitySnapshot::captured(projection.clone(), &session.id);
         }
+        let mirrored_delegation_child_ids = mirrored_delegation_child_ids(&sessions)
+            .map(str::to_owned)
+            .collect();
         StateResponse {
             remote_transport_statuses: self.remote_registry.transport_statuses(),
             revision: inner.revision,
@@ -1312,6 +1321,7 @@ impl AppState {
             orchestrators: inner.orchestrator_instances.clone(),
             workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
             sessions,
+            mirrored_delegation_child_ids,
             delegations: inner
                 .delegations
                 .iter()

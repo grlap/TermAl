@@ -2726,7 +2726,7 @@ describe("App workspace layout", () => {
     ).toBe(unrelatedError);
   });
 
-  it("prunes delegated child tabs from a fetched workspace layout after state loads", async () => {
+  it("prunes native child tabs and keeps mirrored child tabs in a fetched layout", async () => {
     const fetchWorkspaceLayoutDeferred = createDeferred<Awaited<
       ReturnType<typeof api.fetchWorkspaceLayout>
     > | null>();
@@ -2769,6 +2769,11 @@ describe("App workspace layout", () => {
                     kind: "session",
                     sessionId: "session-parent",
                   },
+                  {
+                    id: "tab-remote-child",
+                    kind: "session",
+                    sessionId: "session-remote-child",
+                  },
                 ],
                 activeTabId: "tab-child",
                 activeSessionId: "session-child",
@@ -2803,6 +2808,11 @@ describe("App workspace layout", () => {
             name: "Delegated Reviewer",
             parentDelegationId: "delegation-1",
           }),
+          makeSession("session-remote-child", {
+            name: "Remote Reviewer",
+            remoteId: "Mac",
+            mirroredDelegationChild: true,
+          }),
         ],
       }),
     );
@@ -2812,6 +2822,9 @@ describe("App workspace layout", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("tab", { name: "Parent Session" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Remote Reviewer" }),
     ).toBeInTheDocument();
 
     const workspaceViewId = new URL(window.location.href).searchParams.get(
@@ -2831,7 +2844,7 @@ describe("App workspace layout", () => {
           tab.kind === "session" ? [tab.sessionId] : [],
         ),
     );
-    expect(persistedSessionIds).toEqual(["session-parent"]);
+    expect(persistedSessionIds).toEqual(["session-parent", "session-remote-child"]);
   });
 
   it("prunes delegated child tabs from a locally restored workspace layout after state loads", async () => {

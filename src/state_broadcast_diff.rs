@@ -147,6 +147,11 @@ where
 #[derive(Serialize)]
 pub(crate) struct StateDiffSessions<'a> {
     pub(crate) changed: Vec<&'a StateSessionSummary>,
+    #[serde(
+        rename = "mirroredDelegationChildIds",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub(crate) mirrored_delegation_child_ids: Vec<&'a str>,
     pub(crate) removed: Vec<&'a str>,
     /// The full id sequence, present only when membership or order changed.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -222,6 +227,7 @@ pub(crate) fn state_diff_payload<'a>(
         workspaces,
         // A cut's header lists no sessions; `cut.sessions` holds them.
         sessions: _,
+        mirrored_delegation_child_ids: _,
         delegations,
         delegation_waits,
         test_run_overview,
@@ -233,7 +239,7 @@ pub(crate) fn state_diff_payload<'a>(
         .iter()
         .map(|session| (session.id.as_str(), session))
         .collect();
-    let changed = cut
+    let changed: Vec<_> = cut
         .sessions
         .iter()
         .filter(|session| {
@@ -273,6 +279,8 @@ pub(crate) fn state_diff_payload<'a>(
             pending_engram_mcp_revocation_session_ids,
         },
         sessions: StateDiffSessions {
+            mirrored_delegation_child_ids: mirrored_delegation_child_ids(changed.iter().copied())
+                .collect(),
             changed,
             removed: state_diff_removed_keys(
                 base.sessions.iter().map(|session| session.id.as_str()),

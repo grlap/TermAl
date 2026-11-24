@@ -2,7 +2,7 @@
 // The canonical wire types stay strict; no discarded value reaches apply logic.
 use crate::{
     CreateOrchestratorInstanceResponse, CreateProjectResponse, DeltaEvent, OrchestratorInstance,
-    StateEventPayload, StateResponse,
+    StateEventPayload, StateResponse, apply_mirrored_delegation_child_ids,
 };
 use serde::de::{DeserializeOwned, MapAccess, Visitor};
 use serde::ser::SerializeMap;
@@ -81,10 +81,27 @@ fn decode_snapshot<T: DeserializeOwned>(payload: &str) -> serde_json::Result<T> 
 }
 
 pub(crate) fn decode_state_event(payload: &str) -> serde_json::Result<StateEventPayload> {
-    decode_snapshot(payload)
+    let mut event: StateEventPayload = decode_snapshot(payload)?;
+    restore_mirror_classification(&mut event.state);
+    Ok(event)
 }
 
 pub(crate) fn decode_delta_event(payload: &str) -> serde_json::Result<DeltaEvent> {
+    let mut event = decode_delta(payload)?;
+    if !event.session_summaries().is_empty() {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct MirrorClassification {
+            #[serde(default)]
+            mirrored_delegation_child_ids: Vec<String>,
+        }
+        let classification: MirrorClassification = serde_json::from_str(payload)?;
+        event.restore_mirror_classification(&classification.mirrored_delegation_child_ids);
+    }
+    Ok(event)
+}
+
+fn decode_delta(payload: &str) -> serde_json::Result<DeltaEvent> {
     // Current peers, especially streaming text deltas, keep the direct path.
     if let Ok(delta) = serde_json::from_str(payload) {
         return Ok(delta);
@@ -114,6 +131,10 @@ pub(crate) fn decode_delta_event(payload: &str) -> serde_json::Result<DeltaEvent
     serde_json::from_str(&serde_json::to_string(&object)?)
 }
 
+fn restore_mirror_classification(state: &mut StateResponse) {
+    apply_mirrored_delegation_child_ids(&mut state.sessions, &state.mirrored_delegation_child_ids);
+}
+
 // Decode every inbound remote state response inside request_json's existing
 // lease checks, including snapshots nested in creation responses.
 pub(crate) struct RemoteStateResponse(pub(crate) StateResponse);
@@ -121,9 +142,9 @@ pub(crate) struct RemoteStateResponse(pub(crate) StateResponse);
 impl<'de> Deserialize<'de> for RemoteStateResponse {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = Box::<RawValue>::deserialize(deserializer)?;
-        decode_snapshot(raw.get())
-            .map(Self)
-            .map_err(serde::de::Error::custom)
+        let mut state = decode_snapshot(raw.get()).map_err(serde::de::Error::custom)?;
+        restore_mirror_classification(&mut state);
+        Ok(Self(state))
     }
 }
 

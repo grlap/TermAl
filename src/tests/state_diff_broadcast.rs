@@ -228,6 +228,8 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
 
     let b_changed = Arc::new(StateSessionSummary {
         name: "Renamed".to_owned(),
+        remote_id: Some("other-host".to_owned()),
+        mirrored_delegation_child: true,
         ..(*b).clone()
     });
     let mut updated_cut = cut(11, &[&a, &b_changed]);
@@ -242,6 +244,10 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
     assert_eq!(diff["serverInstanceId"], DIFF_INSTANCE);
     assert_eq!(ids(&diff["sessions"]["changed"], "id"), ["b"]);
     assert_eq!(diff["sessions"]["changed"][0]["name"], "Renamed");
+    assert_eq!(diff["sessions"]["mirroredDelegationChildIds"], json!(["b"]));
+    let strict_summary: StateSessionSummary =
+        serde_json::from_value(diff["sessions"]["changed"][0].clone()).unwrap();
+    assert_eq!(strict_summary.id, "b");
     assert!(keys(&diff["sessions"]["removed"]).is_empty());
     assert!(diff["sessions"].get("order").is_none());
     // Every header slice is absolute in every diff, even when empty.
@@ -259,6 +265,7 @@ fn state_diff_without_a_base_sends_a_full_state_then_diffs_from_it() {
         assert!(diff["header"].get(slice).is_some(), "header slice {slice}");
     }
     let full = serde_json::to_value(cut(11, &[&a, &b_changed]).materialize()).unwrap();
+    assert_eq!(full["mirroredDelegationChildIds"], json!(["b"]));
     assert_eq!(diff["header"]["preferences"], full["preferences"]);
     assert_eq!(diff["header"]["codex"], full["codex"]);
     assert_eq!(

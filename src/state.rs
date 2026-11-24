@@ -752,7 +752,26 @@ impl StateBroadcastSenders {
     }
 
     pub(crate) fn send_delta_event(&self, event: &DeltaEvent) -> bool {
-        let payload = match encode_sse_json("delta", event) {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ClassifiedDelta<'a> {
+            #[serde(flatten)]
+            event: &'a DeltaEvent,
+            mirrored_delegation_child_ids: Vec<&'a str>,
+        }
+        let ids = mirrored_delegation_child_ids(event.session_summaries()).collect::<Vec<_>>();
+        let encoded = if ids.is_empty() {
+            encode_sse_json("delta", event)
+        } else {
+            encode_sse_json(
+                "delta",
+                &ClassifiedDelta {
+                    event,
+                    mirrored_delegation_child_ids: ids,
+                },
+            )
+        };
+        let payload = match encoded {
             Ok(payload) => payload,
             Err(error) => {
                 observe_output_limit("sse_delta", &error, Some(event.revision()));
@@ -899,6 +918,7 @@ mod state_broadcast_mailbox_tests {
             orchestrators: Vec::new(),
             workspaces: Vec::new(),
             sessions: Vec::new(),
+            mirrored_delegation_child_ids: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
             test_run_overview: TestRunOverviewSnapshot::default(),
@@ -997,7 +1017,7 @@ pub(crate) enum RemoteDeltaReplayPayload {
     SessionCreated {
         session_id: String,
         message_count: u32,
-        session_fingerprint: String,
+        session_projection: (String, bool),
         session_mutation_stamp: Option<u64>,
     },
     MessageCreated {
@@ -1107,7 +1127,7 @@ pub(crate) enum RemoteDeltaReplayPayload {
     },
     OrchestratorsUpdated {
         orchestrator_fingerprints: Vec<String>,
-        session_fingerprints: Vec<String>,
+        session_projections: Vec<(String, bool)>,
     },
 }
 
@@ -2230,10 +2250,19 @@ impl StateInner {
     ) -> bool {
         self.should_skip_remote_applied_delta_revision(remote_id, remote_revision)
             || self
-                .remote_session_transcript_applied_revisions
-                .get(remote_id)
-                .and_then(|sessions| sessions.get(remote_session_id))
-                .is_some_and(|latest_revision| *latest_revision >= remote_revision)
+                .remote_session_transcript_applied_revision(remote_id, remote_session_id)
+                .is_some_and(|latest_revision| latest_revision >= remote_revision)
+    }
+
+    pub(crate) fn remote_session_transcript_applied_revision(
+        &self,
+        remote_id: &str,
+        remote_session_id: &str,
+    ) -> Option<u64> {
+        self.remote_session_transcript_applied_revisions
+            .get(remote_id)
+            .and_then(|sessions| sessions.get(remote_session_id))
+            .copied()
     }
 
     /// Records the latest applied remote revision for a mirrored remote.

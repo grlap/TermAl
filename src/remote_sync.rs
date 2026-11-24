@@ -328,6 +328,11 @@ fn sync_remote_state_inner(
         let Some(remote_session) = remote_sessions_by_id.get(remote_session_id.as_str()) else {
             continue;
         };
+        // A focused tail can apply a newer classification before the broad
+        // snapshot watermark catches up. Keep that flag on an older cut.
+        let preserve_classification = inner
+            .remote_session_transcript_applied_revision(remote_id, &remote_session_id)
+            .is_some_and(|revision| revision > remote_state.revision);
         // The mirror always takes the remote summary. It is stamped only
         // when something a stamp consumer observes changed: a broad snapshot
         // carries every mirrored session, so stamping unchanged ones would
@@ -339,12 +344,16 @@ fn sync_remote_state_inner(
             continue;
         };
         let before = RemoteProxyChangeView::capture(record);
+        let previous_classification = record.session.mirrored_delegation_child;
         apply_remote_session_summary_to_record(
             record,
             remote_id,
             local_project_id.map(LocalProjectId::into_inner),
             remote_session,
         );
+        if preserve_classification {
+            record.session.mirrored_delegation_child = previous_classification;
+        }
         if before.differs_from(&RemoteProxyChangeView::capture(record)) {
             inner.stamp_session_at_index(idx);
         }
@@ -963,6 +972,8 @@ pub(crate) fn localize_remote_session(
         .collect();
     // Delegation records are intentionally not mirrored across remotes in this
     // phase, so a remote child link would be dangling in the local proxy state.
+    session.mirrored_delegation_child =
+        remote_session.mirrored_delegation_child || remote_session.parent_delegation_id.is_some();
     session.parent_delegation_id = None;
     session
 }
@@ -1048,6 +1059,7 @@ pub(crate) fn localize_remote_session_summary(
         session_mutation_stamp: remote_session.session_mutation_stamp,
         // Delegation records are intentionally not mirrored across remotes.
         parent_delegation_id: None,
+        mirrored_delegation_child: remote_session.is_delegation_child_for_mirror(),
     }
 }
 

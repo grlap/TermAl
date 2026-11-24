@@ -277,10 +277,11 @@ function sameSessionSummary(previous: Session, next: Session) {
   );
 }
 
-// These flags affect pane controls even when a legacy peer has no stamp or
-// record-derived state changes under the same stamp. Omission means false.
+// These flags affect pane controls and list visibility when a legacy peer has
+// no stamp or record-derived state changes under the same stamp. Omission means false.
 function sameSessionControlFlags(previous: Session, next: Session) {
   return (
+    Boolean(previous.mirroredDelegationChild) === Boolean(next.mirroredDelegationChild) &&
     Boolean(previous.queuePaused) === Boolean(next.queuePaused) &&
     Boolean(previous.providerCapacityWaiting) === Boolean(next.providerCapacityWaiting) &&
     Boolean(previous.sourceTrackingRecovery) === Boolean(next.sourceTrackingRecovery)

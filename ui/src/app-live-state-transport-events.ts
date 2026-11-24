@@ -37,6 +37,7 @@ import {
   staleSendRecoveryPollSessionIdsForDelta,
 } from "./app-live-state-delta-events";
 import { mergeOrchestratorDeltaSessions } from "./control-surface-state";
+import { applyMirroredDelegationChildIds } from "./state-adoption";
 import {
   createStateEventProfiler,
   extractTopLevelJsonNumber,
@@ -493,6 +494,17 @@ export function createAppLiveStateTransportEventHandlers(
 
     try {
       const delta = JSON.parse(event.data) as DeltaEvent;
+      if (
+        delta.type === "sessionCreated" &&
+        delta.mirroredDelegationChildIds?.includes(delta.session.id)
+      ) {
+        delta.session.mirroredDelegationChild = true;
+      } else if (delta.type === "orchestratorsUpdated" && delta.sessions) {
+        delta.sessions = applyMirroredDelegationChildIds(
+          delta.sessions,
+          delta.mirroredDelegationChildIds,
+        );
+      }
       const currentRevision = latestStateRevisionRef.current;
       if (isBodyDelta(delta)) {
         const beforeBody = sessionsRef.current;

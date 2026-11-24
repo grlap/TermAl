@@ -51,6 +51,7 @@ export type StateDiffEvent = {
   serverInstanceId: string;
   header: StateDiffHeader;
   sessions: StateDiffRows<StateSessionSummary> & {
+    mirroredDelegationChildIds?: string[];
     /** Present only when membership or order changed against the base. */
     order?: string[];
   };

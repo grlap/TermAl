@@ -35,7 +35,21 @@ import type {
   CodexState,
   OrchestratorInstance,
   Project,
+  StateSessionSummary,
 } from "./types";
+
+// Broad wire summaries omit classification so strict older peers can read
+// them. The snapshot or event carries the IDs alongside its summary rows.
+export function applyMirroredDelegationChildIds(
+  summaries: StateSessionSummary[],
+  ids: readonly string[] | undefined,
+): StateSessionSummary[] {
+  if (!ids?.length) return summaries;
+  const classified = new Set(ids);
+  return summaries.map((summary) =>
+    classified.has(summary.id) ? { ...summary, mirroredDelegationChild: true } : summary,
+  );
+}
 
 export function resolveRecoveredWorkspaceLayoutRequestError(
   currentRequestError: string | null,

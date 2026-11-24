@@ -141,7 +141,7 @@ describe("session panel host filtering", () => {
     expect(rowNames(docked)).toEqual(["Local"]);
   });
 
-  it.each(["docked", "standalone"])("combines host, project and search in the %s list", async kind => {
+  it.each(["docked", "standalone"])("keeps delegation children out while combining host, project and search in the %s list", async kind => {
     const state = makeStateResponse({
       revision: 1, orchestrators: [], workspaces: [],
       projects: [
@@ -152,6 +152,8 @@ describe("session panel host filtering", () => {
       sessions: [
         makeSession("local", { name: "Local work", projectId: "p1" }),
         makeSession("remote", { name: "Remote work", projectId: "p1", remoteId: "Mac" }),
+        makeSession("local-child", { name: "Local child", projectId: "p1", parentDelegationId: "delegation-1" }),
+        makeSession("remote-child", { name: "Remote child", projectId: "p1", remoteId: "Mac", mirroredDelegationChild: true }),
         makeSession("other", { name: "Remote other", projectId: "p2" }),
       ],
     });
@@ -168,6 +170,7 @@ describe("session panel host filtering", () => {
     }
     await choose(surface, "Project", "All projects");
     expect(within(surface).getByRole("combobox", { name: "Host" })).toHaveTextContent("All hosts");
+    expect(rowNames(surface).sort()).toEqual(["Local work", "Remote other", "Remote work"]);
     await choose(surface, "Host", "Local");
     expect(rowNames(surface)).toEqual(["Local work"]);
     await choose(surface, "Host", "Mac");
@@ -183,6 +186,66 @@ describe("session panel host filtering", () => {
     expect(rowNames(surface)).toEqual([]);
     await choose(surface, "Host", "All hosts");
     expect(rowNames(surface)).toEqual(["Local work"]);
+  });
+
+  it("keeps the docked Files and Git context when an owner classifies a cached mirror", async () => {
+    const workdir = "/remote/review";
+    const child = makeSession("remote-child", {
+      name: "Remote reviewer", remoteId: "Mac", workdir, sessionMutationStamp: 7,
+    });
+    const legacy = makeStateResponse({
+      revision: 1,
+      projects: [],
+      orchestrators: [],
+      workspaces: [],
+      preferences: { remotes: [remote("Mac")] },
+      sessions: [child],
+    });
+    vi.spyOn(api, "fetchState").mockResolvedValue(legacy);
+    vi.mocked(api.fetchWorkspaceLayout).mockResolvedValue(makeWorkspaceLayoutResponse({
+      workspace: {
+        root: { type: "pane", paneId: "pane-control" },
+        panes: [{
+          id: "pane-control",
+          tabs: [{ id: "tab-control", kind: "controlPanel", originSessionId: null }],
+          activeTabId: "tab-control",
+          activeSessionId: null,
+          viewMode: "controlPanel",
+          lastSessionViewMode: "session",
+          sourcePath: null,
+        }],
+        activePaneId: "pane-control",
+        lastContentPaneId: null,
+        lastViewerPaneId: null,
+      },
+    }));
+    const readDirectory = vi.spyOn(api, "fetchDirectory").mockResolvedValue({
+      path: workdir, name: "review", entries: [],
+    });
+    const readGitStatus = vi.spyOn(api, "fetchGitStatus").mockResolvedValue({
+      workdir, repoRoot: workdir, files: [], ahead: 0, behind: 0, isClean: true,
+    });
+    await renderApp();
+    await dispatchOpenedStateEvent(latestEventSource(), legacy);
+    await clickAndSettle(await screen.findByRole("button", { name: "Sessions" }));
+    const sessionsPanel = document.querySelector<HTMLElement>(".control-panel-section-sessions")!;
+    expect(rowNames(sessionsPanel)).toEqual(["Remote reviewer"]);
+
+    await dispatchOpenedStateEvent(latestEventSource(), {
+      ...legacy,
+      revision: 2,
+      mirroredDelegationChildIds: [child.id],
+    });
+    expect(rowNames(sessionsPanel)).toEqual([]);
+
+    readDirectory.mockClear();
+    readGitStatus.mockClear();
+    await clickAndSettle(screen.getByRole("button", { name: "Files" }));
+    expect(screen.getByRole("button", { name: "Open tab" })).toBeEnabled();
+    expect(readDirectory).toHaveBeenCalledWith(workdir, expect.objectContaining({ sessionId: child.id }));
+    await clickAndSettle(screen.getByRole("button", { name: "Git status" }));
+    expect(screen.getByRole("button", { name: "Open tab" })).toBeEnabled();
+    expect(readGitStatus).toHaveBeenCalledWith(workdir, child.id, expect.anything());
   });
 
   it("keeps many sessions windowed and finds a remote row outside the initial window", async () => {

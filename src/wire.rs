@@ -930,6 +930,10 @@ pub(crate) struct Session {
     pub(crate) session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) parent_delegation_id: Option<String>,
+    /// Session-list classification of a remote proxy. An older cached row
+    /// stays visible until its owner supplies a child marker.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) mirrored_delegation_child: bool,
 }
 impl Session {
     pub(crate) fn clone_without_messages(&self) -> Self {
@@ -989,6 +993,7 @@ impl Session {
             queue_projection_hash: self.queue_projection_hash.clone(),
             session_mutation_stamp: self.session_mutation_stamp.clone(),
             parent_delegation_id: self.parent_delegation_id.clone(),
+            mirrored_delegation_child: self.mirrored_delegation_child,
         }
     }
 }
@@ -1089,6 +1094,40 @@ pub(crate) struct StateSessionSummary {
     pub(crate) session_mutation_stamp: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) parent_delegation_id: Option<String>,
+    // Older peers strictly decode this row. Send mirror classification in
+    // the enclosing state response or event instead.
+    #[serde(skip)]
+    pub(crate) mirrored_delegation_child: bool,
+}
+
+impl StateSessionSummary {
+    pub(crate) fn is_delegation_child_for_mirror(&self) -> bool {
+        self.mirrored_delegation_child || self.parent_delegation_id.is_some()
+    }
+}
+
+pub(crate) fn mirrored_delegation_child_ids<'a>(
+    sessions: impl IntoIterator<Item = &'a StateSessionSummary>,
+) -> impl Iterator<Item = &'a str> {
+    sessions
+        .into_iter()
+        .filter(|session| session.mirrored_delegation_child)
+        .map(|session| session.id.as_str())
+}
+
+pub(crate) fn apply_mirrored_delegation_child_ids(
+    sessions: &mut [StateSessionSummary],
+    ids: &[String],
+) {
+    if !ids.is_empty() {
+        let ids = ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        for session in sessions {
+            session.mirrored_delegation_child = ids.contains(session.id.as_str());
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -3170,6 +3209,8 @@ pub(crate) struct StateResponse {
     #[serde(default)]
     pub(crate) sessions: Vec<StateSessionSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) mirrored_delegation_child_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) delegation_waits: Vec<DelegationWaitRecord>,
@@ -3955,6 +3996,23 @@ pub(crate) enum DeltaEvent {
 }
 
 impl DeltaEvent {
+    pub(crate) fn session_summaries(&self) -> &[StateSessionSummary] {
+        match self {
+            Self::SessionCreated { session, .. } => std::slice::from_ref(session),
+            Self::OrchestratorsUpdated { sessions, .. } => sessions,
+            _ => &[],
+        }
+    }
+
+    pub(crate) fn restore_mirror_classification(&mut self, ids: &[String]) {
+        let sessions = match self {
+            Self::SessionCreated { session, .. } => std::slice::from_mut(session),
+            Self::OrchestratorsUpdated { sessions, .. } => sessions,
+            _ => return,
+        };
+        apply_mirrored_delegation_child_ids(sessions, ids);
+    }
+
     pub(crate) fn revision(&self) -> u64 {
         match self {
             Self::SessionCreated { revision, .. }

@@ -11,7 +11,7 @@ export type SessionListFilterCounts = Record<SessionListFilter, number>;
 export type SessionWorkingBreakdown = { foreground: number; background: number };
 
 export function isSessionVisibleInSessionList(session: Session): boolean {
-  return !session.parentDelegationId;
+  return !session.parentDelegationId && !session.mirroredDelegationChild;
 }
 
 export function filterSessionListVisibleSessions(

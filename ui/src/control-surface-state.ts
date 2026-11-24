@@ -68,7 +68,6 @@ import {
   countWorkingBreakdown,
   filterSessionListVisibleSessions,
   filterSessionsByListFilter,
-  isSessionVisibleInSessionList,
   type SessionListFilter,
 } from "./session-list-filter";
 import type { SessionWorkByOwner as RunningRunsByOwner } from "./test-run-overview";
@@ -163,7 +162,7 @@ export function resolveWorkspaceScopedSessionId(
   return (
     sessions.find(
       (session) =>
-        isSessionVisibleInSessionList(session) &&
+        !session.parentDelegationId &&
         session.projectId === projectId,
     )?.id ?? null
   );

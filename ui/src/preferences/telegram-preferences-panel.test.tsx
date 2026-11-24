@@ -364,7 +364,7 @@ describe("TelegramPreferencesPanel", () => {
     });
   });
 
-  it("excludes delegated child sessions from the default-session picker", async () => {
+  it("excludes native children and offers mirrored children in the default-session picker", async () => {
     const sessionsWithDelegatedChild: Session[] = [
       ...sessions,
       {
@@ -373,6 +373,13 @@ describe("TelegramPreferencesPanel", () => {
         name: "Delegated Reviewer",
         status: "active",
         parentDelegationId: "delegation-1",
+      },
+      {
+        ...sessions[0],
+        id: "remote-child",
+        name: "Remote Reviewer",
+        remoteId: "Mac",
+        mirroredDelegationChild: true,
       },
     ];
     fetchTelegramStatusMock.mockResolvedValue({
@@ -394,6 +401,7 @@ describe("TelegramPreferencesPanel", () => {
 
     const listbox = await screen.findByRole("listbox");
     expect(within(listbox).getByText("Codex Live")).toBeInTheDocument();
+    expect(within(listbox).getByText("Remote Reviewer")).toBeInTheDocument();
     expect(within(listbox).queryByText("Delegated Reviewer")).not.toBeInTheDocument();
   });
 

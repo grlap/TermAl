@@ -70,6 +70,7 @@ pub(crate) fn empty_state_events_response(server_instance_id: String) -> StateRe
         orchestrators: Vec::new(),
         workspaces: Vec::new(),
         sessions: Vec::new(),
+        mirrored_delegation_child_ids: Vec::new(),
         delegations: Vec::new(),
         delegation_waits: Vec::new(),
         test_run_overview: TestRunOverviewSnapshot::default(),

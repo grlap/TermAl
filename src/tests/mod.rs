@@ -1493,6 +1493,7 @@ fn sample_remote_orchestrator_state(
                 queue_projection_hash: None,
                 session_mutation_stamp: None,
                 parent_delegation_id: None,
+                mirrored_delegation_child: false,
             };
             if session.agent.supports_codex_prompt_settings() {
                 session.approval_policy = Some(default_codex_approval_policy());
@@ -1565,6 +1566,7 @@ fn sample_remote_orchestrator_state(
                 stopped_session_ids_during_stop: Vec::new(),
             }],
             sessions: Vec::new(),
+            mirrored_delegation_child_ids: Vec::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
             test_run_overview: TestRunOverviewSnapshot::default(),
@@ -1625,6 +1627,7 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         queue_projection_hash: session.queue_projection_hash.clone(),
         session_mutation_stamp: session.session_mutation_stamp,
         parent_delegation_id: session.parent_delegation_id.clone(),
+        mirrored_delegation_child: session.mirrored_delegation_child,
     }
 }
 

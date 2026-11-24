@@ -1151,6 +1151,10 @@ impl PersistedSessionRecord {
         }
         if remote_proxy_identity.is_none() {
             session.pending_prompts.clear();
+        } else {
+            // Cached proxies only carry the owner's list classification.
+            // Discard a stale native link without changing the transcript.
+            session.parent_delegation_id = None;
         }
 
         let mut historical_control_hold = [

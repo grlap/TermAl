@@ -79,6 +79,10 @@ impl ImmutableStateSnapshot {
             .into_iter()
             .map(|summary| (*summary).clone())
             .collect();
+        self.header.mirrored_delegation_child_ids =
+            mirrored_delegation_child_ids(&self.header.sessions)
+                .map(str::to_owned)
+                .collect();
         self.header
     }
 }
@@ -142,6 +146,7 @@ impl AppState {
             queue_projection_hash,
             session_mutation_stamp,
             parent_delegation_id,
+            mirrored_delegation_child,
             // This is attached from the separate exact test-run cut after
             // metadata cache lookup; it is never a SessionRecord input.
             test_run_activity: _,
@@ -184,7 +189,8 @@ impl AppState {
             && preview == &session.preview
             && markers == &session.markers
             && provider_capacity_waiting == &session.provider_capacity_waiting
-            && parent_delegation_id == &session.parent_delegation_id)
+            && parent_delegation_id == &session.parent_delegation_id
+            && mirrored_delegation_child == &session.mirrored_delegation_child)
         {
             return false;
         }
