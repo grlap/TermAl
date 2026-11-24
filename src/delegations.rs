@@ -916,10 +916,12 @@ impl AppState {
                 {
                     return self.delegation_response_from_state(&record.id);
                 }
+                // The reason travels with the failure, so a refused start
+                // says why rather than only that it failed.
                 self.mark_delegation_failed_after_start_error(
                     &record.id,
                     &record.child_session_id,
-                    "child session failed to start",
+                    &format!("child session failed to start: {}", err.message),
                 )?;
                 return self.delegation_response_from_state(&record.id);
             }

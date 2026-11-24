@@ -201,6 +201,7 @@ fn terminal_delegation_cleanup_detaches_shared_codex_child_without_interrupt() {
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
 
     runtime
@@ -278,6 +279,7 @@ fn terminal_delegation_cleanup_defers_shared_codex_detach_when_sessions_lock_is_
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
 
     runtime
@@ -373,6 +375,7 @@ fn stop_session_detaches_shared_codex_session_when_interrupt_fails() {
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     drop(input_rx);
 
@@ -492,6 +495,7 @@ fn stop_session_pauses_queued_prompt_after_shared_codex_interrupt_failure() {
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
 
     {
@@ -2476,6 +2480,7 @@ fn shared_codex_runtime_exit_clears_state_and_kills_process() {
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     let handle = CodexRuntimeHandle {
         runtime_id: runtime.runtime_id.clone(),

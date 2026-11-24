@@ -1,6 +1,7 @@
 // Owns terminal shared-Codex child resource release and the off-lock barrier
 // before follow-up. Does not kill shared processes, sweep historical sessions,
-// or change Claude/ACP cleanup. The reservation is installed with the terminal
+// or change Claude/ACP cleanup; a child's own app-server it ends only when the
+// release cannot run (`owned_codex_server.rs`). The reservation is installed with the terminal
 // state; only its post-commit ticket may enqueue the external side effect.
 
 use super::*;
@@ -369,7 +370,16 @@ impl Drop for CodexDelegationReleaseTicket {
             self.release.finish(CodexReleaseOutcome::NotSent(
                 "terminal result commit did not publish thread cleanup".to_owned(),
             ));
+            // The barrier keeps a handle for a later retry; a server owned by
+            // this child must not live on through it.
+            end_owned_codex_server_of(&self.runtime);
         }
+    }
+}
+
+fn end_owned_codex_server_of(runtime: &SharedCodexRuntime) {
+    if let Some(owner) = &runtime.owner {
+        owner.end();
     }
 }
 
@@ -503,6 +513,7 @@ impl CodexDelegationReleaseTicket {
             self.release.finish(CodexReleaseOutcome::NotSent(format!(
                 "failed to start child archive reconciliation: {error}"
             )));
+            end_owned_codex_server_of(&self.runtime);
         }
     }
 }

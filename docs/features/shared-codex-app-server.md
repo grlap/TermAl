@@ -78,6 +78,110 @@ not an encoding enforcement mechanism. See
 [Windows Codex writable children](./agent-delegation-sessions.md#windows-codex-writable-children)
 for the delegation boundary.
 
+## Delegation-owned app-servers
+
+A delegation child (a session with a parent delegation) does not attach to the
+shared server of its profile. Its first turn launches an app-server of its own
+through the same launch path, profile and Codex home, so `thread/resume`,
+`thread/archive` and restart recovery are unchanged. Root sessions stay on the
+shared servers. Each owned server costs about one fresh app-server (about
+135-330 MB resident) plus its code-mode host (35-62 MB) per live delegation,
+measured on Windows and Linux hosts in 2026-11.
+
+The server owns its process tree for its whole life:
+
+- On Windows it is launched suspended into a kill-on-close job, as every
+  app-server is; descendants cannot leave the job, and the job closes when the
+  server ends.
+- On Linux it runs under a keeper (`codex_keeper.rs`): TermAl starts its own
+  executable as `termal __codex-keeper <control fd> <app-server argv>`, in a
+  session of its own, and the keeper starts the app-server. The keeper is a
+  child subreaper, so every process the app-server starts re-parents to the
+  keeper when its own parent exits, however it detached; Codex's shell tools
+  call `setsid`, so neither a session nor a process group can name them.
+- On other Unix hosts it leads a session of its own.
+
+When the last handle to the server drops (after the completed child's
+archive settles, or when a cancelled, stopped or deleted child's runtime is
+removed), a worker off every lock ends the tree. A release that cannot run
+(its worker fails to start, or its ticket is dropped before publication) ends
+the server explicitly, since its barrier keeps a handle for a later retry; that
+retry goes to the shared server of the same Codex home.
+
+The worker that ends trees belongs to the state and is started before the
+first owned launch, so ending a server never depends on creating a thread.
+Each profile's Codex home is seeded on the first owned launch and reused by
+later ones, as the shared server's own launch seeds it.
+
+On Linux the keeper ends the tree in two cases: the app-server exits by
+itself (a crash, an OOM kill), or the keeper's control pipe closes. TermAl
+holds the pipe's only write end and never writes to it; ending the server
+closes it, and so does TermAl's own exit, so a delegation's tree never
+outlives TermAl either. On a closed pipe the keeper kills the app-server.
+Then, as long as it has any child left, it kills all its children and reaps
+one. A process whose parent ends re-parents to the keeper, so every
+descendant becomes its child in turn, and the keeper exits once it has none.
+It names its children from its own threads' `children` lists in `/proc`
+(from each process's parent pid where the kernel lacks those lists) and
+signals only its own unreaped children, whose pids cannot be reused. It does
+so only when `/proc` numbers processes as the keeper's own system calls do:
+`NStgid` in `/proc/self/status` must list exactly one pid, its own. Where
+that fails, no delegation server is started, so no tree exists that could
+not be ended: TermAl checks before it launches the keeper, and the
+delegation fails at once with a result that names the PID-namespace
+reason; the keeper checks again before it starts the app-server. Only a
+host whose `/proc` belongs to an ancestor PID namespace is refused; a
+container with its own `/proc` mount passes, and so do the Linux hosts
+TermAl runs on. The app-server has
+`PR_SET_PDEATHSIG` set to `SIGKILL`, so even a keeper killed outright takes
+its server with it. A `SIGTERM`, `SIGINT` or `SIGHUP` sent to the keeper is
+forwarded to the app-server. TermAl sends a Codex app-server no signal of its
+own; a Stop or an interrupt travels as JSON-RPC on the wire, which the
+app-server inherits from the keeper unchanged. The keeper leaves with the
+app-server's exit code, or by the signal that ended it, so TermAl sees the
+server's real end. It keeps only stderr open for its own diagnostics, which
+reach TermAl's log with the server's. The subreaper flag is set on the
+keeper alone, never on TermAl, so no other session's orphans are adopted.
+
+The worker that ends a tree on Linux waits up to 30 seconds for the keeper
+after the pipe closes. A keeper still running then is reported and left to
+finish, never killed, and the runtime's waiter reaps it whenever it exits.
+A child the kernel holds in uninterruptible sleep cannot be ended until it
+leaves that state, and it holds the keeper in its drain until then. Only
+the keeper, a subreaper, can end that child's descendants when it does, so
+killing the keeper would let them outlive the delegation. Ending them
+earlier, while their parent is still stuck, is not done yet. Nothing waits
+on the worker: completion, cancellation and the session's state never wait
+for a keeper to finish. A delegation's server is owned from the moment it
+starts, before its runtime threads, and stays known as owned until the
+process TermAl holds for it, the keeper on Linux, has exited, as its
+runtime's waiter observes. Every TermAl path that would kill the
+process it holds for a Codex runtime outright either never reaches a
+delegation's own server or ends it through its owner instead: the stdin
+watchdog's fallback does so even when the ending has already begun, and a
+watchdog that cannot start ends a just-started server the same way. So the
+keeper always runs its ending.
+
+Other Unix hosts, macOS included, end only the server itself: no raw pid or
+process group is signalled, because the server's waiter may reap it at any
+moment, and macOS has no subreaper. A descendant that called `setsid` there
+outlives the delegation. On Windows ending the server closes its
+kill-on-close job, which ends its descendants, and so does a server that
+exits by itself. When a server exits, its waiter tells the server's stdin
+writer so that it ends too, with its stdin watchdog and pipe, without writing
+to a pipe a surviving descendant may still hold.
+
+The server's stdout activity is registered with it, so the busy-versus-wedged
+checks of a request that times out see an owned server's output as they do a
+shared server's. Session-scoped thread actions (fork, compact, rollback,
+unarchive and archive probes) still go to the profile's shared server, and so
+does a model-catalog refresh for a delegation child that has no runtime: it
+attaches nothing, so it starts no app-server of the child's own.
+
+Without this, a reviewer's stalled tool (for example a verifier whose child
+blocks on stdin) kept running under the shared server long after the
+delegation completed, holding CPU, memory and the review checkout.
+
 ## Descriptor capacity
 
 The shared app-server and all its tools inherit TermAl's Unix soft file limit

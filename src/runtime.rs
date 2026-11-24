@@ -100,6 +100,10 @@ pub(crate) enum CodexRuntimeCommand {
     RefreshModelList {
         response_tx: Sender<std::result::Result<Vec<SessionModelOption>, String>>,
     },
+    /// Internal: sent by the waiter once the app-server has exited and that
+    /// exit has been reported. The writer ends without writing, so it cannot
+    /// block on a pipe a surviving descendant still holds open.
+    ServerExited,
     /// Internal: sent by the model-list waiter to fetch the next page.
     RefreshModelListPage {
         cursor: String,

@@ -1102,8 +1102,8 @@ impl AppState {
                 record.clear_runtime_reset();
             }
 
-            let handle = match &record.runtime {
-                SessionRuntime::Codex(handle) => handle.clone(),
+            let input_tx = match &record.runtime {
+                SessionRuntime::Codex(handle) => handle.input_tx.clone(),
                 SessionRuntime::Acp(_) => {
                     return Err(ApiError::internal(
                         "unexpected ACP runtime attached to Codex session",
@@ -1114,13 +1114,30 @@ impl AppState {
                         "unexpected Claude runtime attached to Codex session",
                     ));
                 }
+                // The catalog belongs to the profile, not to a thread: a
+                // delegation child without a runtime asks its profile's
+                // shared server and attaches nothing, so no app-server of
+                // its own is started that no later transition would end.
+                SessionRuntime::None
+                    if CodexServerOwnership::of_record(record)
+                        == CodexServerOwnership::Delegation =>
+                {
+                    self.shared_codex_runtime_for(record.shared_codex_profile())
+                        .map_err(|err| {
+                            ApiError::internal(format!(
+                                "failed to start the shared Codex app-server: {err:#}"
+                            ))
+                        })?
+                        .input_tx
+                }
                 SessionRuntime::None => {
                     let profile = record.shared_codex_profile();
-                    let handle = spawn_codex_runtime(
+                    let handle = spawn_codex_runtime_owned_by(
                         self.clone(),
                         record.session.id.clone(),
                         record.session.workdir.clone(),
                         profile,
+                        CodexServerOwnership::of_record(record),
                     )
                     .map_err(|err| {
                         ApiError::internal(format!(
@@ -1129,15 +1146,14 @@ impl AppState {
                     })?;
                     record.runtime = SessionRuntime::Codex(handle.clone());
                     record.attach_to_shared_codex_profile(profile);
-                    handle
+                    handle.input_tx
                 }
             };
             drop(inner);
 
             let (response_tx, response_rx) =
                 mpsc::channel::<std::result::Result<Vec<SessionModelOption>, String>>();
-            handle
-                .input_tx
+            input_tx
                 .send(CodexRuntimeCommand::RefreshModelList { response_tx })
                 .map_err(|err| {
                     ApiError::internal(format!("failed to queue Codex model refresh: {err}"))

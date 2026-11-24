@@ -1497,7 +1497,8 @@ fn shared_codex_app_server_is_contained_before_resume_and_reaps_descendants() {
     // Replace only the executable and its configured home. The production
     // shared-runtime launch and waiter own containment throughout the test.
     let runtime =
-        start_shared_codex_runtime(test_app_state(), temp.path().to_owned(), &mut command).unwrap();
+        start_shared_codex_runtime(test_app_state(), temp.path().to_owned(), &mut command, None)
+            .unwrap();
     assert_eq!(contained_rx.try_recv().unwrap(), runtime.process.id());
     let peers: Vec<_> = (0..3).map(|_| ProcessPeer::accept(&listener)).collect();
     assert!(peers.iter().any(|peer| {

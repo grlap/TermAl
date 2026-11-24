@@ -28,14 +28,52 @@
 
 use super::*;
 
-/// Spawns Codex runtime.
+/// Spawns Codex runtime on its profile's shared app-server.
 pub(crate) fn spawn_codex_runtime(
+    state: AppState,
+    session_id: String,
+    workdir: String,
+    profile: SharedCodexProfile,
+) -> Result<CodexRuntimeHandle> {
+    spawn_codex_runtime_owned_by(
+        state,
+        session_id,
+        workdir,
+        profile,
+        CodexServerOwnership::Shared,
+    )
+}
+
+/// Whether a delegation child gets an app-server of its own. Under test, only
+/// a registered fixture may stand in for Codex: a test without one keeps its
+/// delegation children on the wire it installed and never launches the real
+/// executable or seeds a Codex home from the user's.
+fn launches_owned_codex_servers(state: &AppState) -> bool {
+    #[cfg(test)]
+    if test_codex_app_server_fixture(&state.default_workdir).is_none() {
+        return false;
+    }
+    state.agent_runtime_spawning_enabled
+}
+
+/// Spawns the Codex runtime of a session. A delegation child gets an
+/// app-server of its own, whose process tree ends with the child's last
+/// runtime handle; every other session attaches to its profile's shared
+/// app-server.
+pub(crate) fn spawn_codex_runtime_owned_by(
     state: AppState,
     session_id: String,
     _workdir: String,
     profile: SharedCodexProfile,
+    ownership: CodexServerOwnership,
 ) -> Result<CodexRuntimeHandle> {
-    let shared_runtime = state.shared_codex_runtime_for(profile)?;
+    let shared_runtime = match ownership {
+        CodexServerOwnership::Delegation if launches_owned_codex_servers(&state) => {
+            spawn_shared_codex_runtime(state.clone(), profile, ownership)?
+        }
+        // Otherwise the session attaches to its profile's shared slot.
+        _ => state.shared_codex_runtime_for(profile)?,
+    };
     let shared_session = SharedCodexSessionHandle {
         runtime: shared_runtime.clone(),
         session_id,
@@ -310,7 +348,11 @@ pub(crate) fn poll_shared_codex_stdin_watchdog(
         shared_codex_stdin_timeout_detail(&activity, activity.budget.limit(ordinary_timeout));
     if let Err(err) = state.handle_shared_codex_runtime_exit(runtime_id, Some(&detail)) {
         eprintln!("[termal] shared Codex watchdog cleanup failed; killing app-server: {err:#}");
-        if let Err(kill_err) = kill_child_process(process, "shared Codex runtime") {
+        // A delegation's own server ends with its whole tree, through its
+        // owner, even when that ending has already begun.
+        if is_unfinished_owned_codex_server(state, runtime_id) {
+            end_owned_codex_server(state, runtime_id);
+        } else if let Err(kill_err) = kill_child_process(process, "shared Codex runtime") {
             eprintln!("[termal] shared Codex watchdog fallback kill failed: {kill_err:#}");
         }
     }
@@ -400,16 +442,92 @@ pub(crate) fn start_shared_codex_rpc_command(
     }
 }
 
+/// Test-only app-server producers, keyed by the owning `AppState`'s default
+/// workdir so concurrent tests never see each other's fixture. A state with
+/// no entry launches exactly as production does.
+#[cfg(test)]
+pub(crate) type TestCodexAppServerFixture = Arc<dyn Fn() -> Command + Send + Sync>;
+
+#[cfg(test)]
+pub(crate) static TEST_CODEX_APP_SERVER_FIXTURES: LazyLock<
+    Mutex<HashMap<String, TestCodexAppServerFixture>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// No test build ever launches the real Codex executable; kept as a call so
+/// the production launch below stays compiled and checked in test builds.
+#[cfg(test)]
+fn test_launches_real_codex() -> bool {
+    false
+}
+
+#[cfg(test)]
+fn test_codex_app_server_fixture(default_workdir: &str) -> Option<TestCodexAppServerFixture> {
+    TEST_CODEX_APP_SERVER_FIXTURES
+        .lock()
+        .expect("Codex app-server fixture registry poisoned")
+        .get(default_workdir)
+        .cloned()
+}
+
+/// Starts a Codex app-server for `profile`. A `Shared` server serves every
+/// root session of the profile from its slot; a `Delegation` server serves
+/// one delegation child and owns its whole process tree, which ends when the
+/// last handle to it drops.
 pub(crate) fn spawn_shared_codex_runtime(
     state: AppState,
     profile: SharedCodexProfile,
+    ownership: CodexServerOwnership,
 ) -> Result<SharedCodexRuntime> {
     if !state.agent_runtime_spawning_enabled {
         bail!("agent runtime spawning is disabled for this AppState");
     }
+    if ownership == CodexServerOwnership::Delegation {
+        // Before the launch: a server must never exist that nothing can end.
+        state.owned_codex_servers.ensure_cleanup_worker()?;
+    }
+    let (codex_home, mut command) = codex_app_server_command(&state, profile, ownership)?;
+    let owned_launch = match ownership {
+        CodexServerOwnership::Delegation => Some((
+            profile,
+            OwnedCodexServerLaunch::prepare(&state, &mut command)?,
+        )),
+        CodexServerOwnership::Shared => None,
+    };
+    start_shared_codex_runtime(state, codex_home, &mut command, owned_launch)
+}
+
+fn codex_app_server_command(
+    state: &AppState,
+    profile: SharedCodexProfile,
+    ownership: CodexServerOwnership,
+) -> Result<(PathBuf, Command)> {
+    // Under test only a registered disposable protocol producer is launched:
+    // it replaces executable discovery and the user Codex home, while launch,
+    // containment and the wire stay production. A test never starts the real
+    // provider or copies the user's credentials.
+    #[cfg(test)]
+    if !test_launches_real_codex() {
+        let Some(fixture) = test_codex_app_server_fixture(&state.default_workdir) else {
+            bail!("a test launches a Codex app-server only through a registered fixture");
+        };
+        let codex_home = PathBuf::from(&state.default_workdir).join("fixture-codex-home");
+        fs::create_dir_all(&codex_home)?;
+        let mut command = fixture();
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        return Ok((codex_home, command));
+    }
     // Codex threads carry their own cwd, so one shared app-server can serve
     // every session of a profile.
-    let codex_home = prepare_termal_codex_home(&state.default_workdir, profile.codex_home_scope())?;
+    let prepare = || prepare_termal_codex_home(&state.default_workdir, profile.codex_home_scope());
+    // Shared and owned launches prepare a profile's home under one lock. A
+    // delegation launch runs under the state lock, so it reuses the home as
+    // last prepared instead of seeding it again.
+    let codex_home = state
+        .owned_codex_servers
+        .prepared_home(profile, ownership, prepare)?;
     let mut command = codex_command()?;
     command
         .arg("app-server")
@@ -434,14 +552,16 @@ pub(crate) fn spawn_shared_codex_runtime(
     // TermAl or Engram identity leak into all of them; each thread receives
     // its exact identity through `shell_environment_policy.set` instead.
     apply_agent_process_env(&mut command, None, None)?;
-
-    start_shared_codex_runtime(state, codex_home, &mut command)
+    Ok((codex_home, command))
 }
 
+/// Starts an app-server and its runtime threads. `owned` makes it a
+/// delegation's own server, owned from the moment it starts.
 pub(crate) fn start_shared_codex_runtime(
     state: AppState,
     codex_home: PathBuf,
     command: &mut Command,
+    owned: Option<(SharedCodexProfile, OwnedCodexServerLaunch)>,
 ) -> Result<SharedCodexRuntime> {
     let runtime_id = Uuid::new_v4().to_string();
     let DedicatedRuntimeChild {
@@ -462,6 +582,18 @@ pub(crate) fn start_shared_codex_runtime(
     // reads as "silent since spawn", never as "recently active".
     let stdout_activity: SharedCodexStdoutActivityState =
         Arc::new(Mutex::new(std::time::Instant::now()));
+    // Owned before anything below can fail, so a failure ends the tree
+    // through its owner instead of killing the process outright.
+    let owner = owned.map(|(profile, launch)| {
+        OwnedCodexServer::register(
+            &state,
+            &runtime_id,
+            &process,
+            &stdout_activity,
+            profile,
+            launch,
+        )
+    });
 
     {
         let writer_state = state.clone();
@@ -483,13 +615,18 @@ pub(crate) fn start_shared_codex_runtime(
             SHARED_CODEX_STDIN_WRITE_TIMEOUT,
             SHARED_CODEX_STDIN_WATCHDOG_POLL_INTERVAL,
         ) {
-            if let Err(kill_err) = kill_child_process(
-                &process,
-                "shared Codex runtime after watchdog startup failure",
-            ) {
-                eprintln!(
-                    "[termal] failed to clean up shared Codex app-server after watchdog startup failure: {kill_err:#}"
-                );
+            match &owner {
+                Some(owner) => owner.end(),
+                None => {
+                    if let Err(kill_err) = kill_child_process(
+                        &process,
+                        "shared Codex runtime after watchdog startup failure",
+                    ) {
+                        eprintln!(
+                            "[termal] failed to clean up shared Codex app-server after watchdog startup failure: {kill_err:#}"
+                        );
+                    }
+                }
             }
             return Err(err);
         }
@@ -529,6 +666,7 @@ pub(crate) fn start_shared_codex_runtime(
             while let Ok(command) = input_rx.recv() {
                 stdin.set_command_budget(&command);
                 let command_result = match command {
+                    CodexRuntimeCommand::ServerExited => break,
                     CodexRuntimeCommand::Prompt {
                         session_id,
                         command,
@@ -937,6 +1075,7 @@ pub(crate) fn start_shared_codex_runtime(
     {
         let wait_state = state.clone();
         let wait_process = process.clone();
+        let wait_input_tx = input_tx.clone();
         let wait_pending_requests = pending_requests.clone();
         let wait_runtime_id = runtime_id.clone();
         #[cfg(windows)]
@@ -947,6 +1086,11 @@ pub(crate) fn start_shared_codex_runtime(
             // the last handle also ends descendants that outlive its root.
             #[cfg(windows)]
             drop(wait_tree);
+            // Only now has the process TermAl holds exited, a delegation's
+            // keeper included; until then no failure path may kill it.
+            if result.is_ok() {
+                owned_codex_server_exited(&wait_state, &wait_runtime_id);
+            }
             match result {
                 Ok(status) if status.success() => {
                     fail_pending_codex_requests(
@@ -968,6 +1112,11 @@ pub(crate) fn start_shared_codex_runtime(
                         .handle_shared_codex_runtime_exit(&wait_runtime_id, Some(&detail));
                 }
             }
+            // The writer holds a sender to its own channel, so nothing else
+            // ever wakes it once the server is gone. After the exit has been
+            // reported, tell it so: it ends, stopping its stdin watchdog and
+            // closing the pipe, without writing to it.
+            let _ = wait_input_tx.send(CodexRuntimeCommand::ServerExited);
         });
     }
 
@@ -980,6 +1129,7 @@ pub(crate) fn start_shared_codex_runtime(
         sessions,
         thread_sessions,
         stdout_activity,
+        owner,
     })
 }
 

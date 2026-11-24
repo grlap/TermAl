@@ -1381,6 +1381,9 @@ pub(crate) struct AppState {
     /// A separate Windows workspace-write worker process; its lifecycle must
     /// not retire read-only reviewers or default-profile root threads.
     pub(crate) shared_codex_workspace_write_runtime: Arc<Mutex<Option<SharedCodexRuntime>>>,
+    /// Delegation-owned app-servers by runtime id, with the profile whose
+    /// Codex home they use (`owned_codex_server.rs`).
+    pub(crate) owned_codex_servers: OwnedCodexServerRegistry,
     /// Runtime ids whose exit cascade has already been claimed. Several
     /// worker threads may report one shared-process death; only the first may
     /// terminalize sessions or rebind Engram.

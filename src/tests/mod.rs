@@ -40,6 +40,7 @@ mod claude_refusal_signal;
 mod claude_turn_ownership;
 mod cli;
 mod codex_bin;
+mod codex_delegation_process_tree;
 mod codex_delegation_release;
 mod codex_delegation_release_restart;
 mod codex_discovery;
@@ -1053,6 +1054,7 @@ pub(crate) fn test_app_state() -> AppState {
         shared_codex_runtime: Arc::new(Mutex::new(None)),
         shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
         shared_codex_workspace_write_runtime: Arc::new(Mutex::new(None)),
+        owned_codex_servers: OwnedCodexServerRegistry::default(),
         shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),
@@ -1991,6 +1993,7 @@ fn test_shared_codex_runtime_with_process(
         // need a silent (wedge-shaped) server pass a `response_timeout` the
         // elapsed time cannot undercut instead of back-dating this Instant.
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     (runtime, input_rx, process)
 }

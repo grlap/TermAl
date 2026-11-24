@@ -73,7 +73,8 @@ impl AppState {
         if let Some(runtime) = shared_runtime.clone() {
             return Ok(runtime);
         }
-        let runtime = spawn_shared_codex_runtime(self.clone(), profile)?;
+        let runtime =
+            spawn_shared_codex_runtime(self.clone(), profile, CodexServerOwnership::Shared)?;
         *shared_runtime = Some(runtime.clone());
         Ok(runtime)
     }
@@ -100,19 +101,23 @@ impl AppState {
         }
     }
 
-    /// The profile whose slot holds the runtime `runtime_id`, or `None` when
-    /// no slot holds it (torn down or replaced).
+    /// The profile whose slot holds the runtime `runtime_id`, or whose
+    /// delegation-owned app-server it is while that server is still owned;
+    /// `None` when neither holds it (torn down or replaced).
     pub(crate) fn shared_codex_profile_holding(
         &self,
         runtime_id: &str,
     ) -> Option<SharedCodexProfile> {
-        SharedCodexProfile::ALL.into_iter().find(|profile| {
-            self.shared_codex_runtime_slot(*profile)
-                .lock()
-                .expect("shared Codex runtime mutex poisoned")
-                .as_ref()
-                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
-        })
+        SharedCodexProfile::ALL
+            .into_iter()
+            .find(|profile| {
+                self.shared_codex_runtime_slot(*profile)
+                    .lock()
+                    .expect("shared Codex runtime mutex poisoned")
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.runtime_id == runtime_id)
+            })
+            .or_else(|| owned_codex_server_profile(self, runtime_id))
     }
 
     /// The profile a session's thread operations use, from its record.
@@ -326,8 +331,9 @@ impl AppState {
 
     /// Returns how long the shared Codex app-server identified by
     /// `runtime_id` has been silent on stdout, or `None` when that runtime
-    /// is no longer the one in the shared slot (already torn down or
-    /// replaced — in which case the caller has nothing live to protect).
+    /// is neither the one in a shared slot nor a live delegation-owned
+    /// server (already torn down or replaced — in which case the caller has
+    /// nothing live to protect).
     ///
     /// This is the busy-vs-wedged discriminator for response timeouts: a
     /// server that emitted ANY stdout line during a request's wait window
@@ -340,22 +346,25 @@ impl AppState {
         &self,
         runtime_id: &str,
     ) -> Option<Duration> {
-        SharedCodexProfile::ALL.into_iter().find_map(|profile| {
-            let shared_runtime = self
-                .shared_codex_runtime_slot(profile)
-                .lock()
-                .expect("shared Codex runtime mutex poisoned");
-            shared_runtime
-                .as_ref()
-                .filter(|runtime| runtime.runtime_id == runtime_id)
-                .map(|runtime| {
-                    runtime
-                        .stdout_activity
-                        .lock()
-                        .expect("shared Codex stdout activity mutex poisoned")
-                        .elapsed()
-                })
-        })
+        SharedCodexProfile::ALL
+            .into_iter()
+            .find_map(|profile| {
+                let shared_runtime = self
+                    .shared_codex_runtime_slot(profile)
+                    .lock()
+                    .expect("shared Codex runtime mutex poisoned");
+                shared_runtime
+                    .as_ref()
+                    .filter(|runtime| runtime.runtime_id == runtime_id)
+                    .map(|runtime| {
+                        runtime
+                            .stdout_activity
+                            .lock()
+                            .expect("shared Codex stdout activity mutex poisoned")
+                            .elapsed()
+                    })
+            })
+            .or_else(|| owned_codex_server_stdout_silence(self, runtime_id))
     }
 
     /// Zeros the shared runtime slot if and only if it still holds the

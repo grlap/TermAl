@@ -88,9 +88,18 @@ const MAX_IMAGE_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_JSON_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 
-/// Starts the backend entrypoint.
+/// Starts the backend entrypoint. A delegation's Codex keeper is selected
+/// first, before any runtime thread exists, and leaves without one.
+fn main() {
+    #[cfg(target_os = "linux")]
+    if let Some(code) = codex_keeper::run_codex_keeper_if_requested() {
+        std::process::exit(code);
+    }
+    run_main();
+}
+
 #[tokio::main]
-async fn main() {
+async fn run_main() {
     capture_federation_process_image();
     process_limits::configure_process_open_file_limit();
     ignore_sigpipe();
@@ -1693,7 +1702,11 @@ mod acp_opencode_config;
 use acp_opencode_config::*;
 mod codex;
 use codex::*;
+mod owned_codex_server;
+use owned_codex_server::*;
 mod codex_engram_bootstrap;
+#[cfg(target_os = "linux")]
+mod codex_keeper;
 use codex_engram_bootstrap::*;
 mod codex_thread_recovery;
 use codex_thread_recovery::*;

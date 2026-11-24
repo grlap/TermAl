@@ -1,7 +1,10 @@
 # Feature Brief: Agent Delegation Sessions
 
-> Delegated Codex children run on the shared Codex app-server; its identity model
-> and orphan-thread behavior are documented in
+> Each delegated Codex child runs on an app-server of its own, launched through
+> the shared-server path and ended with its whole process tree when the child's
+> runtime is released; see
+> [Delegation-owned app-servers](./shared-codex-app-server.md#delegation-owned-app-servers).
+> The identity model and orphan-thread behavior are documented in
 > [shared-codex-app-server.md](./shared-codex-app-server.md).
 
 ## Status
@@ -25,12 +28,15 @@ Related:
 ## Completed Codex child thread lifecycle
 
 After a child reaches `completed` or `failed` and its terminal result is
-persisted, TermAl queues a session-scoped `thread/archive` on the shared Codex
+persisted, TermAl queues a session-scoped `thread/archive` on the child's Codex
 app-server. Required reviewer submissions are recorded through the structured
 result protocol before successful completion; a missing submission remains a
 failed/unavailable review, never a clean result. The child record, transcript,
-and external thread ID survive cleanup. Claude and ACP teardown is unchanged;
-the shared Codex process and other sessions are not killed.
+and external thread ID survive cleanup. Once the archive settles, the child's own
+app-server and every process descended from it end (on Unix hosts other than
+Linux, only the server itself); a cancelled or stopped child's server ends the
+same way. Claude and ACP teardown is unchanged, and the
+shared Codex servers and other sessions are never touched.
 
 Archive is used instead of `thread/unsubscribe`: the latter has an inactivity
 grace period, whereas the archive measurement released the observed per-thread

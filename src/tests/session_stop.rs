@@ -122,6 +122,7 @@ impl StdinWatchdogFixture {
             sessions: SharedCodexSessions::new(),
             thread_sessions: Arc::new(Mutex::new(HashMap::new())),
             stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+            owner: None,
         };
         let handle = CodexRuntimeHandle {
             runtime_id: runtime.runtime_id.clone(),

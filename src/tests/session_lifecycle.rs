@@ -883,7 +883,11 @@ fn private_claude_mcp_config_is_released_on_first_valid_stdout_line() {
 #[test]
 fn lightweight_test_state_rejects_direct_shared_codex_runtime_spawning() {
     let state = test_app_state();
-    let result = spawn_shared_codex_runtime(state, SharedCodexProfile::Default);
+    let result = spawn_shared_codex_runtime(
+        state,
+        SharedCodexProfile::Default,
+        CodexServerOwnership::Shared,
+    );
 
     let err = match result {
         Ok(_) => panic!("lightweight test state must not start a real Codex runtime"),
@@ -937,6 +941,7 @@ fn killing_session_persists_removal_even_when_shared_codex_interrupt_fails() {
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     drop(input_rx);
 
@@ -1040,6 +1045,7 @@ async fn kill_session_route_returns_ok_when_shared_codex_interrupt_fails() {
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     drop(input_rx);
 
@@ -1398,6 +1404,7 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     drop(input_rx);
 

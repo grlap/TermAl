@@ -3407,6 +3407,7 @@ fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() 
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     runtime
@@ -4276,6 +4277,7 @@ fn engram_mcp_shared_codex_interrupt_failure_detaches_thread_and_surfaces_degrad
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     runtime
@@ -5408,6 +5410,7 @@ fn enabling_engram_warns_that_a_loaded_shared_codex_thread_needs_a_cold_resume()
         sessions: SharedCodexSessions::new(),
         thread_sessions: Arc::new(Mutex::new(HashMap::new())),
         stdout_activity: Arc::new(Mutex::new(std::time::Instant::now())),
+        owner: None,
     };
     install_single_wire_codex_fixture(&state, Some(runtime.clone()));
     {

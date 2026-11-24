@@ -105,6 +105,9 @@ pub(crate) struct SharedCodexRuntime {
     pub(crate) sessions: SharedCodexSessionMap,
     pub(crate) thread_sessions: SharedCodexThreadMap,
     pub(crate) stdout_activity: SharedCodexStdoutActivityState,
+    /// `Some` only for a delegation's dedicated app-server: dropping the last
+    /// clone ends that server's whole process tree (`owned_codex_server.rs`).
+    pub(crate) owner: Option<Arc<OwnedCodexServer>>,
 }
 
 impl SharedCodexRuntime {

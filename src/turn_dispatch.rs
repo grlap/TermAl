@@ -674,11 +674,12 @@ impl AppState {
                     }
                     SessionRuntime::None => {
                         let profile = record.shared_codex_profile();
-                        let handle = spawn_codex_runtime(
+                        let handle = spawn_codex_runtime_owned_by(
                             self.clone(),
                             record.session.id.clone(),
                             record.session.workdir.clone(),
                             profile,
+                            CodexServerOwnership::of_record(record),
                         )
                         .map_err(|err| {
                             ApiError::internal(format!(
