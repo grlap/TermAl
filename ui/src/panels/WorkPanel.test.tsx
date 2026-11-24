@@ -495,6 +495,7 @@ describe("WorkPanel", () => {
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "w-one — Visible task" });
     fireEvent.click(screen.getByRole("button", { name: view }));
+    if (view === "Labels") fireEvent.click(screen.getByRole("button", { name: "Expand all labels" }));
     const title = screen.getByRole("button", { name: "w-one — Visible task" });
     fireEvent.click(title);
     const details = await screen.findByRole("complementary", { name: "Work item details" });
@@ -557,6 +558,7 @@ describe("WorkPanel", () => {
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "w-one — Visible task" });
     fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all labels" }));
     const title = screen.getByRole("button", { name: "w-one — Visible task" });
     fireEvent.click(title);
     await screen.findByRole("complementary");
@@ -584,6 +586,7 @@ describe("WorkPanel", () => {
     render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
     await screen.findByRole("button", { name: "w-one — Visible task" });
     fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all labels" }));
     const first = screen.getByRole("region", { name: "Label group: decision" });
     const second = screen.getByRole("region", { name: "Label group: ui" });
     const title = within(second).getByRole("button", { name: "w-one — Visible task" });
@@ -601,6 +604,62 @@ describe("WorkPanel", () => {
     expect(collapse).toHaveFocus();
     fireEvent.click(collapse);
     expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+  });
+
+  it("reveals details in their second label group when returning from a scrolled view", async () => {
+    const loaded = page();
+    loaded.page!.items[0]!.labels = ["decision", "ui"];
+    for (const [label, count] of [["decision", 8], ["ui", 18]] as const) {
+      for (let index = 0; index < count; index++) {
+        const ref = `${label}-${index}`;
+        loaded.page!.items.push(item(ref, ref, { labels: [label] }));
+      }
+    }
+    loaded.page!.total = loaded.page!.items.length;
+    vi.mocked(readProjectWork).mockResolvedValue(loaded);
+    vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
+      notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
+    render(<WorkPanel projects={projects} focusedProjectId="p-one" />);
+    await screen.findByRole("button", { name: "w-one — Visible task" });
+    const viewport = screen.getByRole("region", { name: "Work list" });
+    const labels = screen.getByRole("button", { name: "Labels" });
+    const uiGroup = () => screen.getByRole("region", { name: "Label group: ui" });
+    const title = () => within(uiGroup()).getByRole("button", { name: "w-one — Visible task" });
+    const rowHeight = 32;
+    const height = 160;
+    const rows = () => [...viewport.querySelectorAll("[data-work-window-key]")];
+    let scrollTop = 0;
+    Object.defineProperties(viewport, {
+      clientHeight: { get: () => height },
+      scrollTop: {
+        get: () => Math.min(scrollTop, Math.max(0, rows().length * rowHeight - height)),
+        set: (value: number) => { scrollTop = Math.max(0, value); },
+      },
+    });
+    const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const row = this.closest("[data-work-window-key]");
+      const index = row ? rows().indexOf(row) : -1;
+      return this === viewport ? new DOMRect(0, 0, 320, height)
+        : index < 0 ? new DOMRect() : new DOMRect(0, index * rowHeight - viewport.scrollTop, 320, rowHeight);
+    });
+    try {
+      fireEvent.click(labels);
+      fireEvent.click(screen.getByRole("button", { name: "Expand all labels" }));
+      viewport.scrollTop = title().getBoundingClientRect().top;
+      fireEvent.scroll(viewport);
+      fireEvent.click(title());
+      expect(await within(uiGroup()).findByRole("complementary")).toBeInTheDocument();
+      showTable();
+      labels.focus();
+      fireEvent.click(labels);
+      expect(await within(uiGroup()).findByRole("complementary")).toBeInTheDocument();
+      expect(within(screen.getByRole("region", { name: "Label group: decision" })).queryByRole("complementary")).toBeNull();
+      expect(title().getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+      expect(title().getBoundingClientRect().bottom).toBeLessThanOrEqual(height);
+      expect(labels).toHaveFocus();
+    } finally {
+      geometry.mockRestore();
+    }
   });
 
   it("never claims an empty tracker while a source failed", async () => {

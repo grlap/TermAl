@@ -119,6 +119,21 @@ function WorkResults({ projectId, filters, view, active, sort, onSortChange }: {
     // Recapture now, before a child layout pass can reapply the old anchor.
     viewport.dispatchEvent(new Event("scroll"));
   }, [filters, kind, lifecycle, labels, labelMode, sort, view, active]);
+  // Only the selected label group reopens on entry, so the restored offset
+  // can miss its task. Wait for the new window's scroll listener to mount
+  // so it captures the corrected position instead of restoring its old anchor.
+  useEffect(() => {
+    if (!active || view !== "labels") return;
+    const viewport = listContainer.current;
+    const selected = viewport?.querySelector('button[data-work-ref][aria-current="true"]');
+    if (!viewport?.clientHeight || !selected) return;
+    const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+    const row = selected.getBoundingClientRect();
+    if (row.top < top || row.bottom > top + viewport.clientHeight) {
+      viewport.scrollTop += row.top - top;
+      viewport.dispatchEvent(new Event("scroll"));
+    }
+  }, [view, active]);
   const page = result?.page;
   // Stable row identity lets the tree memoise its forest across selection and
   // collapse re-renders.

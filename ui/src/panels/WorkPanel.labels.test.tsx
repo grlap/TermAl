@@ -12,7 +12,8 @@ function item(id: string, labels: string[], source = "engram"): WorkItem {
   return { id, shortRef: id, title: `Task ${id}`, labels, source, priority: 2, kind: "task", lifecycle: "open", availability: "ready", assignedTo: null, parentId: null, blockedBy: [], prerequisites: [], updatedAt: "2026-09-16T10:00:00Z" };
 }
 function response(): WorkListResponse {
-  return { sources: [], readerId: "host:reader", observedAt: "now", page: { items: [item("a", ["storage", "reliability"]), item("b", ["storage"]), item("c", []), item("d", ["reliability"])], total: 4, shownBefore: 0, more: false, after: null, hint: null } };
+  const blocked = { ...item("b", ["storage"]), availability: "blocked" };
+  return { sources: [], readerId: "host:reader", observedAt: "now", page: { items: [item("a", ["storage", "reliability"]), blocked, item("c", []), item("d", ["reliability"])], total: 4, shownBefore: 0, more: false, after: null, hint: null } };
 }
 async function mount() {
   vi.mocked(readProjectWork).mockResolvedValue(response());
@@ -42,19 +43,22 @@ describe("Work label browsing", () => {
     expect(screen.getByRole("button", { name: "c — Task c" })).toBeInTheDocument();
   });
 
-  it("groups multi-label items without double-counting, keeps Unlabelled separate, and collapses groups", async () => {
+  it("shows collapsed groups with counts before opening their tasks", async () => {
     await mount();
     fireEvent.click(screen.getByRole("button", { name: "Labels" }));
     expect(screen.getByText(/4 unique items/)).toBeInTheDocument();
-    expect(within(group("storage")).getByRole("button", { name: "a — Task a" })).toBeInTheDocument();
-    expect(within(group("reliability")).getByRole("button", { name: "a — Task a" })).toBeInTheDocument();
-    expect(within(group("Unlabelled")).getByRole("button", { name: "c — Task c" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Collapse all labels" }));
+    const storage = within(group("storage")).getByRole("button", { name: "storage 2 items 1 blocked", expanded: false });
+    expect(within(group("reliability")).getByRole("button", { name: "reliability 2 items", expanded: false })).toBeInTheDocument();
+    expect(within(group("Unlabelled")).getByRole("button", { name: "Unlabelled 1 item", expanded: false })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "a — Task a" })).not.toBeInTheDocument();
-    fireEvent.click(within(group("storage")).getByRole("button", { expanded: false }));
+    fireEvent.click(storage);
+    expect(within(group("storage")).getByRole("button", { name: "a — Task a" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "a — Task a" })).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Expand all labels" }));
     expect(screen.getAllByRole("button", { name: "a — Task a" })).toHaveLength(2);
+    expect(within(group("Unlabelled")).getByRole("button", { name: "c — Task c" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all labels" }));
+    expect(screen.queryByRole("button", { name: "a — Task a" })).not.toBeInTheDocument();
   });
 
   it("searches counted options, matches Any/All, and restores focus with Escape", async () => {
@@ -110,13 +114,16 @@ describe("Work label browsing", () => {
     await screen.findByRole("button", { name: "a — Task a" });
     fireEvent.click(screen.getAllByRole("button", { name: "Filter by label storage" })[0]!);
     fireEvent.click(screen.getByRole("button", { name: "Labels" }));
+    fireEvent.click(within(group("storage")).getByRole("button", { expanded: false }));
     await waitFor(() => expect(readProjectWork).toHaveBeenCalledTimes(2));
     const next = response();
     next.page = { items: [item("e", ["storage", "<img onerror=alert(1)>"])], total: 5, shownBefore: 4, more: false, after: null, hint: null };
     await act(async () => finish(next));
     expect(screen.getByText(/3 unique items/)).toBeInTheDocument();
+    expect(within(group("storage")).getByRole("button", { name: "storage 3 items 1 blocked", expanded: true })).toBeInTheDocument();
     expect(within(group("storage")).getByRole("button", { name: "e — Task e" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Label group: <img onerror=alert(1)>" })).toBeInTheDocument();
+    const newGroup = group("<img onerror=alert(1)>");
+    expect(within(newGroup).getByRole("button", { expanded: false })).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();
     openPicker();
     expect(screen.getByRole("checkbox", { name: "storage" })).toHaveAttribute("aria-description", "3 loaded items");

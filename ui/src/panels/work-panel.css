@@ -128,9 +128,11 @@ button.work-tree-relation { background: none; border: 0; padding: 0; cursor: poi
 .work-label-count { margin-left: auto; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .work-label-picker button[aria-pressed="true"] { border-color: var(--signal-blue); }
 .work-label-groups { display: flex; flex-direction: column; gap: 0.65rem; }
-.work-label-group { border: 1px solid var(--line); border-radius: 0.4rem; min-width: 0; }
-.work-label-group > h3 { margin: 0; font-size: 0.9rem; }
-.work-label-group > h3 button { display: flex; align-items: center; gap: 0.4rem; text-align: left; width: 100%; border: 0; overflow-wrap: anywhere; }
+.work-label-group > h3 { margin: 0; font-size: 0.9rem; border-bottom: 1px solid var(--line); }
+.work-label-group > h3 button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; text-align: left; width: 100%; border: 0; }
+.work-label-group-name { overflow-wrap: anywhere; }
+.work-label-group-stats { display: flex; flex-wrap: wrap; justify-content: end; gap: 0.15rem 0.65rem; font-size: 0.8rem; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; max-width: 9rem; }
+.work-label-group-blocked { color: var(--signal-red); }
 .work-label-group > ul { list-style: none; margin: 0; padding: 0 0.5rem; }
 .work-label-group > ul > li { padding: 0.35rem 0; border-top: 1px solid var(--line); }
 .work-memories { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }

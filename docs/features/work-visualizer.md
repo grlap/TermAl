@@ -66,7 +66,8 @@ The tab offers five views, all read-only; the task views share the loaded Engram
   same rule as the dependency counts. Blocking relations never appear here;
   the two relations are deliberately separate trees.
   Both trees use a bounded, measured window while all pages load serially.
-- **Labels**: collapsible, flat groups for each label, followed by Unlabelled.
+- **Labels**: groups start collapsed and show counts of filtered items and
+  blocked work. Open a group to see its tasks. Unlabelled comes last.
   A multi-label item appears in each matching group, but the visible count
   counts items only once. Groups do not imply hierarchy or dependencies.
   The current sort applies inside each group; group headings sort by label.

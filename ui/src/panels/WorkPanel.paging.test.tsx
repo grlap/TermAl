@@ -1,6 +1,6 @@
 // Real-panel paging/window integration with controlled viewport demand. No
 // tracker process or live store is involved.
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../types";
 import { ApiRequestError } from "../api-request";
@@ -27,6 +27,14 @@ function deferred<T>() {
 }
 const mount = () => render(<WorkPanel projects={projects} focusedProjectId="project" />);
 const loaded = (count: number, total = 40) => screen.findByText(new RegExp(`${count} of ${total} Engram items loaded`));
+
+function openTasksIn(view: string) {
+  fireEvent.click(screen.getByRole("button", { name: view }));
+  if (view === "Labels") {
+    const group = screen.getByRole("region", { name: "Label group: topic" });
+    fireEvent.click(within(group).getByRole("button", { expanded: false }));
+  }
+}
 
 describe("Work serial paging", () => {
   beforeEach(() => {
@@ -106,7 +114,7 @@ describe("Work serial paging", () => {
     vi.mocked(readWorkDetail).mockResolvedValue({ status: null, holder: null, heldUntil: null, notes: [],
       notesWindow: { total: 0, shown: 0, newer: 0, older: 0, after: null, readCut: { projectPosition: 1, observedAt: "now", validUntilMs: null } } });
     mount(); await loaded(55, 80);
-    fireEvent.click(screen.getByRole("button", { name: presentation }));
+    openTasksIn(presentation);
     const existing = screen.getByRole("button", { name: "item-0 — Task 0" });
     const metadata = existing.closest("li, td")!.querySelector(".work-row-secondary .work-row-updated")!;
     expect(metadata).toHaveAttribute("title", updated);
@@ -186,7 +194,7 @@ describe("Work serial paging", () => {
     expect(vi.mocked(readProjectWork).mock.calls.map(call => call[3]?.after))
       .toEqual([undefined, ...Array.from({ length: 59 }, (_, i) => `c${(i + 1) * 20}`)]);
     for (const view of ["Dependencies", "Hierarchy", "Labels", "Table"]) {
-      fireEvent.click(screen.getByRole("button", { name: view }));
+      openTasksIn(view);
       expect(container.querySelectorAll(".work-row-title").length).toBeGreaterThan(0);
       expect(container.querySelectorAll(".work-row-title").length).toBeLessThanOrEqual(WORK_WINDOW_ROWS + 2);
     }

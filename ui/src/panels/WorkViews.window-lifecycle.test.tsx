@@ -218,6 +218,9 @@ describe("real Work views at the clamped end of a measured window", () => {
       expect(root.querySelector(".work-table-scroll > table > thead")).not.toBeNull();
       expect(root.querySelectorAll("tbody[data-work-window-key]").length).toBeGreaterThan(0);
     }
+    if (view === "labels") {
+      bounded(() => fireEvent.click(screen.getByRole("button", { name: /shared 125 items/, expanded: false })));
+    }
     expect(rows.length).toBeGreaterThan(WORK_WINDOW_ROWS);
     bounded(() => act(() => measure()));
     const end = () => {
@@ -239,6 +242,28 @@ describe("real Work views at the clamped end of a measured window", () => {
     const settled = commits;
     bounded(() => fireEvent.scroll(root));
     expect(commits - settled).toBeLessThan(3);
+  });
+
+  it("keeps the final collapsed label group and its task reachable", () => {
+    const items = rows.map((row, index) => ({
+      ...row,
+      labels: [`group ${String(index).padStart(3, "0")}`],
+      availability: index === rows.length - 1 ? "blocked" : row.availability,
+    }));
+    render(<Harness view="labels" items={items} />);
+    const viewport = screen.getByTestId("viewport");
+    const atEnd = () => {
+      viewport.scrollTop = Number.MAX_SAFE_INTEGER;
+      fireEvent.scroll(viewport);
+      act(() => measure());
+    };
+    atEnd();
+    const heading = screen.getByRole("button", { name: "group 124 1 item 1 blocked", expanded: false });
+    expect(heading.closest("h3")!.getBoundingClientRect().top).toBeLessThan(viewport.getBoundingClientRect().bottom);
+    fireEvent.click(heading);
+    atEnd();
+    const task = screen.getByRole("button", { name: "item-124 — Work item 124" });
+    expect(task.closest("li")!.getBoundingClientRect().bottom).toBeGreaterThan(viewport.getBoundingClientRect().top);
   });
 
   it("settles a wide 119-row auto-layout table as mounted rows change its scrollbar and wrapping", () => {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Profiler } from "react";
 import type { Project } from "../types";
@@ -19,6 +19,15 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
+}
+
+function selectExampleIn(view: string) {
+  fireEvent.click(screen.getByRole("button", { name: view }));
+  if (view === "Labels") {
+    const group = screen.getByRole("region", { name: "Label group: fixture" });
+    fireEvent.click(within(group).getByRole("button", { expanded: false }));
+  }
+  fireEvent.click(screen.getByRole("button", { name: "example — Example item" }));
 }
 
 describe("expanded Work details visibility", () => {
@@ -72,8 +81,7 @@ describe("expanded Work details visibility", () => {
     });
     render(<WorkPanel projects={projects} focusedProjectId="project" />);
     await screen.findByRole("button", { name: "example — Example item" });
-    fireEvent.click(screen.getByRole("button", { name: view }));
-    fireEvent.click(screen.getByRole("button", { name: "example — Example item" }));
+    selectExampleIn(view);
     const panel = screen.getByRole("complementary", { name: "Work item details" });
     expect(panel).toHaveFocus();
     expect(screen.getByText("Reading Engram details…")).toBeInTheDocument();
@@ -92,8 +100,7 @@ describe("expanded Work details visibility", () => {
     const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView");
     render(<WorkPanel projects={projects} focusedProjectId="project" />);
     await screen.findByRole("button", { name: "example — Example item" });
-    fireEvent.click(screen.getByRole("button", { name: view }));
-    fireEvent.click(screen.getByRole("button", { name: "example — Example item" }));
+    selectExampleIn(view);
     const search = screen.getByRole("textbox", { name: "Search" });
     search.focus();
     scroll.mockClear();

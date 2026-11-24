@@ -23,24 +23,27 @@ export function WorkLabels({ rows, mixedSources, selection, onSelect, onLabel, r
   renderDetails?: WorkDetailsRenderer; onHideSelection?: () => void; viewport?: WorkViewport;
   reveal?: WorkRevealRequest | null;
 }) {
-  const groups = useMemo(() => groupWorkLabels(rows), [rows]);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
-  // A reveal request from another view expands the item's first
-  // label group, the group its selection names, during this render, so the
-  // row and its details mount with the selection. Earlier requests are not
-  // replayed when the view mounts.
+  const groups = useMemo(() => groupWorkLabels(rows).map(group => ({
+    ...group,
+    blockedCount: group.items.filter(item => item.availability === "blocked").length,
+  })), [rows]);
+  // Reopen the selected occurrence when returning from another view.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(selection?.group ? [selection.group] : []),
+  );
+  // Handle fresh reveals in an already mounted view without replaying old ones.
   const [revealSeen, setRevealSeen] = useState(reveal?.seq);
   if (reveal && reveal.seq !== revealSeen) {
     setRevealSeen(reveal.seq);
     const group = groupWorkLabels([reveal.item])[0]?.key;
-    if (group !== undefined && collapsed.has(group)) {
-      setCollapsed(new Set([...collapsed].filter(key => key !== group)));
+    if (group !== undefined && !expanded.has(group)) {
+      setExpanded(new Set(expanded).add(group));
     }
   }
   const entries = useMemo(() => groups.flatMap(group => [
     { key: `heading:${group.key}`, group, item: null as WorkItem | null },
-    ...(collapsed.has(group.key) ? [] : group.items.map(item => ({ key: JSON.stringify([group.key, item.source, item.id]), group, item }))),
-  ]), [groups, collapsed]);
+    ...(expanded.has(group.key) ? group.items.map(item => ({ key: JSON.stringify([group.key, item.source, item.id]), group, item })) : []),
+  ]), [groups, expanded]);
   const keys = useMemo(() => entries.map(entry => entry.key), [entries]);
   const selectedKey = entries.find(entry => entry.item && entry.group.key === selection?.group && isSelectedWorkItem(selection, entry.item))?.key;
   const window = useWorkWindow(keys, viewport, selectedKey);
@@ -51,17 +54,25 @@ export function WorkLabels({ rows, mixedSources, selection, onSelect, onLabel, r
     visibleGroups.get(group.key)!.entries.push({ index, position });
   });
   const toggle = (key: string, button: HTMLButtonElement) => {
-    if (!collapsed.has(key) && selection?.group === key) { onHideSelection?.(); button.focus({ preventScroll: true }); }
-    setCollapsed(current => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+    if (expanded.has(key) && selection?.group === key) {
+      onHideSelection?.();
+      button.focus({ preventScroll: true });
+    }
+    setExpanded(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
   return <section className="work-label-groups" aria-label="Work grouped by label">
-    <p className="work-panel-caption">{rows.length} unique items · multi-label items appear in each group. Label groups are not dependencies.</p>
+    <p className="work-panel-caption">{rows.length} unique items · Items can appear under multiple labels.</p>
     {groups.length > 0 && <div className="work-panel-actions">
-      <button type="button" onClick={() => setCollapsed(new Set())}>Expand all labels</button>
+      <button type="button" onClick={() => setExpanded(new Set(groups.map(group => group.key)))}>Expand all labels</button>
       <button type="button" onClick={event => {
         if (selection) onHideSelection?.();
         event.currentTarget.focus({ preventScroll: true });
-        setCollapsed(new Set(groups.map(group => group.key)));
+        setExpanded(new Set());
       }}>Collapse all labels</button>
     </div>}
     <div ref={window.content} className="work-label-window">
@@ -76,8 +87,13 @@ export function WorkLabels({ rows, mixedSources, selection, onSelect, onLabel, r
                 <WorkRowLead item={item} /><WorkRowButton item={item} selected={isSelectedWorkItem(selection, item) && selection?.group === group.key} onSelect={(row, trigger) => onSelect(row, trigger, group.key)} />
               </div><WorkRowChips item={item} mixedSources={mixedSources} /></div>
               <div className="work-row-secondary"><WorkLabelChips item={item} onLabel={onLabel} /><WorkRowUpdated item={item} /></div>{renderDetails?.(item, group.key)}
-            </li></ul> : <h3 ref={window.rowRef(key)}><button type="button" aria-expanded={!collapsed.has(group.key)} onClick={event => toggle(group.key, event.currentTarget)}>
-              <span aria-hidden="true">{collapsed.has(group.key) ? "▸" : "▾"}</span> {group.label || "(empty label)"} <span className="work-label-count">{group.items.length}</span>
+            </li></ul> : <h3 ref={window.rowRef(key)}><button type="button" aria-expanded={expanded.has(group.key)} onClick={event => toggle(group.key, event.currentTarget)}>
+              <span aria-hidden="true">{expanded.has(group.key) ? "▾" : "▸"}</span>
+              <span className="work-label-group-name">{group.label || "(empty label)"}</span>{" "}
+              <span className="work-label-group-stats">
+                <span>{group.items.length} {group.items.length === 1 ? "item" : "items"}</span>
+                {group.blockedCount > 0 && <>{" "}<span className="work-label-group-blocked">{group.blockedCount} blocked</span></>}
+              </span>
             </button></h3>}
           </Fragment>;
         })}
