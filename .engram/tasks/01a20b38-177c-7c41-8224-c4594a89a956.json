@@ -1,0 +1,30 @@
+{
+  "id": "01a20b38-177c-7c41-8224-c4594a89a956",
+  "external_ref": null,
+  "title": "Exercise mirrored delegation classification through production browser snapshot and event envelopes",
+  "outcome": "Bring host-filter, saved-workspace and Telegram fixtures into the current beside-the-row mirroredDelegationChildIds wire contract. Exercise sessionCreated, orchestratorsUpdated and stateDiff envelope adoption in browser tests, and use an older-shaped permissive enclosing decoder where practical. Keep existing targeted-session fixtures on the full-detail shape.",
+  "acceptance": [
+    "Browser behavior tests use actual summary/event envelopes for mirrored classification and verify rows are hidden while permitted workspace and Telegram access is retained.",
+    "Compatibility coverage uses an older-shaped enclosing decoder for a classified proxy without weakening strict summary-row checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "federation",
+    "testing",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

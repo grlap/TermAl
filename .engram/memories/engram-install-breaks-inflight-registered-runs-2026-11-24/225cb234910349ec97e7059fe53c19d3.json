@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-install-breaks-inflight-registered-runs-2026-11-24",
+    "revision_id": "225cb234910349ec97e7059fe53c19d3",
+    "previous": null,
+    "body_sha256": "3297bfbdc35a01dd7fb19c74d59af9831c42766ee21d193ba86eee79ade884c5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-24T01:10:34.571956500Z"
+    }
+  },
+  "body": "Scheduling rule (Opus2, 2026-11-24, from Sol-c593 #2602 and Engram::Merger #1825). The launcher pins the source-owner executable C:/Users/grzeg/.cargo/bin/engram.exe by SHA-256 when a run opens and checks it again when the run closes. Engram::Merger installed d8e1927d (build 2f744a8a, 4aabf168 -> 67e18a08), completing by 00:58:51Z, while Sol-c593 registered run test-efbd6018 (00:56:31-01:06:28Z) was in flight. The tests passed 30/0/1, but the run ended exit 1 with \"source owner executable no longer matches its pin\" and earned no verification. The file mtime is preserved by the copy, so LastWriteTime does not show when it changed; compare the hash. Rule: an Engram binary install on Central happens only in a window with NO registered launcher run in flight on Central, announced to the integration owner first, like the TermAl install, which goes outside any gate window."
+}

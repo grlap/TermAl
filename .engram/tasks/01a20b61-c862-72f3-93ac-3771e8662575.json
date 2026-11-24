@@ -1,0 +1,28 @@
+{
+  "id": "01a20b61-c862-72f3-93ac-3771e8662575",
+  "external_ref": null,
+  "title": "Make the delayed-snapshot regression prove same-revision delta admission and classification protection",
+  "outcome": "The final revision-R orchestrator delta in older_remote_snapshot_does_not_unclassify_a_proxy_after_a_newer_tail currently supplies the same classified row as the preceding owner tail. The test would pass if the per-session delta guard were removed or the whole delta were ignored. Send an unclassified summary at R, make a separate observable orchestrator change, and check that the delta applied while the proxy remains classified in the public projection. Keep the regression's stale, equal and newer snapshot checks.",
+  "acceptance": [
+    "The regression fails if the per-session guard is removed or if the whole revision-R delta is ignored, and still tests the public projection after late, equal and newer snapshots."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "delegations",
+    "federation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a20b52-8d23-76f0-be38-4e3fbc2dff86",
+  "external_ref": null,
+  "title": "A classification-only stamp bump on an intermediate mirror invalidates a downstream peer's unchanged cached transcript suffix",
+  "outcome": "Found by the Codex reviewer in w-314a5d481df3 round 6 (candidate 29ad6cb7, evidence 382f27d419a14098a410cce7846218e9). It was relayed by Termal::Sol-8e1f in TermAl mailbox f62b0593 #3047 and filed by Termal::Fable2 as out of scope for w-314a.\n\nSequence:\n1. A downstream peer holds a cached transcript at stamp S.\n2. An intermediate mirror stamps a classification-only change as S+1, so that it persists and publishes.\n3. Whether or not the delta for that change arrives, the next broad snapshot at S+1 invalidates the unchanged cached transcript suffix, under the existing conservative stamp rule.\n\nEffect: the saved tab remains, but it may need another tail read from the owner. No delegation appears in Sessions, and no data is wrong; the cost is an extra read. Fixing it means changing when a transcript cache counts as valid, which reaches beyond w-314a.\n\nWanted: a change that leaves transcript content untouched does not invalidate a downstream peer's cached transcript, or an explicit decision that the extra read is acceptable.",
+  "acceptance": [
+    "A classification-only stamp bump on an intermediate mirror invalidates a downstream peer's unchanged cached transcript suffix is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

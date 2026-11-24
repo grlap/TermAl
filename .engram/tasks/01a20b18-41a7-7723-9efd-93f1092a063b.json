@@ -1,0 +1,28 @@
+{
+  "id": "01a20b18-41a7-7723-9efd-93f1092a063b",
+  "external_ref": null,
+  "title": "Session-scoped Codex thread actions still go to the profile's shared server for delegation children that own a server",
+  "outcome": "Once delegation children run on an app-server of their own, session-scoped thread RPCs (fork, compact, rollback, unarchive, and the thread/list archive probes) still go through perform_codex_json_rpc_request_for(profile), i.e. the profile's shared slot. They can boot a shared server just for delegation housekeeping. If such an action reaches a non-terminal idle child whose thread is loaded on its owned server, a second server acts on the same thread. Found by the Claude reviewer of the review pair (round 1, Low) on the change that gives delegation children their own servers.",
+  "acceptance": [
+    "A session-scoped thread action for a session with an attached Codex runtime goes to that session's own app-server; only a session without an attached runtime uses its profile's shared server. A behaviour test shows an owned-server child's thread action reaching its own server's wire, not the shared slot's."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex",
+    "delegation",
+    "review-finding"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

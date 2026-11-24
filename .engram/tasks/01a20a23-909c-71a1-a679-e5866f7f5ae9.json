@@ -1,0 +1,28 @@
+{
+  "id": "01a20a23-909c-71a1-a679-e5866f7f5ae9",
+  "external_ref": null,
+  "title": "Refresh the Git panel when tab Push or Sync returns current status",
+  "outcome": "After an external commit, an open Git panel can retain its previous dirty-file rows. A successful Push or Sync from the Git tab already returns current status, but the tab action only updates its menu, so the panel can keep showing old rows until its next successful refresh. Apply the fresh result or trigger an immediate scoped refresh when that action succeeds.",
+  "acceptance": [
+    "After a successful Git-tab Push or Sync for the displayed host and worktree, stale file rows in the open Git panel reconcile immediately with the action's fresh Git status without requiring focus, manual Refresh, or the periodic tick.",
+    "A behavioral UI regression supplies an initially dirty panel and a clean Push or Sync result following an external commit, then observes Working tree clean. A late result for another scope cannot update the visible panel."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "git",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

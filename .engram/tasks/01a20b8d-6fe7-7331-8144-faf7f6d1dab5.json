@@ -1,0 +1,26 @@
+{
+  "id": "01a20b8d-6fe7-7331-8144-faf7f6d1dab5",
+  "external_ref": null,
+  "title": "Launcher cleanup snapshot records reaped pids without an image name, so a leftover process cannot be attributed",
+  "outcome": "When the test launcher reaps processes at command exit, its record names each reaped process (image name and, where available, parent and command line) besides the pid, so a reviewer can tell a toolchain helper from a leaked test fixture after the fact.",
+  "acceptance": [
+    "Launcher cleanup snapshot records reaped pids without an image name, so a leftover process cannot be attributed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

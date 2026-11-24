@@ -1,0 +1,26 @@
+{
+  "id": "01a20b84-4fd1-7ca3-b4f5-e191e404a194",
+  "external_ref": null,
+  "title": "A failed Settled-mirror write leaves the launcher summary reporting a settled record as received, with no repair",
+  "outcome": "The launcher summary reports a run's verification record as settled whenever the host holds a Settled ack for it, even if writing the mirror file beside the run failed once.",
+  "acceptance": [
+    "A failed Settled-mirror write leaves the launcher summary reporting a settled record as received, with no repair is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

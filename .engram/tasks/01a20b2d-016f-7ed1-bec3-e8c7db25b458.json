@@ -1,0 +1,28 @@
+{
+  "id": "01a20b2d-016f-7ed1-bec3-e8c7db25b458",
+  "external_ref": null,
+  "title": "One action resumes all paused sessions after a provider outage or subscription change, showing each pause reason",
+  "outcome": "Greg approved variant A on 2026-11-24 at about 01:29Z, relayed by Engram::Asistant in TermAl mailbox 588693a8 #2622. His words: „Wznowienie sesji tak. Spoko, jestem za.” Variant B, automatic resume, is NOT approved and is out of scope.\n\nMechanism, from TermAl's code (Fable2, #2621):\n- During a subscription change or provider outage, every turn fails.\n- A failed turn that mail started pauses that session's queue (src/turn_lifecycle.rs, around lines 950, 1380 and 1770). The pause lifts only by Resume, one session at a time.\n- The only automatic retry is for Codex serverOverloaded (src/provider_capacity_retry.rs).\n- Once the provider works again, every such session stays paused, and new mail accumulates behind it as heldBehindPausedQueue.\n\nWanted: a single operator action, in the UI and from the CLI, that resumes the paused sessions on this host through the existing per-session Resume path, showing each session's pause reason.\n\nOut of scope:\n- automatic resume (variant B);\n- resuming sessions on other federation hosts; each host's own action covers those.\n\nThe visible pause reason builds on w-b63e1af0ce4c, criterion 2.",
+  "acceptance": [
+    "One operator action, available in the UI and from the CLI, resumes every session on this host whose queue is paused, except sessions an operator paused explicitly. Each resumed session goes through the same path as the existing per-session Resume. Nothing resumes without that action. A behaviour test covers the following case. There are three paused sessions: two paused by failed mail-woken turns, and one paused by an operator. The action resumes the first two, and their restored wakes are dispatched. The operator-paused session stays paused.",
+    "Before the action runs, and in its result, the operator sees each paused session with its pause reason and whether the action resumes it or skips it (with the reason for a skip); a behaviour test covers the listing for both a resumed and a skipped session."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "coordination",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

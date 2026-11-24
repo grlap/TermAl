@@ -1,0 +1,28 @@
+{
+  "id": "01a20b14-b387-71f2-b124-03ceae670fdb",
+  "external_ref": null,
+  "title": "Clear a stale native delegation parent from a mirrored session retained across a browser reconnect",
+  "outcome": "An open browser holds a remote proxy with remoteId set and a stale native parentDelegationId. A subsequent backend restart provides a summary and detail for the same proxy without the parent. preserveExistingParentDelegationId restores the stale parent from browser state, hiding the still-unclassified proxy while its owner is offline and risking saved-tab pruning. This is the client-side counterpart to the owner-only offline classification rule called out in w-314a5d481df3. Existing local child ownership must still survive omitted markers where appropriate.",
+  "acceptance": [
+    "An already-open browser adopts cleared native-parent metadata from a restarted backend for an unclassified proxy, keeps the proxy visible until verified owner classification, and retains its saved tab. Cover matching-stamp summary and targeted detail adoption without changing local-child ownership behaviour."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "delegations",
+    "federation",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

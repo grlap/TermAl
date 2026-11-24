@@ -1,0 +1,30 @@
+{
+  "id": "01a20af6-5df6-7202-be1a-280b7e168078",
+  "external_ref": null,
+  "title": "Keep a newer idle Stop in effect when an earlier unselected Human Resume reaches promotion",
+  "outcome": "An explicit queue Resume without a row selection can start a previously queued Human prompt after a later successful idle Stop. The unselected Resume takes the Human start path without the exact selected owner. A Stop that occurs after the off-lock selection changes the queue pause and retains the prompt, yet the earlier Resume can reach promotion with its explicit pause bypass. Bind the unselected manual Resume to the pause it originally saw and keep the exact head retained when authority changes.",
+  "acceptance": [
+    "If a local unselected manual Resume reaches promotion after a later successful idle Stop of a pending wait, it leaves the original prompt queued without provider delivery and preserves the Stop pause.",
+    "A later explicit Resume can send that exact retained prompt once. Existing exact selected Resume and automatic dispatch ownership continue to apply.",
+    "A deterministic behavior regression exercises the real idle Stop between the empty-selection Resume's off-lock preparation and final Human promotion."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "claude",
+    "queue",
+    "stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

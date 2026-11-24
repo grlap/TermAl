@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "engram-install-breaks-inflight-registered-runs-2026-11-24",
+  "head": {
+    "state": "active",
+    "chain": [
+      "225cb234910349ec97e7059fe53c19d3"
+    ]
+  }
+}

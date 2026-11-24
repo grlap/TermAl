@@ -1,0 +1,29 @@
+{
+  "id": "01a20a1f-975c-7d53-9419-f5982b95b21c",
+  "external_ref": null,
+  "title": "Investigate Git status rows that remain visible after a branch push",
+  "outcome": "Greg reports that after creating a draft and pushing a branch, plain git diff shows none of the files that remain visible in TermAl. Verify the panel and CLI are observing the same host, repository, worktree and branch. Establish whether the rows are staged/untracked, submodule pointer contents, an existing diff snapshot, stale panel state, or a fresh status mismatch. Correct a reproduced TermAl bug in an owned worktree. Preserve Greg's checkout and branch.",
+  "acceptance": [
+    "Record a same-host/worktree comparison of the reporting Git view after refresh and Git porcelain status, or an equivalent isolated reproduction that identifies the cause.",
+    "If a TermAl inconsistency is reproduced, the Git view reflects the correct current scope and status after refresh and a behavioral regression covers the reproduced case. If the rows match Git status or a documented submodule/preview view, record which view explains the report."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "git",
+    "greg-reported",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Withdrawn by Greg via Engram::Asistant mailbox 2f46d746 #5: “Cofam prace z gitem. Jest Ok. Problem byl z VS studio.” Read-only diagnosis only; no TermAl source, Greg files or branch changed. No further work requested.",
+  "completion": null
+}

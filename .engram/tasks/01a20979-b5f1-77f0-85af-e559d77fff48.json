@@ -1,0 +1,27 @@
+{
+  "id": "01a20979-b5f1-77f0-85af-e559d77fff48",
+  "external_ref": null,
+  "title": "Foreground registered launcher run that returned END is still closed Unknown for \"no prior-turn END\"",
+  "outcome": "A registered launcher run made in the foreground, whose tool call returns normally with the run's END inside the same turn, has its observed provider check associated with the registered run, rather than closed as Unknown with the relationship \"unconfirmed\".",
+  "acceptance": [
+    "Foreground registered launcher run that returned END is still closed Unknown for \"no prior-turn END\" is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
