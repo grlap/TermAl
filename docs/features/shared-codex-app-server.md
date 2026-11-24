@@ -445,7 +445,7 @@ duplicate. That is the session leak reappearing through a side door.
 ### The attachment epoch (parked)
 
 The fix is a generation stamp: `CodexAttachment { runtime_id, generation }`, minted
-per attachment in `spawn_codex_runtime` and threaded through every per-session guard
+per attachment in `spawn_codex_runtime_owned_by` and threaded through every per-session guard
 so the weak process token is unreachable on those paths. This work is **parked** (git
 stash; spec in beads `tm-d22`) because the reproducible leak is already fixed and the
 remaining failures need a detach at an exact instant. Do not restart it casually — it

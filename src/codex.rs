@@ -1,7 +1,8 @@
 // Codex runtime — spawning + shared-app-server lifecycle + event handling.
 //
-// Covers: per-session `spawn_codex_runtime` (which actually attaches each
-// session to the shared app server), the shared-app-server lifecycle
+// Covers: per-session `spawn_codex_runtime_owned_by` (which attaches a
+// session to its profile's shared app server, or gives a delegation child an
+// app server of its own), the shared-app-server lifecycle
 // (`spawn_shared_codex_runtime`, stdin watchdog, completed-turn cleanup
 // worker), the main event dispatch (`handle_shared_codex_app_server_message`,
 // `handle_shared_codex_app_server_notification`, item started/completed,
@@ -28,7 +29,9 @@
 
 use super::*;
 
-/// Spawns Codex runtime on its profile's shared app-server.
+/// Spawns Codex runtime on its profile's shared app-server. Only tests use
+/// this shorthand; production callers choose an ownership.
+#[cfg(test)]
 pub(crate) fn spawn_codex_runtime(
     state: AppState,
     session_id: String,
@@ -2058,7 +2061,7 @@ pub(crate) fn handle_shared_codex_start_turn_inner(
     //     what a waiter puts on the queue.
     //   * The runtime-id check below does not catch it either: every session on the
     //     shared app-server carries the same `runtime_id` (cloned from
-    //     `SharedCodexRuntime` in `spawn_codex_runtime`), so detach + re-attach yields
+    //     `SharedCodexRuntime` in `spawn_codex_runtime_owned_by`), so detach + re-attach yields
     //     the SAME id and the check returns `Applied`. It is a PROCESS check, not an
     //     ATTACHMENT check.
     //

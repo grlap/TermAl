@@ -757,7 +757,7 @@ fn shared_codex_stale_start_turn_handoff_skips_runtime_config_persistence() {
 //
 // The runtime-id check at the top of `handle_shared_codex_start_turn` does NOT catch
 // this. Every session on the shared app-server carries the SAME `runtime_id` — it is
-// cloned straight off `SharedCodexRuntime` in `spawn_codex_runtime` — so detach and
+// cloned straight off `SharedCodexRuntime` in `spawn_codex_runtime_owned_by` — so detach and
 // re-attach yield the same id and the check returns `Applied`. It is a PROCESS check,
 // not an ATTACHMENT check.
 //
