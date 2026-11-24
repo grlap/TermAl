@@ -9,17 +9,35 @@ pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_NAME: &str =
     "termal_read_acceptance_evidence";
 pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_QUALIFIED_TOOL_NAME: &str =
     "mcp__termal-delegation__termal_read_acceptance_evidence";
-pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION: &str = "When your current brief enables evidence recovery, read omitted evidence before judging. An attempt without recovery keeps its missing-evidence verdict route; this tool refuses such a call without ending that attempt. Supply your exact attemptKey and a new readKey for each logical read. action catalog continues the captured notes catalog: omit cursor for its original boundary, then use only a cursor this tool returned. action records reads whole records named by your brief or a recovered catalog page; supply locators. The host derives the store, work, run and cut. Repeating the same readKey and arguments returns its original result without another read or budget charge; reusing it for different arguments refuses. All reads share one attempt allowance. An unfinished result recorded no verdict and ends this attempt: finish and report it so the parent can request a fresh evaluation. A stale result means the item's evidence changed after the captured cut; it also ends this attempt and is retryable: report it so the parent requests a fresh evaluation. When recovery is enabled, do not submit insufficient-evidence merely because discovery stopped before older proof was read.";
+pub(crate) const TERMAL_READ_ACCEPTANCE_EVIDENCE_TOOL_DESCRIPTION: &str = "When your brief enables evidence recovery, start with requester-selected proof. Use action records and only requester-selected locators to read their captured bodies without spending discovery allowance. Use action catalog for other older locators: omit cursor initially, then use only a cursor this tool returned. Read whole bodies with action records and known locators. Supply your exact attemptKey and a new readKey per logical read. Repeating the same key and arguments replays the result without tracker I/O; reusing the key with different arguments refuses. An exhausted result closes optional discovery and leaves submission open. Submit one verdict per criterion, with reasoned insufficient-evidence wherever unread proof prevents a judgment. A stale or unfinished result ends the attempt without a verdict: finish and report the reason so the parent can request a fresh evaluation.";
+
+const ACCEPTANCE_DISCOVERY_EXHAUSTED_REMEDY: &str = "Submit one verdict per criterion on this attempt. Use insufficient-evidence with a reason where unread proof prevents a judgment.";
+
+enum AcceptanceEvidenceReadError {
+    AllowanceSpent(&'static str),
+    Failed(ApiError),
+}
+
+impl From<ApiError> for AcceptanceEvidenceReadError {
+    fn from(error: ApiError) -> Self {
+        Self::Failed(error)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AcceptanceEvidenceRecoveryManifest {
     pub(crate) identity: AcceptanceEvidenceIdentity,
     pub(crate) basis: AcceptanceAgentEvidenceBasis,
     pub(crate) window: AcceptanceNotesWindow,
+    pub(crate) reader: WorkReadTarget,
+    /// The lookup path validated at admission, before canonicalization.
+    pub(crate) lookup_path: PathBuf,
     pub(crate) seen: BTreeSet<String>,
     pub(crate) catalog: Vec<Value>,
     /// Exact selected records are readable before they appear in catalog paging.
     pub(crate) indexed: BTreeSet<String>,
+    /// Whole requester-selected records validated inside the request's canonical bracket.
+    pub(crate) selected_records: BTreeMap<String, Arc<Value>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -115,7 +133,11 @@ pub(crate) struct AcceptanceEvidenceRecovery {
     catalog_seen: BTreeSet<String>,
     pub(crate) seen: BTreeSet<String>,
     pub(crate) pages: HashMap<String, Value>,
-    pub(crate) replies: HashMap<String, (String, Value)>,
+    replies: HashMap<String, (String, Value)>,
+    /// Successful selected reads retain their intent and original budget display.
+    /// The immutable bodies are shared in the manifest.
+    selected_replies: HashMap<String, (String, u64)>,
+    discovery_exhausted: bool,
     /// Set when a read failed because the captured window went stale.
     pub(crate) stale_basis: Option<String>,
 }
@@ -170,6 +192,8 @@ impl AcceptanceEvidenceRecovery {
             catalog_seen,
             pages: HashMap::new(),
             replies: HashMap::new(),
+            selected_replies: HashMap::new(),
+            discovery_exhausted: false,
             stale_basis: None,
         }
     }
@@ -205,7 +229,7 @@ impl AcceptanceEvidenceRecovery {
             && history_scope(old) == history_scope(target)
     }
 
-    pub(crate) fn call(
+    fn call(
         &mut self,
         connection: &EngramConnectionConfig,
         args: &[String],
@@ -215,9 +239,9 @@ impl AcceptanceEvidenceRecovery {
             Duration,
         ) -> Result<Value, EngramTransportError>,
         now: &impl Fn() -> std::time::Instant,
-    ) -> Result<Value, ApiError> {
+    ) -> Result<Value, AcceptanceEvidenceReadError> {
         if self.remaining < ENGRAM_MIN_CALL_TIMEOUT {
-            return Err(ApiError::conflict(
+            return Err(AcceptanceEvidenceReadError::AllowanceSpent(
                 "the attempt's evidence read allowance is spent",
             ));
         }
@@ -234,15 +258,16 @@ impl AcceptanceEvidenceRecovery {
                     acceptance_brief_text(&error.message, 512)
                 );
                 self.stale_basis = Some(reason.clone());
-                Err(ApiError::conflict(reason))
+                Err(ApiError::conflict(reason).into())
             }
             Err(_) => Err(ApiError::bad_gateway(
                 "the captured evidence read is unavailable or its cursor expired",
-            )),
+            )
+            .into()),
         }
     }
 
-    pub(crate) fn inspect(
+    fn inspect(
         &mut self,
         connection: &EngramConnectionConfig,
         read: &impl Fn(
@@ -251,7 +276,7 @@ impl AcceptanceEvidenceRecovery {
             Duration,
         ) -> Result<Value, EngramTransportError>,
         now: &impl Fn() -> std::time::Instant,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), AcceptanceEvidenceReadError> {
         let args = vec![
             "work".to_owned(),
             "core".to_owned(),
@@ -263,12 +288,13 @@ impl AcceptanceEvidenceRecovery {
         if acceptance_core_identity(&result)?.as_ref() != Some(&self.manifest.identity) {
             return Err(ApiError::conflict(
                 "the captured work/run identity changed during evidence recovery",
-            ));
+            )
+            .into());
         }
         Ok(())
     }
 
-    pub(crate) fn execute(
+    fn discover(
         &mut self,
         request: &ReadAcceptanceEvidenceRequest,
         connection: &EngramConnectionConfig,
@@ -278,9 +304,9 @@ impl AcceptanceEvidenceRecovery {
             Duration,
         ) -> Result<Value, EngramTransportError>,
         now: &impl Fn() -> std::time::Instant,
-    ) -> Result<Value, ApiError> {
+    ) -> Result<Value, AcceptanceEvidenceReadError> {
         self.inspect(connection, read, now)?;
-        let mut result = match request.action.as_str() {
+        let result = match request.action.as_str() {
             "catalog" => {
                 let handle = request
                     .cursor
@@ -318,7 +344,8 @@ impl AcceptanceEvidenceRecovery {
                         if window.read_cut.project_position < previous.read_cut.project_position {
                             return Err(ApiError::conflict(
                                 "the recovered catalog moved before its captured cut",
-                            ));
+                            )
+                            .into());
                         }
                         let rows = page["notes"]
                             .as_array()
@@ -334,9 +361,11 @@ impl AcceptanceEvidenceRecovery {
                             if !catalog_seen.insert(locator.to_owned()) {
                                 return Err(ApiError::conflict(
                                     "catalog repeated an already discovered record",
-                                ));
+                                )
+                                .into());
                             }
                         }
+                        self.inspect(connection, read, now)?;
                         self.catalog_seen = catalog_seen;
                         let next = window.after.as_ref().map(|_| Uuid::new_v4().to_string());
                         if let Some(token) = &window.after {
@@ -352,61 +381,88 @@ impl AcceptanceEvidenceRecovery {
                         let response = json!({"catalog":rows, "cursor":next, "remainingUnread":window.older,
                             "pageReadCut":window.read_cut});
                         self.pages.insert(handle, response.clone());
-                        response
+                        return Ok(response);
                     }
                 }
             }
-            "records" => {
-                let mut records = Vec::new();
-                for locator in &request.locators {
-                    let args = vec![
-                        "work".to_owned(),
-                        "show".to_owned(),
-                        self.manifest.identity.work_ref.clone(),
-                        "--note".to_owned(),
-                        locator.clone(),
-                        "--json".to_owned(),
-                    ];
-                    let record = self.call(connection, &args, read, now)?;
-                    validate_acceptance_selected_record(
-                        &record,
-                        &self.manifest.identity.work_ref,
-                        locator,
-                    )?;
-                    let original = &self.known[locator];
-                    // Whole records are immutable. Any provenance or size assertion
-                    // already exposed by the captured catalog must still agree.
-                    for field in [
-                        "family",
-                        "kind",
-                        "by",
-                        "created_at",
-                        "non_holder",
-                        "body_bytes",
-                    ] {
-                        if original
-                            .get(field)
-                            .is_some_and(|v| record["note"].get(field) != Some(v))
-                        {
-                            return Err(ApiError::conflict(
-                                "the exact evidence record disagrees with its captured catalog",
-                            ));
-                        }
-                    }
-                    records.push(record);
-                }
-                json!({"records":records})
-            }
+            "records" => self.read_records(&request.locators, connection, read, now)?,
             _ => unreachable!("validated read action"),
         };
         self.inspect(connection, read, now)?;
+        Ok(result)
+    }
+
+    fn read_records(
+        &mut self,
+        locators: &[String],
+        connection: &EngramConnectionConfig,
+        read: &impl Fn(
+            &EngramConnectionConfig,
+            &[String],
+            Duration,
+        ) -> Result<Value, EngramTransportError>,
+        now: &impl Fn() -> std::time::Instant,
+    ) -> Result<Value, AcceptanceEvidenceReadError> {
+        let mut records = Vec::with_capacity(locators.len());
+        for locator in locators {
+            let record = if let Some(record) = self.manifest.selected_records.get(locator) {
+                record.as_ref().clone()
+            } else {
+                let args = [
+                    "work".to_owned(),
+                    "show".to_owned(),
+                    self.manifest.identity.work_ref.clone(),
+                    "--note".to_owned(),
+                    locator.clone(),
+                    "--json".to_owned(),
+                ];
+                let record = self.call(connection, &args, read, now)?;
+                validate_acceptance_selected_record(
+                    &record,
+                    &self.manifest.identity.work_ref,
+                    locator,
+                )?;
+                record
+            };
+            let original = &self.known[locator];
+            // Whole records are immutable. Any provenance or size assertion
+            // already exposed by the captured catalog must still agree.
+            for field in [
+                "family",
+                "kind",
+                "by",
+                "created_at",
+                "non_holder",
+                "body_bytes",
+            ] {
+                if original
+                    .get(field)
+                    .is_some_and(|v| record["note"].get(field) != Some(v))
+                {
+                    return Err(ApiError::conflict(
+                        "the exact evidence record disagrees with its captured catalog",
+                    )
+                    .into());
+                }
+            }
+            records.push(record);
+        }
+        Ok(json!({"records":records}))
+    }
+
+    fn complete(
+        &self,
+        request: &ReadAcceptanceEvidenceRequest,
+        mut result: Value,
+        remaining_read_millis: u64,
+    ) -> Value {
         result["state"] = json!("complete");
         result["recorded"] = json!(false);
         result["attemptKey"] = json!(request.attempt_key);
         result["readKey"] = json!(request.read_key);
         result["capturedCut"] = json!(self.manifest.window.read_cut);
-        result["remainingReadMillis"] = json!(self.remaining.as_millis() as u64);
-        Ok(result)
+        result["remainingReadMillis"] = json!(remaining_read_millis);
+        result
     }
 }
 
@@ -507,19 +563,27 @@ impl AppState {
         Ok(authority)
     }
 
-    fn acceptance_evidence_read_target_locked(
+    fn validate_acceptance_evidence_authority_locked(
         &self,
         inner: &StateInner,
         child: &str,
         authority: &AcceptanceEvaluationSubmitAuthority,
-    ) -> Result<WorkReadTarget, ApiError> {
+        reader: &WorkReadTarget,
+    ) -> Result<(), ApiError> {
         let delegation = &inner.delegations[inner
             .find_delegation_index(&authority.delegation_id)
             .ok_or_else(|| ApiError::conflict("the evaluator delegation disappeared"))?];
-        let target = acceptance_evaluation_host_target_locked(inner, child)?;
-        if authority.target.store.as_ref() != Some(&target.store) {
+        let project = acceptance_evaluation_project_locked(inner, child)?;
+        let (connection, store) =
+            work_host_reader_configuration(inner, project).map_err(ApiError::conflict)?;
+        if authority.target.store.as_ref() != Some(&store) || reader.store != store {
             return Err(ApiError::conflict(
                 ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
+            ));
+        }
+        if reader.connection != connection {
+            return Err(ApiError::conflict(
+                "the Work reader changed during the evidence attempt; request a fresh evaluation",
             ));
         }
         let naming = authority
@@ -527,17 +591,19 @@ impl AppState {
             .naming_history
             .as_ref()
             .ok_or_else(|| ApiError::conflict("the attempt has no naming history"))?;
-        if engram_work_naming_change(inner, &target.store, naming).is_some()
-            || authority.target.source_root.as_ref().is_some_and(|root| {
-                !root.still_named(&inner.engram_work_source_roots, &target.store)
-            })
+        if engram_work_naming_change(inner, &store, naming).is_some()
+            || authority
+                .target
+                .source_root
+                .as_ref()
+                .is_some_and(|root| !root.still_named(&inner.engram_work_source_roots, &store))
             || authority.target.source_claim.as_ref().is_some_and(|claim| {
                 acceptance_evaluation_claim_named_since(
                     &inner.engram_work_source_roots,
-                    &target.store,
+                    &store,
                     claim,
                     &authority.target.work_ref,
-                ) || acceptance_evaluation_other_claim_named_since(inner, &target.store, claim)
+                ) || acceptance_evaluation_other_claim_named_since(inner, &store, claim)
             })
         {
             return Err(ApiError::conflict(
@@ -557,15 +623,14 @@ impl AppState {
         if acceptance_evaluation_claim_unconfirmed_locked(
             inner,
             &delegation.parent_session_id,
-            &target.store,
+            &store,
             claim.as_ref().or(authority.target.source_claim.as_ref()),
         ) {
             return Err(ApiError::conflict(
                 "the evidence attempt's source claim is unconfirmed",
             ));
         }
-        validate_work_read_target(&target)?;
-        Ok(target)
+        Ok(())
     }
 
     fn finish_acceptance_evidence_read_locked(
@@ -629,8 +694,13 @@ impl AppState {
         ) -> Result<Value, EngramTransportError>,
         now: impl Fn() -> std::time::Instant,
     ) -> Result<Value, ApiError> {
-        let result =
-            self.read_acceptance_evidence_with_io_inner(child, request.clone(), read, now)?;
+        let result = self.read_acceptance_evidence_with_io_inner(
+            child,
+            request.clone(),
+            read,
+            now,
+            validate_work_read_target_at,
+        )?;
         if !matches!(result["state"].as_str(), Some("unfinished" | "stale")) {
             return Ok(result);
         }
@@ -682,6 +752,22 @@ impl AppState {
         Ok(result)
     }
 
+    #[cfg(test)]
+    pub(crate) fn replay_acceptance_evidence_with_probe(
+        &self,
+        child: &str,
+        request: ReadAcceptanceEvidenceRequest,
+        probe: impl Fn(&WorkReadTarget, &FsPath) -> Result<(), ApiError>,
+    ) -> Result<Value, ApiError> {
+        self.read_acceptance_evidence_with_io_inner(
+            child,
+            request,
+            |_, _, _| panic!("a cached replay must not read the tracker"),
+            std::time::Instant::now,
+            probe,
+        )
+    }
+
     fn read_acceptance_evidence_with_io_inner(
         &self,
         child: &str,
@@ -692,6 +778,7 @@ impl AppState {
             Duration,
         ) -> Result<Value, EngramTransportError>,
         now: impl Fn() -> std::time::Instant,
+        probe: impl Fn(&WorkReadTarget, &FsPath) -> Result<(), ApiError>,
     ) -> Result<Value, ApiError> {
         request.validate()?;
         let entry = {
@@ -741,7 +828,11 @@ impl AppState {
         // One attempt owns one serialized logical-read stream. Identical
         // concurrent calls wait here and get the first result, not another IO.
         let mut recovery = entry.lock().expect("evidence recovery mutex poisoned");
-        let (authority, target, _in_flight) = {
+        let intent = request.intent();
+        let validate_reader = |manifest: &AcceptanceEvidenceRecoveryManifest| {
+            probe(&manifest.reader, &manifest.lookup_path)
+        };
+        let (authority, authority_check, _in_flight) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let authority =
                 self.acceptance_evidence_caller_locked(&inner, child, &request.attempt_key)?;
@@ -750,13 +841,82 @@ impl AppState {
                     "the evidence recovery belongs to another attempt scope",
                 ));
             }
-            if let Some((intent, result)) = recovery.replies.get(&request.read_key) {
-                if *intent != request.intent() {
+            let selected_reply = recovery.selected_replies.get(&request.read_key);
+            let saved_reply = recovery.replies.get(&request.read_key);
+            if let Some(saved_intent) = selected_reply
+                .map(|(intent, _)| intent)
+                .or_else(|| saved_reply.map(|(intent, _)| intent))
+            {
+                if *saved_intent != intent {
                     return Err(ApiError::conflict(
                         "readKey is already bound to another evidence read intent",
                     ));
                 }
-                return Ok(result.clone());
+                // A reason-only failure may be replayed after a scope move
+                // so an earlier unfinished read can be acknowledged.
+                let _in_flight = if saved_reply.is_some_and(|(_, result)| {
+                    matches!(result["state"].as_str(), Some("unfinished" | "stale"))
+                }) {
+                    drop(inner);
+                    None
+                } else {
+                    if acceptance_evidence_unfinished(&authority.target).is_some() {
+                        return Err(ApiError::conflict(
+                            "this evidence read attempt already ended without a verdict; request a fresh evaluation",
+                        ));
+                    }
+                    self.validate_acceptance_evidence_authority_locked(
+                        &inner,
+                        child,
+                        &authority,
+                        &recovery.manifest.reader,
+                    )?;
+                    let guard = AcceptanceEvaluationSubmissionInFlight::admit_locked(
+                        self,
+                        &mut inner,
+                        &authority.delegation_id,
+                    )
+                    .ok_or_else(|| {
+                        ApiError::conflict("an evaluation operation is already in progress")
+                    })?;
+                    drop(inner);
+                    validate_reader(&recovery.manifest)?;
+                    {
+                        let inner = self.inner.lock().expect("state mutex poisoned");
+                        let current = self.acceptance_evidence_caller_locked(
+                            &inner,
+                            child,
+                            &request.attempt_key,
+                        )?;
+                        if current.delegation_id != authority.delegation_id
+                            || current.target != authority.target
+                        {
+                            return Err(ApiError::conflict(
+                                "the evaluator changed while evidence was being read; nothing was exposed",
+                            ));
+                        }
+                        self.validate_acceptance_evidence_authority_locked(
+                            &inner,
+                            child,
+                            &current,
+                            &recovery.manifest.reader,
+                        )?;
+                    }
+                    Some(guard)
+                };
+                if let Some((_, remaining_read_millis)) = selected_reply {
+                    let records: Vec<_> = request
+                        .locators
+                        .iter()
+                        .map(|locator| recovery.manifest.selected_records[locator].as_ref())
+                        .collect();
+                    return Ok(recovery.complete(
+                        &request,
+                        json!({"records":records}),
+                        *remaining_read_millis,
+                    ));
+                }
+                return Ok(saved_reply.expect("known reply").1.clone());
             }
             if acceptance_evidence_unfinished(&authority.target).is_some() {
                 return Err(ApiError::conflict(
@@ -780,52 +940,119 @@ impl AppState {
                     "the cursor or record was not issued to this evaluator attempt",
                 ));
             }
-            let target = self.acceptance_evidence_read_target_locked(&inner, child, &authority);
+            let authority_check = self.validate_acceptance_evidence_authority_locked(
+                &inner,
+                child,
+                &authority,
+                &recovery.manifest.reader,
+            );
             let guard = AcceptanceEvaluationSubmissionInFlight::admit_locked(
                 self,
                 &mut inner,
                 &authority.delegation_id,
             )
             .ok_or_else(|| ApiError::conflict("an evaluation operation is already in progress"))?;
-            (authority, target, guard)
+            (authority, authority_check, guard)
         };
-        let result = match target {
-            Err(error) => Err(error),
-            Ok(_) if recovery.replies.len() >= MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES => Err(
-                ApiError::conflict("the attempt's bounded logical evidence reads are exhausted"),
-            ),
-            Ok(target) => recovery.execute(&request, &target.connection, &read, &now),
+        let selected_only = request.action == "records"
+            && request
+                .locators
+                .iter()
+                .all(|id| recovery.manifest.selected_records.contains_key(id));
+        let connection = recovery.manifest.reader.connection.clone();
+        let result = match authority_check.and_then(|()| validate_reader(&recovery.manifest)) {
+            Err(error) => Err(error.into()),
+            // Selected bodies already passed the opening and closing canonical
+            // checks before spawn. Reuse them under the current local scope.
+            Ok(())
+                if selected_only
+                    && recovery.selected_replies.len() >= MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES =>
+            {
+                return Err(ApiError::conflict(
+                    "the selected evidence replay limit is reached; reuse a readKey with its original arguments",
+                ));
+            }
+            Ok(()) if selected_only => {
+                recovery.read_records(&request.locators, &connection, &read, &now)
+            }
+            Ok(()) if recovery.discovery_exhausted => {
+                return Err(ApiError::conflict(ACCEPTANCE_DISCOVERY_EXHAUSTED_REMEDY));
+            }
+            Ok(()) if recovery.replies.len() >= MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES => {
+                Err(AcceptanceEvidenceReadError::AllowanceSpent(
+                    "the attempt's bounded logical evidence reads are exhausted",
+                ))
+            }
+            Ok(()) => recovery.discover(&request, &connection, &read, &now),
+        };
+        let result = if matches!(&result, Err(AcceptanceEvidenceReadError::Failed(_))) {
+            result
+        } else {
+            validate_reader(&recovery.manifest)
+                .map_err(AcceptanceEvidenceReadError::from)
+                .and(result)
         };
         // Taken at once, so no early return below can leave it for a later read.
         let stale_basis = recovery.stale_basis.take();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let current =
             self.acceptance_evidence_caller_locked(&inner, child, &request.attempt_key)?;
-        if current.target != authority.target {
+        if current.delegation_id != authority.delegation_id || current.target != authority.target {
             return Err(ApiError::conflict(
                 "the evaluator changed while evidence was being read; nothing was exposed",
             ));
         }
-        let result = result.and_then(|value| {
-            self.acceptance_evidence_read_target_locked(&inner, child, &current)
-                .map(|_| value)
-        });
+        let result = if matches!(&result, Err(AcceptanceEvidenceReadError::Failed(_))) {
+            result
+        } else {
+            self.validate_acceptance_evidence_authority_locked(
+                &inner,
+                child,
+                &current,
+                &recovery.manifest.reader,
+            )
+            .map_err(AcceptanceEvidenceReadError::from)
+            .and(result)
+        };
+        let complete = result.is_ok();
         let result = match result {
             Ok(result) => result,
-            Err(error) => self.finish_acceptance_evidence_read_locked(
-                &mut inner,
-                &authority,
-                &request,
-                stale_basis.clone().unwrap_or(error.message),
-                Some(json!(recovery.manifest.window.read_cut)),
-                stale_basis.is_some(),
-            )?,
+            Err(AcceptanceEvidenceReadError::AllowanceSpent(reason)) => {
+                // Closing the optional read stream prevents a partial result
+                // from escaping on retry. Ordinary submission stays available.
+                recovery.discovery_exhausted = true;
+                json!({"state":"exhausted", "recorded":false, "attemptKey":request.attempt_key,
+                    "readKey":request.read_key, "reason":reason, "capturedCut":recovery.manifest.window.read_cut,
+                    "remedy":ACCEPTANCE_DISCOVERY_EXHAUSTED_REMEDY})
+            }
+            Err(AcceptanceEvidenceReadError::Failed(error)) => self
+                .finish_acceptance_evidence_read_locked(
+                    &mut inner,
+                    &authority,
+                    &request,
+                    stale_basis.clone().unwrap_or(error.message),
+                    Some(json!(recovery.manifest.window.read_cut)),
+                    stale_basis.is_some(),
+                )?,
         };
-        recovery
-            .replies
-            .insert(request.read_key.clone(), (request.intent(), result.clone()));
-        // The in-flight guard relocks state when dropped.
+        // Serialize and cache response data after releasing app state.
+        // The in-flight guard also relocks state when dropped.
         drop(inner);
+        let remaining_read_millis = recovery.remaining.as_millis() as u64;
+        let result = if complete {
+            recovery.complete(&request, result, remaining_read_millis)
+        } else {
+            result
+        };
+        if complete && selected_only {
+            recovery
+                .selected_replies
+                .insert(request.read_key, (intent, remaining_read_millis));
+        } else {
+            recovery
+                .replies
+                .insert(request.read_key, (intent, result.clone()));
+        }
         Ok(result)
     }
 }

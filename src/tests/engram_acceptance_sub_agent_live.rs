@@ -1,11 +1,11 @@
-// Owns the operator-run sub-agent acceptance checks against a pinned real
+// Owns the operator-run evaluator acceptance checks against a pinned real
 // Engram store. Requests create actual evaluator delegations; submissions use
 // the production CLI runner. Only the model/provider runtime is simulated.
 // Does not own policy selection fixtures or the shared completion fixture.
 use super::*;
 use std::sync::atomic::AtomicUsize;
 
-fn configure_sub_agent(fixture: &CompletionFixture, modes: &str) {
+fn configure_acceptance_modes(fixture: &CompletionFixture, modes: &str) {
     fixture.command(
         &fixture.live.session_id,
         &[
@@ -108,7 +108,7 @@ fn add_claimed_work(fixture: &CompletionFixture, former: &str, pin: bool) -> Str
         &["core", "inspect", &work, "--json"],
     );
     assert_eq!(
-        core["run"]["id"], binding.run_id,
+        core["run"]["run_id"], binding.run_id,
         "actual held claim, not a control bind"
     );
     work
@@ -217,7 +217,7 @@ fn live_sub_agent_host_submission_is_accepted_under_each_required_policy() {
             transport: fixture.live.transport.clone(),
             session_id: WORK_HOST_READER_SESSION_ID.to_owned(),
         };
-        configure_sub_agent(&fixture, modes);
+        configure_acceptance_modes(&fixture, modes);
         let former = another_session(&fixture);
         let work = add_claimed_work(&fixture, &former, pin);
         let evidence = record_evidence(&fixture, &work, &former);
@@ -288,13 +288,159 @@ fn live_sub_agent_host_submission_is_accepted_under_each_required_policy() {
 
 #[test]
 #[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
+fn live_independent_evidence_exhaustion_records_insufficient_evidence_and_blocks_done() {
+    let fixture = completion_fixture();
+    let state = &fixture.live.state;
+    let parent = &fixture.live.session_id;
+    let _reader = LiveRootCleanup {
+        transport: fixture.live.transport.clone(),
+        session_id: WORK_HOST_READER_SESSION_ID.to_owned(),
+    };
+    configure_acceptance_modes(&fixture, "independent-session");
+    let former = another_session(&fixture);
+    let work = add_claimed_work(&fixture, &former, false);
+    state
+        .name_engram_source_root(
+            parent,
+            EngramSourceRootRequest {
+                work: work.clone(),
+                path: Some(Some(fixture.root.to_string_lossy().into_owned())),
+            },
+        )
+        .expect("the holder names the fixture repository");
+    fixture.begin(parent, "Observe the named source without changing it.");
+    finish_live_root(state, parent);
+    fixture.wait_for_reports(parent);
+    record_evidence(&fixture, &work, &former);
+    let response = state
+        .request_acceptance_evaluation(
+            parent,
+            RequestAcceptanceEvaluationRequest {
+                reuse_delegation_id: None,
+                work_ref: work.clone(),
+                agent: Some(Agent::Codex),
+                model: None,
+                retired_check_dispositions: Vec::new(),
+                criterion_evidence: Vec::new(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("real host request must spawn: {}", error.message));
+    let AcceptanceEvaluationRequestResponse::Spawned {
+        delegation, mode, ..
+    } = response
+    else {
+        panic!("expected an independent evaluator")
+    };
+    assert_eq!(mode, AcceptanceEvaluationMode::IndependentSession);
+    let child = &delegation.delegation.child_session_id;
+    let _child = LiveRootCleanup {
+        transport: fixture.live.transport.clone(),
+        session_id: child.clone(),
+    };
+    let target = delegation
+        .delegation
+        .acceptance_evaluation
+        .as_ref()
+        .expect("the host retained the evaluator attempt");
+    let attempt_key = target.attempt_key.clone();
+    let source = target
+        .source_id
+        .as_ref()
+        .expect("the evaluator judges the acknowledged named source");
+    let start = std::time::Instant::now();
+    let after_read = std::cell::Cell::new(false);
+    let cwd = state.engram_host_launch_workdir();
+    let read = state
+        .read_acceptance_evidence_with_io(
+            child,
+            ReadAcceptanceEvidenceRequest {
+                attempt_key: attempt_key.clone(),
+                read_key: "catalog-exhaustion".to_owned(),
+                action: "catalog".to_owned(),
+                cursor: None,
+                locators: Vec::new(),
+            },
+            |connection, args, timeout| {
+                let result = run_acceptance_evaluation_read(connection, args, timeout, &cwd);
+                assert!(
+                    !after_read.replace(true),
+                    "no further call fits the allowance"
+                );
+                result
+            },
+            || {
+                if after_read.get() {
+                    start + acceptance_evaluation_evidence_budget()
+                } else {
+                    start
+                }
+            },
+        )
+        .unwrap();
+    assert_eq!(read["state"], "exhausted", "{read:#}");
+    let submission = state
+        .submit_acceptance_evaluation(
+            child,
+            SubmitAcceptanceEvaluationRequest {
+                attempt_key: Some(attempt_key),
+                schema_version: ACCEPTANCE_EVALUATION_SUBMISSION_SCHEMA_VERSION,
+                verdicts: vec![SubmitAcceptanceEvaluationVerdict {
+                    criterion: 1,
+                    verdict: "insufficient-evidence".to_owned(),
+                    basis: Some("judgment".to_owned()),
+                    rationale: "Discovery ended before the evidence establishing the evaluator's distinct execution identity was read.".to_owned(),
+                    evidence: Vec::new(),
+                }],
+            },
+        )
+        .unwrap_or_else(|error| panic!("the same attempt must submit: {}", error.message));
+    assert_eq!(submission.receipt["evaluation"]["passed"], 0);
+    assert_eq!(submission.receipt["evaluation"]["blocking"]["position"], 1);
+    assert_eq!(
+        submission.receipt["evaluation"]["blocking"]["verdict"],
+        "insufficient_evidence"
+    );
+    let source_file = fixture.home.join("completion-source.json");
+    fs::write(&source_file, serde_json::to_vec(source).unwrap()).unwrap();
+    let done = fixture.command_output(
+        parent,
+        &[
+            "done",
+            &work,
+            "Checked",
+            "--source-id-file",
+            source_file.to_str().unwrap(),
+            "--json",
+        ],
+        true,
+    );
+    assert!(
+        !done.status.success(),
+        "insufficient evidence must block done"
+    );
+    let refusal: Value = serde_json::from_slice(&done.stdout).unwrap_or_else(|error| {
+        panic!(
+            "Engram did not return a completion refusal: {error}; {}",
+            String::from_utf8_lossy(&done.stderr)
+        )
+    });
+    assert_eq!(
+        refusal["recovery"]["cause"]["kind"], "acceptance_insufficient_evidence",
+        "{refusal:#}"
+    );
+    let shown = fixture.work(parent, &["show", &work, "--json"]);
+    assert_eq!(shown["status"]["work"]["lifecycle"], "open");
+}
+
+#[test]
+#[ignore = "requires reviewed TERMAL_TEST_LIVE_ENGRAM_BINARY and TERMAL_TEST_LIVE_ENGRAM_SHA256"]
 fn live_sub_agent_parent_loses_both_routes_after_spawn_and_host_surfaces_final_refusal() {
     let fixture = completion_fixture();
     let _reader = LiveRootCleanup {
         transport: fixture.live.transport.clone(),
         session_id: WORK_HOST_READER_SESSION_ID.to_owned(),
     };
-    configure_sub_agent(&fixture, "sub-agent");
+    configure_acceptance_modes(&fixture, "sub-agent");
     let former = another_session(&fixture);
     let work = add_claimed_work(&fixture, &former, false);
     let evidence = record_evidence(&fixture, &work, &former);

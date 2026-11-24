@@ -810,12 +810,19 @@ pub(crate) fn acceptance_evaluation_host_target_locked(
     inner: &StateInner,
     session_id: &str,
 ) -> Result<WorkReadTarget, ApiError> {
-    let project = engram_project_for_session_locked(inner, session_id).ok_or_else(|| {
+    let project = acceptance_evaluation_project_locked(inner, session_id)?;
+    work_host_reader(inner, project).map_err(ApiError::conflict)
+}
+
+pub(crate) fn acceptance_evaluation_project_locked<'a>(
+    inner: &'a StateInner,
+    session_id: &str,
+) -> Result<&'a Project, ApiError> {
+    engram_project_for_session_locked(inner, session_id).ok_or_else(|| {
         ApiError::conflict(
             "this session has no project; Engram is configured per project, so there is no tracker to evaluate against",
         )
-    })?;
-    work_host_reader(inner, project).map_err(ApiError::conflict)
+    })
 }
 
 pub(crate) fn acceptance_evaluation_transport_error(
@@ -1219,7 +1226,7 @@ impl AppState {
         };
         // The ref is caller text: never hand it to a shell shim or to a store
         // other than the one the operator established.
-        validate_work_read_target(&target)?;
+        let lookup_path = validated_work_lookup_path(&target)?;
         let connection = &target.connection;
         let mut show_args = vec![
             "work".to_owned(),
@@ -1458,9 +1465,12 @@ impl AppState {
                     identity: identity.clone(),
                     basis: basis.clone(),
                     window,
+                    reader: target.clone(),
+                    lookup_path,
                     seen: notes_cursors,
                     catalog: show["notes"].as_array().cloned().unwrap_or_default(),
                     indexed: BTreeSet::new(),
+                    selected_records: BTreeMap::new(),
                 })
             }
             _ => None,

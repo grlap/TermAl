@@ -37,6 +37,16 @@ fn recovery_fixture_with_indexed(
     mode: &str,
     selected: bool,
 ) -> (AppState, String, String, String, String) {
+    recovery_fixture_with_catalog(mode, selected, catalog_page(0), "time_budget", 1)
+}
+
+fn recovery_fixture_with_catalog(
+    mode: &str,
+    selected: bool,
+    first_page: Value,
+    paging_stop: &str,
+    unread: usize,
+) -> (AppState, String, String, String, String) {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     crate::tests::delegation_support::install_delegation_codex_runtime(
@@ -63,6 +73,7 @@ fn recovery_fixture_with_indexed(
                 } else if args.iter().any(|a| a == "--note") {
                     recovery_reader(connection, args, timeout)
                 } else if let Some(i) = args.iter().position(|a| a == "--after") {
+                    assert_ne!(paging_stop, "entry_limit", "optional paging should stop");
                     let index = args[i + 1].strip_prefix("page-").unwrap().parse().unwrap();
                     elapsed.set(elapsed.get() + ENGRAM_MIN_CALL_TIMEOUT);
                     Ok(catalog_page(index))
@@ -74,9 +85,9 @@ fn recovery_fixture_with_indexed(
                     Ok(policy_receipt(Some(&[mode])))
                 } else {
                     let mut show = show_receipt(None);
-                    show["notes"] = catalog_page(0)["notes"].clone();
-                    show["notes_window"] = catalog_page(0)["notes_window"].clone();
-                    show["notes_omitted"] = json!(3);
+                    show["notes"] = first_page["notes"].clone();
+                    show["notes_window"] = first_page["notes_window"].clone();
+                    show["notes_omitted"] = first_page["notes_omitted"].clone();
                     Ok(show)
                 }
             },
@@ -85,8 +96,8 @@ fn recovery_fixture_with_indexed(
         )
         .unwrap();
     let wire = serde_json::to_value(&response).unwrap();
-    assert_eq!(wire["evidenceOmissions"]["unread"]["reason"], "time_budget");
-    assert_eq!(wire["evidenceOmissions"]["unread"]["count"], 1);
+    assert_eq!(wire["evidenceOmissions"]["unread"]["reason"], paging_stop);
+    assert_eq!(wire["evidenceOmissions"]["unread"]["count"], unread);
     let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
         panic!("evaluator")
     };
@@ -457,8 +468,28 @@ fn a_reused_evaluators_stale_attempt_is_reported_beside_its_earlier_retired_writ
 }
 
 #[test]
-fn exhausted_allowance_is_an_unfinished_attempt_not_a_verdict_and_parent_can_request_again() {
-    let (state, parent, id, child, key) = recovery_fixture();
+fn requester_proof_beyond_the_brief_and_discovery_exhaustion_allow_mixed_verdicts() {
+    let first_page = json!({
+        "notes": (402..=441).map(catalog_note).collect::<Vec<_>>(),
+        "notes_window": canonical_notes_window(441, 0, 40, 42, Some("older-cut")),
+        "notes_omitted": 401
+    });
+    let (state, _, id, child, key) =
+        recovery_fixture_with_catalog("independent_session", true, first_page, "entry_limit", 401);
+    let selected = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "selected-first", true),
+            |_, _, _| panic!("the requester proof was already read before spawn"),
+            std::time::Instant::now,
+        )
+        .unwrap();
+    assert_eq!(selected["records"][0]["note"], catalog_note(3));
+    assert_eq!(
+        selected["remainingReadMillis"],
+        acceptance_evaluation_evidence_budget().as_millis() as u64
+    );
+
     let elapsed = std::cell::Cell::new(Duration::ZERO);
     let start = std::time::Instant::now();
     let calls = AtomicUsize::new(0);
@@ -467,17 +498,27 @@ fn exhausted_allowance_is_an_unfinished_attempt_not_a_verdict_and_parent_can_req
         .read_acceptance_evidence_with_io(
             &child,
             request.clone(),
-            |connection, args, timeout| {
+            |_, args, _| {
                 calls.fetch_add(1, Ordering::SeqCst);
-                let result = recovery_reader(connection, args, timeout);
                 elapsed.set(elapsed.get() + ENGRAM_MIN_CALL_TIMEOUT);
-                result
+                if let Some(i) = args.iter().position(|a| a == "--after") {
+                    assert_eq!(args[i + 1], "older-cut");
+                    Ok(json!({
+                        "work": {"short_ref":"w-task"},
+                        "notes": [catalog_note(401)],
+                        "notes_window": canonical_notes_window(441, 40, 1, 42, Some("next-older-cut")),
+                        "notes_omitted": 400
+                    }))
+                } else {
+                    assert!(args.iter().any(|a| a == "inspect"));
+                    Ok(evidence_selection::canonical_core_receipt())
+                }
             },
             || start + elapsed.get(),
         )
         .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 2, "no unfunded closing read");
-    assert_eq!(result["state"], "unfinished");
+    assert_eq!(result["state"], "exhausted");
     assert_eq!(result["recorded"], false);
     assert!(
         result.get("catalog").is_none(),
@@ -492,71 +533,83 @@ fn exhausted_allowance_is_an_unfinished_attempt_not_a_verdict_and_parent_can_req
         )
         .unwrap();
     assert_eq!(result, replay);
-    let mut submit = two_verdicts();
+    let refusal = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "fresh-catalog-after-exhaustion", false),
+            |_, _, _| panic!("exhausted discovery must not issue tracker I/O"),
+            std::time::Instant::now,
+        )
+        .expect_err("a fresh discovery key cannot reopen exhaustion");
+    assert_eq!(refusal.status, StatusCode::CONFLICT);
+    assert_eq!(refusal.message, result["remedy"].as_str().unwrap());
+    let selected_after_exhaustion = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "selected-again", true),
+            |_, _, _| panic!("discovery exhaustion cannot force an I/O re-read"),
+            std::time::Instant::now,
+        )
+        .unwrap();
+    assert_eq!(selected_after_exhaustion["records"], selected["records"]);
+
+    let mut submit = submission(vec![
+        verdict(
+            1,
+            "pass",
+            selected["records"][0]["note"]["summary"].as_str().unwrap(),
+            &[OLDER_PROOF],
+        ),
+        verdict(
+            2,
+            "insufficient-evidence",
+            "The acceptance test result was not shown when discovery ran out.",
+            &[],
+        ),
+    ]);
     submit.attempt_key = Some(key.clone());
-    assert!(
-        state
-            .submit_acceptance_evaluation_with_runner(&child, submit, runner_must_not_run)
-            .unwrap_err()
-            .message
-            .contains("ended without a verdict")
-    );
-    {
-        let inner = state.inner.lock().unwrap();
-        let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
-            .acceptance_evaluation
-            .as_ref()
-            .unwrap();
-        assert!(matches!(
-            target.submission,
-            AcceptanceEvaluationSubmission::None
-        ));
-        assert!(
-            acceptance_evaluation_outcome_line(target)
-                .contains(result["unfinishedEvidence"]["reason"].as_str().unwrap())
-        );
-        assert_eq!(
-            target
-                .client_view()
-                .attempt_history
-                .as_ref()
-                .unwrap()
-                .unfinished_evidence,
-            target.attempt_history.as_ref().unwrap().unfinished_evidence
-        );
-        let round_trip: DelegationAcceptanceEvaluation =
-            serde_json::from_value(serde_json::to_value(target).unwrap()).unwrap();
-        assert_eq!(
-            acceptance_evidence_unfinished(&round_trip)
-                .unwrap()
-                .attempt_key,
-            key
-        );
-        assert!(
-            !acceptance_evidence_unfinished(&round_trip)
-                .unwrap()
-                .recorded
-        );
-        assert!(
-            round_trip
-                .attempt_history
-                .unwrap()
-                .refused_submissions
-                .is_empty(),
-            "no fabricated refused judgment"
-        );
-    }
-    let response = spawn_request(&state, &parent)
-        .expect("unfinished read does not block a fresh parent request");
-    let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response else {
-        panic!("fresh child")
+    let mut receipt: Value = serde_json::from_str(&evaluate_receipt(false)).unwrap();
+    receipt["evaluation"]["attempt_key"] = json!(key);
+    receipt["evaluation"]["work_revision"] = json!(7);
+    receipt["evaluation"]["evaluated_cut"] = json!(42);
+    receipt["work"]["revision"] = json!(7);
+    receipt["evaluation"]["blocking"]["verdict"] = json!("insufficient_evidence");
+    receipt["evaluation"]["verdicts"][1]["verdict"] = json!("insufficient_evidence");
+    state
+        .submit_acceptance_evaluation_with_runner(&child, submit, |_, args, _| {
+            assert_eq!(
+                args.windows(2)
+                    .filter(|pair| pair[0] == "--verdict")
+                    .map(|pair| pair[1].as_str())
+                    .collect::<Vec<_>>(),
+                ["1=pass:judgment", "2=insufficient_evidence:judgment"]
+            );
+            assert!(args.iter().any(|arg| arg == &format!("1={OLDER_PROOF}")));
+            assert!(args.windows(2).any(|pair| {
+                pair[0] == "--rationale"
+                    && pair[1].starts_with("2=")
+                    && pair[1].ends_with(
+                        "The acceptance test result was not shown when discovery ran out.",
+                    )
+            }));
+            Ok(cli_output(true, &receipt.to_string(), ""))
+        })
+        .unwrap();
+    let inner = state.inner.lock().unwrap();
+    let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+        .acceptance_evaluation
+        .as_ref()
+        .unwrap();
+    assert!(acceptance_evidence_unfinished(target).is_none());
+    let AcceptanceEvaluationSubmission::Recorded { receipt, .. } = &target.submission else {
+        panic!("expected a recorded verdict");
     };
-    assert_ne!(delegation.delegation.id, id);
+    assert_eq!(receipt.passed, Some(1));
+    let blocking = receipt.blocking.as_ref().unwrap();
+    assert_eq!(blocking.position, 2);
+    assert_eq!(blocking.verdict, "insufficient_evidence");
     assert!(
-        delegation
-            .delegation
-            .prompt
-            .contains(result["unfinishedEvidence"]["reason"].as_str().unwrap())
+        acceptance_evaluation_outcome_line(target).contains("criterion 2 is insufficient_evidence")
     );
 }
 
@@ -707,7 +760,7 @@ fn distinct_logical_reads_spend_the_same_allowance_and_thinking_time_spends_none
             start + elapsed.get()
         })
         .unwrap();
-    assert_eq!(proof["state"], "unfinished");
+    assert_eq!(proof["state"], "exhausted");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         4,

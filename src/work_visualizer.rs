@@ -36,6 +36,19 @@ pub(crate) fn work_host_reader(
     inner: &StateInner,
     project: &Project,
 ) -> Result<WorkReadTarget, &'static str> {
+    let (connection, store) = work_host_reader_configuration(inner, project)?;
+    let reader_key = work_reader_key(&connection, &store);
+    Ok(WorkReadTarget {
+        connection,
+        store,
+        reader_key,
+    })
+}
+
+pub(crate) fn work_host_reader_configuration(
+    inner: &StateInner,
+    project: &Project,
+) -> Result<(EngramConnectionConfig, EngramAuthorityStoreKey), &'static str> {
     if project.remote_id != LOCAL_REMOTE_ID {
         return Err("Remote project Work reads are not supported yet");
     }
@@ -70,12 +83,7 @@ pub(crate) fn work_host_reader(
         actor_context: None,
         session_id: WORK_HOST_READER_SESSION_ID.to_owned(),
     };
-    let reader_key = work_reader_key(&connection, &store);
-    Ok(WorkReadTarget {
-        connection,
-        store,
-        reader_key,
-    })
+    Ok((connection, store))
 }
 
 /// `host:` plus a digest of everything a read runs under. The same
@@ -296,6 +304,19 @@ impl AppState {
 }
 
 pub(crate) fn validate_work_read_target(target: &WorkReadTarget) -> Result<(), ApiError> {
+    validated_work_lookup_path(target).map(|_| ())
+}
+
+pub(crate) fn validated_work_lookup_path(target: &WorkReadTarget) -> Result<PathBuf, ApiError> {
+    let lookup_path = work_database_path(&target.connection.home, &target.store.project_id);
+    validate_work_read_target_at(target, &lookup_path)?;
+    Ok(lookup_path)
+}
+
+pub(crate) fn validate_work_read_target_at(
+    target: &WorkReadTarget,
+    lookup_path: &FsPath,
+) -> Result<(), ApiError> {
     let c = &target.connection;
     validate_work_read_binary(c)?;
     if !c.home.is_absolute()
@@ -328,10 +349,9 @@ pub(crate) fn validate_work_read_target(target: &WorkReadTarget) -> Result<(), A
     }
     // Engram schema-1 resolves the project store from SHA-256(project id).
     // Check that actual resolution, not only the old admitted path's existence.
-    let resolved = fs::canonicalize(work_database_path(&c.home, &target.store.project_id))
-        .map_err(|e| {
-            ApiError::conflict(format!("Established Work store cannot be resolved: {e}"))
-        })?;
+    let resolved = fs::canonicalize(lookup_path).map_err(|e| {
+        ApiError::conflict(format!("Established Work store cannot be resolved: {e}"))
+    })?;
     let admitted = fs::canonicalize(&target.store.database_path)
         .map_err(|e| ApiError::conflict(format!("Admitted Work store cannot be resolved: {e}")))?;
     if resolved != admitted || normalize_user_facing_path(&admitted) != target.store.database_path {

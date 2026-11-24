@@ -2796,35 +2796,39 @@ call cannot retire it. Admission still requires canonical work/run identity.
 Parent-selected records and original closure records are readable immediately
 and may later reappear while paging the catalog; knowing a locator is not
 evidence that the catalog has already visited its row.
+The evaluator starts with requester-selected proof. A records request using
+only those locators returns the whole, validated records captured before
+spawn, without spending the discovery allowance.
 
-Recovery reuses the canonical catalog and exact-record checks, with a core
-work/run identity bracket and a current local authority recheck before exposing
-data. A changed task/run, expired producer cursor, partial body or exhausted
-allowance ends that attempt as **unfinished**, with `recorded: false` and a
-reason in the delegation's attempt history. No verdict or fake Engram evaluation
-row is created. Its old child cannot submit a judgment; the parent can request
-a fresh evaluation, whose brief also names the unfinished predecessor. Wrong
-caller keys and invented cursor/record handles refuse only that call.
+Discovery reuses the canonical catalog and exact-record checks, with a core
+work/run identity bracket. Both read paths apply the current local authority
+check before returning data. A changed task/run, expired producer cursor or
+partial body ends the attempt as **stale** or **unfinished**, with
+`recorded: false` and a reason in the delegation's attempt history. The child
+reports the reason and the parent can request a fresh evaluation. Wrong caller
+keys and invented cursor or record handles refuse only that call.
 
-All recovery calls of one attempt share the existing acceptance evidence
-allowance (two minimum operation windows) of actual tracker I/O. Before every
-issued read, a full 60-second window must remain; an issued operation retains
-that window, including the existing ten-second warning and lock-retry clock.
-There is no new setting and no change to the request's independently funded
-discovery or mandatory phases. Repeating a `readKey` with identical arguments
-returns the first success or unfinished response without I/O or another charge;
-different arguments conflict. Concurrent identical reads share that result.
-The host bounds logical reads by the existing brief-entry limit. Restart loses
-the private recovery cache and ends old recovery instead of resetting its quota.
+Discovery shares two minimum operation windows of actual tracker I/O and is
+bounded by the existing brief-entry limit. Before every issued read, a full
+60-second window must remain. An issued operation retains that window,
+including the existing ten-second warning and lock retry. Exhausting either
+bound returns **exhausted** and closes discovery without exposing an incomplete
+read. Requester-selected records remain available. Repeating a `readKey` with
+identical arguments replays its response without tracker I/O or another charge.
+Successful replies recheck current local authority. A stale or unfinished
+reply can still replay its reason. A selected-only read uses a separate limit
+of 40 distinct keys per attempt, with the captured bodies shared across them.
+Different arguments under a previously used key conflict. Restart loses the
+private recovery cache and ends old recovery instead of resetting its quota.
 Terminal delegation cleanup releases the runtime cache. A requester cannot rearm
 that same attempt after its recovery state was released; it requests a fresh
 evaluation. A newer evaluator supersedes the unfinished predecessor notice.
 
-After reading the relevant evidence, a criterion still lacking proof receives
-`insufficient-evidence`. The child does not record that verdict solely because
-discovery stopped before older proof was read. An unfinished recovery is
-reported to the parent instead. The child never infers missing proof or treats
-a visibility limit as a failed criterion. The same-session brief still names
+After ordinary exhaustion, the child submits one verdict per criterion through
+the same attempt. A criterion that still lacks proof receives
+`insufficient-evidence` with a rationale naming the missing proof. That
+recorded verdict blocks completion. The normal submission checks still apply.
+The same-session brief still names
 unread evidence by its read cut and paging reason; it grants no child read
 capability or generic tracker access.
 Only when the complete criteria do not fit with no context left is the request

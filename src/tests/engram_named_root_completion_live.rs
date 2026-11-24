@@ -126,7 +126,12 @@ impl CompletionFixture {
             .unwrap_or_else(|_| panic!("Engram fixture command returned invalid JSON"))
     }
 
-    fn command_output(&self, session_id: &str, args: &[&str], work: bool) -> std::process::Output {
+    pub(super) fn command_output(
+        &self,
+        session_id: &str,
+        args: &[&str],
+        work: bool,
+    ) -> std::process::Output {
         let (actor_id, actor_context) = {
             let inner = self.live.state.inner.lock().expect("state mutex poisoned");
             engram_runtime_actor_identity(

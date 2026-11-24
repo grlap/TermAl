@@ -21,8 +21,8 @@ fn stored_unfinished(path: &FsPath, id: &str) -> Option<AcceptanceUnfinishedEvid
 }
 
 #[test]
-fn duplicate_catalog_provenance_and_logical_cap_fail_closed_with_replay() {
-    for fault in ["none", "duplicate", "provenance", "read-cap"] {
+fn duplicate_catalog_and_record_provenance_fail_closed_with_replay() {
+    for fault in ["none", "duplicate", "provenance"] {
         let (state, _, id, child, key) = recovery_fixture();
         let catalog = state
             .read_acceptance_evidence_with_io(
@@ -42,16 +42,6 @@ fn duplicate_catalog_provenance_and_logical_cap_fail_closed_with_replay() {
             (read_request(&key, "page", false), catalog)
         } else {
             assert_eq!(catalog["state"], "complete");
-            if fault == "read-cap" {
-                let entry = state.inner.lock().unwrap().acceptance_evidence_recovery[&key].clone();
-                let mut recovery = entry.lock().unwrap();
-                for i in 0..MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES {
-                    recovery.replies.insert(
-                        format!("prior-{i}"),
-                        ("prior intent".into(), json!({"state":"complete"})),
-                    );
-                }
-            }
             let request = read_request(&key, "body", true);
             let result = state
                 .read_acceptance_evidence_with_io(
@@ -87,6 +77,215 @@ fn duplicate_catalog_provenance_and_logical_cap_fail_closed_with_replay() {
         assert_eq!(result, replay);
         assert!(stored_unfinished(state.persistence_path.as_ref(), &id).is_some());
     }
+}
+
+#[test]
+fn selected_reads_leave_every_optional_discovery_slot_available() {
+    let (state, _, id, child, key) = recovery_fixture_with_indexed("independent_session", true);
+    let start = std::time::Instant::now();
+    let selected = read_request(&key, "selected", true);
+    let selected_result = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            selected.clone(),
+            |_, _, _| panic!("selected proof must reuse the captured record"),
+            || start,
+        )
+        .unwrap();
+    for index in 0..MAX_ACCEPTANCE_BRIEF_EVIDENCE_ENTRIES {
+        let page = state
+            .read_acceptance_evidence_with_io(
+                &child,
+                read_request(&key, &format!("catalog-{index}"), false),
+                recovery_reader,
+                || start,
+            )
+            .unwrap();
+        assert_eq!(page["state"], "complete");
+    }
+    let exhausted = read_request(&key, "over-cap", false);
+    let read_without_io = |request| {
+        state
+            .read_acceptance_evidence_with_io(
+                &child,
+                request,
+                |_, _, _| panic!("a capped or replayed read cannot issue I/O"),
+                || start,
+            )
+            .unwrap()
+    };
+    let result = read_without_io(exhausted.clone());
+    assert_eq!(result["state"], "exhausted");
+    assert_eq!(result, read_without_io(exhausted));
+    assert_eq!(read_without_io(selected), selected_result);
+    assert!(stored_unfinished(state.persistence_path.as_ref(), &id).is_none());
+}
+
+#[test]
+fn successful_evidence_replies_are_withheld_when_local_scope_changes() {
+    for change in ["naming", "reader"] {
+        let (state, parent, id, child, key) =
+            recovery_fixture_with_indexed("independent_session", true);
+        let selected = read_request(&key, "selected-before-move", true);
+        let catalog = read_request(&key, "catalog-before-move", false);
+        for request in [&selected, &catalog] {
+            let result = state
+                .read_acceptance_evidence_with_io(
+                    &child,
+                    request.clone(),
+                    recovery_reader,
+                    std::time::Instant::now,
+                )
+                .unwrap();
+            assert_eq!(result["state"], "complete");
+        }
+        {
+            let mut inner = state.inner.lock().unwrap();
+            if change == "naming" {
+                let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+                    .acceptance_evaluation
+                    .as_ref()
+                    .unwrap();
+                let store = target.store.clone().unwrap();
+                let work = target.naming_history.as_ref().unwrap().work_id.clone();
+                inner
+                    .engram_work_naming_history
+                    .iter_mut()
+                    .find(|history| history.store == store && history.work_id == work)
+                    .unwrap()
+                    .revision += 1;
+            } else {
+                let project = inner.sessions[inner.find_session_index(&parent).unwrap()]
+                    .session
+                    .project_id
+                    .clone()
+                    .unwrap();
+                inner
+                    .projects
+                    .iter_mut()
+                    .find(|p| p.id == project)
+                    .unwrap()
+                    .engram = None;
+            }
+        }
+        for request in [selected, catalog] {
+            let refusal = state
+                .read_acceptance_evidence_with_io(
+                    &child,
+                    request,
+                    |_, _, _| panic!("replay must not issue tracker I/O"),
+                    std::time::Instant::now,
+                )
+                .expect_err("a cached result cannot be served after its authority moves");
+            assert_eq!(
+                refusal.status,
+                StatusCode::CONFLICT,
+                "{change}: {refusal:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn replay_probes_without_holding_state_and_rechecks_naming_before_exposing_evidence() {
+    for selected in [true, false] {
+        let (state, _, id, child, key) = recovery_fixture_with_indexed("independent_session", true);
+        let request = read_request(&key, "replay-after-probe", selected);
+        let complete = state
+            .read_acceptance_evidence_with_io(
+                &child,
+                request.clone(),
+                recovery_reader,
+                std::time::Instant::now,
+            )
+            .unwrap();
+        assert_eq!(complete["state"], "complete");
+
+        let probes = std::cell::Cell::new(0);
+        let refusal = state
+            .replay_acceptance_evidence_with_probe(&child, request, |reader, lookup_path| {
+                probes.set(probes.get() + 1);
+                assert!(
+                    state.inner.is_not_held_by_current_thread_for_test(),
+                    "probe must leave state unlocked"
+                );
+                validate_work_read_target_at(reader, lookup_path)?;
+                let mut inner = state.inner.lock().unwrap();
+                let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+                    .acceptance_evaluation
+                    .as_ref()
+                    .unwrap();
+                let work = target.naming_history.as_ref().unwrap().work_id.clone();
+                inner
+                    .engram_work_naming_history
+                    .iter_mut()
+                    .find(|history| history.store == reader.store && history.work_id == work)
+                    .unwrap()
+                    .revision += 1;
+                Ok(())
+            })
+            .expect_err("a scope change during the probe must withhold the cached response");
+        assert_eq!(probes.get(), 1);
+        assert_eq!(refusal.status, StatusCode::CONFLICT);
+        assert!(refusal.message.contains("source naming scope changed"));
+        assert!(stored_unfinished(state.persistence_path.as_ref(), &id).is_none());
+    }
+}
+
+#[test]
+fn mixed_record_read_charges_discovery_and_reuses_the_selected_body() {
+    let (state, _, _, child, key) = recovery_fixture_with_indexed("independent_session", true);
+    let selected = read_request(&key, "selected-before-mixed", true);
+    let read_selected = || {
+        state
+            .read_acceptance_evidence_with_io(
+                &child,
+                selected.clone(),
+                |_, _, _| panic!("selected evidence does not issue tracker I/O"),
+                std::time::Instant::now,
+            )
+            .unwrap()
+    };
+    let before = read_selected();
+    let mut request = read_request(&key, "mixed-records", true);
+    let discovered = catalog_note(1);
+    let locator = discovered["locator"].as_str().unwrap();
+    request.locators.push(locator.to_owned());
+    let elapsed = std::cell::Cell::new(Duration::ZERO);
+    let calls = std::cell::RefCell::new(Vec::new());
+    let start = std::time::Instant::now();
+    let response = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            request,
+            |connection, args, timeout| {
+                elapsed.set(elapsed.get() + Duration::from_secs(1));
+                if let Some(index) = args.iter().position(|arg| arg == "--note") {
+                    assert_eq!(args[index + 1], locator);
+                    calls.borrow_mut().push("note");
+                    Ok(json!({"work_ref":"w-task", "note":discovered}))
+                } else {
+                    assert!(args.iter().any(|arg| arg == "inspect"));
+                    calls.borrow_mut().push("inspect");
+                    recovery_reader(connection, args, timeout)
+                }
+            },
+            || start + elapsed.get(),
+        )
+        .unwrap();
+    assert_eq!(*calls.borrow(), ["inspect", "note", "inspect"]);
+    assert_eq!(response["state"], "complete");
+    assert_eq!(response["records"][0]["note"], catalog_note(3));
+    assert_eq!(response["records"][1]["note"], discovered);
+    assert_eq!(
+        response["remainingReadMillis"],
+        (acceptance_evaluation_evidence_budget() - elapsed.get()).as_millis() as u64
+    );
+    assert_eq!(
+        read_selected(),
+        before,
+        "replay preserves its original budget"
+    );
 }
 
 #[test]

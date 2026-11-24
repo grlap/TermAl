@@ -2025,16 +2025,17 @@ pub(crate) fn render_acceptance_evaluator_brief_with_index_detail(
     let missing_evidence_rule = if task.evidence_recovery.is_some() {
         "- An entry marked as clipped or as not shown in full is incomplete, and an\n  \
 entry counted as not shown was not given to you: you have not read the rest.\n  \
-Where a verdict depends on it, first recover it with termal_read_acceptance_evidence:\n  \
-echo your current attemptKey and use a distinct readKey per logical read.\n  \
-Use action catalog (no cursor initially) to discover older locators, then\n  \
-action records with the known locators to read whole bodies. Later catalog\n  \
-calls use only the opaque cursor returned by that tool, never a tracker token.\n  \
-The scope and one aggregate read allowance belong to this attempt. Repeating\n  \
-a readKey with identical arguments returns its original result without IO.\n  \
-If recovery ends unfinished, no verdict was recorded: finish and report its\n  \
-reason; the parent can request a fresh evaluation. Do not submit a verdict\n  \
-solely because omitted evidence could not be read. Never infer missing text.\n\
+Read the requester-selected proof in the criterion evidence index first. If\n  \
+you need its whole body, use termal_read_acceptance_evidence with action records\n  \
+and only requester-selected locators. These reads use no discovery allowance.\n  \
+For other missing proof, use action catalog (no cursor initially) to find older\n  \
+locators, then action records for whole bodies. Use only tool-issued cursors.\n  \
+Echo your attemptKey and use a distinct readKey per logical read. Repeating a\n  \
+readKey with identical arguments returns its original result without IO.\n  \
+If discovery returns exhausted, submit one verdict per criterion on this attempt.\n  \
+Use insufficient-evidence with a reason wherever unread proof prevents a judgment.\n  \
+If recovery returns stale or unfinished, finish and report the reason to the parent.\n  \
+Never infer missing text.\n\
 - Evidence not shown does not establish that proof is absent on the item.\n  \
 Where a verdict depends on omitted evidence, say 'not shown' in the rationale\n  \
 and name the known locator; name unread evidence by its read cut and paging\n  \

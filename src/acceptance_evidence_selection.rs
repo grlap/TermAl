@@ -759,6 +759,11 @@ pub(crate) fn read_acceptance_selected_evidence(
                     })
                     .flatten(),
             };
+            if let Some(manifest) = &mut task.evidence_recovery {
+                manifest
+                    .selected_records
+                    .insert(locator.clone(), Arc::new(result));
+            }
             if let Some(window_entry) = task
                 .evidence
                 .iter_mut()
