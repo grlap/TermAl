@@ -1,7 +1,11 @@
 // Compatibility repair for the retained, unused transcript-overview columns.
 // Schema inventory and defaults stay unchanged; existing values are never backfilled.
 
-fn ensure_sqlite_message_overview_columns(connection: &rusqlite::Connection) -> Result<()> {
+use super::*;
+
+pub(super) fn ensure_sqlite_message_overview_columns(
+    connection: &rusqlite::Connection,
+) -> Result<()> {
     let existing_columns = {
         let mut statement = connection
             .prepare("PRAGMA table_info(messages)")

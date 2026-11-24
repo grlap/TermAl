@@ -1,6 +1,8 @@
 // Disposable compatibility fixtures; no live store or older binary is opened.
 // Shared with the metadata-unit rollback tests: sqlite3 CLI directives are
 // not SQL and must be removed before executing the same script via rusqlite.
+
+use super::*;
 #[cfg(test)]
 pub(crate) fn metadata_units_rollback_sql() -> String {
     include_str!("../scripts/state-metadata-units-rollback.sql")

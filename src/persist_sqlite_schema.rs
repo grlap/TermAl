@@ -3,6 +3,8 @@
 // Does not own connection lifetimes, path locks, transaction orchestration,
 // physical message layout conversion, overview backfill or transcript reads.
 
+use super::*;
+
 pub(crate) fn sqlite_state_user_table_names(
     connection: &rusqlite::Connection,
 ) -> Result<BTreeSet<String>> {
@@ -21,7 +23,7 @@ pub(crate) fn sqlite_state_user_table_names(
         .context("failed to decode state database tables")
 }
 
-fn sqlite_state_table_columns(
+pub(super) fn sqlite_state_table_columns(
     connection: &rusqlite::Connection,
     table_name: &str,
 ) -> Result<BTreeSet<String>> {
@@ -110,7 +112,7 @@ fn sqlite_state_column_may_be_added_by_maintenance(table_name: &str, column_name
     )
 }
 
-fn validate_sqlite_state_table_columns(
+pub(super) fn validate_sqlite_state_table_columns(
     connection: &rusqlite::Connection,
     expected_tables: &[(&str, &[&str])],
     allow_maintenance_missing: bool,
@@ -151,7 +153,7 @@ fn validate_sqlite_state_table_columns(
     Ok(())
 }
 
-const SQLITE_STATE_CORE_SCHEMA_SQL: &str = "
+pub(super) const SQLITE_STATE_CORE_SCHEMA_SQL: &str = "
     CREATE TABLE meta (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -181,7 +183,7 @@ const SQLITE_STATE_CORE_SCHEMA_SQL: &str = "
     ) WITHOUT ROWID;
 ";
 
-const SQLITE_STATE_AUXILIARY_SCHEMA_SQL: &str = "
+pub(super) const SQLITE_STATE_AUXILIARY_SCHEMA_SQL: &str = "
     CREATE TABLE app_state (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL
@@ -253,7 +255,7 @@ fn embedded_state_field_has_records_or_invalid_shape(value: &Value, key: &str) -
     }
 }
 
-fn first_normalized_state_authority_table_with_rows(
+pub(super) fn first_normalized_state_authority_table_with_rows(
     connection: &rusqlite::Connection,
 ) -> Result<Option<&'static str>> {
     for table_name in SQLITE_STATE_METADATA_AUTHORITY_TABLES {
@@ -284,31 +286,33 @@ fn first_normalized_state_authority_table_with_rows(
 thread_local! {
     static LEGACY_EMBEDDED_SESSION_SCAN_COUNT: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
-    static PERSISTED_STATE_METADATA_DESERIALIZE_COUNT: std::cell::Cell<usize> =
+    pub(super) static PERSISTED_STATE_METADATA_DESERIALIZE_COUNT: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
-fn reset_legacy_embedded_session_scan_count() {
+pub(super) fn reset_legacy_embedded_session_scan_count() {
     LEGACY_EMBEDDED_SESSION_SCAN_COUNT.with(|count| count.set(0));
 }
 
 #[cfg(test)]
-fn legacy_embedded_session_scan_count() -> usize {
+pub(super) fn legacy_embedded_session_scan_count() -> usize {
     LEGACY_EMBEDDED_SESSION_SCAN_COUNT.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]
-fn reset_persisted_state_metadata_deserialize_count() {
+pub(super) fn reset_persisted_state_metadata_deserialize_count() {
     PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(|count| count.set(0));
 }
 
 #[cfg(test)]
-fn persisted_state_metadata_deserialize_count() -> usize {
+pub(super) fn persisted_state_metadata_deserialize_count() -> usize {
     PERSISTED_STATE_METADATA_DESERIALIZE_COUNT.with(std::cell::Cell::get)
 }
 
-fn reject_invalid_persisted_state_metadata_shape(error: serde_json::Error) -> anyhow::Error {
+pub(super) fn reject_invalid_persisted_state_metadata_shape(
+    error: serde_json::Error,
+) -> anyhow::Error {
     let mut detail = error.to_string();
     let location = format!(" at line {} column {}", error.line(), error.column());
     if detail.ends_with(&location) {
@@ -319,7 +323,7 @@ fn reject_invalid_persisted_state_metadata_shape(error: serde_json::Error) -> an
     ))
 }
 
-fn validate_no_legacy_embedded_state(
+pub(super) fn validate_no_legacy_embedded_state(
     connection: &rusqlite::Connection,
 ) -> Result<Option<PersistedState>> {
     let metadata = read_persisted_metadata_json(connection).map_err(|error| {
@@ -425,7 +429,7 @@ fn validate_no_legacy_embedded_state(
     Ok(persisted)
 }
 
-fn sqlite_state_schema_header(
+pub(super) fn sqlite_state_schema_header(
     connection: &rusqlite::Connection,
 ) -> Result<(BTreeSet<String>, String)> {
     let actual_tables = sqlite_state_user_table_names(connection)?;
@@ -562,7 +566,7 @@ pub(crate) fn ensure_sqlite_state_schema(connection: &rusqlite::Connection) -> R
     ensure_sqlite_state_schema_with_initialization(connection).map(|_| ())
 }
 
-fn ensure_sqlite_state_schema_with_initialization(
+pub(super) fn ensure_sqlite_state_schema_with_initialization(
     connection: &rusqlite::Connection,
 ) -> Result<bool> {
     if sqlite_state_user_table_names(connection)?.is_empty()

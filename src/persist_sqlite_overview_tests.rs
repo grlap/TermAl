@@ -1,5 +1,7 @@
 // Retained overview storage must be inert during schema initialization.
 
+use super::*;
+
 mod sqlite_overview_tests {
     use super::*;
 

@@ -3,6 +3,8 @@
 // Owns DDL/inventory agreement, validate-before-mutate and file-permission
 // phase contracts. Does not own schema migrations, live databases, or HTTP tests.
 
+use super::*;
+
 mod sqlite_maintenance_tests {
     use super::*;
 

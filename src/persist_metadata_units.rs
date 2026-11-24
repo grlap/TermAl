@@ -2,6 +2,8 @@
 // session transaction writes its counters and changed entries, never app_state.
 // The old metadata image is retained only as migration/rollback provenance.
 
+use super::*;
+
 pub(crate) type PersistMetadataUnitKey = (String, String);
 pub(crate) type PersistMetadataUnitValue = (String, String);
 pub(crate) type PersistMetadataUnits = BTreeMap<PersistMetadataUnitKey, PersistMetadataUnitValue>;
@@ -101,7 +103,7 @@ impl PersistMetadataCapture {
     // Only a caller still holding the authoritative StateInner may adopt a
     // synchronous snapshot. A post-commit integrity error still fails its
     // receipt; a fresh source capture can reapply it after normal checks.
-    fn adopt_own_committed(&self, metadata: &PersistedState) {
+    pub(super) fn adopt_own_committed(&self, metadata: &PersistedState) {
         let applied = self.applied.load(std::sync::atomic::Ordering::Acquire);
         if applied != 0 {
             self.adopt(applied, metadata);
@@ -124,7 +126,7 @@ pub(crate) struct PersistMetadataUnitCache {
     pub(crate) units: PersistMetadataUnits,
     // Derived from the exact encoded ledger unit, never an authority source.
     pub(crate) checkpoint_index: Option<Arc<PersistCheckpointMirrorIndex>>,
-    changed_checkpoint_owners: BTreeSet<String>,
+    pub(super) changed_checkpoint_owners: BTreeSet<String>,
 }
 
 include!("persist_metadata_units_codec.rs");

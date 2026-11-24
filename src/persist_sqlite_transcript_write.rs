@@ -4,6 +4,8 @@
 // boundaries, writer admission, global metadata/delegations or the differential
 // message-row writer in persist_sqlite_messages.rs.
 
+use super::*;
+
 pub(crate) struct SerializedPersistedMessage {
     pub(crate) position: usize,
     pub(crate) message_id: String,
@@ -58,7 +60,7 @@ pub(crate) fn serialize_persisted_session(
     serialize_persisted_session_since(record, None)
 }
 
-fn serialize_persisted_session_since(
+pub(super) fn serialize_persisted_session_since(
     record: &PersistedSessionRecord,
     baseline: Option<&PersistTranscriptBaseline>,
 ) -> Result<SerializedPersistedSession> {
@@ -173,7 +175,7 @@ fn serialize_persisted_session_since(
     })
 }
 
-fn serialize_persisted_sessions_with_isolation(
+pub(super) fn serialize_persisted_sessions_with_isolation(
     sessions: &[PersistedSessionRecord],
     rejected: &mut Vec<PersistSessionRejection>,
 ) -> Vec<SerializedPersistedSession> {
@@ -235,7 +237,7 @@ pub(crate) fn write_serialized_persisted_session(
 
 /// Reject only a transcript identity collision, retaining the complete last
 /// good session row, history and messages inside the outer transaction.
-fn write_serialized_persisted_session_isolated(
+pub(super) fn write_serialized_persisted_session_isolated(
     tx: &rusqlite::Transaction<'_>,
     session: &SerializedPersistedSession,
 ) -> Result<Option<PersistSessionRejection>> {
@@ -258,7 +260,7 @@ fn write_serialized_persisted_session_isolated(
     }
 }
 
-fn remove_missing_persisted_sessions(
+pub(super) fn remove_missing_persisted_sessions(
     tx: &rusqlite::Transaction<'_>,
     retained_session_ids: &HashSet<&str>,
     quarantined_session_ids: &BTreeSet<String>,

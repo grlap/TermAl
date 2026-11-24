@@ -27,7 +27,9 @@ module, so no visibility changes are required.
 
 use super::*;
 
-include!("persist_boot_timings.rs");
+#[path = "persist_boot_timings.rs"]
+mod persist_boot_timings;
+pub(crate) use persist_boot_timings::*;
 
 /// Resolves persistence path.
 pub(crate) fn resolve_persistence_path(default_workdir: &str) -> PathBuf {
@@ -1052,21 +1054,40 @@ pub(crate) fn load_state_for_boot(
     Ok((state, Some(connection)))
 }
 
-include!("persist_metadata_units.rs");
-include!("persist_sqlite_schema.rs");
-include!("persist_sqlite_obligations.rs");
-include!("persist_native_test_completion.rs");
-include!("persist_test_request_custody.rs");
+#[path = "persist_metadata_units.rs"]
+mod persist_metadata_units;
+pub(crate) use persist_metadata_units::*;
+#[path = "persist_sqlite_schema.rs"]
+mod persist_sqlite_schema;
+pub(crate) use persist_sqlite_schema::*;
+#[path = "persist_sqlite_obligations.rs"]
+mod persist_sqlite_obligations;
+pub(crate) use persist_sqlite_obligations::*;
+#[path = "persist_native_test_completion.rs"]
+mod persist_native_test_completion;
+pub(crate) use persist_native_test_completion::*;
+#[path = "persist_test_request_custody.rs"]
+mod persist_test_request_custody;
+pub(crate) use persist_test_request_custody::*;
 include!("persist_direct_prompt.rs");
 
-include!("persist_sqlite_overview.rs");
-include!("persist_sqlite_messages.rs");
+#[path = "persist_sqlite_overview.rs"]
+mod persist_sqlite_overview;
+use persist_sqlite_overview::*;
+#[path = "persist_sqlite_messages.rs"]
+mod persist_sqlite_messages;
+pub(crate) use persist_sqlite_messages::*;
 #[cfg(test)]
-include!("persist_sqlite_overview_tests.rs");
+#[path = "persist_sqlite_overview_tests.rs"]
+mod persist_sqlite_overview_tests;
+
 #[cfg(test)]
-include!("persist_sqlite_maintenance_tests.rs");
+#[path = "persist_sqlite_maintenance_tests.rs"]
+mod persist_sqlite_maintenance_tests;
+
 #[cfg(test)]
-include!("persist_sqlite_messages_tests.rs");
+#[path = "persist_sqlite_messages_tests.rs"]
+mod persist_sqlite_messages_tests;
 
 pub(crate) fn ensure_sqlite_state_schema_for_path(
     connection: &rusqlite::Connection,
@@ -1105,10 +1126,16 @@ pub(crate) fn ensure_sqlite_state_schema_for_load_path(
     finish_sqlite_state_file_setup(path, setup)
 }
 
-include!("persist_sqlite_schema_tests.rs");
+#[path = "persist_sqlite_schema_tests.rs"]
+mod persist_sqlite_schema_tests;
+
 #[cfg(test)]
-include!("persist_sqlite_reader_floor_tests.rs");
-include!("persist_sqlite_obligations_tests.rs");
+#[path = "persist_sqlite_reader_floor_tests.rs"]
+mod persist_sqlite_reader_floor_tests;
+#[cfg(test)]
+pub(crate) use persist_sqlite_reader_floor_tests::*;
+#[path = "persist_sqlite_obligations_tests.rs"]
+mod persist_sqlite_obligations_tests;
 
 fn load_state_from_sqlite_with_connection(
     path: &FsPath,
@@ -1258,7 +1285,9 @@ pub(crate) fn load_state_from_sqlite_with_timings(
     Ok((Some(inner), connection))
 }
 
-include!("persist_sqlite_transcript_read.rs");
+#[path = "persist_sqlite_transcript_read.rs"]
+mod persist_sqlite_transcript_read;
+pub(crate) use persist_sqlite_transcript_read::*;
 
 #[cfg(test)]
 thread_local! {
@@ -1453,7 +1482,9 @@ pub(crate) fn load_delegation_records_with_fingerprint(
     ))
 }
 
-include!("persist_sqlite_transcript_write.rs");
+#[path = "persist_sqlite_transcript_write.rs"]
+mod persist_sqlite_transcript_write;
+pub(crate) use persist_sqlite_transcript_write::*;
 
 fn remove_missing_persisted_delegations(
     tx: &rusqlite::Transaction<'_>,

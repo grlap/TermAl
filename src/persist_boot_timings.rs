@@ -1,5 +1,7 @@
 // Fixed-label boot measurements. Nested session phases are aggregated across
 // rows so startup never prints session IDs, paths or persisted payloads.
+
+use super::*;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum BootStateLoadPhase {
     Open,

@@ -1,5 +1,8 @@
 // Owns isolated shared-obligation migration and fail-closed load regressions.
 // Does not access live stores or certify remote settlement and provider effects.
+
+#[cfg(test)]
+use super::*;
 #[cfg(test)]
 mod session_obligation_storage_tests {
     use super::*;

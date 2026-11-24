@@ -1,3 +1,5 @@
+use super::*;
+
 mod sqlite_message_storage_tests {
     use super::*;
 

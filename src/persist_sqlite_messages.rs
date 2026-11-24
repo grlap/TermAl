@@ -2,7 +2,9 @@
 // belong in a rowid table: WITHOUT ROWID stores them in the primary-key B-tree,
 // where even a key comparison can allocate and read an entire overflow record.
 
-fn ensure_sqlite_message_rowid_storage(connection: &rusqlite::Connection) -> Result<()> {
+use super::*;
+
+pub(super) fn ensure_sqlite_message_rowid_storage(connection: &rusqlite::Connection) -> Result<()> {
     let without_rowid: bool = connection
         .query_row(
             "SELECT wr FROM pragma_table_list('messages') WHERE schema = 'main'",
@@ -145,7 +147,7 @@ fn rebuild_sqlite_message_rowid_storage(connection: &rusqlite::Connection) -> Re
 }
 
 #[derive(Debug)]
-struct PersistTranscriptIdentityConflict;
+pub(super) struct PersistTranscriptIdentityConflict;
 
 impl std::fmt::Display for PersistTranscriptIdentityConflict {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

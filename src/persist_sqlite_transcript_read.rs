@@ -3,6 +3,8 @@
 // Does not own connection/snapshot lifetimes, global metadata adoption,
 // delegation loading, schema maintenance or persistence transactions.
 
+use super::*;
+
 #[cfg(test)]
 pub(crate) fn load_session_records_from_sqlite(
     connection: &rusqlite::Connection,
@@ -26,12 +28,12 @@ pub(crate) fn load_session_records_from_sqlite_with_skipped(
 
 /// What boot knows before delegation rows load: their links, and the sessions
 /// that own a stored test-run card.
-struct ColdTranscriptBoot<'a> {
-    links: &'a DelegationLinkCut,
-    card_owner_sessions: &'a HashSet<String>,
+pub(super) struct ColdTranscriptBoot<'a> {
+    pub(super) links: &'a DelegationLinkCut,
+    pub(super) card_owner_sessions: &'a HashSet<String>,
 }
 
-fn load_session_records_from_sqlite_with_skipped_and_timings(
+pub(super) fn load_session_records_from_sqlite_with_skipped_and_timings(
     connection: &rusqlite::Connection,
     path: &FsPath,
     timings: &mut BootStateLoadTimings,

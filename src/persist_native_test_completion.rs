@@ -1,5 +1,7 @@
 // Extends the existing MAIN reader-floor owner. No live migration command,
 // new store, source measurement or verification authority is introduced.
+
+use super::*;
 const NATIVE_TEST_FACTS_FIELD: &str = "remoteTestRunFacts";
 
 #[cfg(test)]
@@ -81,7 +83,7 @@ fn native_test_field_has_target_keys(field: &str, value: &Value, entry: bool) ->
 
 // This runs under the migration owner's locked OLD header, before its typed
 // load/normalization. Presence is refused even for null/empty target keys.
-fn reject_unversioned_native_test_custody(
+pub(super) fn reject_unversioned_native_test_custody(
     connection: &rusqlite::Connection,
     version: &str,
 ) -> Result<()> {
@@ -177,7 +179,7 @@ pub(crate) fn validate_native_test_predecessor_inventory(
 
 // Called inside each existing predecessor transaction AFTER its older ordered
 // steps, so a new field is never emitted under an intermediate frozen floor.
-fn advance_sqlite_native_test_completion_reader_floor(
+pub(super) fn advance_sqlite_native_test_completion_reader_floor(
     connection: &rusqlite::Connection,
 ) -> Result<()> {
     let version = required_state_meta_value(connection, "schema_version")?;
@@ -253,7 +255,7 @@ fn advance_sqlite_native_test_completion_reader_floor(
     Ok(())
 }
 
-fn prepare_sqlite_native_test_completion_reader_floor(
+pub(super) fn prepare_sqlite_native_test_completion_reader_floor(
     connection: &rusqlite::Connection,
     for_load: bool,
 ) -> Result<Option<PersistedState>> {

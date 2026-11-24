@@ -1,9 +1,11 @@
 // Owns the joint obligation reader floor after the complete ordinary-handoff
 // contract. Does not rewrite session rows, infer grant state or settle duties.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
-    static TEST_BEFORE_OBLIGATION_MIGRATION_BEGIN: std::cell::RefCell<Option<Box<dyn FnOnce()>>>
+    pub(super) static TEST_BEFORE_OBLIGATION_MIGRATION_BEGIN: std::cell::RefCell<Option<Box<dyn FnOnce()>>>
         = const { std::cell::RefCell::new(None) };
 }
 
@@ -43,7 +45,7 @@ pub(crate) fn validate_sqlite_checkpoint_mirrors(
     Ok(())
 }
 
-fn validate_sqlite_obligation_metadata(connection: &rusqlite::Connection) -> Result<()> {
+pub(super) fn validate_sqlite_obligation_metadata(connection: &rusqlite::Connection) -> Result<()> {
     let value = read_persisted_metadata_field(connection, "engramSessionObligations")?.ok_or_else(
         || {
             reject_unsupported_state_schema(
@@ -158,7 +160,7 @@ pub(crate) fn checkpoint_write_cut_index(
 // Probe only changed rows and owners of changed/retired ledger operations.
 // Deferred and quarantined owners are included by the ledger diff. A rejected
 // cut leaves source stamps/watermark unadopted for a fresh collector retry.
-fn validate_sqlite_checkpoint_write_cut(
+pub(super) fn validate_sqlite_checkpoint_write_cut(
     connection: &rusqlite::Connection,
     metadata: &PersistMetadataUnitCache,
     sessions: &[SerializedPersistedSession],
@@ -208,7 +210,7 @@ fn validate_sqlite_checkpoint_write_cut(
     Ok(())
 }
 
-fn is_sqlite_obligation_predecessor(version: &str) -> bool {
+pub(super) fn is_sqlite_obligation_predecessor(version: &str) -> bool {
     matches!(
         version,
         "2" | "2-metadata-units-1"
@@ -218,7 +220,7 @@ fn is_sqlite_obligation_predecessor(version: &str) -> bool {
     )
 }
 
-fn prepare_sqlite_obligation_reader_floor(
+pub(super) fn prepare_sqlite_obligation_reader_floor(
     connection: &rusqlite::Connection,
     for_load: bool,
 ) -> Result<Option<PersistedState>> {

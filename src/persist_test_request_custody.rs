@@ -1,6 +1,8 @@
 // Extends the existing MAIN reader floor before typed registration loading.
 // Custody stays inside existing registrations and compacted survivors.
 
+use super::*;
+
 #[cfg(test)]
 thread_local! {
     pub(crate) static TEST_REQUEST_CUSTODY_FLOOR_FAULT: std::cell::Cell<Option<&'static str>> =
@@ -42,7 +44,7 @@ fn test_request_custody_metadata_field(field: &str) -> bool {
 // Presence, including null, is rejected while the old header is still held.
 // Inspect only custody-bearing metadata; ordinary session/message JSON is not
 // interpreted as registration authority.
-fn reject_unversioned_test_request_custody(
+pub(super) fn reject_unversioned_test_request_custody(
     connection: &rusqlite::Connection,
     version: &str,
 ) -> Result<()> {
@@ -106,7 +108,7 @@ fn reject_unversioned_test_request_custody(
     Ok(())
 }
 
-fn advance_sqlite_test_request_custody_reader_floor(
+pub(super) fn advance_sqlite_test_request_custody_reader_floor(
     connection: &rusqlite::Connection,
 ) -> Result<()> {
     let version = required_state_meta_value(connection, "schema_version")?;

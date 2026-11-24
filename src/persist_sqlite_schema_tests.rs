@@ -4,6 +4,9 @@
 // overview, permission-hardening and application persistence test suites.
 
 #[cfg(test)]
+use super::*;
+
+#[cfg(test)]
 mod sqlite_schema_tests {
     use super::*;
 

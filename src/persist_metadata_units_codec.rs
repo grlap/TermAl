@@ -2,7 +2,7 @@
 
 // Frozen units-2/handoff inventory. Later safety fields are never accepted
 // merely because the current writer knows how to project them.
-const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
+pub(super) const METADATA_UNIT_PREDECESSOR_FIELDS: &[&str] = &[
     "federation",
     "preferences",
     "revision",
