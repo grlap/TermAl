@@ -1,0 +1,27 @@
+{
+  "id": "01a20fbe-1447-7ee0-9ce4-e78ef8fdc975",
+  "external_ref": null,
+  "title": "Run-wait prompt wording: provisional follow-ups, retried reads, and the \"not sent\" parenthetical",
+  "outcome": "Run-wait resume prompts describe what is still undecided, and the outcomes that will resume the wait, accurately.",
+  "acceptance": [
+    "The follow-up's line for undecided provisional runs names every outcome that resumes the wait again (a built record, or a record the host leaves pending for good), and never promises a resume that may not come; the line for marked runs does not call a record 'being sent' while the host is only retrying a read of the run's files; and the 'not sent' text for a run whose readable results never carried a committed-input record does not say its directory was removed or its files rewritten. Covered by behaviour tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "notifications"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a20fc8-fff5-7f53-9b9c-a6eefa5cc561",
+  "external_ref": null,
+  "title": "A wait that ends on any of several runs does not follow a run that wasn't yet indexed as finished at its resume; that run's settlement reaches only its owner",
+  "outcome": "Scoped out of w-56f386fdd7d3 by Termal::Fable2 on 2026-11-24 at about 22:59Z, at Opus3's suggestion (TermAl mailbox 03723eab #6120).\n\nFrom round 29 onward, each of 11 review rounds found 2 to 4 new interleavings in one area: following runs that an any-mode wait had not yet seen finish. Rounds 34-39 found MF, MJ, the provisional marks, the unread looks, MN and MO. Each fix was sound, but the surface kept widening.\n\nDecision: when a wait that ends on any of several runs resumes because one run finished, any other run the host's index does not yet show as finished is reported as not finished and is NOT followed. Its later settlement reaches only the run owner's next turn. Criterion 1 of w-56f3 states this as a second limit.\n\nWanted here, if it is ever needed: follow such runs to their settlement without the interleaving problems found in rounds 34-39. Those rounds' review findings are the test corpus. Candidates c48-c53 of w-56f3 contain the provisional machinery as a starting point.",
+  "acceptance": [
+    "A wait that ends on any of several runs does not follow a run that wasn't yet indexed as finished at its resume; that run's settlement reaches only its owner is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "test-runs",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

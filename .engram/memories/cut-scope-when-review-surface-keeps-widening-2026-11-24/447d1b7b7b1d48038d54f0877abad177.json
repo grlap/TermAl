@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "cut-scope-when-review-surface-keeps-widening-2026-11-24",
+    "revision_id": "447d1b7b7b1d48038d54f0877abad177",
+    "previous": null,
+    "body_sha256": "4403267b3fa86d091b7e0a055bce8f4d6cab5697608665760f6fa93626f7d78c",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-24T22:59:42.587033400Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-24, w-56f386fdd7d3: 53 candidates, 39 review rounds, 9+ evaluations).\n\nWhen consecutive review rounds keep finding NEW interleavings in the same sub-area (here, following any-wait runs that were not yet indexed as finished; 2 to 4 new ones per round over 11 rounds), the fixes are not converging: each mechanism added widens the surface for the next round.\n\nRule: after about 3 rounds of that pattern, stop fixing case by case.\n- Cut the sub-area out with an explicit limit in the criterion, tracked as its own item (here w-a6eefa5cc561, with the rounds' findings as its test corpus).\n- Remove the machinery built for it.\n- Rule later findings in that area against the new limit and file them.\n\nThat is a deliberate scope decision with a stated limit, not rewording to pass. Ask the coder early whether the surface is converging. Here Opus3 raised it himself at round 39."
+}
