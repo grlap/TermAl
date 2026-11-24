@@ -1,0 +1,32 @@
+{
+  "id": "01a20e9a-e015-7053-80a9-bad242c425da",
+  "external_ref": null,
+  "title": "Work Labels: keep the reading position when returning from Memories",
+  "outcome": "With a task selected in Labels, switching to Memories and returning preserves the saved viewport position, including when the title is above the viewport and the user is reading the details.",
+  "acceptance": [
+    "A Work panel behavior test selects a Labels task, scrolls away from its title to read details, switches to Memories and back, and verifies the prior scroll offset is restored.",
+    "Returning to Labels from a different task view still reveals an out-of-view selected task without moving focus from the view switch, and the Memories round trip reuses the same task list."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "beads-in-progress",
+    "beads-migrated",
+    "review-low",
+    "ui",
+    "work-visualizer"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a0e6d3-c61a-7c71-b373-97e3d75409fd",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Codex delegation children now run on an app-server of their own, and its whole process tree ends with the delegation, so a finished or cancelled review no longer leaves sandbox processes running.\n- Linux: a keeper mode of the TermAl executable acts as child subreaper and is the server's parent. It kills and reaps all of its children until none is left, both when the server exits and when TermAl closes its control pipe. TermAl never kills a keeper that is still ending its tree.\n- Windows: a kill-on-close job object.\n- Where /proc is not in TermAl's PID namespace, the delegation fails at once and names the reason.\nBehaviour tests use a provider fixture whose tool blocks on stdin under a setsid'd sandbox. They cover completion, cancellation, a server that exits by itself, a closed control pipe, the refusal, and the no-kill case.\nThe change landed as 32ed2134 by fast-forward from af85a417 at 17:16:43Z (Opus2).\n- Review R14-1: clean.\n- Gates: Windows FULL test-31a72f13 on Central (landing gate); Linux FULL test-9f9de71e on C7; registered run test-7861f8b6.\n- Evaluation 5: passed.\n- Follow-ups filed: w-da2d954a2918, w-eeefb324ef2b, w-bb7c3f95d686, w-6a28dec1e484, w-2cfe315a33ae.\nThe install of the release build is pending; Opus2 will record its hash.",
+    "completed_at": "2026-11-24T17:18:26.100851Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

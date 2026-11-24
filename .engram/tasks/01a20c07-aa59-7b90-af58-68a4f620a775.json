@@ -4,7 +4,8 @@
   "title": "Unused spawn_codex_runtime in non-test builds after delegation-owned app-servers",
   "outcome": "Unused spawn_codex_runtime in non-test builds after delegation-owned app-servers",
   "acceptance": [
-    "Unused spawn_codex_runtime in non-test builds after delegation-owned app-servers is done"
+    "A non-test build (`cargo check --bin termal`) reports no `spawn_codex_runtime` is never used warning, and otherwise exactly the warnings master reports.",
+    "The test build compiles, and the existing tests that call spawn_codex_runtime pass unchanged."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
