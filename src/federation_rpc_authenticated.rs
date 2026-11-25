@@ -3,6 +3,47 @@
 
 use super::*;
 
+/// Keeps the local refusals before anything is sent, the post-reply
+/// authority failure and the request deadline apart from every other request
+/// failure, so a relay caller can report which check refused it. Each carries
+/// the same API error the caller would otherwise receive.
+pub(crate) enum FederationRpcRequestError {
+    /// Local route authority, the link incarnation, its security context or
+    /// the sender counter refused before anything was sent.
+    BeforeSendAuthority(ApiError),
+    /// The local peer RPC bound was full, or the request deadline passed
+    /// while it waited for a sender counter, before anything was sent. Any
+    /// wait for the window counts, even if earlier local checks used most of
+    /// the budget; either way the deciding check is local, not the origin.
+    BeforeSendCapacity(ApiError),
+    /// The caller's deadline passed in the local checks before sending,
+    /// with a sender counter free; nothing was sent.
+    BeforeSendDeadline(ApiError),
+    AfterReplyAuthority(ApiError),
+    /// The request deadline passed after a counter was allocated.
+    TimedOut(ApiError),
+    Other(ApiError),
+}
+
+impl From<ApiError> for FederationRpcRequestError {
+    fn from(error: ApiError) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl FederationRpcRequestError {
+    fn into_api_error(self) -> ApiError {
+        match self {
+            Self::BeforeSendAuthority(error)
+            | Self::BeforeSendCapacity(error)
+            | Self::BeforeSendDeadline(error)
+            | Self::AfterReplyAuthority(error)
+            | Self::TimedOut(error)
+            | Self::Other(error) => error,
+        }
+    }
+}
+
 impl FederationRpcClient {
     #[cfg(test)]
     pub(crate) async fn allocate_authenticated_counter(
@@ -11,15 +52,18 @@ impl FederationRpcClient {
     ) -> Result<u64, ApiError> {
         self.allocate_authenticated_counter_for(context, "test")
             .await
+            .map(|(counter, _)| counter)
     }
 
     /// Allocates the next sender counter for one request; `operation` is the
-    /// request's fixed local name, which its retirement record names.
+    /// request's fixed local name, which its retirement record names. Also
+    /// says whether the allocation had to wait for the sender window.
     async fn allocate_authenticated_counter_for(
         &self,
         context: &Arc<FederationSecurityContext>,
         operation: &'static str,
-    ) -> Result<u64, ApiError> {
+    ) -> Result<(u64, bool), ApiError> {
+        let mut waited = false;
         loop {
             let changed = context.changed.notified();
             tokio::pin!(changed);
@@ -44,7 +88,7 @@ impl FederationRpcClient {
                         FederationSenderDeadline::new(self.channel.control.clock.now(), operation),
                     );
                     context.changed.notify_waiters();
-                    return Ok(counter);
+                    return Ok((counter, waited));
                 }
             };
             #[cfg(test)]
@@ -53,6 +97,7 @@ impl FederationRpcClient {
             }
             #[cfg(not(test))]
             let _ = blocked;
+            waited = true;
             changed.await;
         }
     }
@@ -73,7 +118,10 @@ impl FederationRpcClient {
             _ => None,
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        let first = self.request_once(route).await;
+        let first = self
+            .request_once(route)
+            .await
+            .map_err(FederationRpcRequestError::into_api_error);
         if first.as_ref().err().is_some_and(|error| {
             matches!(
                 error.kind,
@@ -90,7 +138,7 @@ impl FederationRpcClient {
                 )
                 .await
                 {
-                    Ok(result) => result,
+                    Ok(result) => result.map_err(FederationRpcRequestError::into_api_error),
                     Err(_) => Err(federation_mailbox_unknown_outcome(
                         StatusCode::SERVICE_UNAVAILABLE,
                         "central mailbox transport_loss during exact retry",
@@ -104,7 +152,19 @@ impl FederationRpcClient {
     pub(crate) async fn request_once<T: DeserializeOwned>(
         &self,
         route: FederationRpcRoute,
-    ) -> Result<T, ApiError> {
+    ) -> Result<T, FederationRpcRequestError> {
+        self.request_once_within(route, None).await
+    }
+
+    /// One request whose whole exchange, counter allocation included, ends
+    /// at the caller's deadline when it gives one instead of the route
+    /// default. The caller fixes the deadline, so its own earlier checks
+    /// count against the same budget.
+    pub(crate) async fn request_once_within<T: DeserializeOwned>(
+        &self,
+        route: FederationRpcRoute,
+        caller_deadline: Option<tokio::time::Instant>,
+    ) -> Result<T, FederationRpcRequestError> {
         let policy_deadline = matches!(&route, FederationRpcRoute::PromptPolicy(_, _)).then(|| {
             tokio::time::Instant::from_std(
                 self.channel.control.clock.now() + Duration::from_secs(10),
@@ -128,12 +188,17 @@ impl FederationRpcClient {
                 .map_err(|_| federation_prompt_policy_unknown_outcome())??;
             Some(permit)
         } else {
-            (self.ensure_current)()?;
+            (self.ensure_current)().map_err(FederationRpcRequestError::BeforeSendAuthority)?;
             None
         };
         let _permit = match policy_permit {
             Some(permit) => permit,
-            None => Arc::new(self.channel.bound.try_acquire()?),
+            None => Arc::new(
+                self.channel
+                    .bound
+                    .try_acquire()
+                    .map_err(FederationRpcRequestError::BeforeSendCapacity)?,
+            ),
         };
         let (lease, path) = match &route {
             FederationRpcRoute::Health(lease) => (lease, "/federation/v1/health"),
@@ -166,19 +231,28 @@ impl FederationRpcClient {
             }
             FederationRpcRoute::MailboxRelay(lease, _) => (lease, MAILBOX_RELAY_RPC_ROUTE),
         };
-        lease.with_incarnation(|| Ok(()))?;
-        let context = self.channel.security_context()?;
+        lease
+            .with_incarnation(|| Ok(()))
+            .map_err(FederationRpcRequestError::BeforeSendAuthority)?;
+        let context = self
+            .channel
+            .security_context()
+            .map_err(FederationRpcRequestError::BeforeSendAuthority)?;
         if context.incarnation != lease.incarnation {
-            return Err(federation_auth_refused());
+            return Err(FederationRpcRequestError::BeforeSendAuthority(
+                federation_auth_refused(),
+            ));
         }
         // Local install precedes central install on a satellite. Refuse before
         // allocating a counter or sending HTTP; this is not a link failure.
         if self.channel.snapshot.local_role == FederationRole::Satellite
             && !context.outgoing_rpc_ready.load(Ordering::SeqCst)
         {
-            return Err(ApiError::from_status(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "federation peer handshake is completing; retry the original operation",
+            return Err(FederationRpcRequestError::BeforeSendAuthority(
+                ApiError::from_status(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "federation peer handshake is completing; retry the original operation",
+                ),
             ));
         }
         // Serialize before allocating a transport counter. Local size/encoding
@@ -220,10 +294,16 @@ impl FederationRpcClient {
             return Err(ApiError::from_status(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "federation request exceeds negotiated size",
-            ));
+            )
+            .into());
         }
         let mut rpc_stage = "counter";
+        // Whether a sender counter was allocated. Until then nothing is sent.
+        // The stage name alone cannot say so: the reply's counter check after
+        // sending uses the same stage name.
+        let mut counter_allocated = false;
         let mut rpc_status = None;
+        let mut after_reply_authority_refused = false;
         // Only a reply with no MAC header at all, such as the receiver's own
         // unsigned 408, is unanswered. A present but malformed, duplicate or
         // foreign MAC header is a security event.
@@ -242,10 +322,25 @@ impl FederationRpcClient {
         // await it inline on one thread would otherwise carry it on their
         // stack.
         let request = Box::pin(async {
-            let counter = self
+            let (counter, waited) = self
                 .allocate_authenticated_counter_for(&context, operation)
                 .await?;
+            counter_allocated = true;
             allocated.counter = Some(counter);
+            // A counter obtained only after the caller's deadline is not used,
+            // and nothing is sent. If the allocation waited for the sender
+            // window, local capacity took the budget; otherwise the local
+            // checks before it did.
+            if caller_deadline
+                .is_some_and(|deadline| self.channel.control.clock.now() >= deadline.into_std())
+            {
+                rpc_stage = if waited {
+                    "deadlineBeforeSend"
+                } else {
+                    "deadlineInLocalChecks"
+                };
+                return Err(federation_transport_unavailable());
+            }
             // A verified reply settles its counter. If the watchdog already
             // retired it as UNKNOWN, the caller keeps that outcome, so the
             // caller's result and the retirement record agree.
@@ -304,6 +399,20 @@ impl FederationRpcClient {
                 federation_mac_header(&context, direction, counter, &tag)?,
             );
             *prepared.headers_mut() = headers;
+            // Encoding and signing above are local work too. A caller
+            // deadline that passed during them is not spent on the origin:
+            // nothing is sent, as after the allocation check.
+            #[cfg(test)]
+            (self.before_dispatch)();
+            // The allocation already returned within the budget, so any
+            // waiting for the window ended in time: a deadline that passes
+            // here was spent in local work.
+            if caller_deadline
+                .is_some_and(|deadline| self.channel.control.clock.now() >= deadline.into_std())
+            {
+                rpc_stage = "deadlineInLocalChecks";
+                return Err(federation_transport_unavailable());
+            }
             rpc_stage = "execute";
             let mut response = self.client.execute(prepared).await.map_err(|_error| {
                 #[cfg(test)]
@@ -364,6 +473,7 @@ impl FederationRpcClient {
             federation_verify_mac(&context.keys[key + 1], &[&authenticated], &tag)?;
             rpc_stage = "securityCurrent";
             if let Err(error) = self.channel.security_current(&context) {
+                after_reply_authority_refused = true;
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     // A verified read-only proof cannot survive local lease
                     // retirement. Preserve its typed stale-authority refusal.
@@ -400,6 +510,7 @@ impl FederationRpcClient {
                 (self.ensure_current)()
             };
             if let Err(error) = current {
+                after_reply_authority_refused = true;
                 if matches!(&route, FederationRpcRoute::NativeBinding(_, _)) {
                     settle_verified!();
                     return Ok(Err(error));
@@ -488,7 +599,7 @@ impl FederationRpcClient {
         } else {
             Duration::from_secs(10)
         };
-        let result = if let Some(deadline) = policy_deadline {
+        let result = if let Some(deadline) = policy_deadline.or(caller_deadline) {
             self.channel
                 .control
                 .clock
@@ -500,13 +611,22 @@ impl FederationRpcClient {
         let timed_out = result.is_err();
         // The receiver's own deadline answers with an unsigned 408: no
         // authenticated reply arrived, which proves nothing either way.
+        let receiver_deadline = rpc_stage == "macParse"
+            && mac_header_absent
+            && rpc_status == Some(StatusCode::REQUEST_TIMEOUT.as_u16());
         let unanswered = timed_out
             || matches!(rpc_stage, "execute" | "responseBody" | "decode" | "retired")
-            || (rpc_stage == "macParse"
-                && mac_header_absent
-                && rpc_status == Some(StatusCode::REQUEST_TIMEOUT.as_u16()));
-        match result {
+            || receiver_deadline;
+        let result = match result {
             Ok(Ok(result)) => result,
+            Ok(Err(error))
+                if matches!(rpc_stage, "deadlineBeforeSend" | "deadlineInLocalChecks") =>
+            {
+                // Nothing was sent. The unused counter is retired with a
+                // record that says so; the link is not fenced.
+                allocated.retire("unsentAfterDeadline");
+                Err(error)
+            }
             failure
                 if policy_deadline.is_some() && rpc_stage == "authority" && failure.is_err() =>
             {
@@ -573,7 +693,35 @@ impl FederationRpcClient {
                 }
                 Err(route.response_failure(federation_transport_unavailable()))
             }
-        }
+        };
+        // Every arm keeps the caller's original API error; only its class
+        // differs. Nothing is sent before a counter is allocated: a refusal
+        // there is local authority, and a deadline there is local capacity,
+        // as is a counter freed only after the caller's deadline. A deadline
+        // that passed before an allocation that did not wait was spent in the
+        // local checks. The counter may already have been retired when the
+        // local check after the reply refused; keep that outcome.
+        let class: fn(ApiError) -> FederationRpcRequestError = if rpc_stage == "deadlineBeforeSend"
+        {
+            FederationRpcRequestError::BeforeSendCapacity
+        } else if rpc_stage == "deadlineInLocalChecks" {
+            FederationRpcRequestError::BeforeSendDeadline
+        } else if !counter_allocated {
+            if timed_out {
+                FederationRpcRequestError::BeforeSendCapacity
+            } else {
+                FederationRpcRequestError::BeforeSendAuthority
+            }
+        } else if after_reply_authority_refused && rpc_stage != "retired" {
+            FederationRpcRequestError::AfterReplyAuthority
+        } else if timed_out || receiver_deadline {
+            // The receiver's own unsigned 408 is its deadline for this read,
+            // not an authenticated outcome; it is a timeout like the caller's.
+            FederationRpcRequestError::TimedOut
+        } else {
+            FederationRpcRequestError::Other
+        };
+        result.map_err(class)
     }
 }
 

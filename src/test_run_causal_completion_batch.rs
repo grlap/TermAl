@@ -13,6 +13,44 @@ pub(crate) struct CausalTestCompletionPlan {
     pub(crate) pending: CausalPendingRow,
 }
 
+impl CausalTestCompletionPlan {
+    /// What a ready plan waits for: its saved settlement's admission, which
+    /// recovery replays without an origin read, or else the origin completion.
+    fn ready_reason(&self) -> CausalPendingReason {
+        if self.settlement.is_some() {
+            CausalPendingReason::AdmissionPending
+        } else {
+            CausalPendingReason::AwaitingCompletion
+        }
+    }
+
+    /// The reason this ready plan disproves `previous` with, if it does. A
+    /// plan proves its row decodes and its send receipt is saved. One with a
+    /// saved settlement is replayed without an origin read, so every
+    /// pull-phase reason is obsolete too; only the admission phase and a
+    /// recorded settlement failure still apply to it.
+    pub(crate) fn replaces(&self, previous: CausalPendingReason) -> Option<CausalPendingReason> {
+        use CausalPendingReason as Reason;
+        if previous.disproved_by_ready_plan() {
+            return Some(self.ready_reason());
+        }
+        let settlement_phase = matches!(
+            previous,
+            Reason::AdmissionPending
+                | Reason::AdmissionFailed
+                | Reason::SettlementReadFailed
+                | Reason::SettlementSaveFailed
+                | Reason::CompletionConflictsWithSettlement
+        );
+        (self.settlement.is_some() && !settlement_phase).then_some(Reason::AdmissionPending)
+    }
+}
+
+pub(crate) struct CausalCurrentnessFailure {
+    pub(crate) reason: CausalPendingReason,
+    pub(crate) error: ApiError,
+}
+
 impl MailboxStore {
     pub(crate) fn causal_test_completion_plans(&self) -> Result<Vec<CausalTestCompletionPlan>> {
         self.causal_test_completion_plans_without(CAUSAL_COMPLETION_BATCH, &BTreeSet::new())
@@ -73,14 +111,14 @@ impl MailboxStore {
             let row = rows
                 .next()?
                 .ok_or_else(|| anyhow!("pending original row disappeared"))?;
-            match CausalPendingMetadata::from_column(row, 8)? {
-                CausalPendingMetadata::Readable(_) => {}
+            let previous_reason = match CausalPendingMetadata::from_column(row, 8)? {
+                CausalPendingMetadata::Readable(state) => state.reason,
                 CausalPendingMetadata::Retired => continue,
                 CausalPendingMetadata::Malformed => {
                     rotate_causal_pending(&transaction, pending)?;
                     continue;
                 }
-            }
+            };
             match causal_test_completion_plan_from_row(row, intents, &local_store) {
                 Ok(CausalPendingRead::Ready(plan)) => {
                     // Hinted keys already own this batch's targeted slots.
@@ -88,11 +126,9 @@ impl MailboxStore {
                     if excluded.contains(&plan.selector.key()) {
                         continue;
                     }
-                    note_causal_pending(
-                        &transaction,
-                        pending,
-                        CausalPendingReason::AwaitingCompletion,
-                    )?;
+                    // The last pull's own outcome stays until the next one.
+                    let reason = plan.replaces(previous_reason).unwrap_or(previous_reason);
+                    note_causal_pending(&transaction, pending, reason)?;
                     plans.push(plan);
                 }
                 Ok(CausalPendingRead::Waiting(reason)) | Err(reason) => {
@@ -128,32 +164,81 @@ pub(crate) struct CausalTestCompletionDelivery {
 }
 
 impl AppState {
+    /// The currentness check on a blocking thread. A check that cannot finish
+    /// there defers this row as a failed check, as any other read failure
+    /// does, instead of ending the whole batch.
+    async fn causal_test_completion_plan_current_off_lock(
+        &self,
+        plan: &CausalTestCompletionPlan,
+    ) -> Result<(), CausalCurrentnessFailure> {
+        let worker = self.clone();
+        let check = plan.clone();
+        run_blocking_api(move || Ok(worker.causal_test_completion_plan_current(&check)))
+            .await
+            .unwrap_or_else(|error| {
+                Err(CausalCurrentnessFailure {
+                    reason: CausalPendingReason::CurrentnessCheckFailed,
+                    error,
+                })
+            })
+    }
+
+    /// Records this row's deferral reason. A failed write concerns this row
+    /// only: it is counted and logged with its status, and the batch goes on
+    /// with the other rows, which keep their own outcomes.
     async fn defer_causal_pending(
         &self,
         plan: &CausalTestCompletionPlan,
         reason: CausalPendingReason,
-    ) -> Result<(), ApiError> {
+    ) {
         let store = self.mailbox_store.clone();
         let selector = plan.selector.clone();
         let intents = plan.pending.intents;
-        run_blocking_api(move || {
+        if let Err(error) = run_blocking_api(move || {
             store
                 .note_causal_pending_for_selector(&selector, intents, reason)
                 .map_err(mailbox_api_error)
         })
         .await
+        {
+            self.record_causal_ready("pending_write_failed");
+            eprintln!(
+                "causal completion pull: pending_write_failed reason={reason:?} status={}; original row retained",
+                error.status.as_u16()
+            );
+        }
     }
     pub(crate) fn causal_test_completion_plan_current(
         &self,
         plan: &CausalTestCompletionPlan,
-    ) -> Result<(), ApiError> {
+    ) -> Result<(), CausalCurrentnessFailure> {
+        use CausalPendingReason as Reason;
+        let route_error = |error| CausalCurrentnessFailure {
+            reason: Reason::RouteChanged,
+            error,
+        };
+        let custody_error = |error| CausalCurrentnessFailure {
+            reason: Reason::OriginalCustodyChanged,
+            error,
+        };
+        let read_error = |error| CausalCurrentnessFailure {
+            reason: Reason::CurrentnessCheckFailed,
+            error: mailbox_api_error(error),
+        };
         let selector = &plan.selector;
         if self
-            .native_mailbox_relay_descriptor(&selector.payload.requester.native_session_id)?
+            .native_mailbox_relay_descriptor_checked(&selector.payload.requester.native_session_id)
+            .map_err(|failure| match failure {
+                NativeMailboxRelayDescriptorError::StoreRead(error) => CausalCurrentnessFailure {
+                    reason: Reason::CurrentnessCheckFailed,
+                    error,
+                },
+                NativeMailboxRelayDescriptorError::Authority(error) => route_error(error),
+            })?
             .principal
             != selector.payload.requester
         {
-            return Err(federation_stale_link());
+            return Err(route_error(federation_stale_link()));
         }
         let original = self
             .mailbox_store
@@ -161,13 +246,13 @@ impl AppState {
                 &selector.payload.requester.native_session_id,
                 &selector.payload.request_send_key,
             )
-            .map_err(mailbox_api_error)?;
+            .map_err(read_error)?;
         if original.as_ref() != Some(&(Some(selector.payload.clone()), plan.scope.clone())) {
-            return Err(ApiError::conflict(
+            return Err(custody_error(ApiError::conflict(
                 "association_stale: original test request changed",
-            ));
+            )));
         }
-        let connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
+        let connection = self.mailbox_store.connection().map_err(read_error)?;
         let mut statement = connection
             .prepare(
                 "SELECT id,0 FROM mailbox_messages
@@ -175,7 +260,7 @@ impl AppState {
             UNION ALL SELECT receipt_json,1 FROM mailbox_relay_intents
             WHERE owner_session_id=?1 AND idempotency_key=?2 LIMIT 2",
             )
-            .map_err(|error| mailbox_api_error(error.into()))?;
+            .map_err(|error| read_error(error.into()))?;
         let identities = statement
             .query_map(
                 rusqlite::params![
@@ -184,27 +269,32 @@ impl AppState {
                 ],
                 |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, bool>(1)?)),
             )
-            .map_err(|error| mailbox_api_error(error.into()))?
+            .map_err(|error| read_error(error.into()))?
             .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(|error| mailbox_api_error(error.into()))?;
+            .map_err(|error| read_error(error.into()))?;
         let canonical = match identities.as_slice() {
             [(Some(value), false)] => Some(value.clone()),
             [(Some(value), true)] => Some(
                 serde_json::from_str::<MailboxAppendReceipt>(value)
-                    .map_err(|_| ApiError::conflict("original test request receipt is malformed"))?
+                    .map_err(|_| CausalCurrentnessFailure {
+                        reason: Reason::ReceiptDecode,
+                        error: ApiError::conflict("original test request receipt is malformed"),
+                    })?
                     .message_id,
             ),
             _ => None,
         };
         if canonical.as_deref() != Some(selector.canonical_message_id.as_str()) {
-            return Err(ApiError::conflict(
+            return Err(custody_error(ApiError::conflict(
                 "association_stale: original test request receipt changed",
-            ));
+            )));
         }
         drop(statement);
         drop(connection);
         if let Some(peer) = &plan.peer {
-            let current = self.federation_peer_snapshot(&peer.peer.host_id)?;
+            let current = self
+                .federation_peer_snapshot(&peer.peer.host_id)
+                .map_err(route_error)?;
             if !same_mailbox_relay_enrollment(peer, &current)
                 || !mailbox_relay_peer_current_locked(
                     &self.inner.lock().expect("state mutex poisoned"),
@@ -212,7 +302,7 @@ impl AppState {
                     peer.enrollment_generation,
                 )
             {
-                return Err(federation_stale_link());
+                return Err(route_error(federation_stale_link()));
             }
         }
         Ok(())
@@ -255,25 +345,22 @@ impl AppState {
                 });
                 continue;
             }
-            let worker = self.clone();
-            let check = plan.clone();
-            if run_blocking_api(move || worker.causal_test_completion_plan_current(&check))
+            if let Err(failure) = self
+                .causal_test_completion_plan_current_off_lock(&plan)
                 .await
-                .is_err()
             {
-                self.defer_causal_pending(&plan, CausalPendingReason::CurrentnessCheckFailed)
-                    .await?;
+                self.defer_causal_pending(&plan, failure.reason).await;
                 continue;
             }
             let runner = plan.selector.runner()?.clone();
             let Some(handle) = self.federation_peer_handle(&runner.host.host_id) else {
                 self.defer_causal_pending(&plan, CausalPendingReason::RunnerUnavailable)
-                    .await?;
+                    .await;
                 continue;
             };
             let Ok(lease) = handle.channel.current_lease() else {
                 self.defer_causal_pending(&plan, CausalPendingReason::LeaseUnavailable)
-                    .await?;
+                    .await;
                 continue;
             };
             if lease
@@ -293,32 +380,48 @@ impl AppState {
                 .is_err()
             {
                 self.defer_causal_pending(&plan, CausalPendingReason::RouteChanged)
-                    .await?;
+                    .await;
                 continue;
             }
             let operation = MailboxRelayOperation::ReadCausalTestCompletion {
                 selector: plan.selector.clone(),
             };
-            let reply = match tokio::time::timeout(
-                Duration::from_secs(5),
-                self.request_mailbox_relay::<CausalTestCompletionReply>(&handle, &lease, operation),
-            )
-            .await
-            {
-                Ok(Ok(reply)) => reply,
-                other => {
-                    let reason = if other.is_err() {
-                        CausalPendingReason::OriginTimeout
-                    } else {
-                        CausalPendingReason::OriginReadFailed
-                    };
-                    self.defer_causal_pending(&plan, reason).await?;
+            // The deadline is inside the request, so time spent waiting for a
+            // local sender counter is not reported as an origin timeout.
+            let reply = self
+                .request_mailbox_relay_checked::<CausalTestCompletionReply>(
+                    &handle,
+                    &lease,
+                    operation,
+                    Some(Duration::from_secs(5)),
+                )
+                .await
+                .map_err(|failure| match failure {
+                    MailboxRelayRequestError::BeforeReadAuthority(_) => {
+                        CausalPendingReason::RouteChanged
+                    }
+                    MailboxRelayRequestError::BeforeReadCapacity(_) => {
+                        CausalPendingReason::RelayCapacityUnavailable
+                    }
+                    MailboxRelayRequestError::BeforeReadDeadline(_) => {
+                        CausalPendingReason::ReadDeadlineBeforeSend
+                    }
+                    MailboxRelayRequestError::AfterReadAuthority(_) => {
+                        CausalPendingReason::PostReadRouteChanged
+                    }
+                    MailboxRelayRequestError::ReadTimeout(_) => CausalPendingReason::OriginTimeout,
+                    MailboxRelayRequestError::Read(_) => CausalPendingReason::OriginReadFailed,
+                });
+            let reply = match reply {
+                Ok(reply) => reply,
+                Err(reason) => {
+                    self.defer_causal_pending(&plan, reason).await;
                     continue;
                 }
             };
             let Some(completion) = reply.completion else {
                 self.defer_causal_pending(&plan, CausalPendingReason::AwaitingCompletion)
-                    .await?;
+                    .await;
                 continue;
             };
             let invalid = if expected_run
@@ -349,7 +452,7 @@ impl AppState {
                 None
             };
             if let Some(reason) = invalid {
-                self.defer_causal_pending(&plan, reason).await?;
+                self.defer_causal_pending(&plan, reason).await;
                 continue;
             }
             // Fresh route and original custody are checked again after I/O.
@@ -370,20 +473,21 @@ impl AppState {
                 .is_err()
             {
                 self.defer_causal_pending(&plan, CausalPendingReason::PostReadRouteChanged)
-                    .await?;
+                    .await;
                 continue;
             }
-            let worker = self.clone();
-            let check = plan.clone();
-            if run_blocking_api(move || worker.causal_test_completion_plan_current(&check))
+            if let Err(failure) = self
+                .causal_test_completion_plan_current_off_lock(&plan)
                 .await
-                .is_err()
             {
-                self.defer_causal_pending(
-                    &plan,
-                    CausalPendingReason::PostReadCurrentnessCheckFailed,
-                )
-                .await?;
+                let reason = match failure.reason {
+                    CausalPendingReason::RouteChanged => CausalPendingReason::PostReadRouteChanged,
+                    CausalPendingReason::CurrentnessCheckFailed => {
+                        CausalPendingReason::PostReadCurrentnessCheckFailed
+                    }
+                    reason => reason,
+                };
+                self.defer_causal_pending(&plan, reason).await;
                 continue;
             }
             deliveries.push(CausalTestCompletionDelivery {

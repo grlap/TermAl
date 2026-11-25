@@ -127,13 +127,37 @@ ledger, and private sender mappings remain local.
 `GET /api/diagnostics/mailbox-relay-wakes` exposes `causalCompletionPending`:
 `records` (at most 64 table/row-id records), `total`, `limited`,
 `resetOnRestart: false`, `disposition` and `remedy`. Each record's `state` contains
-a closed reason, attempt count, first-pending and last-attempt UTC timestamps,
-and whether it came from the one-time migration. Custody changes, unavailable
+a closed reason, a `releaseCondition` identifying what must become true,
+attempt count, first-pending and last-attempt UTC timestamps, and whether it
+came from the one-time migration. Custody changes, unavailable
 runner/lease, route changes, origin timeout/read failure, absent or invalid
-completion and admission failures remain distinguishable. These records live on
+completion and admission failures remain distinguishable. A refusal by local
+route authority or the sender counter before the read is sent is a route
+change. A full local peer RPC bound, or a sender window still full at the
+read's deadline, is `relay_capacity_unavailable`. A deadline spent in the local
+checks or in signing the read, while the window was free, is
+`read_deadline_before_send`; an unused counter is retired as unsent. None of these
+is an origin read failure or timeout. A settlement that cannot be read or saved, or a completion
+that differs from the saved settlement, names that step. A failure of the
+whole recovery batch belongs to no row: `causalCompletionReady.decisions`
+counts it under its stage, such as `pending_read_failed`, and the host log
+carries its status or a closed error class, never stored text. A row whose
+own pending-state write fails is counted as `pending_write_failed`,
+`ready_pending_write_failed` or `admission_pending_write_failed`, and the
+other rows of the batch go on. These
+records live on
 the original rows, survive restart, and expose no send key, payload, private
-scope or peer data. The bounded projection does not evict durable pending state.
-Report table, rowId and reason for diagnosis; do not edit the live store.
+scope or peer data. Pending admission states can include `check` and
+`admissionChecks` with an ordinal, the check and its release condition for each
+outstanding target. These distinguish destination resolution, capability,
+transport and receipt failures. Before a specific admission check is available,
+the row carries its general pending reason. The settlement-detail query caps
+the bytes of settlement text it fetches and reports `admissionDetailsLimited`
+if a stored value is outside that bound or cannot be read as text. Per-target
+checks are diagnostic hints from the stored admission fields. They do not
+verify a settlement. Unreadable admission fields supply no per-target checks.
+The bound does not evict durable pending state. Report the table, rowId,
+reason and any check to the coordinator without editing the live store.
 Undecodable scheduling metadata reports `pending_metadata_decode`; unavailable
 state fields are `null`, rather than inferred counters or timestamps. Recovery
 preserves malformed metadata bytes and original custody while rotating retry

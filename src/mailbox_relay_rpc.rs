@@ -5,6 +5,46 @@ use super::*;
 
 pub(crate) const NATIVE_MAILBOX_RELAY_LINK_CHANGED: &str = "native mailbox relay link changed";
 
+pub(crate) enum NativeMailboxRelayDescriptorError {
+    StoreRead(ApiError),
+    Authority(ApiError),
+}
+
+impl NativeMailboxRelayDescriptorError {
+    fn into_api_error(self) -> ApiError {
+        match self {
+            Self::StoreRead(error) | Self::Authority(error) => error,
+        }
+    }
+}
+
+pub(crate) enum MailboxRelayRequestError {
+    /// Local route authority refused; nothing was sent to the origin.
+    BeforeReadAuthority(ApiError),
+    /// The local peer RPC bound or the sender window stayed full; nothing was
+    /// sent to the origin.
+    BeforeReadCapacity(ApiError),
+    /// The read's deadline passed in the local checks before it was sent.
+    BeforeReadDeadline(ApiError),
+    AfterReadAuthority(ApiError),
+    /// The request deadline passed after the read was sent.
+    ReadTimeout(ApiError),
+    Read(ApiError),
+}
+
+impl MailboxRelayRequestError {
+    fn into_api_error(self) -> ApiError {
+        match self {
+            Self::BeforeReadAuthority(error)
+            | Self::BeforeReadCapacity(error)
+            | Self::BeforeReadDeadline(error)
+            | Self::AfterReadAuthority(error)
+            | Self::ReadTimeout(error)
+            | Self::Read(error) => error,
+        }
+    }
+}
+
 pub(crate) struct MailboxRelayAuthority {
     pub(crate) app: AppState,
     pub(crate) lease: FederationLinkLease,
@@ -136,24 +176,34 @@ impl AppState {
         &self,
         session: &str,
     ) -> Result<MailboxRelayDescriptor, ApiError> {
+        self.native_mailbox_relay_descriptor_checked(session)
+            .map_err(NativeMailboxRelayDescriptorError::into_api_error)
+    }
+
+    pub(crate) fn native_mailbox_relay_descriptor_checked(
+        &self,
+        session: &str,
+    ) -> Result<MailboxRelayDescriptor, NativeMailboxRelayDescriptorError> {
+        use NativeMailboxRelayDescriptorError::{Authority, StoreRead};
+        let store_error = |error| StoreRead(mailbox_api_error(error));
         let store_id = {
-            let connection = self.mailbox_store.connection().map_err(mailbox_api_error)?;
-            mailbox_relay_store_id(&connection).map_err(mailbox_api_error)?
+            let connection = self.mailbox_store.connection().map_err(store_error)?;
+            mailbox_relay_store_id(&connection).map_err(store_error)?
         };
         let inner = self.inner.lock().expect("state mutex poisoned");
-        let root = federation_mailbox_root_locked(&inner, session)?;
+        let root = federation_mailbox_root_locked(&inner, session).map_err(Authority)?;
         let host = inner
             .federation
             .local
             .clone()
-            .ok_or_else(federation_transport_unavailable)?;
+            .ok_or_else(|| Authority(federation_transport_unavailable()))?;
         let principal = MailboxRelayPrincipal {
             host,
             store_id,
             native_session_id: session.to_owned(),
             native_creation_id: root.federation_native_creation_id.clone(),
         };
-        principal.validate()?;
+        principal.validate().map_err(Authority)?;
         Ok(MailboxRelayDescriptor {
             principal,
             name: federation_mailbox_display_name(&root.session.name),
@@ -474,39 +524,75 @@ impl AppState {
         lease: &FederationLinkLease,
         operation: MailboxRelayOperation,
     ) -> Result<T, ApiError> {
+        self.request_mailbox_relay_checked(handle, lease, operation, None)
+            .await
+            .map_err(MailboxRelayRequestError::into_api_error)
+    }
+
+    /// The relay request with its failure classified. A `timeout`, counted
+    /// from this call, bounds the whole exchange, its local checks and sender
+    /// counter allocation included.
+    pub(crate) async fn request_mailbox_relay_checked<T: DeserializeOwned>(
+        &self,
+        handle: &FederationPeerHandle,
+        lease: &FederationLinkLease,
+        operation: MailboxRelayOperation,
+        timeout: Option<Duration>,
+    ) -> Result<T, MailboxRelayRequestError> {
+        use crate::federation_rpc_authenticated::FederationRpcRequestError;
+        use MailboxRelayRequestError::{
+            AfterReadAuthority, BeforeReadAuthority, BeforeReadCapacity, BeforeReadDeadline, Read,
+            ReadTimeout,
+        };
+        let deadline = timeout.map(|timeout| {
+            tokio::time::Instant::from_std(handle.channel.control.clock.now() + timeout)
+        });
         let request_id = Uuid::new_v4().to_string();
-        let expected = lease.with_current(self, |_, peer| Ok(peer.peer.clone()))?;
+        let expected = lease
+            .with_current(self, |_, peer| Ok(peer.peer.clone()))
+            .map_err(BeforeReadAuthority)?;
         let response: MailboxRelayResponse = handle
             .rpc
-            .request(FederationRpcRoute::MailboxRelay(
-                lease.clone(),
-                MailboxRelayRequest {
-                    version: MAILBOX_RELAY_VERSION,
-                    request_id: request_id.clone(),
-                    operation,
-                },
-            ))
-            .await?;
+            .request_once_within(
+                FederationRpcRoute::MailboxRelay(
+                    lease.clone(),
+                    MailboxRelayRequest {
+                        version: MAILBOX_RELAY_VERSION,
+                        request_id: request_id.clone(),
+                        operation,
+                    },
+                ),
+                deadline,
+            )
+            .await
+            .map_err(|error| match error {
+                FederationRpcRequestError::BeforeSendAuthority(error) => BeforeReadAuthority(error),
+                FederationRpcRequestError::BeforeSendCapacity(error) => BeforeReadCapacity(error),
+                FederationRpcRequestError::BeforeSendDeadline(error) => BeforeReadDeadline(error),
+                FederationRpcRequestError::AfterReplyAuthority(error) => AfterReadAuthority(error),
+                FederationRpcRequestError::TimedOut(error) => ReadTimeout(error),
+                FederationRpcRequestError::Other(error) => Read(error),
+            })?;
         if response.version != MAILBOX_RELAY_VERSION
             || response.request_id != request_id
             || response.host != expected
         {
-            return Err(federation_mailbox_unknown_outcome(
+            return Err(Read(federation_mailbox_unknown_outcome(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "native mailbox relay reply identity/version mismatch",
-            ));
+            )));
         }
         lease.with_current(self, |_, _| Ok(())).map_err(|_| {
-            federation_mailbox_unknown_outcome(
+            AfterReadAuthority(federation_mailbox_unknown_outcome(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "native mailbox relay authority changed after response",
-            )
+            ))
         })?;
         serde_json::from_value(response.value).map_err(|_| {
-            federation_mailbox_unknown_outcome(
+            Read(federation_mailbox_unknown_outcome(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "invalid native mailbox relay response",
-            )
+            ))
         })
     }
 }

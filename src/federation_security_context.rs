@@ -69,6 +69,8 @@ pub(crate) struct FederationSenderEvent {
     pub(crate) kind: &'static str,
     pub(crate) operation: &'static str,
     pub(crate) counter: u64,
+    /// The closed retirement reason the host log names.
+    pub(crate) reason: &'static str,
 }
 
 impl Default for FederationSenderWindow {
@@ -220,6 +222,7 @@ impl FederationSecurityContext {
                 kind,
                 operation,
                 counter,
+                reason,
             });
     }
 

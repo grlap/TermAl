@@ -131,7 +131,8 @@ impl AppState {
                     "completion_ready_original_identity_changed",
                 ));
             }
-            self.causal_test_completion_plan_current(&plan)?;
+            self.causal_test_completion_plan_current(&plan)
+                .map_err(|failure| failure.error)?;
             current()?;
             let mut queue = self
                 .federation_executor_wake_signal
@@ -193,6 +194,24 @@ impl AppState {
             .await?
             {
                 CausalReadyPlan::Ready(plan) if hint.matches(&plan) => {
+                    let store = self.mailbox_store.clone();
+                    let ready = plan.clone();
+                    // Only this row's diagnostic waits on the write. A failed
+                    // write is counted, and the pull still runs and records
+                    // its own outcome, so other drained hints are kept.
+                    if let Err(error) = run_blocking_api(move || {
+                        store
+                            .note_ready_causal_pending(&ready)
+                            .map_err(mailbox_api_error)
+                    })
+                    .await
+                    {
+                        self.record_causal_ready("ready_pending_write_failed");
+                        eprintln!(
+                            "causal completion ready: ready_pending_write_failed status={}; the pull goes on",
+                            error.status.as_u16()
+                        );
+                    }
                     plans.push((plan, Some(hint.run_id)))
                 }
                 CausalReadyPlan::Ignored(reason) => self.record_causal_ready(reason),

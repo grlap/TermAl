@@ -11,6 +11,10 @@ pub(crate) struct FederationRpcClient {
     pub(crate) ensure_current: FederationAuthorityCheck,
     #[cfg(test)]
     pub(crate) allocation_blocked: Arc<dyn Fn(u64) + Send + Sync>,
+    /// Called once a signed request is ready, just before the last caller
+    /// deadline check and its dispatch.
+    #[cfg(test)]
+    pub(crate) before_dispatch: Arc<dyn Fn() + Send + Sync>,
 }
 
 pub(crate) enum FederationRpcRoute {
@@ -61,6 +65,8 @@ impl FederationRpcClient {
             ensure_current,
             #[cfg(test)]
             allocation_blocked: Arc::new(|_| {}),
+            #[cfg(test)]
+            before_dispatch: Arc::new(|| {}),
         })
     }
 

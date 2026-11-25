@@ -393,3 +393,189 @@ async fn settled_history_beyond_the_old_cache_does_not_repeat_confirmed_ready_hi
     );
     fixture.finish().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refused_pending_writes_for_one_hinted_row_keep_the_other_drained_hints() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let (mut server, handles) = super::super::causal_test_completion::connect(&fixture).await;
+    let (input, _, _) = destination(fixture.central.clone(), &fixture.native);
+    let mut selectors = Vec::new();
+    // Drained hints are ordered by send key, so the refused original, keyed
+    // first, is pulled before the other: its failed writes must not stop it.
+    for key in ["ready-write-a-refused", "ready-write-b-kept"] {
+        let (run, directory, selector) = original(&fixture, key, input.clone()).await;
+        // The refused original has no completion yet, so its pull must also
+        // record a deferral on the row whose writes are refused.
+        if key == "ready-write-b-kept" {
+            finish(
+                &fixture.satellite,
+                &run,
+                &directory,
+                native_test_completion::Verdict::Pass,
+                source(),
+                source(),
+            );
+        }
+        // A reason the ready plan disproves, so the pull first rewrites it.
+        fixture
+            .central
+            .mailbox_store
+            .note_causal_pending_for_selector(&selector, true, CausalPendingReason::AwaitingReceipt)
+            .unwrap();
+        let hint = CausalTestCompletionReadyHint {
+            requester: selector.payload.requester.clone(),
+            runner: selector.runner().unwrap().clone(),
+            request_send_key: selector.payload.request_send_key.clone(),
+            canonical_message_id: selector.canonical_message_id.clone(),
+            run_id: run,
+        };
+        fixture
+            .central
+            .federation_executor_wake_signal
+            .causal_ready
+            .lock()
+            .unwrap()
+            .pending
+            .insert(hint.key(), hint);
+        selectors.push(selector);
+    }
+    // A disposable store refuses pending writes for the first original only.
+    fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER fixture_refuse_ready_write
+             BEFORE UPDATE OF test_request_pending_json ON mailbox_relay_intents
+             WHEN OLD.idempotency_key='ready-write-a-refused'
+             BEGIN SELECT RAISE(ABORT, 'fixture refuses this pending write'); END",
+        )
+        .unwrap();
+    let deliveries = tokio::time::timeout(
+        phase_sync::DEADLOCK_GUARD,
+        fixture.central.read_ready_causal_test_completions(false),
+    )
+    .await
+    .expect("the hinted batch finishes");
+    let decisions = fixture
+        .central
+        .federation_executor_wake_signal
+        .causal_ready
+        .lock()
+        .unwrap()
+        .diagnostic()["decisions"]
+        .clone();
+    fixture
+        .central
+        .mailbox_store
+        .connection()
+        .unwrap()
+        .execute_batch("DROP TRIGGER fixture_refuse_ready_write")
+        .unwrap();
+    drop(handles);
+    server.finish().await;
+    fixture.finish().await;
+
+    let delivered: Vec<_> = deliveries
+        .expect("refused writes for one row do not fail the hinted batch")
+        .into_iter()
+        .map(|delivery| delivery.selector)
+        .collect();
+    assert_eq!(delivered, vec![selectors[1].clone()]);
+    assert_eq!(decisions["ready_pending_write_failed"], 1);
+    assert_eq!(decisions["pending_write_failed"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_sent_read_past_its_deadline_is_an_origin_timeout() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let (mut reverse, handles, _) = capture_hints(&fixture).await;
+    let (input, _, _) = destination(fixture.central.clone(), &fixture.native);
+    original(&fixture, "sent-read-deadline", input).await;
+    let (mut blocked, entered, release) = block_first_completion_read(&fixture).await;
+    let plans = fixture
+        .central
+        .mailbox_store
+        .causal_test_completion_plans()
+        .unwrap();
+    assert_eq!(plans.len(), 1);
+    let central = fixture.central.clone();
+    let read = tokio::spawn(async move {
+        central
+            .read_causal_test_completion_plans(plans.into_iter().map(|plan| (plan, None)).collect())
+            .await
+    });
+    // The read was sent: the origin's gate holds it. Then the link's
+    // scripted clock moves past the read's deadline.
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered.notified())
+        .await
+        .expect("the read reached the origin");
+    fixture
+        .channel
+        .control
+        .clock
+        .advance(Duration::from_secs(6));
+    let deliveries = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, read)
+        .await
+        .expect("the read's scripted deadline ends it")
+        .unwrap()
+        .unwrap();
+    let diagnostic = fixture
+        .central
+        .mailbox_store
+        .causal_pending_diagnostics()
+        .unwrap();
+    release.add_permits(1);
+    drop(handles);
+    blocked.finish().await;
+    reverse.finish().await;
+    fixture.finish().await;
+
+    assert!(deliveries.is_empty());
+    let state = &diagnostic["records"][0]["state"];
+    assert_eq!(state["reason"], "origin_timeout");
+    assert_eq!(state["releaseCondition"], "origin_read_succeeds");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hinted_pull_with_a_saved_receipt_shows_awaiting_completion_while_it_reads() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let (mut reverse, handles, _) = capture_hints(&fixture).await;
+    let (input, _, _) = destination(fixture.central.clone(), &fixture.native);
+    let (run, _, selector) = original(&fixture, "hinted-receipt-transition", input).await;
+    // The row was noted while its send was not yet confirmed; the receipt is
+    // saved now, and only the hint starts the next pull.
+    fixture
+        .central
+        .mailbox_store
+        .note_causal_pending_for_selector(&selector, true, CausalPendingReason::AwaitingReceipt)
+        .unwrap();
+    let (mut blocked, entered, release) = block_first_completion_read(&fixture).await;
+    ready(&fixture, &selector, &run);
+    let mut recovery = CausalTestCompletionRecovery::default();
+    recovery.tick(&fixture.central, false).await;
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, entered.notified())
+        .await
+        .expect("the hinted authenticated read reaches the gate");
+    // While the origin read is held, the row names the pull it waits for.
+    let during_read = fixture
+        .central
+        .mailbox_store
+        .causal_pending_diagnostics()
+        .unwrap();
+    release.add_permits(1);
+    join_worker(&mut recovery).await;
+    recovery.shutdown().await;
+    drop(handles);
+    blocked.finish().await;
+    reverse.finish().await;
+    fixture.finish().await;
+
+    let state = &during_read["records"][0]["state"];
+    assert_eq!(state["reason"], "awaiting_completion");
+    assert_eq!(state["releaseCondition"], "origin_completion_available");
+}

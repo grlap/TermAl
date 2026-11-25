@@ -7,10 +7,120 @@
 // The encoded aggregate is still checked before every save and decode.
 
 use super::*;
-const CAUSAL_SETTLEMENT_MAX_BYTES: usize = MAILBOX_TEST_REQUEST_MAX_TARGETS
+pub(crate) const CAUSAL_SETTLEMENT_MAX_BYTES: usize = MAILBOX_TEST_REQUEST_MAX_TARGETS
     * (5 * ENGRAM_CONTROL_MAX_FRAME_BYTES)
     + 2 * ENGRAM_SOURCE_JSON_LIMIT
     + MAILBOX_TEST_REQUEST_MAX_BYTES;
+
+// These codes live in the existing bounded pending string. Older readers
+// still accept that string, and this projection never exports arbitrary text.
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CausalAdmissionCheck {
+    #[serde(alias = "destination connection has not been read")]
+    DestinationNotChecked,
+    SenderScopeUnavailable,
+    RequesterRootUnavailable,
+    RequesterCreationChanged,
+    RequesterHostChanged,
+    DestinationTargetUnavailable,
+    DestinationTargetInvalid,
+    DestinationProjectChanged,
+    DestinationStoreChanged,
+    DestinationSessionChanged,
+    #[serde(alias = "original destination connection changed; no route replacement")]
+    DestinationConnectionChanged,
+    DestinationSnapshotChanged,
+    CapabilityReadFailed,
+    CapabilityUnavailable,
+    #[serde(alias = "original destination connection unavailable")]
+    DestinationUnconfirmed,
+    LocalConnectionUnavailable,
+    AdmissionDeadline,
+    AdmissionTransportFailed,
+    AdmissionProtocolFailed,
+    #[serde(alias = "remote verification deferred; retry original operation")]
+    AdmissionDeferred,
+    #[serde(alias = "unconfirmed malformed remote receipt")]
+    AdmissionReceiptInvalid,
+    #[serde(other)]
+    AdmissionUnconfirmed,
+}
+
+impl CausalAdmissionCheck {
+    pub(crate) fn stored(self) -> String {
+        let Value::String(code) = json!(self) else {
+            unreachable!("causal admission checks serialize as strings");
+        };
+        code
+    }
+
+    fn release_condition(self) -> &'static str {
+        match self {
+            Self::DestinationNotChecked => "original_target_is_checked",
+            Self::SenderScopeUnavailable => "original_sender_scope_available",
+            Self::RequesterRootUnavailable => "original_requester_root_available",
+            Self::RequesterCreationChanged => "requester_creation_matches_original",
+            Self::RequesterHostChanged => "requester_host_matches_original",
+            Self::DestinationTargetUnavailable => "destination_target_available",
+            Self::DestinationTargetInvalid => "destination_target_resolves",
+            Self::DestinationProjectChanged => "destination_project_matches_original",
+            Self::DestinationStoreChanged => "destination_store_matches_original",
+            Self::DestinationSessionChanged => "destination_session_matches_original",
+            Self::DestinationConnectionChanged => "destination_connection_matches_original",
+            Self::DestinationSnapshotChanged => {
+                "destination_snapshot_stable_during_capability_read"
+            }
+            Self::CapabilityReadFailed => "destination_capability_read_succeeds",
+            Self::CapabilityUnavailable => "destination_advertises_remote_verification",
+            Self::DestinationUnconfirmed => "original_destination_resolves",
+            Self::LocalConnectionUnavailable => "original_admission_connection_available",
+            Self::AdmissionDeadline
+            | Self::AdmissionTransportFailed
+            | Self::AdmissionProtocolFailed
+            | Self::AdmissionDeferred
+            | Self::AdmissionReceiptInvalid
+            | Self::AdmissionUnconfirmed => "original_operation_returns_valid_receipt",
+        }
+    }
+}
+
+pub(crate) fn project_causal_admission_checks(state: &mut Value, encoded: &str) {
+    // Skip the completion, wire, request and receipt bodies during decoding.
+    // This is explanatory metadata only, never settlement/receipt validation.
+    #[derive(Deserialize)]
+    struct PendingAdmission {
+        pending: Option<CausalAdmissionCheck>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PendingSettlement {
+        schema_version: u16,
+        admissions: Vec<PendingAdmission>,
+    }
+    let Ok(saved) = serde_json::from_str::<PendingSettlement>(encoded) else {
+        return;
+    };
+    if saved.schema_version != 1 || saved.admissions.len() > MAILBOX_TEST_REQUEST_MAX_TARGETS {
+        return;
+    }
+    let checks = saved
+        .admissions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, admission)| admission.pending.map(|check| (index + 1, check)));
+    if let Some((_, check)) = checks
+        .clone()
+        .find(|(_, check)| *check != CausalAdmissionCheck::DestinationNotChecked)
+        .or_else(|| checks.clone().next())
+    {
+        state["check"] = json!(check);
+        state["releaseCondition"] = json!(check.release_condition());
+        state["admissionChecks"] = json!(checks.map(|(target, check)| {
+            json!({"target":target, "check":check, "releaseCondition":check.release_condition()})
+        }).collect::<Vec<_>>());
+    }
+}
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -130,7 +240,7 @@ impl CausalTestSettlement {
                         connection: None,
                         receipt: None,
                         refusal: None,
-                        pending: Some("destination connection has not been read".into()),
+                        pending: Some(CausalAdmissionCheck::DestinationNotChecked.stored()),
                     },
                     Err(error) => CausalTestAdmission {
                         request: None,
@@ -313,11 +423,38 @@ impl MailboxStore {
         if current.as_ref() != before {
             bail!("causal settlement changed before publication");
         }
+        let complete = after.complete();
+        // Publish the admission phase with every incomplete settlement save,
+        // unless the row already says so: a saved completion disproves any
+        // pull-phase reason or recorded settlement failure. The worker can
+        // stop before its separate attempt outcome is recorded.
+        let admission_phase = if !complete {
+            let metadata = transaction.query_row(
+                &format!(
+                    "SELECT test_request_pending_json FROM {table}
+                     WHERE {owner}=?1 AND idempotency_key=?2"
+                ),
+                rusqlite::params![selector.payload.requester.native_session_id, key],
+                |row| CausalPendingMetadata::from_column(row, 0),
+            )?;
+            match metadata {
+                CausalPendingMetadata::Readable(mut state)
+                    if state.reason != CausalPendingReason::AdmissionPending =>
+                {
+                    state.reason = CausalPendingReason::AdmissionPending;
+                    state.legacy_custody_digest = None;
+                    Some(serde_json::to_string(&state)?)
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let text = serde_json::to_string(after)?;
         let count = transaction.execute(
             &format!(
                 "UPDATE {table} SET test_request_settlement_json=?1,
-             test_request_pending_json=CASE WHEN ?4 THEN NULL ELSE test_request_pending_json END,
+             test_request_pending_json=CASE WHEN ?4 THEN NULL ELSE COALESCE(?5,test_request_pending_json) END,
              test_request_pending_order=CASE WHEN ?4 THEN NULL ELSE test_request_pending_order END
              WHERE {owner}=?2 AND idempotency_key=?3"
             ),
@@ -325,7 +462,8 @@ impl MailboxStore {
                 text,
                 selector.payload.requester.native_session_id,
                 key,
-                after.complete()
+                complete,
+                admission_phase
             ],
         )?;
         if count != 1 {
