@@ -267,6 +267,15 @@ pub(crate) fn engram_unsupported_focused_line(command: &str) -> Option<String> {
             ));
         }
     };
+    if engram_is_focused_dart_sdk_test(inner) {
+        return (!engram_supports_focused_dart_test(inner)).then(|| {
+            format!(
+                "[TermAl] Unsupported focused Dart SDK test form {line:?}: no Test record will follow. \
+                 Use node scripts/test-launcher.mjs focused --input commit -- flutter test \
+                 (or dart test) with only supported options, and omit --file-reporter and positional paths."
+            )
+        });
+    }
     let [inner, inner_args @ ..] = inner else {
         return None;
     };

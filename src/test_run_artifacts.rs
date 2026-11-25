@@ -236,6 +236,7 @@ impl AppState {
             return;
         }
         let Some(command) = EngramHost::recognized_check(line)
+            .or_else(|| engram_observed_dart_launcher(line, provenance))
             .filter(|command| command.simple && EngramHost::launcher_arguments(command).is_some())
         else {
             return;
@@ -367,9 +368,20 @@ impl AppState {
             refuse(ArtifactRequestUnavailable, &[(RequestReadable, false)]);
             return;
         };
+        let dart_argv = engram_focused_launcher_words(&command.program, &command.argv[1..])
+            .and_then(Result::ok)
+            .filter(|argv| engram_supports_focused_dart_test(argv));
+        let worktree_matches = if dart_argv.is_some() {
+            engram_dart_worktree_matches(
+                FsPath::new(&row.summary.worktree),
+                FsPath::new(&disk.worktree),
+            )
+        } else {
+            test_run_path_key(&disk.worktree) == test_run_path_key(&row.summary.worktree)
+        };
         if disk.run_id != run_id
             || disk.owner.as_deref() != Some(session_id)
-            || test_run_path_key(&disk.worktree) != test_run_path_key(&row.summary.worktree)
+            || !worktree_matches
             || disk.request_identity.is_none()
         {
             refuse(
@@ -380,11 +392,7 @@ impl AppState {
                         RequestOwnerMatches,
                         disk.owner.as_deref() == Some(session_id),
                     ),
-                    (
-                        WorktreeMatches,
-                        test_run_path_key(&disk.worktree)
-                            == test_run_path_key(&row.summary.worktree),
-                    ),
+                    (WorktreeMatches, worktree_matches),
                     (RequestIdentityPresent, disk.request_identity.is_some()),
                 ],
             );
@@ -393,6 +401,14 @@ impl AppState {
         let mode = EngramHost::launcher_arguments(&command).and_then(|words| words.get(2).cloned());
         if (disk.preset == TestRunPreset::Full) != (mode.as_deref() == Some("full")) {
             refuse(ArtifactModeMismatch, &[(ModeMatches, false)]);
+            return;
+        }
+        // Bind the launch observation to the actual focused Dart request,
+        // even if the shell decoded a word differently.
+        if let Some(planned) = dart_argv
+            && (disk.command_truncated || disk.command.as_deref() != Some(planned))
+        {
+            refuse(ArtifactRequestMismatch, &[(ObservationMatches, false)]);
             return;
         }
         // The locator is explicit; this interval is only an anti-replay guard,

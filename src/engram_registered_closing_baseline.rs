@@ -52,7 +52,8 @@ fn registered_clean_input(
         || results.get("interrupted").and_then(Value::as_bool) == Some(true)
         || registration.monitoring_interrupted_at.is_some()
         || engram_verification_record_producer_refusal(registration, &results).is_some()
-        || !engram_verification_record_unclassified_stages(&request, &results).is_empty()
+        || !engram_verification_record_unclassified_stages(registration, &request, &results)
+            .is_empty()
     {
         return false;
     }
