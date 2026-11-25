@@ -173,7 +173,11 @@ fn registration_refreshes_after_revision_or_child_attachment_but_never_after_reg
             "the transport refusal identifies the stale work revision"
         );
         let step = engram_verification_record_send(frozen, Ok(route.link()));
-        let EngramVerificationRecordStep::Rejected(detail) = &step else {
+        let EngramVerificationRecordStep::ProducerRejected {
+            detail,
+            body_digest,
+        } = &step
+        else {
             panic!("the actual backend must refuse the stale registered revision");
         };
         assert_eq!(detail, "Engram refused it: verification_record_refused");
@@ -195,7 +199,9 @@ fn registration_refreshes_after_revision_or_child_attachment_but_never_after_reg
             "refusal never refreshes the registration"
         );
         assert!(
-            matches!(&stored.verification_record, Some(TestRunVerificationAck::Rejected { detail: saved }) if saved == detail),
+            matches!(&stored.verification_record, Some(TestRunVerificationAck::Rejected {
+                detail: saved, producer_body_digest: Some(saved_digest)
+            }) if saved == detail && saved_digest == body_digest),
             "the host retains the observed terminal refusal"
         );
         assert!(

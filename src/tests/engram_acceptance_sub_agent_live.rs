@@ -144,6 +144,7 @@ fn spawn_child(
                 agent: Some(Agent::Codex),
                 model: None,
                 retired_check_dispositions: Vec::new(),
+                rejected_check_disposition: None,
                 criterion_evidence: vec![AcceptanceCriterionEvidenceRequest {
                     criterion: 1,
                     locators: vec![evidence.to_owned()],
@@ -321,6 +322,7 @@ fn live_independent_evidence_exhaustion_records_insufficient_evidence_and_blocks
                 agent: Some(Agent::Codex),
                 model: None,
                 retired_check_dispositions: Vec::new(),
+                rejected_check_disposition: None,
                 criterion_evidence: Vec::new(),
             },
         )

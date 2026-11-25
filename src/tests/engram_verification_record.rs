@@ -1270,7 +1270,7 @@ fn historical_producer_receipts_stay_readable_but_commit_requests_are_not_resent
     transport.script(Err(EngramTransportError::remote(error.into_body())));
     let step = engram_verification_record_send(ready(&current.registration), link(&adapter, &own));
     assert!(
-        matches!(&step, EngramVerificationRecordStep::Rejected(detail) if detail.contains("verification_record_refused")),
+        matches!(&step, EngramVerificationRecordStep::ProducerRejected { detail, .. } if detail.contains("verification_record_refused")),
         "the producer's typed refusal is final"
     );
     let sent = transport.sent_records();
@@ -3187,7 +3187,7 @@ fn only_a_definite_refusal_rejects_the_record_and_any_other_answer_resends_it_un
     transport.script(remote("invalid_request"));
     let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
     assert!(
-        matches!(&step, EngramVerificationRecordStep::Rejected(detail) if detail.contains("invalid_request")),
+        matches!(&step, EngramVerificationRecordStep::ProducerRejected { detail, .. } if detail.contains("invalid_request")),
         "{step:?}"
     );
     // The host keeps the refusal it observed on the registration, as the
@@ -3868,6 +3868,7 @@ fn a_settled_or_rejected_run_is_not_looked_at_again() {
             "rejected",
             TestRunVerificationAck::Rejected {
                 detail: "refused".to_owned(),
+                producer_body_digest: None,
             },
         ),
     ] {

@@ -39,7 +39,7 @@ fn passed_baseline() -> (AppState, String, String, String, TestRunRegistration) 
     (state, parent, named_root, head, acknowledged)
 }
 
-fn pending_results(run_id: &str, head: &str) -> Value {
+pub(super) fn pending_results(run_id: &str, head: &str) -> Value {
     let mut results = committed_results("passed", input_record(head, "clean"));
     results["runId"] = json!(run_id);
     results["state"] = json!("running");

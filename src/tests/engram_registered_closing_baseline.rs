@@ -501,6 +501,7 @@ fn incomplete_or_changed_registered_check_scope_keeps_the_assumption() {
                     .update(&id, |run| {
                         run.verification_record = Some(TestRunVerificationAck::Rejected {
                             detail: "fixture producer refusal".into(),
+                            producer_body_digest: None,
                         });
                     })
                     .unwrap();

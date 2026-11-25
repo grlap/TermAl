@@ -194,6 +194,12 @@ pub(crate) fn acceptance_evaluation_request_tool_definition() -> Value {
                         "properties": {"runId": {"type": "string", "minLength": 1, "maxLength": 256},
                             "reason": {"type": "string", "minLength": 1, "maxLength": 1024}}}
                 },
+                "rejectedCheckDisposition": {
+                    "type": "object", "additionalProperties": false, "required": ["runId", "reason"],
+                    "description": "Disclose the newest applicable passing run on the current clean named root when the host holds Engram's terminal verification rejection. Context only; never verification credit or satisfaction of a bound criterion. Applies only to this explicit fresh evaluation request, without reuseDelegationId.",
+                    "properties": {"runId": {"type": "string", "minLength": 1, "maxLength": 256},
+                        "reason": {"type": "string", "minLength": 1, "maxLength": 1024}}
+                },
                 "criterionEvidence": {
                     "type": "array", "maxItems": MAX_ACCEPTANCE_SELECTED_RECORDS,
                     "description": "Explicit criterion-to-evidence associations. TermAl reads these records whole even outside the newest notes window; this is discovery, not a claim that they satisfy the criterion.",
@@ -290,6 +296,8 @@ pub(crate) struct RequestAcceptanceEvaluationRequest {
     pub(crate) criterion_evidence: Vec<AcceptanceCriterionEvidenceRequest>,
     #[serde(default)]
     pub(crate) retired_check_dispositions: Vec<AcceptanceRetiredCheckRequest>,
+    #[serde(default)]
+    pub(crate) rejected_check_disposition: Option<AcceptanceRetiredCheckRequest>,
 }
 
 #[derive(Serialize)]
@@ -1058,11 +1066,24 @@ impl AppState {
         automatic: bool,
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
         validate_acceptance_retired_check_requests(&request.retired_check_dispositions)?;
-        if !request.retired_check_dispositions.is_empty()
+        if let Some(rejected) = &request.rejected_check_disposition {
+            validate_acceptance_check_requests(std::slice::from_ref(rejected), "rejected")?;
+            if request
+                .retired_check_dispositions
+                .iter()
+                .any(|r| r.run_id == rejected.run_id)
+            {
+                return Err(ApiError::bad_request(
+                    "a run cannot have both a retired and a rejected check disposition",
+                ));
+            }
+        }
+        if (!request.retired_check_dispositions.is_empty()
+            || request.rejected_check_disposition.is_some())
             && (automatic || request.reuse_delegation_id.is_some())
         {
             return Err(ApiError::bad_request(
-                "retired check dispositions require an explicit fresh evaluation request, without reuseDelegationId",
+                "check dispositions require an explicit fresh evaluation request, without reuseDelegationId",
             ));
         }
         self.prepare_acceptance_evaluation_with_dispositions_until(
@@ -1834,14 +1855,18 @@ impl AppState {
         // at HEAD and an acknowledged verification record, refused otherwise,
         // with an additional sighting check for an unheld retained-root requester
         // (`acceptance_committed_input.rs`).
-        if !request.retired_check_dispositions.is_empty() && dispositions.is_empty() {
-            let recorded = self.record_acceptance_retired_dispositions(
+        if (!request.retired_check_dispositions.is_empty()
+            || request.rejected_check_disposition.is_some())
+            && dispositions.is_empty()
+        {
+            let recorded = self.record_acceptance_check_dispositions(
                 parent_session_id,
                 connection,
                 &target.store,
                 &task,
                 source_root.as_ref(),
                 &request.retired_check_dispositions,
+                request.rejected_check_disposition.as_ref(),
                 read,
                 deadline,
                 now,
@@ -1858,7 +1883,7 @@ impl AppState {
                 &recorded,
             );
         }
-        self.validate_acceptance_retired_dispositions(
+        self.validate_acceptance_check_dispositions(
             parent_session_id,
             connection,
             &target.store,
@@ -1866,25 +1891,36 @@ impl AppState {
             source_root.as_ref(),
             dispositions,
         )?;
-        if !dispositions.is_empty() {
-            let rows = dispositions
+        let (retired, rejected): (Vec<_>, Vec<_>) = dispositions
+            .iter()
+            .partition(|row| row.rejected_source.is_none());
+        if !retired.is_empty() {
+            let rows = retired
                 .iter()
                 .map(|row| &row.disclosure)
                 .collect::<Vec<_>>();
             selection_notice.push_str(&format!("Host-recorded retired check dispositions (context only, no verification credit):\n{}\n\n",
                 serde_json::to_string(&rows).map_err(|e| ApiError::internal(e.to_string()))?));
         }
-        let committed_admission = self.require_acceptance_source_preflight_excluding(
-            parent_session_id,
-            &target.connection,
-            &target.store,
-            &task,
-            source_root.as_ref(),
-            deadline,
-            &now,
-            dispositions,
-        )?;
-        self.validate_acceptance_retired_dispositions(
+        if let Some(row) = rejected.first() {
+            selection_notice.push_str(&format!(
+                "Host-recorded rejected check disposition (context only, no verification credit):\n{}\n\n\
+                 This run cannot satisfy any criterion bound to a check kind. A passing registered verification record is still required for such a criterion.\n\n",
+                row.disclosure
+            ));
+        }
+        let (committed_admission, rejected_selection) = self
+            .require_acceptance_source_preflight_excluding(
+                parent_session_id,
+                &target.connection,
+                &target.store,
+                &task,
+                source_root.as_ref(),
+                deadline,
+                &now,
+                dispositions,
+            )?;
+        self.validate_acceptance_check_dispositions(
             parent_session_id,
             connection,
             &target.store,
@@ -2133,6 +2169,7 @@ impl AppState {
                     // Creation re-resolves the store and refuses a second
                     // active evaluator of this task, under its own lock.
                     Some(seed),
+                    rejected_selection.as_ref(),
                 )?;
                 let notice = acceptance_evaluation_notices([
                     self.acceptance_evaluation_open_write_notice(
@@ -2190,6 +2227,9 @@ impl AppState {
                 task.judged_workspace = judged_workspace;
                 {
                     let inner = self.inner.lock().expect("state mutex poisoned");
+                    if let Some(selection) = &rejected_selection {
+                        selection.require_unchanged_locked(&inner, &task.work_ref)?;
+                    }
                     if let Some(change) =
                         engram_work_naming_change(&inner, &target.store, &naming_history)
                     {
@@ -2731,6 +2771,7 @@ impl AppState {
                             model: None,
                             criterion_evidence: Vec::new(),
                             retired_check_dispositions: Vec::new(),
+                            rejected_check_disposition: None,
                         },
                         read,
                         std::time::Instant::now() + acceptance_evaluation_request_tracker_budget(),

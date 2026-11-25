@@ -48,8 +48,9 @@ pub(crate) fn acceptance_registered_input_start(
 pub(crate) fn acceptance_registered_input_outcome(
     registration: &TestRunRegistration,
     current: &EngramSourceId,
-) -> Result<Option<bool>, AcceptanceCommittedInputRefusal> {
+) -> Result<AcceptanceRegisteredInputOutcome, AcceptanceCommittedInputRefusal> {
     use AcceptanceCommittedInputRefusal as Refusal;
+    use AcceptanceRegisteredInputOutcome as Outcome;
     let Some(start) = &registration.declared_native else {
         return acceptance_committed_input_run_outcome(
             &registration.run_id,
@@ -68,7 +69,7 @@ pub(crate) fn acceptance_registered_input_outcome(
         && results.get("runId").and_then(Value::as_str) == Some(&registration.run_id)
         && results.get("state").and_then(Value::as_str) == Some("running")
     {
-        return Ok(None);
+        return Ok(Outcome::Pending);
     }
     // Rebuilding checks the immutable request identity, before/after owner,
     // complete source equality, exact terminal digest and native eligibility.
@@ -76,12 +77,12 @@ pub(crate) fn acceptance_registered_input_outcome(
     let body = engram_verification_record_body(registration, &request, &results)
         .map_err(|_| Refusal::ScanIncomplete)?;
     if start.source.source_id.commit != current.commit {
-        return Ok(None);
+        return Ok(Outcome::NotApplicable);
     }
     if let Some(refusal) = acceptance_native_local_changes(registration) {
         return Err(refusal);
     }
-    Ok(Some(
+    Ok(Outcome::Terminal(
         body.run.outcome == EngramVerificationRecordRunOutcome::Passed
             && start.source.source_id == *current,
     ))

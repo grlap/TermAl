@@ -2275,7 +2275,7 @@ callers and bodies:
 | Route | Caller | Meaning |
 | --- | --- | --- |
 | `POST /api/sessions/{id}/acceptance-evaluation-replay` | the owning parent root of an ended evaluator | resend its saved Unconfirmed write once, with body `{ delegationId }`; no caller verdicts, payload or new key |
-| `POST /api/sessions/{id}/acceptance-evaluations` (plural) | the parent session whose task needs judging | a request that *may create* an evaluation: it reads the tracker and either spawns an evaluator or answers with a same-session brief. Body `{ workRef, agent?, model?, reuseDelegationId?, criterionEvidence?, retiredCheckDispositions? }` |
+| `POST /api/sessions/{id}/acceptance-evaluations` (plural) | the parent session whose task needs judging | a request that *may create* an evaluation: it reads the tracker and either spawns an evaluator or answers with a same-session brief. Body `{ workRef, agent?, model?, reuseDelegationId?, criterionEvidence?, retiredCheckDispositions?, rejectedCheckDisposition? }` |
 | `POST /api/sessions/{id}/acceptance-evaluation` (singular) | the evaluator child itself | the *one* evaluation that child owns: `{id}` is the child, and the task, mode, bases and attempt key are the host's. Body `{ schemaVersion, attemptKey?, verdicts }` |
 
 The plural route is a collection the parent adds to; the singular route is the
@@ -2303,7 +2303,7 @@ and the [API table](../architecture.md).
 
 **Request.** `termal_evaluate_acceptance`, or
 `POST /api/sessions/{id}/acceptance-evaluations` with
-`{ "workRef", "agent"?, "model"?, "criterionEvidence"?, "retiredCheckDispositions"? }`.
+`{ "workRef", "agent"?, "model"?, "criterionEvidence"?, "retiredCheckDispositions"?, "rejectedCheckDisposition"? }`.
 An explicit fresh request may include up to four retired-check dispositions,
 each `{ "runId": "test-…", "reason": "…" }`. These apply only to exact,
 acknowledged registrations on the same claim's retired root. A current-root
@@ -2323,6 +2323,14 @@ evaluator's brief. They grant no passed check, criterion waiver or test credit.
 Normal current-root sighting, source and criterion checks still apply. A later
 evaluation must name the dispositions again or obtain a current-root check;
 they are incompatible with `reuseDelegationId` and never carry automatically.
+
+An explicit fresh request can also name one current-root
+`rejectedCheckDisposition` with the same `runId` and `reason` fields. The run
+stays in committed-input selection and must be the newest applicable eligible
+pass for the clean current HEAD. The host must hold a terminal rejection from
+Engram on the original registration. The same disclosure and fresh-read
+procedure applies. The rejected record remains untouched. The resulting note
+and evaluator context cannot satisfy a criterion bound to a check kind.
 
 TermAl:
 

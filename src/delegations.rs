@@ -448,7 +448,7 @@ impl AppState {
         parent_session_id: &str,
         request: CreateDelegationRequest,
     ) -> Result<DelegationResponse, ApiError> {
-        self.create_delegation_with_evaluation_target(parent_session_id, request, None)
+        self.create_delegation_with_evaluation_target(parent_session_id, request, None, None)
     }
 
     /// The one creation path. `evaluation` is supplied only by the host's
@@ -459,6 +459,7 @@ impl AppState {
         parent_session_id: &str,
         request: CreateDelegationRequest,
         evaluation: Option<AcceptanceEvaluationTargetSeed>,
+        rejected_selection: Option<&AcceptanceRejectedCheckSelection>,
     ) -> Result<DelegationResponse, ApiError> {
         self.inner
             .lock()
@@ -706,6 +707,9 @@ impl AppState {
         // still the project's, and no other evaluator of the task is active.
         if let Some(seed) = evaluation.as_ref() {
             acceptance_evaluation_spawn_admission_locked(&inner, &parent_session_id, seed)?;
+            if let Some(selection) = rejected_selection {
+                selection.require_unchanged_locked(&inner, &seed.work_ref)?;
+            }
         }
         let prompt = evaluation
             .as_ref()

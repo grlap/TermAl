@@ -595,6 +595,7 @@ fn evaluation_request(agent: Option<Agent>) -> RequestAcceptanceEvaluationReques
         model: None,
         criterion_evidence: Vec::new(),
         retired_check_dispositions: Vec::new(),
+        rejected_check_disposition: None,
     }
 }
 

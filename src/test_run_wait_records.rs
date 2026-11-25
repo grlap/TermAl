@@ -159,7 +159,7 @@ fn test_run_wait_record_state(registration: Option<&TestRunRegistration>) -> Str
             "received, not yet settled; {}",
             test_run_wait_receipt_text(receipt)
         ),
-        Some(TestRunVerificationAck::Rejected { detail }) => {
+        Some(TestRunVerificationAck::Rejected { detail, .. }) => {
             format!("refused: {}", test_run_wait_refusal_text(detail))
         }
         Some(TestRunVerificationAck::LocalUnclassified { detail }) => format!(

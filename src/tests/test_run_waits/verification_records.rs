@@ -215,6 +215,7 @@ fn a_wait_resumed_on_a_failed_run_resumes_again_naming_a_refused_record() {
         &registration(&fixture, RUN),
         TestRunVerificationAck::Rejected {
             detail: "fixture refusal".into(),
+            producer_body_digest: None,
         },
     );
     fixture.state.refresh_test_run_waits();
@@ -663,6 +664,7 @@ fn a_final_record_resumes_a_wait_whose_runs_results_became_unreadable() {
                 &registration(&fixture, RUN),
                 TestRunVerificationAck::Rejected {
                     detail: "fixture refusal".into(),
+                    producer_body_digest: None,
                 },
             );
         } else {

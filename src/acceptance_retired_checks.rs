@@ -1,4 +1,4 @@
-// Request-scoped exclusion of acknowledged checks on a retired source root.
+// Request-scoped disposition of retired checks and terminally refused records.
 // Owns validation and the attributed tracker note, not verification credit or
 // root authority. The API records it before taking a fresh canonical evidence
 // bracket; only that attempt's complete persisted brief carries the exclusion.
@@ -20,17 +20,27 @@ pub(crate) struct AcceptanceRetiredCheckDisposition {
     pub(crate) current: AcceptanceEvaluationSourceRoot,
     pub(crate) identity: AcceptanceEvidenceIdentity,
     pub(crate) disclosure: Value,
+    // A rejected run remains in the committed selection. Only retired runs
+    // are excluded. This source binds the disclosure to the fresh evidence cut.
+    pub(crate) rejected_source: Option<EngramSourceId>,
 }
 
 pub(crate) fn validate_acceptance_retired_check_requests(
     requests: &[AcceptanceRetiredCheckRequest],
 ) -> Result<(), ApiError> {
-    let mut seen = BTreeSet::new();
     if requests.len() > ACCEPTANCE_RETIRED_CHECKS_MAX {
         return Err(ApiError::bad_request(
             "at most four retired check dispositions may be requested",
         ));
     }
+    validate_acceptance_check_requests(requests, "retired")
+}
+
+pub(crate) fn validate_acceptance_check_requests(
+    requests: &[AcceptanceRetiredCheckRequest],
+    kind: &str,
+) -> Result<(), ApiError> {
+    let mut seen = BTreeSet::new();
     for request in requests {
         if request.run_id.is_empty()
             || request.run_id.len() > 256
@@ -43,16 +53,16 @@ pub(crate) fn validate_acceptance_retired_check_requests(
                 .any(|c| c.is_control() && c != '\n' && c != '\t')
             || !seen.insert(request.run_id.as_str())
         {
-            return Err(ApiError::bad_request(
-                "retired check dispositions require distinct exact run IDs and a nonempty reason of at most 1024 bytes",
-            ));
+            return Err(ApiError::bad_request(format!(
+                "{kind} check dispositions require distinct exact run IDs and a nonempty reason of at most 1024 bytes"
+            )));
         }
     }
     Ok(())
 }
 
 impl AppState {
-    fn acceptance_retired_check_registration(
+    fn acceptance_check_disposition_registration(
         &self,
         parent: &str,
         connection: &EngramConnectionConfig,
@@ -60,6 +70,7 @@ impl AppState {
         task: &AcceptanceEvaluationTask,
         root: &AcceptanceEvaluationSourceRoot,
         run_id: &str,
+        rejected: bool,
     ) -> Result<TestRunRegistration, ApiError> {
         let inner = self.inner.lock().expect("state mutex poisoned");
         let target = acceptance_evaluation_host_target_locked(&inner, parent)?;
@@ -69,7 +80,7 @@ impl AppState {
             || task.canonical_work_id() != Some(root.work_id.as_str())
         {
             return Err(ApiError::conflict(
-                "retired check disposition source authority changed",
+                "check disposition source authority changed",
             ));
         }
         let row = inner
@@ -84,26 +95,32 @@ impl AppState {
                     .and_then(|row| row.registration.as_ref())
             })
             .ok_or_else(|| {
-                ApiError::bad_request(format!(
-                    "retired check {run_id} is not a retained registered run"
-                ))
+                ApiError::bad_request(format!("check {run_id} is not a retained registered run"))
             })?;
-        if row.authority_store.as_ref() != Some(store)
+        let same_claim = row.authority_store.as_ref() == Some(store)
+            && row.work_binding.as_ref().is_some_and(|binding| {
+                binding.work_id == root.work_id && binding.claim_id == root.claim_id
+            });
+        if rejected {
+            if !same_claim
+                || !row.named_root.as_ref().is_some_and(|named| {
+                    named.workspace_id == root.root && named.generation == root.generation
+                })
+                || !engram_verification_rejected_by_producer(row.verification_record.as_ref())
+            {
+                return Err(ApiError::bad_request(format!(
+                    "check {run_id} is not a current-root run of this claim with a host-held terminal verification rejection"
+                )));
+            }
+        } else if !same_claim
             || !row
-                .work_binding
+                .named_root
                 .as_ref()
-                .is_some_and(|b| b.work_id == root.work_id && b.claim_id == root.claim_id)
-            || !row.named_root.as_ref().is_some_and(|named| {
-                named.generation < root.generation
-                    && (named.workspace_id != root.root || named.generation != root.generation)
-            })
-            || !row.verification_record.as_ref().is_some_and(|ack| {
-                matches!(
-                    ack,
-                    TestRunVerificationAck::Received { .. }
-                        | TestRunVerificationAck::Settled { .. }
-                ) && ack.body_digest().is_some()
-            })
+                .is_some_and(|named| named.generation < root.generation)
+            || !row
+                .verification_record
+                .as_ref()
+                .is_some_and(|ack| ack.body_digest().is_some())
         {
             return Err(ApiError::bad_request(format!(
                 "check {run_id} is not an acknowledged check on this claim's retired root; current-root checks cannot be excluded"
@@ -112,7 +129,7 @@ impl AppState {
         Ok(row.clone())
     }
 
-    pub(crate) fn validate_acceptance_retired_dispositions(
+    pub(crate) fn validate_acceptance_check_dispositions(
         &self,
         parent: &str,
         connection: &EngramConnectionConfig,
@@ -123,34 +140,39 @@ impl AppState {
     ) -> Result<(), ApiError> {
         for disposition in dispositions {
             let root = root.ok_or_else(|| {
-                ApiError::conflict("retired check disposition lost its current source root")
+                ApiError::conflict("check disposition lost its current source root")
             })?;
             if root != &disposition.current
                 || task.canonical_identity.as_ref() != Some(&disposition.identity)
             {
                 return Err(ApiError::conflict(
-                    "retired check disposition names a different current source root",
+                    "check disposition names a different current source root",
                 ));
             }
-            let row = self.acceptance_retired_check_registration(
+            let rejected = disposition.rejected_source.is_some();
+            let row = self.acceptance_check_disposition_registration(
                 parent,
                 connection,
                 store,
                 task,
                 root,
                 &disposition.registration.run_id,
+                rejected,
             )?;
-            if !acceptance_committed_input_registration_unchanged(&disposition.registration, &row) {
-                return Err(ApiError::conflict(
-                    "retired check disposition registration changed",
-                ));
+            let unchanged = if rejected {
+                row.matches_registration_snapshot(&disposition.registration)
+            } else {
+                acceptance_committed_input_registration_unchanged(&disposition.registration, &row)
+            };
+            if !unchanged {
+                return Err(ApiError::conflict("check disposition registration changed"));
             }
         }
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn record_acceptance_retired_dispositions(
+    pub(crate) fn record_acceptance_check_dispositions(
         &self,
         parent: &str,
         connection: &EngramConnectionConfig,
@@ -158,6 +180,7 @@ impl AppState {
         task: &AcceptanceEvaluationTask,
         root: Option<&AcceptanceEvaluationSourceRoot>,
         requests: &[AcceptanceRetiredCheckRequest],
+        rejected: Option<&AcceptanceRetiredCheckRequest>,
         read: &impl Fn(
             &EngramConnectionConfig,
             &[String],
@@ -168,7 +191,7 @@ impl AppState {
     ) -> Result<Vec<AcceptanceRetiredCheckDisposition>, ApiError> {
         use std::io::Read as _;
         let root = root.ok_or_else(|| {
-            ApiError::bad_request("a retired check disposition requires the current named root")
+            ApiError::bad_request("a check disposition requires the current named root")
         })?;
         // Validate the entire selection before issuing any write.
         let mut selected = Vec::new();
@@ -184,13 +207,14 @@ impl AppState {
             )
         };
         for request in requests {
-            let registration = self.acceptance_retired_check_registration(
+            let registration = self.acceptance_check_disposition_registration(
                 parent,
                 connection,
                 store,
                 task,
                 root,
                 &request.run_id,
+                false,
             )?;
             if registration
                 .named_root
@@ -281,9 +305,82 @@ impl AppState {
                 current: root.clone(),
                 identity,
                 disclosure,
+                rejected_source: None,
             });
         }
-        for disposition in &mut selected {
+        let rejected_selection = if let Some(request) = rejected {
+            let registration = self.acceptance_check_disposition_registration(
+                parent,
+                connection,
+                store,
+                task,
+                root,
+                &request.run_id,
+                true,
+            )?;
+            let decision = self
+                .acceptance_committed_input_decision_with_dispositions(
+                    parent,
+                    connection,
+                    store,
+                    task,
+                    Some(root),
+                    deadline,
+                    now,
+                    &selected,
+                    Some(&registration),
+                    true, // Recheck the source at the rejected note write.
+                )
+                .map_err(|refusal| refusal.into_api_error(&task.work_ref))?;
+            let (AcceptanceCommittedInputDecision::Admitted(admission), Some(selection)) = decision
+            else {
+                return Err(AcceptanceCommittedInputRefusal::RejectedCheckNotSelected {
+                    run_id: request.run_id.clone(),
+                }
+                .into_api_error(&task.work_ref));
+            };
+            if task.current_claim.is_none() {
+                self.require_acceptance_named_root_sighting(
+                    parent,
+                    connection,
+                    store,
+                    task,
+                    Some(root),
+                    deadline,
+                    now,
+                )?;
+            }
+            let disclosure = json!({
+                "kind": "current_root_verification_rejected",
+                "runId": request.run_id, "reason": request.reason,
+                "author": {"sessionId": parent, "actorId": author.0, "actorContext": author.1},
+                "workId": root.work_id, "claimId": root.claim_id,
+                "currentRoot": root, "requestIdentity": registration.request_identity,
+                "sourceId": admission.recorded_source,
+                "artifactOutcome": "passed",
+                "verificationRecord": registration.verification_record,
+                "scope": "this evaluation request only; context only, no verification credit, no satisfaction of bound criteria, and no standing disposition"
+            });
+            if total + disclosure.to_string().len() > ACCEPTANCE_RETIRED_CHECK_DISCLOSURE_MAX {
+                return Err(ApiError::bad_request(
+                    "check disposition disclosure exceeds the complete brief bound",
+                ));
+            }
+            let identity = task.canonical_identity.clone().ok_or_else(|| {
+                ApiError::conflict("check disposition requires canonical work/run identity")
+            })?;
+            selected.push(AcceptanceRetiredCheckDisposition {
+                registration,
+                current: root.clone(),
+                identity,
+                disclosure,
+                rejected_source: admission.recorded_source,
+            });
+            Some(selection)
+        } else {
+            None
+        };
+        for (index, disposition) in selected.iter_mut().enumerate() {
             let mut writer = connection.clone();
             writer.actor_id = author.0.clone();
             writer.actor_context = author.1.clone();
@@ -304,14 +401,30 @@ impl AppState {
                 disposition.disclosure.to_string(),
                 "--json".to_owned(),
             ]);
-            let result = read(
-                &writer,
-                &args,
-                acceptance_criterion_evidence_read_timeout(deadline, now)?,
-            )
-            .map_err(|e| {
+            if let Some(source) = &disposition.rejected_source {
+                self.require_acceptance_committed_source_unchanged(
+                    parent,
+                    FsPath::new(&root.root),
+                    &source.commit,
+                    Some(source),
+                    deadline,
+                    now,
+                )
+                .map_err(|refusal| refusal.into_api_error(&task.work_ref))?;
+            }
+            let timeout = acceptance_criterion_evidence_read_timeout(deadline, now)?;
+            if (index == 0 || disposition.rejected_source.is_some())
+                && let Some(selection) = &rejected_selection
+            {
+                // Sighting and the note writes are off-lock. Check before
+                // the first write and again if retired notes preceded the
+                // rejected disclosure.
+                let inner = self.inner.lock().expect("state mutex poisoned");
+                selection.require_unchanged_locked(&inner, &task.work_ref)?;
+            }
+            let result = read(&writer, &args, timeout).map_err(|e| {
                 acceptance_evaluation_transport_error(
-                    "record retired check disposition (no evaluator started)",
+                    "record check disposition (no evaluator started)",
                     e,
                 )
             })?;
@@ -330,12 +443,12 @@ impl AppState {
                 || record.is_none()
             {
                 return Err(ApiError::bad_gateway(
-                    "retired check disposition write supplied no acknowledgement for this item and revision; no evaluator started",
+                    "check disposition write supplied no acknowledgement for this item and revision; no evaluator started",
                 ));
             }
             disposition.disclosure["evidenceRecord"] = json!(record.unwrap());
         }
-        self.validate_acceptance_retired_dispositions(
+        self.validate_acceptance_check_dispositions(
             parent,
             connection,
             store,

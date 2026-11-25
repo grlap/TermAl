@@ -58,3 +58,26 @@ fn retired_check_request_is_closed_and_refuses_invalid_selections() {
         );
     }
 }
+
+#[test]
+fn rejected_check_disposition_crosses_the_evaluation_post() {
+    let expected = json!({"workRef":"work", "agent":"Codex",
+        "rejectedCheckDisposition":{"runId":"test-current", "reason":"Terminal producer refusal."}});
+    let wire = expected.clone();
+    let (url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(
+            request.path,
+            "/api/sessions/session-parent/acceptance-evaluations"
+        );
+        assert_eq!(serde_json::from_str::<Value>(&request.body).unwrap(), wire);
+        (
+            409,
+            json!({"error":"check disposition write outcome unknown; no evaluator started"}),
+        )
+    });
+    let bridge = TermalDelegationMcpBridge::new("session-parent".into(), url).unwrap();
+    assert!(bridge.tool_evaluate_acceptance(expected).is_err());
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}

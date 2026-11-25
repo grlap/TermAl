@@ -446,9 +446,13 @@ pub(crate) enum TestRunVerificationAck {
         body_digest: String,
     },
     /// The host saw Engram refuse the record, answer it unreadably, or locally
-    /// retired an unsent legacy input. The detail distinguishes these cases;
-    /// local retirement says nothing about an earlier producer outcome.
-    Rejected { detail: String },
+    /// retired an unsent legacy input.
+    Rejected {
+        detail: String,
+        /// Kept only for a definitive producer reply, from the body sent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        producer_body_digest: Option<String>,
+    },
     /// Final local refusal before any producer send. Its presentation can be
     /// repaired after restart without reopening delivery or granting credit.
     LocalUnclassified { detail: String },
@@ -538,6 +542,10 @@ pub(crate) enum EngramVerificationRecordPrepared {
 pub(crate) enum EngramVerificationRecordStep {
     Pending(EngramVerificationRecordPending),
     Rejected(String),
+    ProducerRejected {
+        detail: String,
+        body_digest: String,
+    },
     Received {
         body: EngramVerificationRecordBody,
         receipt: EngramVerificationRecordReceipt,
@@ -1849,7 +1857,7 @@ fn test_run_verification_record_view(
     match ack {
         TestRunVerificationAck::Settled { receipt, .. } => receipt_view("settled", receipt),
         TestRunVerificationAck::Received { receipt, .. } => receipt_view("received", receipt),
-        TestRunVerificationAck::Rejected { detail } => refusal_view("rejected", detail),
+        TestRunVerificationAck::Rejected { detail, .. } => refusal_view("rejected", detail),
         TestRunVerificationAck::LocalUnclassified { detail } => {
             refusal_view("refusedByHost", detail)
         }
@@ -2038,6 +2046,71 @@ pub(crate) fn engram_verification_record_inputs(
         return Inputs::NotEligible;
     }
     Inputs::Read(request, results)
+}
+
+impl AppState {
+    /// Authenticate the same results used to rebuild the body. Older
+    /// rejections lack a body digest and need the original launch
+    /// observation's terminal digest as independent host evidence.
+    pub(crate) fn engram_rejected_verification_body_matches(
+        &self,
+        registration: &TestRunRegistration,
+        body: &EngramVerificationRecordBody,
+    ) -> bool {
+        let Some(TestRunVerificationAck::Rejected {
+            producer_body_digest,
+            ..
+        }) = &registration.verification_record
+        else {
+            return false;
+        };
+        let run_dir = FsPath::new(&registration.run_directory);
+        let (TestRunJson::Parsed(request, _, _), TestRunJson::Parsed(results, digest, _)) = (
+            test_run_read_json(&run_dir.join("request.json")),
+            test_run_read_json(&run_dir.join("results.json")),
+        ) else {
+            return false;
+        };
+        if test_run_registration_identity(&request).ok().as_ref()
+            != Some(&registration.request_identity)
+            || !engram_verification_record_build_body(
+                registration,
+                &request,
+                &results,
+                Some(&body.input),
+            )
+            .is_ok_and(|rebuilt| rebuilt == *body)
+        {
+            return false;
+        }
+        if let Some(expected) = producer_body_digest {
+            return engram_verification_record_digest_answers(expected, body);
+        }
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let live = inner
+            .test_run_observations
+            .index()
+            .artifact_run(&registration.run_id)
+            .filter_map(|key| inner.test_run_observations.get(key));
+        let compacted = inner
+            .test_run_compacted
+            .get(&registration.run_id)
+            .filter(|row| row.compacted && test_run_compact_is_installed(&*inner, row))
+            .into_iter()
+            .flat_map(|row| &row.observations);
+        let mut terminals = live
+            .chain(compacted)
+            .filter(|row| engram_verification_record_row_matches(row, registration))
+            .filter_map(|row| {
+                let digest = row.artifact.as_ref()?.terminal_digest.as_deref()?;
+                Some((row.summary.state, digest))
+            });
+        let matches = |(state, retained): (TestRunState, &str)| {
+            state == TestRunState::Passed
+                && test_run_terminal_digest_matches(Some(&digest), retained)
+        };
+        terminals.next().is_some_and(matches) && terminals.all(matches)
+    }
 }
 
 /// Looks at one registered run off the state lock: whether it emits, and
@@ -2293,7 +2366,7 @@ pub(crate) fn engram_verification_record_send(
         );
         EngramVerificationRecordStep::Pending(reason)
     };
-    let rejected = |detail: String| {
+    let rejected = |detail: String, producer_body_digest: Option<String>| {
         eprintln!(
             "engram> run={} verification record not settled: {detail}",
             frozen.run_id
@@ -2305,7 +2378,13 @@ pub(crate) fn engram_verification_record_send(
                 detail: detail.clone(),
             },
         );
-        EngramVerificationRecordStep::Rejected(detail)
+        match producer_body_digest {
+            Some(body_digest) => EngramVerificationRecordStep::ProducerRejected {
+                detail,
+                body_digest,
+            },
+            None => EngramVerificationRecordStep::Rejected(detail),
+        }
     };
     let link = match link {
         Ok(link) => link,
@@ -2331,10 +2410,13 @@ pub(crate) fn engram_verification_record_send(
         )
     {
         if command.len() > COMMAND_LIMIT {
-            return rejected(format!(
-                "verification_command_too_long: {field} has {} UTF-8 bytes; Engram limit is {COMMAND_LIMIT} bytes",
-                command.len()
-            ));
+            return rejected(
+                format!(
+                    "verification_command_too_long: {field} has {} UTF-8 bytes; Engram limit is {COMMAND_LIMIT} bytes",
+                    command.len()
+                ),
+                None,
+            );
         }
     }
     let request = engram_verification_record_request(&frozen);
@@ -2345,10 +2427,10 @@ pub(crate) fn engram_verification_record_send(
         Ok(value) => {
             let receipt = match parse_engram_result::<EngramVerificationRecordReceipt>(value) {
                 Ok(receipt) => receipt,
-                Err(_) => return rejected("the receipt is unreadable".to_owned()),
+                Err(_) => return rejected("the receipt is unreadable".to_owned(), None),
             };
             if let Err(why) = engram_verification_record_receipt_check(&frozen.body, &receipt) {
-                return rejected(why.to_owned());
+                return rejected(why.to_owned(), None);
             }
             // Held beside the run before anything else, so no later look
             // sends again; marked settled only once its records reached the
@@ -2387,10 +2469,13 @@ pub(crate) fn engram_verification_record_send(
                     ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)
                 }) =>
         {
-            rejected(engram_verification_record_refusal_detail(
-                error.code.as_deref(),
-                error.refused_field.as_deref(),
-            ))
+            rejected(
+                engram_verification_record_refusal_detail(
+                    error.code.as_deref(),
+                    error.refused_field.as_deref(),
+                ),
+                Some(engram_verification_record_body_digest(&frozen.body)),
+            )
         }
         // Any other answer, transient (a deadline, a busy or unavailable
         // control, a spent budget) or unknown to this host, says nothing
@@ -2427,6 +2512,30 @@ pub(crate) fn engram_verification_record_refusal_detail(
     } else {
         refused
     }
+}
+
+/// Only a definitive reply from Engram can be disclosed as a producer
+/// rejection. The same host state also retains local terminal refusals.
+pub(crate) fn engram_verification_rejected_by_producer(
+    ack: Option<&TestRunVerificationAck>,
+) -> bool {
+    let Some(TestRunVerificationAck::Rejected {
+        detail,
+        producer_body_digest,
+    }) = ack
+    else {
+        return false;
+    };
+    if producer_body_digest.is_some() {
+        return true;
+    }
+    // The historical host record distinguished producer refusals only in its
+    // detail. Using it for admission also requires a retained terminal.
+    let Some(reason) = detail.strip_prefix("Engram refused it: ") else {
+        return false;
+    };
+    let code = reason.split_once(" (").map_or(reason, |(code, _)| code);
+    ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)
 }
 
 /// The source basis of a run's checks in its original named root. Current
@@ -2723,7 +2832,8 @@ impl AppState {
                                     deadline,
                                 ))
                             }
-                            EngramVerificationRecordStep::Rejected(_) => true,
+                            EngramVerificationRecordStep::Rejected(_)
+                            | EngramVerificationRecordStep::ProducerRejected { .. } => true,
                             EngramVerificationRecordStep::Pending(_) => false,
                         }
                     }
@@ -3133,6 +3243,14 @@ impl AppState {
             }
             EngramVerificationRecordStep::Rejected(detail) => TestRunVerificationAck::Rejected {
                 detail: detail.clone(),
+                producer_body_digest: None,
+            },
+            EngramVerificationRecordStep::ProducerRejected {
+                detail,
+                body_digest,
+            } => TestRunVerificationAck::Rejected {
+                detail: detail.clone(),
+                producer_body_digest: Some(body_digest.clone()),
             },
             EngramVerificationRecordStep::Pending(_) => return,
         };

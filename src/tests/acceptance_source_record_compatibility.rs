@@ -3,6 +3,13 @@
 use super::*;
 
 pub(super) fn owner_run(progress: &str) -> (AppState, String, String, String, TestRunRegistration) {
+    owner_run_with_outcome("passed", Some(progress))
+}
+
+pub(super) fn owner_run_with_outcome(
+    outcome: &str,
+    progress: Option<&str>,
+) -> (AppState, String, String, String, TestRunRegistration) {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);
     let root = worktree(&named_root);
@@ -12,15 +19,31 @@ pub(super) fn owner_run(progress: &str) -> (AppState, String, String, String, Te
         "submodules":[], "changes":[]
     }))
     .unwrap();
+    let mut results = committed_results(outcome, input_record(&head, "clean"));
+    results["input"]["eligible"] = json!(outcome == "passed");
     let registration = try_register_committed_run_with_source_as(
         &state,
         &parent,
         &named_root,
         COMMITTED_RUN_ID,
-        committed_results("passed", input_record(&head, "clean")),
+        results,
         Some(source),
     )
     .unwrap();
+    let body = write_owner_run_body(&registration);
+    if let Some(progress) = progress {
+        let mut observed = acknowledged(progress);
+        observed["body_digest"] = json!(engram_verification_record_body_digest(&body));
+        let ack: TestRunVerificationAck = serde_json::from_value(observed).unwrap();
+        state.note_engram_verification_record_ack(&registration, ack);
+    }
+    let current = current_registration(&state);
+    (state, parent, named_root, head, current)
+}
+
+pub(super) fn write_owner_run_body(
+    registration: &TestRunRegistration,
+) -> EngramVerificationRecordBody {
     let directory = FsPath::new(&registration.run_directory);
     // Model a zero-duration check after its actual registration. The shared
     // admission fixture's historical timestamps predate this receipt.
@@ -29,18 +52,15 @@ pub(super) fn owner_run(progress: &str) -> (AppState, String, String, String, Te
     results["ended"] = json!(registration.registered_at);
     results["stages"][0]["started"] = json!(registration.registered_at);
     results["stages"][0]["ended"] = json!(registration.registered_at);
-    assert!(engram_verification_record_producer_refusal(&registration, &results).is_none());
+    assert!(engram_verification_record_producer_refusal(registration, &results).is_none());
     fs::write(results_path, serde_json::to_vec(&results).unwrap()).unwrap();
     let read = |name: &str| -> Value {
         serde_json::from_slice(&fs::read(directory.join(name)).unwrap()).unwrap()
     };
     // Use the NEW production writer, without the historical test helper.
-    let body = engram_verification_record_body(
-        &registration,
-        &read("request.json"),
-        &read("results.json"),
-    )
-    .unwrap();
+    let body =
+        engram_verification_record_body(registration, &read("request.json"), &read("results.json"))
+            .unwrap();
     assert!(matches!(
         &body.input,
         EngramVerificationRecordInput::SourceId { .. }
@@ -50,12 +70,7 @@ pub(super) fn owner_run(progress: &str) -> (AppState, String, String, String, Te
         engram_verification_record_text(&body).unwrap(),
     )
     .unwrap();
-    let mut observed = acknowledged(progress);
-    observed["body_digest"] = json!(engram_verification_record_body_digest(&body));
-    let ack: TestRunVerificationAck = serde_json::from_value(observed).unwrap();
-    state.note_engram_verification_record_ack(&registration, ack);
-    let current = current_registration(&state);
-    (state, parent, named_root, head, current)
+    body
 }
 
 #[test]
@@ -90,7 +105,10 @@ fn full_launcher_source_cannot_borrow_a_matching_commit() {
     let outcome = |current: &EngramSourceId| {
         acceptance_registered_input_outcome(&registration, current).unwrap()
     };
-    assert_eq!(outcome(&source_id), Some(true));
+    assert_eq!(
+        outcome(&source_id),
+        AcceptanceRegisteredInputOutcome::Terminal(true)
+    );
 
     let mut current = serde_json::to_value(&source_id).unwrap();
     current["submodules"] = json!([{
@@ -100,7 +118,10 @@ fn full_launcher_source_cannot_borrow_a_matching_commit() {
     }]);
     let current: EngramSourceId = serde_json::from_value(current).unwrap();
     assert_eq!(current.commit, source_id.commit);
-    assert_eq!(outcome(&current), Some(false));
+    assert_eq!(
+        outcome(&current),
+        AcceptanceRegisteredInputOutcome::Terminal(false)
+    );
 }
 
 #[test]

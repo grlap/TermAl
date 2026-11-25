@@ -1189,6 +1189,7 @@ fn a_record_engram_has_not_acknowledged_at_head_is_refused_without_a_sighting() 
             matches!(
                 &refusal,
                 AcceptanceCommittedInputRefusal::RecordNotAcknowledged { run_id, commit, .. }
+                    | AcceptanceCommittedInputRefusal::RecordRejected { run_id, commit, .. }
                     if run_id == COMMITTED_RUN_ID && *commit == head
             ),
             "{case}: <details withheld>"

@@ -35,10 +35,17 @@ fn typed_producer_refusal_reaches_the_retained_record_and_actual_summary() {
         panic!("error envelope")
     };
     transport.script(Err(EngramTransportError::remote(error.into_body())));
-    let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
-    let EngramVerificationRecordStep::Rejected(detail) = &step else {
+    let frozen = ready(&run.registration);
+    let original_body_digest = engram_verification_record_body_digest(&frozen.body);
+    let step = engram_verification_record_send(frozen, link(&adapter, &own));
+    let EngramVerificationRecordStep::ProducerRejected {
+        detail,
+        body_digest,
+    } = &step
+    else {
         panic!("{step:?}")
     };
+    assert_eq!(body_digest, &original_body_digest);
     assert_eq!(detail, "Engram refused it: verification_record_refused");
     assert!(!detail.contains("source_id"));
     assert!(!detail.contains("execution_observe"));
@@ -69,7 +76,8 @@ fn typed_producer_refusal_reaches_the_retained_record_and_actual_summary() {
     let stored = current(&fixture, &run);
     assert!(matches!(
         &stored.verification_record,
-        Some(TestRunVerificationAck::Rejected { detail: saved }) if saved == detail
+        Some(TestRunVerificationAck::Rejected { detail: saved, producer_body_digest: Some(saved_digest) })
+            if saved == detail && saved_digest == &original_body_digest
     ));
     assert!(matches!(
         engram_verification_record_prepare(&stored),
@@ -285,7 +293,7 @@ fn a_claim_refusal_stays_rejected_and_its_summary_names_the_cause_and_the_correc
     read_work_session(&transport, &adapter, &own, supported());
     transport.script(Err(refused("claim")));
     let step = engram_verification_record_send(ready(&run.registration), link(&adapter, &own));
-    let EngramVerificationRecordStep::Rejected(detail) = &step else {
+    let EngramVerificationRecordStep::ProducerRejected { detail, .. } = &step else {
         panic!("{step:?}")
     };
     assert!(

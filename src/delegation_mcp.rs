@@ -1185,6 +1185,9 @@ impl TermalDelegationMcpBridge {
         if let Some(dispositions) = arguments.get("retiredCheckDispositions") {
             body.insert("retiredCheckDispositions".to_owned(), dispositions.clone());
         }
+        if let Some(disposition) = arguments.get("rejectedCheckDisposition") {
+            body.insert("rejectedCheckDisposition".to_owned(), disposition.clone());
+        }
         if let Some(evidence) = arguments.get("criterionEvidence") {
             body.insert("criterionEvidence".to_owned(), evidence.clone());
         }

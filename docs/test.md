@@ -1282,6 +1282,35 @@ the local disposition does not determine any earlier producer outcome. Existing
 receipts remain readable without converting the body to a current identity or
 creating new legacy producer observations.
 
+### Check dispositions for acceptance evaluation
+
+An explicit fresh acceptance request can record
+[`retiredCheckDispositions`](features/engram-host-adapter.md#acceptance-evaluation)
+to disclose acknowledged checks on a retired root. The original checks remain
+visible as context.
+
+If Engram terminally refused the verification record of the newest applicable
+passing run on the current named root, use
+`rejectedCheckDisposition: { "runId": "test-…", "reason": "…" }`
+in `termal_evaluate_acceptance`. TermAl must hold the rejection on the original
+registration for the claim. It verifies that the run passed eligibly on the
+clean current HEAD using the body Engram refused. For an older refusal, the
+host compares the original terminal files on disk with the digest it kept
+in the launch observation. An original commit-format record stays in that
+format. The evaluation uses the independently measured current source.
+A missing or unreadable file prevents disclosure.
+If a newer matching registered run is unfinished, wait for its terminal result
+before requesting this disposition. For a requester
+using a retained named root, it checks Engram's root sighting before writing
+the disclosure. It records an attributed disclosure and checks the input
+again after reading a fresh evidence cut. A pending record, a local refusal,
+or a rejection written only beside the run cannot use this route.
+
+The evaluator sees this run as context only. Bound criteria still require a
+passing registered verification record. The disposition applies only to
+this request and cannot be combined with `reuseDelegationId`. It neither
+resends the rejected record nor changes the run.
+
 A committed-input registration in a named root reads that exact claim's
 current held association before it publishes the registration. A same-claim
 handoff can retain the original name: the current holder's held read must prove

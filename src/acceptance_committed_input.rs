@@ -112,6 +112,21 @@ pub(crate) enum AcceptanceCommittedInputRefusal {
         commit: String,
         state: String,
     },
+    RecordRejected {
+        run_id: String,
+        commit: String,
+        detail: String,
+        by_producer: bool,
+    },
+    RejectedCheckNotSelected {
+        run_id: String,
+    },
+    RejectedCheckNewerRunPending {
+        run_id: String,
+    },
+    RejectedCheckEvidenceMismatch {
+        run_id: String,
+    },
     /// The producer cannot build a record for these unsupported check stages.
     UnclassifiedStages {
         run_id: String,
@@ -135,7 +150,12 @@ impl AcceptanceCommittedInputRefusal {
             Self::NotClean => "committed_input_not_clean",
             Self::NativeLocalChanges { .. } => "native_input_local_changes",
             Self::NoEligibleRun { .. } => "committed_input_no_eligible_run",
-            Self::RecordNotAcknowledged { .. } => "verification_record_not_acknowledged",
+            Self::RecordNotAcknowledged { .. } | Self::RecordRejected { .. } => {
+                "verification_record_not_acknowledged"
+            }
+            Self::RejectedCheckNotSelected { .. } => "rejected_check_not_selected",
+            Self::RejectedCheckNewerRunPending { .. } => "rejected_check_newer_run_pending",
+            Self::RejectedCheckEvidenceMismatch { .. } => "rejected_check_evidence_mismatch",
             Self::UnclassifiedStages { .. } => "verification_record_unclassified_stages",
             Self::Changed => "committed_input_changed",
             Self::ScanIncomplete => "committed_input_scan_incomplete",
@@ -175,6 +195,38 @@ impl AcceptanceCommittedInputRefusal {
             } => format!(
                 "the verification record of run {run_id} at {commit} is not yet acknowledged \
                  by Engram ({state}); request again once Engram has received it"
+            ),
+            Self::RecordRejected {
+                run_id,
+                commit,
+                detail,
+                by_producer: true,
+            } => format!(
+                "Engram terminally rejected the verification record of run {run_id} at {commit} \
+                 ({detail}); the refusal is final. For an eligible passing run on the current \
+                 named root, request an explicit rejectedCheckDisposition with its runId and \
+                 reason for context only, or use a new registered run if verification credit is required"
+            ),
+            Self::RecordRejected {
+                run_id,
+                commit,
+                detail,
+                by_producer: false,
+            } => format!(
+                "the verification record of run {run_id} at {commit} was refused ({detail}); \
+                 the refusal is final. Use a new registered run if verification credit is required"
+            ),
+            Self::RejectedCheckNotSelected { run_id } => format!(
+                "run {run_id} is not the newest applicable eligible passing result for the named \
+                 root's current HEAD; rejectedCheckDisposition cannot admit it"
+            ),
+            Self::RejectedCheckNewerRunPending { run_id } => format!(
+                "newer matching run {run_id} is unfinished; wait for its terminal result before \
+                 requesting rejectedCheckDisposition again"
+            ),
+            Self::RejectedCheckEvidenceMismatch { run_id } => format!(
+                "run {run_id} does not match host-retained verification or terminal evidence; \
+                 rejectedCheckDisposition cannot authenticate the passing result"
             ),
             Self::UnclassifiedStages { run_id, commit } => format!(
                 "run {run_id} at {commit} contains checks TermAl cannot record as test or build; \
@@ -285,15 +337,21 @@ pub(crate) fn acceptance_committed_input_read_results(run_directory: &str) -> Te
     test_run_read_json(&FsPath::new(run_directory).join("results.json"))
 }
 
-/// The admission outcome of a terminal result of `run_id` on `commit`.
-/// Ok(None) skips a coherent unfinished or other-commit result; Ok(Some(false))
-/// selects a failed or ineligible result. An unreadable or incoherent result
-/// refuses selection rather than falling back to an older PASS.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum AcceptanceRegisteredInputOutcome {
+    Pending,
+    NotApplicable,
+    Terminal(bool),
+}
+
+/// The newest applicable terminal result decides. Only a rejected-check
+/// request must wait for a newer unfinished run. Unreadable results refuse.
 pub(crate) fn acceptance_committed_input_run_outcome(
     run_id: &str,
     run_directory: &str,
     current: &EngramSourceId,
-) -> Result<Option<bool>, AcceptanceCommittedInputRefusal> {
+) -> Result<AcceptanceRegisteredInputOutcome, AcceptanceCommittedInputRefusal> {
+    use AcceptanceRegisteredInputOutcome as Outcome;
     let TestRunJson::Parsed(results, _, _) = acceptance_committed_input_read_results(run_directory)
     else {
         return Err(AcceptanceCommittedInputRefusal::ScanIncomplete);
@@ -302,22 +360,22 @@ pub(crate) fn acceptance_committed_input_run_outcome(
         AcceptanceCommittedInputRunStart::Unknown => {
             return Err(AcceptanceCommittedInputRefusal::ScanIncomplete);
         }
-        AcceptanceCommittedInputRunStart::Pending
-        | AcceptanceCommittedInputRunStart::NotStarted => return Ok(None),
+        AcceptanceCommittedInputRunStart::Pending => return Ok(Outcome::Pending),
+        AcceptanceCommittedInputRunStart::NotStarted => return Ok(Outcome::NotApplicable),
         AcceptanceCommittedInputRunStart::Started => {}
     }
     let input = TestRunCommittedInput::read(&results)
         .ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
     if results.get("state").and_then(Value::as_str) == Some("running") {
-        return Ok(None);
+        return Ok(Outcome::Pending);
     }
     let terminal =
         test_run_terminal_state(&results).ok_or(AcceptanceCommittedInputRefusal::ScanIncomplete)?;
     if input.commit.as_deref() != Some(current.commit.as_str()) {
-        return Ok(None);
+        return Ok(Outcome::NotApplicable);
     }
     if terminal != TestRunState::Passed {
-        return Ok(Some(false));
+        return Ok(Outcome::Terminal(false));
     }
     let source_matches =
         if results.get("sourceIdBefore").is_some() || results.get("sourceIdAfter").is_some() {
@@ -329,7 +387,7 @@ pub(crate) fn acceptance_committed_input_run_outcome(
             // A full source_id receipt is checked separately against current.
             true
         };
-    Ok(Some(
+    Ok(Outcome::Terminal(
         source_matches
             && input.clean_before
             && input.outcome == Some(TestRunCommittedInputOutcome::Clean)
@@ -488,8 +546,15 @@ pub(crate) fn acceptance_committed_input_record_acknowledged(
                 body_digest,
             },
         ) => (receipt.clone(), body_digest.clone()),
-        Some(TestRunVerificationAck::Rejected { detail }) => {
-            return Err(unacknowledged(format!("rejected: {detail}")));
+        Some(TestRunVerificationAck::Rejected { detail, .. }) => {
+            return Err(AcceptanceCommittedInputRefusal::RecordRejected {
+                run_id: run_id.to_owned(),
+                commit: commit.to_owned(),
+                detail: detail.clone(),
+                by_producer: engram_verification_rejected_by_producer(
+                    registration.verification_record.as_ref(),
+                ),
+            });
         }
         Some(TestRunVerificationAck::LocalUnclassified { .. }) => {
             return Err(AcceptanceCommittedInputRefusal::UnclassifiedStages {
@@ -657,6 +722,113 @@ fn acceptance_committed_input_predecessor_matches(
         })
 }
 
+fn acceptance_committed_candidate(
+    registration: &TestRunRegistration,
+    store: &EngramAuthorityStoreKey,
+    entry: &EngramWorkSourceRoot,
+    claim: Option<&AcceptanceCurrentClaim>,
+) -> bool {
+    acceptance_committed_input_registration_matches_requester(
+        registration,
+        store,
+        &entry.work_id,
+        entry,
+        claim,
+    ) || acceptance_committed_input_predecessor_matches(
+        registration,
+        store,
+        &entry.work_id,
+        entry,
+        claim,
+    )
+}
+
+fn acceptance_committed_registration_order(
+    left: &TestRunRegistration,
+    right: &TestRunRegistration,
+) -> std::cmp::Ordering {
+    right
+        .registered_at
+        .cmp(&left.registered_at)
+        .then_with(|| left.run_id.cmp(&right.run_id))
+}
+
+fn acceptance_published_registrations<'a>(
+    inner: &'a StateInner,
+    indexed: &'a HashSet<&'a str>,
+) -> impl Iterator<Item = &'a TestRunRegistration> + Clone {
+    inner
+        .test_run_registrations
+        .values()
+        .filter(move |row| inner.test_runs.registered.contains(&row.run_id))
+        .chain(
+            inner
+                .test_run_compacted
+                .values()
+                .filter(move |row| {
+                    row.compacted
+                        && test_run_compact_is_installed_with(inner, row, |id| indexed.contains(id))
+                })
+                .filter_map(|row| row.registration.as_ref()),
+        )
+}
+
+/// In-memory admission witness only. A rejected record never reaches the
+/// producer as verification evidence that could supersede the selection.
+pub(crate) struct AcceptanceRejectedCheckSelection {
+    store: EngramAuthorityStoreKey,
+    root: AcceptanceEvaluationSourceRoot,
+    claim: Option<AcceptanceCurrentClaim>,
+    admitted: TestRunRegistration,
+    candidates: HashSet<String>,
+    retired: Vec<TestRunRegistration>,
+}
+
+impl AcceptanceRejectedCheckSelection {
+    fn unchanged_locked(&self, inner: &StateInner) -> bool {
+        let Some(entry) = engram_work_source_root_for_claim(
+            &inner.engram_work_source_roots,
+            &self.store,
+            &self.root.work_id,
+            &self.root.claim_id,
+        )
+        .filter(|entry| entry.generation == self.root.generation && entry.root == self.root.root) else {
+            return false;
+        };
+        let indexed = test_run_indexed_ids(&inner.test_runs);
+        let mut count = 0;
+        acceptance_published_registrations(inner, &indexed)
+            .filter(|row| {
+                acceptance_committed_candidate(row, &self.store, entry, self.claim.as_ref())
+            })
+            .filter(|row| {
+                !self
+                    .retired
+                    .iter()
+                    .any(|old| acceptance_committed_input_registration_unchanged(old, row))
+            })
+            .all(|row| {
+                count += 1;
+                self.candidates.contains(&row.run_id)
+                    && (row.run_id != self.admitted.run_id
+                        || row.matches_registration_snapshot(&self.admitted))
+            })
+            && count == self.candidates.len()
+    }
+
+    pub(crate) fn require_unchanged_locked(
+        &self,
+        inner: &StateInner,
+        work_ref: &str,
+    ) -> Result<(), ApiError> {
+        if self.unchanged_locked(inner) {
+            Ok(())
+        } else {
+            Err(AcceptanceCommittedInputRefusal::Changed.into_api_error(work_ref))
+        }
+    }
+}
+
 /// Whether `row`, the registration as it stands now, is still the run
 /// `admitted` was read as: the same run, directory, request, tracker, binding
 /// and named root, acknowledged for the same body. Received becoming settled
@@ -719,9 +891,16 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
         dispositions: &[AcceptanceRetiredCheckDisposition],
-    ) -> Result<Option<AcceptanceCommittedInputAdmission>, ApiError> {
-        match self
-            .acceptance_committed_input_decision_excluding(
+    ) -> Result<
+        (
+            Option<AcceptanceCommittedInputAdmission>,
+            Option<AcceptanceRejectedCheckSelection>,
+        ),
+        ApiError,
+    > {
+        let rejected = dispositions.iter().find(|d| d.rejected_source.is_some());
+        let (decision, selection) = self
+            .acceptance_committed_input_decision_with_dispositions(
                 parent_session_id,
                 reader,
                 store,
@@ -730,10 +909,19 @@ impl AppState {
                 deadline,
                 now,
                 dispositions,
+                rejected.map(|d| &d.registration),
+                false,
             )
-            .map_err(|refusal| refusal.into_api_error(&task.work_ref))?
-        {
+            .map_err(|refusal| refusal.into_api_error(&task.work_ref))?;
+        match decision {
             AcceptanceCommittedInputDecision::Admitted(admission) => {
+                if let Some(disposition) = rejected
+                    && disposition.rejected_source != admission.recorded_source
+                {
+                    return Err(
+                        AcceptanceCommittedInputRefusal::Changed.into_api_error(&task.work_ref)
+                    );
+                }
                 // A coordinator's retained selection is also confirmed by
                 // Engram's canonical sighting; a passing run cannot replace
                 // that path/generation check for this newly admitted route.
@@ -748,10 +936,16 @@ impl AppState {
                         now,
                     )?;
                 }
-                Ok(Some(admission))
+                Ok((Some(admission), selection))
             }
-            AcceptanceCommittedInputDecision::Legacy => self
-                .require_acceptance_named_root_sighting(
+            AcceptanceCommittedInputDecision::Legacy => {
+                if let Some(disposition) = rejected {
+                    return Err(AcceptanceCommittedInputRefusal::RejectedCheckNotSelected {
+                        run_id: disposition.registration.run_id.clone(),
+                    }
+                    .into_api_error(&task.work_ref));
+                }
+                self.require_acceptance_named_root_sighting(
                     parent_session_id,
                     reader,
                     store,
@@ -760,7 +954,8 @@ impl AppState {
                     deadline,
                     now,
                 )
-                .map(|()| None),
+                .map(|()| (None, None))
+            }
         }
     }
 
@@ -810,7 +1005,7 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
     ) -> Result<AcceptanceCommittedInputDecision, AcceptanceCommittedInputRefusal> {
-        self.acceptance_committed_input_decision_excluding(
+        self.acceptance_committed_input_decision_with_dispositions(
             parent_session_id,
             reader,
             store,
@@ -819,11 +1014,14 @@ impl AppState {
             deadline,
             now,
             &[],
+            None,
+            false,
         )
+        .map(|(decision, _)| decision)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn acceptance_committed_input_decision_excluding(
+    pub(crate) fn acceptance_committed_input_decision_with_dispositions(
         &self,
         parent_session_id: &str,
         reader: &EngramConnectionConfig,
@@ -833,17 +1031,26 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
         dispositions: &[AcceptanceRetiredCheckDisposition],
-    ) -> Result<AcceptanceCommittedInputDecision, AcceptanceCommittedInputRefusal> {
+        rejected: Option<&TestRunRegistration>,
+        defer_source_recheck: bool,
+    ) -> Result<
+        (
+            AcceptanceCommittedInputDecision,
+            Option<AcceptanceRejectedCheckSelection>,
+        ),
+        AcceptanceCommittedInputRefusal,
+    > {
         use AcceptanceCommittedInputDecision as Decision;
         use AcceptanceCommittedInputRefusal as Refusal;
+        use AcceptanceRegisteredInputOutcome as Outcome;
         let Some(root) = root else {
-            return Ok(Decision::Legacy);
+            return Ok((Decision::Legacy, None));
         };
         let Some(work_id) = task
             .canonical_work_id()
             .filter(|work_id| *work_id == root.work_id)
         else {
-            return Ok(Decision::Legacy);
+            return Ok((Decision::Legacy, None));
         };
         let claim = task.current_claim.as_ref();
         let current = |inner: &StateInner| -> bool {
@@ -858,10 +1065,16 @@ impl AppState {
                 )
                 .is_some_and(|entry| claim.is_none_or(|claim| claim.same_claim(entry)))
         };
+        let excluded = |row: &TestRunRegistration| {
+            dispositions.iter().any(|d| {
+                d.rejected_source.is_none()
+                    && acceptance_committed_input_registration_unchanged(&d.registration, row)
+            })
+        };
         let (candidates, rebound) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if !current(&inner) {
-                return Ok(Decision::Legacy);
+                return Ok((Decision::Legacy, None));
             }
             let Some(entry) = engram_work_source_root_for_claim(
                 &inner.engram_work_source_roots,
@@ -869,32 +1082,11 @@ impl AppState {
                 &root.work_id,
                 &root.claim_id,
             ) else {
-                return Ok(Decision::Legacy);
+                return Ok((Decision::Legacy, None));
             };
             let indexed = test_run_indexed_ids(&inner.test_runs);
-            let registrations = inner
-                .test_run_registrations
-                .values()
-                .filter(|registration| inner.test_runs.registered.contains(&registration.run_id))
-                // Compaction retains the original registration and artifacts;
-                // removing full detail must not erase a newer terminal result.
-                .chain(
-                    inner
-                        .test_run_compacted
-                        .values()
-                        .filter(|row| {
-                            row.compacted
-                                && test_run_compact_is_installed_with(&*inner, row, |id| {
-                                    indexed.contains(id)
-                                })
-                        })
-                        .filter_map(|row| row.registration.as_ref()),
-                )
-                .filter(|row| {
-                    !dispositions.iter().any(|d| {
-                        acceptance_committed_input_registration_unchanged(&d.registration, row)
-                    })
-                });
+            let registrations =
+                acceptance_published_registrations(&inner, &indexed).filter(|row| !excluded(row));
             // Filtering by the new name must not erase an acknowledged check
             // and turn it into a legacy request. A current-name run still has
             // its ordinary admission rules; this guard only closes fallback.
@@ -939,36 +1131,26 @@ impl AppState {
                 });
             let mut candidates = registrations
                 .filter(|registration| {
-                    acceptance_committed_input_registration_matches_requester(
-                        registration,
-                        store,
-                        work_id,
-                        entry,
-                        claim,
-                    ) || acceptance_committed_input_predecessor_matches(
-                        registration,
-                        store,
-                        work_id,
-                        entry,
-                        claim,
-                    )
+                    acceptance_committed_candidate(registration, store, entry, claim)
                 })
                 .cloned()
                 .collect::<Vec<_>>();
             // This early check keeps registration order; overlapping runs can
             // finish in another order. Engram rechecks its newest result at
             // evaluation submission and completion.
-            candidates.sort_by(|a, b| {
-                b.registered_at
-                    .cmp(&a.registered_at)
-                    .then_with(|| a.run_id.cmp(&b.run_id))
-            });
+            candidates.sort_by(acceptance_committed_registration_order);
             (candidates, rebound)
         };
         // Only a run that started on a clean checkout selects the committed
         // flow; a refused or never-started one leaves the task where it was.
         // Read off the lock, newest first, at most the bound's results files
         // in all, each only before the request's deadline.
+        let rejected_candidates = rejected.map(|_| {
+            candidates
+                .iter()
+                .map(|registration| registration.run_id.clone())
+                .collect::<HashSet<_>>()
+        });
         let total = candidates.len();
         let mut scanned = 0;
         let mut observed = Vec::new();
@@ -989,7 +1171,7 @@ impl AppState {
             // was shown never to have started; an incomplete scan, or a run
             // whose results show neither, never decides it.
             return if scanned == total && observed.is_empty() {
-                rebound.map_or(Ok(Decision::Legacy), Err)
+                rebound.map_or(Ok((Decision::Legacy, None)), Err)
             } else {
                 Err(Refusal::ScanIncomplete)
             };
@@ -1024,11 +1206,55 @@ impl AppState {
             if start == AcceptanceCommittedInputRunStart::Unknown {
                 return Err(Refusal::ScanIncomplete);
             }
-            let Some(admits) = acceptance_registered_input_outcome(&registration, &source)? else {
-                continue;
+            let admits = match acceptance_registered_input_outcome(&registration, &source)? {
+                Outcome::Terminal(admits) => admits,
+                Outcome::Pending
+                    if rejected.is_some_and(|requested| {
+                        acceptance_committed_registration_order(&registration, requested).is_lt()
+                    }) =>
+                {
+                    return Err(Refusal::RejectedCheckNewerRunPending {
+                        run_id: registration.run_id,
+                    });
+                }
+                Outcome::Pending | Outcome::NotApplicable => continue,
             };
             if !admits {
                 return Err(Refusal::NoEligibleRun { commit });
+            }
+            if let Some(rejected) = rejected {
+                if !registration.matches_registration_snapshot(rejected)
+                    || !engram_verification_rejected_by_producer(
+                        registration.verification_record.as_ref(),
+                    )
+                {
+                    return Err(Refusal::RejectedCheckNotSelected {
+                        run_id: rejected.run_id.clone(),
+                    });
+                }
+                let body = engram_verification_record_frozen(
+                    FsPath::new(&registration.run_directory),
+                    &registration.run_id,
+                )
+                .ok_or(Refusal::ScanIncomplete)?
+                .body;
+                if body.run.outcome != EngramVerificationRecordRunOutcome::Passed
+                    || body.input.clean_commit() != Some(commit.as_str())
+                    || matches!(&body.input, EngramVerificationRecordInput::SourceId { source_id } if *source_id != source)
+                {
+                    return Err(Refusal::NoEligibleRun { commit });
+                }
+                if !self.engram_rejected_verification_body_matches(&registration, &body) {
+                    return Err(Refusal::RejectedCheckEvidenceMismatch {
+                        run_id: registration.run_id.clone(),
+                    });
+                }
+                // The ordinary selection checked the newest eligible terminal
+                // outcome. A historical Commit body stays in its own format.
+                // The independently measured source is the evaluator's basis.
+                recorded_source = Some(source.clone());
+                admitting = Some(registration);
+                break;
             }
             let body = acceptance_committed_input_record_acknowledged(&registration, &commit)?;
             // The frozen body and its acknowledgment bind the original
@@ -1067,39 +1293,28 @@ impl AppState {
                 Refusal::NoEligibleRun { commit }
             });
         };
-        // The root may have moved or changed while the run and its record
-        // were read: it must still be clean at the very commit they admit.
-        #[cfg(test)]
-        TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_RECHECK.with(|slot| {
-            if let Some(step) = slot.borrow_mut().take() {
-                step();
-            }
+        if !defer_source_recheck {
+            self.require_acceptance_committed_source_unchanged(
+                parent_session_id,
+                FsPath::new(&root.root),
+                &commit,
+                recorded_source.as_ref(),
+                deadline,
+                now,
+            )?;
+        }
+        let selection = rejected_candidates.map(|candidates| AcceptanceRejectedCheckSelection {
+            store: store.clone(),
+            root: root.clone(),
+            claim: claim.cloned(),
+            admitted: admitting.clone(),
+            candidates,
+            retired: dispositions
+                .iter()
+                .filter(|d| d.rejected_source.is_none())
+                .map(|d| d.registration.clone())
+                .collect(),
         });
-        let rechecked = self.acceptance_judged_clean_source(
-            parent_session_id,
-            FsPath::new(&root.root),
-            deadline,
-        );
-        if rechecked
-            .as_ref()
-            .zip(recorded_source.as_ref())
-            .is_some_and(|(current, expected)| !current.same_format(expected))
-        {
-            return Err(Refusal::ScanIncomplete);
-        }
-        if rechecked.is_none_or(|current| {
-            if let Some(expected) = &recorded_source {
-                &current != expected
-            } else {
-                current.commit != commit
-            }
-        }) {
-            return Err(if now() >= deadline {
-                Refusal::ScanIncomplete
-            } else {
-                Refusal::Changed
-            });
-        }
         let inner = self.inner.lock().expect("state mutex poisoned");
         let retained = inner
             .test_run_registrations
@@ -1113,9 +1328,14 @@ impl AppState {
                     .and_then(|row| row.registration.as_ref())
             });
         if !current(&inner)
-            || !retained.is_some_and(|row| {
-                acceptance_committed_input_registration_unchanged(&admitting, row)
-            })
+            || !selection.as_ref().map_or_else(
+                || {
+                    retained.is_some_and(|row| {
+                        acceptance_committed_input_registration_unchanged(&admitting, row)
+                    })
+                },
+                |selection| selection.unchanged_locked(&inner),
+            )
         {
             return Err(Refusal::Changed);
         }
@@ -1125,11 +1345,54 @@ impl AppState {
             commit,
             recorded_source,
         };
-        eprintln!(
-            "acceptance evaluation> `{}` admitted on committed-input run {} at {}, its \
-             verification record acknowledged by Engram",
-            task.work_ref, admission.run_id, admission.commit
-        );
-        Ok(Decision::Admitted(admission))
+        if rejected.is_none() {
+            eprintln!(
+                "acceptance evaluation> `{}` admitted on committed-input run {} at {}, its \
+                 verification record acknowledged by Engram",
+                task.work_ref, admission.run_id, admission.commit
+            );
+        }
+        Ok((Decision::Admitted(admission), selection))
+    }
+
+    pub(crate) fn require_acceptance_committed_source_unchanged(
+        &self,
+        parent_session_id: &str,
+        root: &FsPath,
+        commit: &str,
+        recorded_source: Option<&EngramSourceId>,
+        deadline: std::time::Instant,
+        now: &impl Fn() -> std::time::Instant,
+    ) -> Result<(), AcceptanceCommittedInputRefusal> {
+        use AcceptanceCommittedInputRefusal as Refusal;
+
+        #[cfg(test)]
+        TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_RECHECK.with(|slot| {
+            if let Some(step) = slot.borrow_mut().take() {
+                step();
+            }
+        });
+        let rechecked = self.acceptance_judged_clean_source(parent_session_id, root, deadline);
+        if rechecked
+            .as_ref()
+            .zip(recorded_source)
+            .is_some_and(|(current, expected)| !current.same_format(expected))
+        {
+            return Err(Refusal::ScanIncomplete);
+        }
+        if rechecked.is_none_or(|current| {
+            if let Some(expected) = recorded_source {
+                &current != expected
+            } else {
+                current.commit != commit
+            }
+        }) {
+            return Err(if now() >= deadline {
+                Refusal::ScanIncomplete
+            } else {
+                Refusal::Changed
+            });
+        }
+        Ok(())
     }
 }
