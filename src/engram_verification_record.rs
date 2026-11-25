@@ -867,6 +867,8 @@ fn engram_verification_record_stage_name(stage: &Value) -> Result<&str, String> 
 
 /// Use the same stage classification for the named refusal and the body.
 fn engram_verification_record_classify_stage(
+    registration: &TestRunRegistration,
+    request: &Value,
     stage: &Value,
     planned: &HashMap<String, Vec<String>>,
     mode: EngramVerificationRecordMode,
@@ -898,6 +900,47 @@ fn engram_verification_record_classify_stage(
         } else {
             engram_verification_record_stage_argv(stage, planned)?.1
         };
+    if mode == EngramVerificationRecordMode::Focused
+        && name == "focused"
+        && let Some(plan) = planned
+            .get(name)
+            .filter(|plan| engram_is_focused_dart_sdk_test(plan))
+    {
+        let root = FsPath::new(
+            request
+                .get("root")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        );
+        // The committed request is already bound by registration identity.
+        // Match the named root directly before giving Dart Test credit.
+        if request.get("detached").and_then(Value::as_bool) == Some(true)
+            || !engram_supports_focused_dart_test(plan)
+            || !registration.named_root.as_ref().is_some_and(|named| {
+                engram_dart_worktree_matches(FsPath::new(&named.workspace_id), root)
+            })
+        {
+            return Ok((name.to_owned(), argv, None));
+        }
+        let command = if unrun {
+            Some(plan.clone())
+        } else {
+            engram_focused_dart_check_argv(
+                FsPath::new(&registration.run_directory),
+                root,
+                stage,
+                plan,
+            )
+        };
+        return Ok(match command {
+            Some(command) => (
+                name.to_owned(),
+                command,
+                Some(EngramVerificationRecordCheckKind::Test),
+            ),
+            None => (name.to_owned(), argv, None),
+        });
+    }
     let kind =
         engram_verification_record_classify_argv(mode, name, &argv, test_stages, admit_full_lint);
     Ok((name.to_owned(), argv, kind))
@@ -906,6 +949,7 @@ fn engram_verification_record_classify_stage(
 /// The stages of a run that are neither a test, build nor admitted lint check
 /// (`engram_verification_record_classify_argv`), in results order.
 pub(crate) fn engram_verification_record_unclassified_stages(
+    registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
 ) -> Vec<String> {
@@ -919,6 +963,8 @@ pub(crate) fn engram_verification_record_unclassified_stages(
         .flatten()
         .filter_map(|stage| {
             match engram_verification_record_classify_stage(
+                registration,
+                request,
                 stage,
                 &planned,
                 mode,
@@ -937,7 +983,7 @@ pub(crate) fn engram_verification_record_registration_unclassified_stages(
     request: &Value,
     results: &Value,
 ) -> Vec<String> {
-    let mut stages = engram_verification_record_unclassified_stages(request, results);
+    let mut stages = engram_verification_record_unclassified_stages(registration, request, results);
     if registration.declared_native.is_some() && registration.declared_terminal.is_some() {
         // The body builder separately checks the actual command against this
         // captured binding. Merely having a focused stage is insufficient.
@@ -1036,6 +1082,8 @@ fn engram_verification_record_run_command(
 /// build nor admitted lint check (`engram_verification_record_check_kind`)
 /// fails the build of the whole record rather than leaving it out.
 fn engram_verification_record_check(
+    registration: &TestRunRegistration,
+    request: &Value,
     stage: &Value,
     planned: &HashMap<String, Vec<String>>,
     mode: EngramVerificationRecordMode,
@@ -1043,6 +1091,8 @@ fn engram_verification_record_check(
     admit_full_lint: bool,
 ) -> Result<EngramVerificationRecordCheck, String> {
     let (name, argv, kind) = engram_verification_record_classify_stage(
+        registration,
+        request,
         stage,
         planned,
         mode,
@@ -1060,8 +1110,19 @@ fn engram_verification_record_check(
             "stage {name} is neither a test, build nor admitted lint check"
         ));
     };
+    let dart = mode == EngramVerificationRecordMode::Focused
+        && name == "focused"
+        && engram_supports_focused_dart_test(&argv);
     let command = engram_verification_record_command_text(&argv);
     let exit = stage.get("code").and_then(Value::as_i64);
+    let mut refs = Vec::new();
+    let command_ref = format!("command:{command}");
+    if command_ref.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
+        refs.push(command_ref);
+    }
+    if let Some(code) = exit {
+        refs.push(format!("exit:{code}"));
+    }
     let outcome_word = match outcome {
         EngramVerificationRecordCheckOutcome::Passed => "passed",
         EngramVerificationRecordCheckOutcome::Failed => "failed",
@@ -1072,15 +1133,7 @@ fn engram_verification_record_check(
         Some(code) => format!("{name}: {outcome_word} (exit {code})"),
         None => format!("{name}: {outcome_word}"),
     };
-    let mut refs = Vec::new();
-    let command_ref = format!("command:{command}");
-    if command_ref.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
-        refs.push(command_ref);
-    }
-    if let Some(code) = exit {
-        refs.push(format!("exit:{code}"));
-    }
-    Ok(EngramVerificationRecordCheck {
+    let mut check = EngramVerificationRecordCheck {
         stage: name,
         check_kind: kind,
         check_fingerprint: EngramHost::normalized_check_fingerprint(&command),
@@ -1091,7 +1144,15 @@ fn engram_verification_record_check(
         summary: Some(summary),
         refs,
         counts: engram_verification_record_counts(stage),
-    })
+    };
+    if dart {
+        engram_focused_dart_check_result(
+            FsPath::new(&registration.run_directory),
+            stage,
+            &mut check,
+        );
+    }
+    Ok(check)
 }
 
 pub(crate) fn engram_verification_record_declared_check(
@@ -1302,8 +1363,15 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
         .into_iter()
         .flatten()
     {
-        let check =
-            engram_verification_record_check(stage, &planned, mode, &test_stages, admit_full_lint)?;
+        let check = engram_verification_record_check(
+            registration,
+            request,
+            stage,
+            &planned,
+            mode,
+            &test_stages,
+            admit_full_lint,
+        )?;
         if checks
             .iter()
             .any(|earlier: &EngramVerificationRecordCheck| earlier.stage == check.stage)
