@@ -7,6 +7,7 @@ use super::*;
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum SourceBasisRefusal {
     ConfiguredGitFilters,
+    #[cfg(test)]
     UnsupportedGitlinks,
 }
 
@@ -14,6 +15,7 @@ impl std::fmt::Display for SourceBasisRefusal {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ConfiguredGitFilters => "review verification does not run configured Git filters",
+            #[cfg(test)]
             Self::UnsupportedGitlinks => {
                 "a content revision does not cover submodules (Git gitlinks are unsupported)"
             }

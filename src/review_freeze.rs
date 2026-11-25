@@ -272,14 +272,6 @@ impl ReviewFreezeGit {
         let mut command = self.command(args);
         let started = std::time::Instant::now();
         let remaining_at_start = self.deadline.saturating_duration_since(started);
-        #[cfg(test)]
-        if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
-            eprintln!(
-                "Git timing thread={:?} args={args:?} remaining_ms={}",
-                std::thread::current().id(),
-                remaining_at_start.as_millis()
-            );
-        }
         let output = run_bounded_read_command(
             &mut command,
             self.deadline,
@@ -384,7 +376,7 @@ fn review_freeze_file_observed<T>(
     if !before.is_file() || before.file_type().is_symlink() || before.len() > limit as u64 {
         bail!("unsupported or oversized review input");
     }
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     test_review_freeze_before_open(path);
     let mut file = match review_freeze_open_without_waiting(path, &before) {
         Ok(file) => file,
@@ -492,11 +484,11 @@ pub(crate) fn review_freeze_is_link(metadata: &fs::Metadata) -> bool {
 /// between its inspection and its open, as a racing writer would
 /// (`install_test_review_freeze_before_open`). The suffix keeps the hook
 /// independent of how the caller spelled the directory.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 static TEST_REVIEW_FREEZE_BEFORE_OPEN: Mutex<Vec<(PathBuf, Box<dyn FnOnce() + Send>)>> =
     Mutex::new(Vec::new());
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn install_test_review_freeze_before_open(
     path: PathBuf,
     replace: impl FnOnce() + Send + 'static,
@@ -507,7 +499,7 @@ pub(crate) fn install_test_review_freeze_before_open(
         .push((path, Box::new(replace)));
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn test_review_freeze_before_open(path: &FsPath) {
     let hook = {
         let mut hooks = TEST_REVIEW_FREEZE_BEFORE_OPEN

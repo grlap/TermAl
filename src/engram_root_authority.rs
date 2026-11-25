@@ -304,9 +304,7 @@ pub(crate) enum EngramRootEvidenceUncertainty {
 }
 
 pub(crate) enum EngramRootReconcileOutcome {
-    Confirmed {
-        fence: EngramRootReadFence,
-    },
+    Confirmed,
     NoClaim,
     EvidenceWithheld {
         guard: Option<EngramAcknowledgedRootGuard>,
@@ -2530,18 +2528,6 @@ impl AppState {
         owner: &EngramAuthorityTransition,
         deadline: std::time::Instant,
     ) -> Result<(), ApiError> {
-        self.publish_engram_authority_image_with_result_until(store, owner, deadline, |_| ())
-    }
-
-    /// Capture the publication's resulting state under its final ownership
-    /// lock, rather than adopting a possibly newer image after returning.
-    pub(crate) fn publish_engram_authority_image_with_result_until<T>(
-        &self,
-        store: &EngramAuthorityStoreKey,
-        owner: &EngramAuthorityTransition,
-        deadline: std::time::Instant,
-        published: impl FnOnce(&StateInner) -> T,
-    ) -> Result<T, ApiError> {
         let clock = self.engram_budget_clock();
         let image = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -2629,7 +2615,6 @@ impl AppState {
         }
         // Published is an already-acknowledged marker. Either durable side of
         // this optional cleanup is conservative; it removes no history proof.
-        let result = published(&inner);
         drop(inner);
         for line in &retirements {
             engram_root_reclamation_emit(self, line);
@@ -2641,11 +2626,11 @@ impl AppState {
                 // Preserve their persisted marker without doing I/O under
                 // StateInner. A failed cleanup retains the durable candidate.
                 if !engram_authority_manual_writer_allowed() {
-                    return Ok(result);
+                    return Ok(());
                 }
                 let _ = self.engram_authority_manual_write(|_| Ok(true));
             }
         }
-        Ok(result)
+        Ok(())
     }
 }

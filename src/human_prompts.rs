@@ -192,12 +192,14 @@ pub(crate) fn require_human_runtime_reset_owner(
     Ok(())
 }
 
+#[cfg(windows)]
 #[derive(Clone)]
 pub(crate) struct HumanResetResume {
     pub(crate) prompt_id: String,
     pub(crate) resume: PromptDeliveryResume,
 }
 
+#[cfg(windows)]
 pub(crate) fn capture_human_reset_resume(
     record: &SessionRecord,
     prompt_id: &str,
@@ -213,6 +215,7 @@ pub(crate) fn capture_human_reset_resume(
     })
 }
 
+#[cfg(windows)]
 pub(crate) fn transfer_human_reset_resume(
     record: &mut SessionRecord,
     saved: &HumanResetResume,

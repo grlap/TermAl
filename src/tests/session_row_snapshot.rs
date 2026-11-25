@@ -239,7 +239,7 @@ fn session_row_mutable_and_owned_accesses_cannot_change_a_retained_cut() {
     owned.retain(|row| row.session.id != cut[1].session.id);
     assert_eq!(owned.len(), 2);
     for mut row in owned {
-        row.session.name = "owned iteration".to_owned();
+        row.session.name.push_str(" owned iteration");
     }
     assert_eq!(persisted_rows(&cut), original);
 }

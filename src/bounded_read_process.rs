@@ -57,27 +57,6 @@ impl std::fmt::Display for BoundedReadFailure {
 
 impl std::error::Error for BoundedReadFailure {}
 
-#[cfg(test)]
-pub(crate) static BOUNDED_READ_TIMING_DIAGNOSTIC: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-// Explicit ignored diagnostics only; never changes a read's deadline or custody.
-#[cfg(test)]
-struct BoundedReadTimingDiagnostic;
-#[cfg(test)]
-impl BoundedReadTimingDiagnostic {
-    fn enable() -> Self {
-        assert!(!BOUNDED_READ_TIMING_DIAGNOSTIC.swap(true, std::sync::atomic::Ordering::SeqCst));
-        Self
-    }
-}
-#[cfg(test)]
-impl Drop for BoundedReadTimingDiagnostic {
-    fn drop(&mut self) {
-        BOUNDED_READ_TIMING_DIAGNOSTIC.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
 // Cleanup is part of owning a launched capture, even after its read budget
 // expires. One deadline per command: an error path must not renew the floor.
 #[cfg(any(windows, test))]
@@ -117,8 +96,6 @@ pub(crate) struct BoundedReadObservation {
     pub(crate) cleanup_certified: Option<bool>,
     #[cfg(all(windows, test))]
     lock_observation: host_command::telemetry::Observation,
-    #[cfg(test)]
-    timing_phases: Vec<(&'static str, Duration)>,
 }
 
 impl BoundedReadObservation {
@@ -139,8 +116,6 @@ impl BoundedReadObservation {
             cleanup_certified: None,
             #[cfg(all(windows, test))]
             lock_observation: host_command::telemetry::Observation::new(),
-            #[cfg(test)]
-            timing_phases: Vec::new(),
         }
     }
 
@@ -314,18 +289,6 @@ pub(crate) fn run_bounded_read_windows_with_setup(
         before_observe,
         &mut observed,
     );
-    #[cfg(test)]
-    if BOUNDED_READ_TIMING_DIAGNOSTIC.load(std::sync::atomic::Ordering::SeqCst) {
-        eprintln!(
-            "bounded timing thread={:?} ok={} elapsed_ms={} lock_wait_ms={:?} phases={:?}; {}",
-            std::thread::current().id(),
-            result.is_ok(),
-            observed.started.elapsed().as_millis(),
-            observed.launch_lock_wait.map(|wait| wait.as_millis()),
-            observed.timing_phases,
-            observed.lock_observation.summary()
-        );
-    }
     result.map_err(|error| observed.failure(error))
 }
 
@@ -353,14 +316,8 @@ fn run_bounded_read_windows_observed(
     }
     let mut lock_wait = Duration::ZERO;
     let launch = windows_launch::prepare_with_lock_timing(command, &mut lock_wait);
-    #[cfg(test)]
-    observed
-        .timing_phases
-        .push(("prepare", observed.started.elapsed()));
     observed.launch_lock_wait = Some(lock_wait);
     let launch = Arc::new(launch?);
-    #[cfg(test)]
-    let setup_started = std::time::Instant::now();
     let process = launch.process();
     let capture = current_capture_cancellation();
     let capture_job = if capture.is_some() {
@@ -422,13 +379,7 @@ fn run_bounded_read_windows_observed(
             deadline = injected;
             observed.read_deadline = Some(deadline);
         }
-        #[cfg(test)]
-        observed
-            .timing_phases
-            .push(("setup", setup_started.elapsed()));
         observed.stage = "wait";
-        #[cfg(test)]
-        let wait_started = std::time::Instant::now();
         let status = loop {
             observed.warn_if_slow();
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -449,22 +400,12 @@ fn run_bounded_read_windows_observed(
                 }
             }
         };
-        #[cfg(test)]
-        observed
-            .timing_phases
-            .push(("wait", wait_started.elapsed()));
         if let Some(job) = &capture_job {
             observed.stage = "cleanup";
-            #[cfg(test)]
-            let cleanup_started = std::time::Instant::now();
             let cleanup_deadline = cleanup.deadline(deadline, std::time::Instant::now());
             job.terminate()?;
             let finished = job.finish(Some(cleanup_deadline));
             observed.cleanup_certified = finished.as_ref().ok().copied();
-            #[cfg(test)]
-            observed
-                .timing_phases
-                .push(("cleanup", cleanup_started.elapsed()));
             if !finished? {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -483,8 +424,6 @@ fn run_bounded_read_windows_observed(
             .into());
         }
         check_capture_cancellation()?;
-        #[cfg(test)]
-        let pipes_started = std::time::Instant::now();
         let pipe_deadline = std::time::Instant::now() + Duration::from_secs(1);
         observed.stage = "pipe";
         let stdout =
@@ -496,10 +435,6 @@ fn run_bounded_read_windows_observed(
             err.recv_timeout(pipe_deadline.saturating_duration_since(std::time::Instant::now()))?;
         observed.stage = "read";
         let stderr = stderr?;
-        #[cfg(test)]
-        observed
-            .timing_phases
-            .push(("pipes", pipes_started.elapsed()));
         if capture_job.is_some() && std::time::Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -515,8 +450,6 @@ fn run_bounded_read_windows_observed(
     })();
     if result.is_err() {
         if let Some(job) = &capture_job {
-            #[cfg(test)]
-            let cleanup_started = std::time::Instant::now();
             let cleanup_deadline = cleanup.deadline(deadline, std::time::Instant::now());
             if let Err(error) = job.terminate() {
                 eprintln!("bounded read> capture termination: {error}");
@@ -532,10 +465,6 @@ fn run_bounded_read_windows_observed(
                     capture.as_ref().unwrap().retain_job(job.clone());
                 }
             }
-            #[cfg(test)]
-            observed
-                .timing_phases
-                .push(("error_cleanup", cleanup_started.elapsed()));
         } else {
             if let Err(error) = launch.kill(&process, "bounded read") {
                 eprintln!("bounded read> cleanup: {error:#}");
