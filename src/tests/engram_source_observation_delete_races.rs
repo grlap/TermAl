@@ -1,6 +1,5 @@
 //! Delayed ordinary capture/delivery and exact deletion acknowledgement races.
 use super::*;
-use crate::tests::*;
 
 #[test]
 fn ordinary_observation_public_delete_retains_on_lost_or_deferred_removal_ack() {

@@ -362,12 +362,14 @@ impl AppState {
                 EngramRuntimeClosingSource::Unavailable { observed_at },
                 None,
             ),
+            #[cfg(test)]
             Err(EngramObservationSourceRefusal::Legacy(
                 SourceBasisRefusal::UnsupportedGitlinks,
             )) => (
                 EngramRuntimeClosingSource::UnsupportedGitlinks { observed_at },
                 Some(SourceBasisRefusal::UnsupportedGitlinks),
             ),
+            #[cfg(test)]
             Err(EngramObservationSourceRefusal::Legacy(refusal)) => {
                 let mut error = EngramTransportError::local_state(refusal.to_string());
                 error.code = Some("runtime_observation_source_refused".to_owned());

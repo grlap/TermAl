@@ -1944,9 +1944,7 @@ impl AppState {
             None,
         )?;
         match outcome {
-            EngramRootReconcileOutcome::Confirmed { .. } | EngramRootReconcileOutcome::NoClaim => {
-                Ok(())
-            }
+            EngramRootReconcileOutcome::Confirmed | EngramRootReconcileOutcome::NoClaim => Ok(()),
             EngramRootReconcileOutcome::EvidenceWithheld {
                 guard,
                 reason:
@@ -2280,15 +2278,10 @@ impl AppState {
             let published = self
                 .recover_engram_authority_batch_until(store, &guard.owner, deadline, false, None)
                 .and_then(|()| {
-                    self.publish_engram_authority_image_with_result_until(
-                        store,
-                        &guard.owner,
-                        deadline,
-                        EngramRootReadFence::capture,
-                    )
+                    self.publish_engram_authority_image_until(store, &guard.owner, deadline)
                 });
             return Ok(match published {
-                Ok(fence) => EngramRootReconcileOutcome::Confirmed { fence },
+                Ok(()) => EngramRootReconcileOutcome::Confirmed,
                 Err(error) => EngramRootReconcileOutcome::EvidenceWithheld {
                     guard: Some(guard),
                     reason: EngramRootEvidenceUncertainty::Publication(error),

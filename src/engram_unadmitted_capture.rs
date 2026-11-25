@@ -606,24 +606,31 @@ pub(crate) enum EngramRuntimeClosingOutcome {
 #[derive(Clone, Debug)]
 pub(crate) enum EngramRuntimeClosingSource {
     Measured(EngramMeasuredSighting),
-    UnsupportedGitlinks { observed_at: String },
-    Unavailable { observed_at: String },
+    #[cfg(test)]
+    UnsupportedGitlinks {
+        observed_at: String,
+    },
+    Unavailable {
+        observed_at: String,
+    },
 }
 
 impl EngramRuntimeClosingSource {
     pub(crate) fn sighting(&self) -> Option<&EngramMeasuredSighting> {
         match self {
             Self::Measured(sighting) => Some(sighting),
-            Self::UnsupportedGitlinks { .. } | Self::Unavailable { .. } => None,
+            #[cfg(test)]
+            Self::UnsupportedGitlinks { .. } => None,
+            Self::Unavailable { .. } => None,
         }
     }
 
     pub(crate) fn observed_at(&self) -> &str {
         match self {
             Self::Measured(sighting) => &sighting.observed_at,
-            Self::UnsupportedGitlinks { observed_at } | Self::Unavailable { observed_at } => {
-                observed_at
-            }
+            #[cfg(test)]
+            Self::UnsupportedGitlinks { observed_at } => observed_at,
+            Self::Unavailable { observed_at } => observed_at,
         }
     }
 }

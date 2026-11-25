@@ -1108,6 +1108,7 @@ struct ScopedEnvVar {
 }
 
 impl ScopedEnvVar {
+    #[cfg(windows)]
     fn set_path(key: &'static str, value: &FsPath) -> Self {
         let original = std::env::var_os(key);
         unsafe {

@@ -1053,7 +1053,7 @@ fn host_engram_settings_are_machine_scoped_and_cannot_rotate_while_enabled() {
         "the stable principal is stored in its canonical lowercase form"
     );
     let project_id = create_test_project(&state, &project_root, "Host settings project");
-    let mut settings = real_fixture_engram_settings(&root);
+    let settings = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, settings)
         .expect("fixture Engram settings should enable");
@@ -2968,7 +2968,7 @@ fn doctor_transport_drains_a_report_larger_than_the_pipe_buffer() {
 }
 #[test]
 fn engram_mcp_disable_immediately_tears_down_all_runtime_families_and_descendants() {
-    let (state, root, project_id, session_ids) =
+    let (state, _, project_id, session_ids) =
         ordinary_runtime_family_fixture("disable-all-families");
     let settings = EngramProjectSettings::default();
 
@@ -3013,7 +3013,7 @@ fn engram_mcp_disable_serializes_with_runtime_exit_waiter() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP revoke waiter");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -3182,7 +3182,7 @@ fn engram_mcp_disable_defers_behind_existing_stop_owner_without_waiting() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP revoke stop owner");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -3274,7 +3274,7 @@ fn engram_mcp_pending_revocation_completes_failed_stop_without_resuming_automati
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP Stop transfer");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     let mut cleared = enabled.clone();
     cleared.enabled = false;
     state
@@ -3389,7 +3389,7 @@ fn engram_mcp_pending_revocation_surfaces_shared_codex_stop_interrupt_failure() 
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram shared Codex Stop transfer");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     let mut cleared = enabled.clone();
     cleared.enabled = false;
     state
@@ -3789,7 +3789,7 @@ fn engram_mcp_disable_dispatches_queued_prompt_with_fresh_runtime() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP revoke queue");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -3851,7 +3851,7 @@ fn engram_mcp_disable_surfaces_shutdown_failure_and_blocks_resume() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP revoke failure");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -4024,7 +4024,7 @@ fn engram_mcp_degraded_acp_runtime_is_replaced_by_an_explicit_prompt() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP ACP retry");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -4150,7 +4150,7 @@ fn engram_mcp_mixed_cleanup_error_preserves_pending_session_observability() {
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram MCP mixed cleanup");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -4261,7 +4261,7 @@ fn engram_mcp_shared_codex_interrupt_failure_detaches_thread_and_surfaces_degrad
     fs::create_dir_all(&root).expect("project root should exist");
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram shared Codex revoke");
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture settings should enable Engram");
@@ -6084,7 +6084,7 @@ async fn asynchronous_ordinary_stop_publishes_stopping_before_runtime_cleanup() 
 
 fn assert_engram_mcp_disable_or_delete_revokes_existing_runtimes(delete_project: bool) {
     let suffix = if delete_project { "delete" } else { "disable" };
-    let (state, root, project_id, session_ids) = ordinary_runtime_family_fixture(suffix);
+    let (state, _, project_id, session_ids) = ordinary_runtime_family_fixture(suffix);
     if delete_project {
         state
             .delete_project(&project_id)
@@ -6144,7 +6144,7 @@ fn assert_engram_mcp_quarantined_runtime_retried_by_followup(delete_project: boo
     fs::write(root.join(".engram-project"), "fixture-ready\n").expect("fixture mode should write");
     let project_id = create_test_project(&state, &root, "Engram delete quarantined runtime");
     let session_id = create_test_project_session(&state, Agent::Claude, &project_id, &root);
-    let mut enabled = real_fixture_engram_settings(&root);
+    let enabled = real_fixture_engram_settings(&root);
     state
         .update_project_engram_settings(&project_id, enabled)
         .expect("fixture authority should persist");
