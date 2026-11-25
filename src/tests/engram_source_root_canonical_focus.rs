@@ -2,6 +2,137 @@
 //! active turn, or let its controlled successor overtake its closing report.
 use super::*;
 
+#[test]
+fn restart_recovers_the_acknowledged_named_root_for_a_later_ordinary_turn() {
+    let label = "restart-named-opening";
+    let before = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&before.root);
+    let named = request_naming(&before, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    before.begin("Report the original named source.");
+    before.finish();
+    let source_owner = before
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner
+        .clone();
+    let mut new_source = before.sources.get(&worktree);
+    new_source.commit = "c".repeat(40);
+    new_source.tree = "d".repeat(40);
+    before.set_source_id(&worktree, new_source.clone());
+
+    before.state.trigger_shutdown_signal();
+    before.state.shutdown_persist_blocking();
+    let root = before.state.test_temp_root.as_ref().unwrap().clone();
+    let restarted = boot_on_test_temp_root(&root, || {
+        AppState::new_with_paths_engram_transport_and_clock_for_test(
+            before.root.to_string_lossy().into_owned(),
+            before.state.persistence_path.as_ref().clone(),
+            before.state.orchestrator_templates_path.as_ref().clone(),
+            before.transport.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .unwrap()
+    });
+    restarted
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner = source_owner;
+    let (runtime, commands, _process) = test_shared_codex_runtime(label);
+    install_single_wire_codex_fixture(&restarted, Some(runtime));
+    let after = EOCheckedTurn::from_session(
+        restarted,
+        before.session_id.clone(),
+        before.root.clone(),
+        before.transport.clone(),
+        Arc::new(Mutex::new(commands)),
+        before.sources.clone(),
+    );
+    after.begin("First ordinary turn after restart.");
+    let first = after.record(|record| {
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert!(trace.opening_root.is_none());
+        trace.host_turn_ref.clone()
+    });
+    after.end();
+    let guard = phase_sync::PollGuard::new();
+    while !after.record(|record| {
+        record
+            .engram
+            .unadmitted_closing_jobs
+            .iter()
+            .any(|job| job.trace.host_turn_ref == first && job.terminal_failure.is_some())
+    }) {
+        guard.wait("the unbound first turn is refused");
+    }
+    assert!(!after.record(|record| {
+        record
+            .engram
+            .unadmitted_reports
+            .iter()
+            .any(|report| report.host_turn_ref == first)
+    }));
+
+    after.begin("Report the source from a fresh opening.");
+    let later = after.record(|record| {
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert_eq!(
+            trace
+                .opening_root
+                .as_ref()
+                .and_then(|opening| opening.source_root.as_ref())
+                .map(|root| root.generation),
+            Some(named.generation),
+            "the first close restores the exact named association for the next opening"
+        );
+        trace.host_turn_ref.clone()
+    });
+    after.end();
+    let guard = phase_sync::PollGuard::new();
+    let recorded = loop {
+        let (failure, envelopes) = after.record(|record| {
+            let failure = record
+                .engram
+                .unadmitted_closing_jobs
+                .iter()
+                .find(|job| job.trace.host_turn_ref == later)
+                .and_then(|job| job.terminal_failure.clone());
+            let envelopes = record
+                .engram
+                .unadmitted_reports
+                .iter()
+                .find(|report| report.host_turn_ref == later && report.is_settled())
+                .map(|report| report.envelopes.clone());
+            (failure, envelopes)
+        });
+        assert!(failure.is_none(), "the recovered close failed: {failure:?}");
+        if let Some(envelopes) = envelopes {
+            break envelopes;
+        }
+        guard.wait("the recovered close settles its observation");
+    };
+    let sighting = recorded
+        .iter()
+        .find(|envelope| envelope.request["occurrence"]["kind"] == "source_sighting")
+        .expect("the recovered close must include a measured source sighting");
+    let EngramRuntimeObservationDelivery::Recorded { receipt } = &sighting.delivery else {
+        panic!(
+            "the source sighting did not reach the producer: {:?}",
+            sighting.delivery
+        );
+    };
+    assert_eq!(receipt["accounting"]["kind"], "sighting");
+    let basis = &sighting.request["occurrence"]["source_basis"];
+    assert_eq!(basis["workspace_id"], json!(named.root.unwrap()));
+    assert_eq!(basis["source_root_generation"], json!(named.generation));
+    assert_eq!(basis["source_root_state"], "named");
+    assert_eq!(basis["source_id"], json!(new_source));
+    after.state.trigger_shutdown_signal();
+    after.state.shutdown_persist_blocking();
+}
+
 struct CanonicalFocusTransport {
     inner: Arc<ScriptedEngramControlTransport>,
     closing_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,

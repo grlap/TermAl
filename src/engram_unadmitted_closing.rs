@@ -105,6 +105,14 @@ impl AppState {
                 .as_ref()
                 .is_none_or(|opening| opening.store != store || opening.binding != binding)
             {
+                if job.trace.opening_root.is_none() {
+                    // A restart drops the session's work association but keeps
+                    // acknowledged names. This close can refresh a later
+                    // opening. The unbound trace itself stays refused.
+                    let _ = self.refresh_runtime_observation_focus(
+                        session_id, job, &target, &binding, deadline,
+                    );
+                }
                 return Err(runtime_observation_scope_changed(
                     &job.scope,
                     "the closed turn retained no matching claim association",

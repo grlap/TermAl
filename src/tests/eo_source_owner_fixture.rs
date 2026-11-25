@@ -60,6 +60,8 @@ impl EOOwnerSources {
             "not_clean"
         };
         let mut envelope = crate::tests::engram_source_command::source_envelope(root, status);
+        envelope["source"] = json!(format!("git-commit:{}", source.commit));
+        envelope["tree"] = json!(source.tree);
         envelope["source_id"] = serde_json::to_value(&source).unwrap();
         envelope["entries"] = json!(
             source
