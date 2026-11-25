@@ -1,0 +1,30 @@
+{
+  "id": "01a2146a-757d-7b52-8ab8-f9afc081c14a",
+  "external_ref": null,
+  "title": "Confirm scheduled acceptance intake after the worker advances the saved request",
+  "outcome": "For an idle requester, the worker can advance a newly inserted scheduled acceptance before POST confirms the exact AwaitingEvidence row. A conflict or timeout can then be reported for a durably accepted request. Confirm durable admission by the exact immutable request identity while allowing its progressed state, and verify that a declined or replaced request is never acknowledged.",
+  "acceptance": [
+    "A deterministic worker/writer interleaving advances the newly saved schedule before intake acknowledgement and the response confirms the same durable request with its current state, while an absent or different request is refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported",
+    "persistence"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

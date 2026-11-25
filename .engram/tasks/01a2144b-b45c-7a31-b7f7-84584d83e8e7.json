@@ -1,0 +1,29 @@
+{
+  "id": "01a2144b-b45c-7a31-b7f7-84584d83e8e7",
+  "external_ref": null,
+  "title": "Explain when the configured acceptance scheduler is missing",
+  "outcome": "If a configured scheduler session is deleted after readiness was published, the existing pending schedule shows the configuration problem in requester and scheduler listings. Preserve the one-shot release and normal recovery when the configured scheduler is made available again.",
+  "acceptance": [
+    "Explain when the configured acceptance scheduler is missing is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

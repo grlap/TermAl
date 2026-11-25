@@ -4,13 +4,19 @@
   "title": "Remove the manual diff-review conversations feature (review threads, Copy review path, Insert review into prompt)",
   "outcome": "Remove the manual diff-review conversations feature (review threads, Copy review path, Insert review into prompt)",
   "acceptance": [
-    "Remove the manual diff-review conversations feature (review threads, Copy review path, Insert review into prompt) is done"
+    "The diff view no longer offers manual review conversations: opening, browsing and editing a diff makes no review-document request to the host, and the review-thread controls, Copy review path and Insert review into prompt are gone, while viewing, browsing and editing changes in the diff view behave as before. Shown by the remaining DiffPanel behaviour tests and one test that opening a diff issues no review request.",
+    "The host no longer serves, stores or proxies review documents (the review routes, their storage and their remote proxying are removed) and never reads, writes or deletes existing <project>/.termal/reviews files, which stay on disk; agent review delegations and their results are unchanged.",
+    "A workspace saved before the removal, including open diff preview tabs, loads and reopens them as before, and the full gate passes on the exact landed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
-  "kind": "task",
-  "priority": 1,
-  "labels": [],
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "UI",
+    "greg-directed",
+    "removal"
+  ],
   "assigned_to": null,
   "deferred_until": null,
   "lifecycle": "open",
