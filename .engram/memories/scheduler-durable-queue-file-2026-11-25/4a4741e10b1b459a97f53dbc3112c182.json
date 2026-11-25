@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "scheduler-durable-queue-file-2026-11-25",
+    "revision_id": "4a4741e10b1b459a97f53dbc3112c182",
+    "previous": "593cb29a0b4d4d69ab463b2d3fc35f31",
+    "body_sha256": "a6339c6b8675b9539113ac2bb9f0ac72ac7573538ee306543afe8fc7284b0719",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T04:51:10.697999200Z"
+    }
+  },
+  "body": "Scheduler rule (Termal::Opus2, 2026-11-25). w-6ea6's Fix8 Windows FULL was READY at 16:22Z on 2026-11-24 and waited until 02:05Z. Nothing blocked it: there was no busy resource, no missing END, no wrong wake address, and no lapsed claim. Its entry simply fell out of the scheduler's queue: it last appears in the log line at 19:30:53Z and is gone by 21:11:34Z. The queue lived only as free text, retyped in each log line, and was rebuilt after the memory incidents and the cold-routing rule change. Rules:\n(1) Keep the Central and DL560/WinB queues in ONE durable file, .tmp/q8111/central-queue.txt, with one line per entry.\n(2) Remove an entry ONLY at its LAUNCH/SPAWN or on an explicit owner withdrawal, and record the reason.\n(3) Re-read the file whenever a slot frees, never a remembered list.\n(4) An entry that has waited more than 2 h gets an explicit check against free windows.\n\nREV 2 addition (Fable2 #7791, 2026-11-25 04:50Z): rule (4), \"an entry waiting more than 2 h gets an explicit check\", also covers PARKED carriers that are not in the active queue. Examples are a combo candidate whose FULL never ran, a frozen batch whose base has moved, and any open integration item (for example w-b55fde7d6587 combo91, dropped after its 2026-11-21 freeze). They are listed in central-queue.txt under \"PARKED / REVIVE\" and checked with the same rule: revive them (re-cut on current master), or record an explicit withdrawal by their owner."
+}

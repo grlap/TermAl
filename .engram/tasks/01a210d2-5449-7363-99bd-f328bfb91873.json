@@ -1,0 +1,30 @@
+{
+  "id": "01a210d2-5449-7363-99bd-f328bfb91873",
+  "external_ref": null,
+  "title": "Evaluator path compares Engram's acceptance basis with the general work revision, so an Engram that splits them refuses every evaluation after a label edit",
+  "outcome": "Reported by Engram::Coder-MacosFixSol (session-12325, TermAl mailbox 9d92c3dd #421, 2026-11-25 ~03:48Z), on TermAl master 91726e15.\n\nContext: Engram's P0 split (w-e999c592a373, with w-8d0243f80d1a, after the Fix8 label-edit refusal) keeps `show.acceptance_basis` at the contract revision when a label, title or priority is edited, while `work.revision` advances for planning CAS.\n\nTermAl assumes the two are equal:\n- src/acceptance_evaluation.rs:869 refuses when `contract.work.revision != acceptance_basis`.\n- src/acceptance_evidence_selection.rs:198 refuses when `basis.acceptance_basis != identity.revision`.\n- src/acceptance_evaluation_api.rs:1452 does the same, according to the reporter.\n- src/acceptance_evidence_selection.rs:1249 and src/acceptance_verification_evidence.rs:41 pass the contract basis where Engram's host acceptance reads require the exact general revision.\nCoordinator verified lines 869 and 198. The others are from the report.\n\nEffect: once Engram installs the split, every evaluation of an item edited only in its planning fields is refused as a concurrent edit.\n\nWanted: the evaluator path keeps both values. It compares two read snapshots kind by kind. It sends the general work revision to the binding and verification reads, and the acceptance basis to evaluate and reuse.\n\nDelivery order: Engram must not install its split until this fix is installed and running in TermAl (landing, install and a restart by Greg).",
+  "acceptance": [
+    "When Engram reports an acceptance basis lower than the item's general work revision because only planning fields (labels, title, priority) changed, an evaluation request is admitted and the evaluator judges the criteria of the acceptance-basis revision; the host does not report a concurrent edit. A behaviour test covers it with an Engram response fixture whose acceptance_basis and work.revision differ.",
+    "Concurrent-change detection compares like with like: acceptance basis with acceptance basis for evaluation and reuse, and general work revision with general work revision for binding and verification reads, which receive the general revision. A change to the acceptance criteria between two reads is still refused as a concurrent edit. Behaviour tests cover both a planning-only change (admitted) and a criteria change (refused).",
+    "With an Engram that reports acceptance_basis equal to work.revision, behaviour is unchanged: the existing acceptance evaluation tests pass without edits to their expectations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "acceptance",
+    "cross-project",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

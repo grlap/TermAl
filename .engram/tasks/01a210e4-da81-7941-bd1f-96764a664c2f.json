@@ -1,0 +1,26 @@
+{
+  "id": "01a210e4-da81-7941-bd1f-96764a664c2f",
+  "external_ref": null,
+  "title": "Queue pause summary: mark a summary as shortened when the read bound falls just after a space or tab",
+  "outcome": "From the w-b63e1af0ce4c R13-1 review (Claude, delegation-92567411, Note at src/queue_pause_reason.rs:160). The summary reads at most one character past its 120-character bound. When the failure's first line is longer than that and the last character read is a space or tab, every word read is judged whole and plain. So redact_rest stays false, and the rest of the line is dropped with no \"[redacted]\" marker and no \"...\". Nothing leaks, because the unread part is never shown. But a reader may take the summary for the whole line, while the doc says the rest of the line is replaced with [redacted]. Fix direction: mark the summary as shortened (redact_rest or the ellipsis) whenever the line continues past what was read. Also, as cleanup in the same area: the restore of prior_pause_reason in the runtime-exit else branch (turn_lifecycle.rs, about line 2358) is a no-op and could be removed (Claude, same review).",
+  "acceptance": [
+    "When a failure's first line continues past what queue_pause_summary reads, the summary always ends in a truncation or redaction marker, including when the last character read is a space or tab; an exact-output test covers that case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "queue-pause"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

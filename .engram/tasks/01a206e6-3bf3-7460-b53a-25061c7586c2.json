@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "A Human Send overtaken by a successful idle Stop leaves the exact prompt queued and the queue paused. A fresh Resume delivers the prompt once. The regressions exercise the real Stop during a test-run wait, both cancellation orders around a Windows runtime reset, and FIFO retention. Independent evaluation ebcc8e4d6937483e9f6c42e16db9f64b passed all three criteria. The exact clean 3e614e82 candidate passed the Linux and Windows FULL gates and the Central registered Windows focused run (55 passed). The integration owner fast-forwarded origin/master and removed the test ref. At 04:02:19Z the matching release build was installed at target/release/termal.exe; verified SHA-256 a6948884ef054eb9e04931685518d04e34ec406e121429b05ec32b9feea8754e, install note 01bfd78d710a406681e9a9888e698e2f. The running host picks up the build when Greg restarts it.",
+    "completed_at": "2026-11-25T04:03:39.989719700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
