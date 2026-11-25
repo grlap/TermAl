@@ -1,0 +1,30 @@
+{
+  "id": "01a21487-11f9-7800-b044-bdf2aa60ff8f",
+  "external_ref": null,
+  "title": "Report a finished acceptance schedule consistently on repeated opt-in",
+  "outcome": "When schedule POST or MCP opts in again at the same evidence cut and reuses a completed evaluator with a recorded verdict, its response currently projects Evaluating as in progress while list reports Finished. Share the exact terminal projection and verify that repeating opt-in returns the same ID and the finished state without another evaluator or result wait.",
+  "acceptance": [
+    "Repeated opt-in at a recorded terminal result returns the same schedule identity and finished status as list, and leaves the evaluator count and result waits unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "api",
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
