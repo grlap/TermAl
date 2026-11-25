@@ -119,7 +119,7 @@ pub(crate) struct HumanIntakeGenerations {
 }
 
 impl HumanIntakeGenerations {
-    fn capture(record: &SessionRecord) -> Self {
+    pub(crate) fn capture(record: &SessionRecord) -> Self {
         Self {
             pause: record.auto_dispatch_pause_epoch,
             stop: record.runtime_stop_generation,
@@ -681,6 +681,7 @@ impl AppState {
         DispatchTurnResult::Queued
     }
 
+    #[cfg(test)]
     pub(crate) fn start_human_queued_turn(
         &self,
         session_id: &str,

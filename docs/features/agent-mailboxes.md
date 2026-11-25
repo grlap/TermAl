@@ -483,6 +483,26 @@ These views cover sessions on the host that records the pause; a paused
 session's reason does not yet reach another host's listing or a cross-host
 exact read.
 
+After a provider outage or a subscription change, every session whose mail-woken
+turn failed stays paused. One operator action resumes them all: "Resume paused…"
+in the Sessions panel, `termal sessions resume-paused` from the CLI, or
+`POST /api/queues/resume-paused`. It first lists every paused root session on
+this host with its pause reason and whether it will be resumed or skipped; a
+dry run (`--dry-run`, `{"dryRun": true}`) stops there and resumes nothing.
+Running it resumes each listed session through that session's own Resume, one
+at a time, and reports each outcome: resumed, still paused (the Resume was
+accepted but the queue stays paused, with its current reason), failed, or not
+started. A run starts no new Resume after two minutes; any session it has not
+reached by then is reported as not started and is left as it was, and running
+the action again resumes it.
+Queues an operator paused by Stop are skipped, and so are sessions whose
+Delete is pending, including a Stop or Delete that comes while the action
+runs; only that session's own Resume lifts the one or cancels the other.
+Paused delegation children are counted but left to their parent sessions. The request body is JSON and names `dryRun`
+explicitly; `sessionIds` limits a run to the sessions it names, which is how
+the Sessions panel resumes only the sessions its preview showed. A browser
+request from another origin is refused. Nothing resumes automatically.
+
 A wake whose own dispatch was held before provider hand-off records
 `durableButNotWoken` as its receipt outcome, and its `notificationState`
 stays `durableButNotWoken`, so the never-woken recovery still covers it.

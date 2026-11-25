@@ -21,6 +21,7 @@ use super::*;
 const COORDINATION_CLI_USAGE: &str = "usage:
   termal federation status [--as-session <id>] [--json] [--base-url <url>]
   termal sessions list [--as-session <id>] [--json] [--base-url <url>]
+  termal sessions resume-paused [--dry-run] [--json] [--base-url <url>]
   termal mailbox list [--as-session <id>] [--json] [--base-url <url>]
   termal mailbox send [--as-session <id>] --to <session-id-or-name>
                       (--message <text> | --message-file <path or ->)
@@ -90,6 +91,12 @@ sessions list lists root sessions. The MCP delegation spawn tool creates
 children, not roots; it is not a CLI subcommand. Create roots through the
 server UI or POST /api/sessions (docs/architecture.md).
 
+sessions resume-paused resumes every paused root session queue on this host,
+except queues an operator paused by Stop, through each session's own Resume.
+--dry-run lists each paused session, its pause reason and what the action
+would do, and resumes nothing. It is the operator's action: an agent runs it
+without --dry-run only when the operator asks.
+
 {COORDINATION_CLI_USAGE}\n\n{TERMAL_MAILBOX_GUIDANCE}\n{TERMAL_MAILBOX_COVERAGE_GUIDANCE}\n{TERMAL_MAILBOX_WAKE_GUIDANCE}"
     )
 }
@@ -149,6 +156,9 @@ pub(crate) enum CoordinationCliCommand {
     },
     SessionsList {
         as_session: Option<String>,
+    },
+    SessionsResumePaused {
+        dry_run: bool,
     },
     MailboxList {
         as_session: String,
@@ -360,11 +370,11 @@ pub(crate) fn parse_coordination_cli_args_with_default_session_id(
             json = true;
             continue;
         }
-        if name == "--no-continuation" {
+        if name == "--no-continuation" || name == "--dry-run" {
             if inline_value.is_some() {
-                return Err(coordination_cli_usage_error(
-                    "`--no-continuation` takes no value",
-                ));
+                return Err(coordination_cli_usage_error(format!(
+                    "`{name}` takes no value"
+                )));
             }
             flags.insert(&name, "true".to_owned())?;
             continue;
@@ -411,6 +421,9 @@ pub(crate) fn parse_coordination_cli_args_with_default_session_id(
                 &mut flags,
                 default_session_id.as_deref(),
             )?,
+        },
+        ("sessions", "resume-paused") => CoordinationCliCommand::SessionsResumePaused {
+            dry_run: flags.values.remove("--dry-run").is_some(),
         },
         ("sessions", "list") => CoordinationCliCommand::SessionsList {
             as_session: take_optional_coordination_cli_session_id(
@@ -676,6 +689,31 @@ pub(crate) fn validate_coordination_cli_output(
             }
             Ok(())
         }
+        CoordinationCliCommand::SessionsResumePaused { .. } => {
+            let sessions = output
+                .get("sessions")
+                .and_then(Value::as_array)
+                .ok_or_else(|| unusable("`sessions` is missing or not an array".to_owned()))?;
+            for (index, session) in sessions.iter().enumerate() {
+                if !matches!(session.get("sessionId"), Some(Value::String(_)))
+                    || !matches!(session.get("action"), Some(Value::String(_)))
+                {
+                    return Err(unusable(format!(
+                        "sessions[{index}] has no sessionId or action"
+                    )));
+                }
+            }
+            if output
+                .get("pausedDelegationSessionsNotShown")
+                .and_then(Value::as_u64)
+                .is_none()
+            {
+                return Err(unusable(
+                    "`pausedDelegationSessionsNotShown` is missing".to_owned(),
+                ));
+            }
+            Ok(())
+        }
         CoordinationCliCommand::SessionsList { .. } => {
             let sessions = output
                 .get("sessions")
@@ -825,6 +863,10 @@ fn execute_coordination_cli_with_test_request(
         CoordinationCliCommand::FederationStatus { as_session } => {
             coordination_cli_authorized_bridge(as_session, base_url)?
                 .tool_federation_status(json!({}))
+        }
+        CoordinationCliCommand::SessionsResumePaused { dry_run } => {
+            coordination_cli_bridge(COORDINATION_CLI_INVENTORY_CALLER_ID, base_url)?
+                .resume_paused_queues(*dry_run)
         }
         CoordinationCliCommand::SessionsList { as_session } => {
             let caller = as_session
@@ -1155,6 +1197,66 @@ pub(crate) fn render_coordination_cli_output(
         }
         CoordinationCliCommand::FederationStatus { .. } => {
             writeln!(out, "{}", serde_json::to_string_pretty(output)?)?;
+        }
+        CoordinationCliCommand::SessionsResumePaused { dry_run } => {
+            let sessions = output
+                .get("sessions")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if sessions.is_empty() {
+                writeln!(out, "no paused root sessions")?;
+            }
+            for session in sessions {
+                let reason = session
+                    .get("queuePauseReason")
+                    .map(|reason| {
+                        let cause = coordination_cli_field(reason, "cause");
+                        match reason.get("failureKind").and_then(Value::as_str) {
+                            Some(kind) => format!("{cause}/{kind}"),
+                            None => cause,
+                        }
+                    })
+                    .unwrap_or_else(|| "-".to_owned());
+                let action = match session.get("skipReason").and_then(Value::as_str) {
+                    Some(skip) => format!("skip ({skip})"),
+                    None if *dry_run => "would resume".to_owned(),
+                    None => match session.get("outcome").and_then(Value::as_str) {
+                        Some("failed") => {
+                            format!("failed: {}", coordination_cli_field(session, "error"))
+                        }
+                        Some("stillPaused") => "still paused".to_owned(),
+                        Some("notStarted") => {
+                            "not started: the run's time budget ran out; run it again".to_owned()
+                        }
+                        Some(outcome) => outcome.to_owned(),
+                        None => "-".to_owned(),
+                    },
+                };
+                let summary = session
+                    .get("queuePauseReason")
+                    .map(|reason| coordination_cli_field(reason, "summary"))
+                    .unwrap_or_else(|| "-".to_owned());
+                writeln!(
+                    out,
+                    "{}\t{}\t{}\t{}\t{}",
+                    coordination_cli_field(session, "sessionId"),
+                    coordination_cli_field(session, "name"),
+                    reason,
+                    action,
+                    summary,
+                )?;
+            }
+            let hidden = output
+                .get("pausedDelegationSessionsNotShown")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            if hidden > 0 {
+                writeln!(
+                    out,
+                    "{hidden} paused delegation session(s) not shown; their parents own them"
+                )?;
+            }
         }
         CoordinationCliCommand::SessionsList { .. } => {
             let sessions = output

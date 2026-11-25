@@ -185,6 +185,7 @@ mod orchestrator;
 mod ordered_publication;
 pub(crate) mod phase_sync;
 mod queue_pause_reason;
+mod queue_resume_all;
 mod read_only_orientation;
 mod review_freeze;
 mod runtime_fixture_processes;

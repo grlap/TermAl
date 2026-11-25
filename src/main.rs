@@ -795,6 +795,7 @@ fn app_router_with_acceptance_policy_limiter(
             "/api/sessions/{id}/queue/resume",
             post(resume_session_queue),
         )
+        .route("/api/queues/resume-paused", post(resume_paused_queues))
         .route("/api/sessions/{id}/stop", post(stop_session))
         .route("/api/sessions/{id}/kill", post(kill_session))
         .route(
@@ -1622,6 +1623,8 @@ mod provider_capacity_retry;
 use provider_capacity_retry::*;
 mod queue_pause_reason;
 use queue_pause_reason::*;
+mod queue_resume_all;
+use queue_resume_all::*;
 mod message_sequence;
 use message_sequence::SharedSequence;
 type MessageSequence = SharedSequence<Message>;

@@ -40,6 +40,31 @@
 
 use super::*;
 
+/// The refusal of a planned Resume after an operator's Stop or Delete came
+/// since.
+pub(crate) const RESUME_FENCED_BY_OPERATOR_STOP: &str = "an operator stopped or deleted this session after the resume was planned; only its own Resume lifts that pause";
+
+/// The operator's Stops a caller saw when it planned a Resume. A Stop since
+/// then wins, and so does a pending Delete: the fenced Resume lifts nothing
+/// and cancels no Delete.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct OperatorStopFence {
+    generation: u64,
+}
+
+impl OperatorStopFence {
+    pub(crate) fn capture(record: &SessionRecord) -> Self {
+        Self {
+            generation: record.operator_stop_generation,
+        }
+    }
+
+    pub(crate) fn matches(self, record: &SessionRecord) -> bool {
+        self.generation == record.operator_stop_generation
+            && !record.engram.observation_delete_requested
+    }
+}
+
 #[cfg(test)]
 pub(crate) const TEST_PHASE_DEADLOCK_GUARD: Duration = Duration::from_secs(60);
 
@@ -476,16 +501,41 @@ impl AppState {
         if self.remote_session_target(session_id)?.is_some() {
             return self.proxy_remote_resume_session_queue(session_id);
         }
-        self.cancel_observation_delete_for_resume(session_id)?;
+        self.resume_local_session_queue_fenced(session_id, None)?;
+        #[cfg(test)]
+        let _snapshot = self.test_api_phase_timer("resume_snapshot", Some(session_id));
+        Ok(self.snapshot())
+    }
+
+    /// The local per-session Resume of `resume_session_queue`, without its
+    /// state snapshot. With `fence`, captured when a caller planned this
+    /// Resume, nothing resumes once an operator's Stop has come since: the
+    /// Human drain holds on it, and the locked queue step refuses with
+    /// `RESUME_FENCED_BY_OPERATOR_STOP`.
+    pub(crate) fn resume_local_session_queue_fenced(
+        &self,
+        session_id: &str,
+        fence: Option<OperatorStopFence>,
+    ) -> std::result::Result<(), ApiError> {
+        let intake = match fence {
+            Some(fence) => Some(self.check_operator_stop_fence(session_id, fence)?),
+            None => None,
+        };
+        // Only a session's own Resume cancels its pending Delete. A fenced
+        // Resume never does: the Human drain holds on a pending Delete, and
+        // the locked queue step below refuses on it.
+        if fence.is_none() {
+            self.cancel_observation_delete_for_resume(session_id)?;
+        }
         self.cancel_provider_capacity_retry(session_id);
         match self
-            .start_human_queued_turn(session_id, true)
+            .start_human_queued_turn_owned(session_id, true, None, intake)
             .map_err(|error| {
                 ApiError::internal(format!("failed to resume human prompt: {error:#}"))
             })? {
             HumanPromptDrain::Started(started) => {
                 deliver_turn_dispatch(self, started.dispatch).into_public_result()?;
-                return Ok(self.snapshot());
+                return Ok(());
             }
             HumanPromptDrain::Held => {
                 let inner = self.inner.lock().expect("state mutex poisoned");
@@ -497,8 +547,7 @@ impl AppState {
                             && queued_head_durability_resume_refusal(record).is_none()
                     })
                 {
-                    drop(inner);
-                    return Ok(self.snapshot());
+                    return Ok(());
                 }
                 let reason = inner.find_visible_session_index(session_id)
                     .and_then(|index| queued_head_durability_resume_refusal(&inner.sessions[index]))
@@ -514,15 +563,33 @@ impl AppState {
             // A historical projected row can leave the manual action without a
             // choice. The ordinary drain still captures its exact runnable head.
             self.resume_local_session_queue_inner_with_selection(
-                session_id, None, None, None, true,
+                session_id, None, None, None, true, fence,
             )?
         };
         if let Some(delivery) = delivery {
             delivery.into_public_result()?;
         }
-        #[cfg(test)]
-        let _snapshot = self.test_api_phase_timer("resume_snapshot", Some(session_id));
-        Ok(self.snapshot())
+        Ok(())
+    }
+
+    /// Refuses a fenced Resume when an operator's Stop came after its fence
+    /// was captured. Otherwise returns the intake that holds the Human drain
+    /// on a Stop that comes later.
+    fn check_operator_stop_fence(
+        &self,
+        session_id: &str,
+        fence: OperatorStopFence,
+    ) -> std::result::Result<HumanIntakeGenerations, ApiError> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_visible_session_index(session_id)
+            .ok_or_else(|| ApiError::not_found("session not found"))?;
+        let record = &inner.sessions[index];
+        if fence.matches(record) {
+            Ok(HumanIntakeGenerations::capture(record))
+        } else {
+            Err(ApiError::conflict(RESUME_FENCED_BY_OPERATOR_STOP))
+        }
     }
 
     /// The local part of `resume_session_queue`, returning how the resumed
@@ -552,6 +619,7 @@ impl AppState {
             capacity_nonce,
             None,
             false,
+            None,
         )
     }
 
@@ -562,6 +630,7 @@ impl AppState {
         capacity_nonce: Option<&str>,
         ordinary_selection: Option<&HumanPromptSelection>,
         explicit_human: bool,
+        operator_stop_fence: Option<OperatorStopFence>,
     ) -> Result<Option<TurnDispatchDeliveryOutcome>, ApiError> {
         let (checked_head, receipted) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
@@ -569,6 +638,12 @@ impl AppState {
                 .find_visible_session_index(session_id)
                 .ok_or_else(|| ApiError::not_found("session not found"))?;
             let record = &inner.sessions[index];
+            // Under the same lock that lifts the pause, cancels a pending
+            // Delete or captures the head: a Stop or Delete that came after
+            // the fence keeps the operator's pause.
+            if operator_stop_fence.is_some_and(|fence| !fence.matches(record)) {
+                return Err(ApiError::conflict(RESUME_FENCED_BY_OPERATOR_STOP));
+            }
             if ordinary_selection.is_some_and(|selection| {
                 record.mutation_stamp != selection.session_mutation_stamp
                     || !selected_ordinary_resume_matches(&inner, record, selection)

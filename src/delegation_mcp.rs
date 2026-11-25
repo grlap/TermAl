@@ -1949,6 +1949,25 @@ impl TermalDelegationMcpBridge {
         }
     }
 
+    /// The operator's resume-paused action, or with `dry_run` its listing.
+    /// Single-attempt: a real run resumes queues, so it is never replayed.
+    /// It waits for the host's run budget, not the ordinary request timeout,
+    /// so the per-session outcomes reach the operator.
+    pub(crate) fn resume_paused_queues(&self, dry_run: bool) -> Result<Value> {
+        let path = "/api/queues/resume-paused";
+        let timeout = RESUME_PAUSED_CALL_TIMEOUT.max(self.request_timeout);
+        self.decode_response_within(
+            "POST",
+            path,
+            timeout,
+            self.client
+                .post(self.url(path))
+                .timeout(timeout)
+                .json(&json!({ "dryRun": dry_run }))
+                .send(),
+        )
+    }
+
     pub(crate) fn tool_list_sessions(&self, _arguments: Value) -> Result<Value> {
         // Peer discovery: resolve a session by name to its id for termal_send_to_session.
         // /api/state is metadata-only (no transcripts), so this is a cheap summary read.

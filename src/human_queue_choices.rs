@@ -219,6 +219,7 @@ impl AppState {
             None,
             Some(&selection),
             true,
+            None,
         )? {
             outcome.into_public_result()?;
         }

@@ -1504,6 +1504,43 @@ export function resumeSessionQueue(sessionId: string, humanChoice?: {
   );
 }
 
+/** Why a session's queue is paused (the host's typed pause reason). */
+export type QueuePauseReason = {
+  cause: string;
+  failureKind?: string;
+  summary?: string;
+  pausedAt: string;
+};
+
+export type ResumePausedQueueRow = {
+  sessionId: string;
+  name: string;
+  queuePauseReason: QueuePauseReason | null;
+  action: "resume" | "skip";
+  skipReason?: "operator_paused" | "delete_pending" | "not_previewed";
+  /** stillPaused: the Resume was accepted, but the queue is still paused
+   * for the reason the row shows. notStarted: the run's time budget ran out
+   * before this session; nothing was done to it. */
+  outcome?: "resumed" | "stillPaused" | "failed" | "notStarted";
+  error?: string;
+};
+
+export type ResumePausedQueuesResponse = {
+  dryRun: boolean;
+  sessions: ResumePausedQueueRow[];
+  pausedDelegationSessionsNotShown: number;
+};
+
+/** Lists (dry run) or resumes every paused local session queue, each
+ * through its own Resume; queues an operator paused by Stop are skipped.
+ * With `sessionIds`, only those sessions may resume. */
+export function resumePausedQueues(dryRun: boolean, sessionIds?: string[]) {
+  return request<ResumePausedQueuesResponse>("/api/queues/resume-paused", {
+    method: "POST",
+    body: JSON.stringify(sessionIds ? { dryRun, sessionIds } : { dryRun }),
+  });
+}
+
 export function fetchReviewDocument(changeSetId: string, scope?: RequestScope) {
   return request<ReviewDocumentResponse>(
     buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}`, scope),

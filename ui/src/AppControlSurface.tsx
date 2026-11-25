@@ -74,6 +74,7 @@ import {
   type SessionWorkingBreakdown,
 } from "./session-list-filter";
 import { sessionWorkActivity } from "./session-work-activity";
+import { ResumePausedSessionsAction } from "./ResumePausedSessionsAction";
 import {
   WorkingSessionsBreakdownDescription,
   WorkingSessionsChipLabel,
@@ -1416,6 +1417,7 @@ export function AppControlSurface({
                   >
                     Error ({controlSurfaceSessionFilterCounts.error})
                   </button>
+                  <ResumePausedSessionsAction />
                 </div>
               </section>
             </section>
