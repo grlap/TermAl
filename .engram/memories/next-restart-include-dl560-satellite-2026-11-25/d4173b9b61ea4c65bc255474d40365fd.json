@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-include-dl560-satellite-2026-11-25",
+    "revision_id": "d4173b9b61ea4c65bc255474d40365fd",
+    "previous": "7cf8d7d2c22b4acfbe79c032c92ab17a",
+    "body_sha256": "87bfcf6ef0b00d6e5afb73817e2cc7ae4bb84f4c1a3512c4d2aa59c6b8997296",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T19:19:29.812624100Z"
+    }
+  },
+  "body": "For the NEXT TermAl restart request to Greg (Fable2, 2026-11-25; revised ~18:24Z with Opus2 #7891): include the DL560 satellite host.\n\nThe facts, repo and product only, with no process checks:\n- DL560's TermAl checkout HEAD is 9c628bd01e0c967c25d49bdc87795a39b1a0459b (2026-11-23, \"w-2422bd1d69b0: rustfmt on six persist files…\"). Its status is clean. It is an ancestor of master, 14 commits behind 0ec823a6.\n- GET /api/test-runs/RUN?view=verification still returns 400.\n- The satellite restarted with Greg's 18:14Z restart, but stayed on that old checkout.\n\nRegistered DL560 runs and the cleanup rule's verification check depend on that host.\n\nIn the next restart request, ask Greg to `git pull` DL560's TermAl checkout to current master and restart it. Verify by federation status (authenticated) plus Greg's or the runner's \"done\" and the checkout HEAD, and ?view=verification returning 200. No process or mtime checks. Remove this note after that restart is verified.\n\nALSO in that next request to Greg, ask for a one-line approval: let Opus2 (the integration owner) delete the stale author-test ref refs/heads/author-test/w-7e4fde53a0e3-28210ca9 (commit 28210ca995242f7851368c79d005dcad073d0e81, pushed 2026-11-21 22:22:39Z by peer-83b788b7b40f663614e8c4db, w-7e4f push note 6556e8e4). w-7e4f is done (seal 54399284), and the pusher's session can't be mapped to a live session. Delete it with an explicit refspec, and record the deletion on w-7e4f."
+}

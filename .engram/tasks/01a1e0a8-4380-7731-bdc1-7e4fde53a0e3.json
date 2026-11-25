@@ -28,12 +28,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Central's causal-completion pull and settlement now name the deciding guard and its release condition on the original request row and its diagnostics surface. They no longer continue silently or show a generic pending.\n\n- Pre-send refusals and deadlines are typed as local route, capacity or local-check reasons, never origin failures. Nothing is sent after the caller's deadline.\n- Settlement steps name their own failure (read, save, completion conflict).\n- Recovery-batch, worker and pending-write failures are counted by stage with closed log classes.\n- One shared ready-plan transition moves pull-phase reasons to admission_pending when a saved settlement will be replayed, and keeps recorded settlement failures.\n\nLanded as 33a0977cab108db695d09d9c4c8b67e4bc34a9a3 on master, a fast-forward from 0ec823a6, pushed by Opus2 at 2026-11-25T19:14:04Z.\n- Review: it adopts the clean R20 Codex and Claude pair through a byte-identical contribution.\n- Landing gate: Linux FULL test-bea97f25 under D'.\n- Acceptance: pre-landing evaluation bab660df, 4/4 pass; post-landing evaluation by delegation-8dba2c20, 4/4 pass.\n- Install: deferred by Opus2 until after Legal's Central cargo slot; Opus2 records its hash on the item.\n\nFollow-ups filed:\n- w-ca22be3aa9b5: sweep rewrites an unchanged reason.\n- w-7994ff4e436f: ready-path saved-settlement test.\n- w-23b44009dbde: launcher orphans after worker loss.",
+    "completed_at": "2026-11-25T19:17:58.907798300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

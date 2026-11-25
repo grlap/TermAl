@@ -17,12 +17,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "cancelled",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
-  "disposal_reason": null,
+  "disposal_reason": "Fixed by the w-7e4fde53a0e3 landing, 33a0977cab108db695d09d9c4c8b67e4bc34a9a3 on master at 2026-11-25T19:14:04Z.\n- save_causal_test_settlement now publishes admission_pending in the same transaction on every incomplete save, unless the row already shows it, so not only on the first save.\n- The behavioural test settlement_failures::a_later_successful_save_replaces_a_recorded_settlement_failure covers the case: a recorded settlement_save_failed, then a successful save with recovery stopped before the worker's outcome write (stop_after_settlement). It asserts reason admission_pending with the saved per-target check admission_protocol_failed.\n- That test passed in the 33a0977c focused run test-370c22fe and in the landing FULL test-bea97f25.",
   "completion": null
 }
