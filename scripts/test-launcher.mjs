@@ -22,6 +22,8 @@ import nodePath, { basename, delimiter, dirname, isAbsolute, join, relative, res
 import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
+import { captureDartReportDigest, focusedDartReportSummary, isDartSdkTest,
+  startDartReport, supportsFocusedDartTest } from "./test-launcher-dart-report.mjs";
 import { captureCommitInputStatus, compareSourceIds, sourceBinaryPath, sourceIdsEqual, sourceIdDifference,
   sourceOwnerPinValid, sourceIdLimitations, encodeRunRecord, encodeTerminalRunResult,
   refuseRunSource } from "./test-launcher-input.mjs";
@@ -121,6 +123,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-launcher.mjs",
   "scripts/test-launcher-source.mjs",
   "scripts/test-launcher-input.mjs",
+  "scripts/test-launcher-dart-report.mjs",
   "scripts/test-launcher-registration-fixtures.mjs",
   "scripts/test-launcher-source-owner-fixture.mjs",
   "scripts/test-launcher-lifecycle-tests.mjs",
@@ -569,16 +572,22 @@ export function missingLiveTests(names, log) {
   return counts && counts.passed + counts.failed === names.length ? [] : [...names];
 }
 
-function executable(command, cwd, env) {
+function executable(command, cwd, env, batch = false) {
   const path = Object.entries(env).find(([key]) => key.toLowerCase() === "path")?.[1] ?? "";
   const bases = /[\\/]/u.test(command) || isAbsolute(command)
     ? [resolve(cwd, command)]
     : path.split(delimiter).filter(Boolean).map((part) => join(part, command));
-  // .cmd/.bat require a shell: callers must name that shell explicitly.
+  // Only the focused Dart SDK route can resolve its native batch shims.
   for (const base of bases) {
-    for (const candidate of process.platform === "win32" ? [base, `${base}.exe`] : [base]) {
+    const candidates = process.platform === "win32"
+      ? batch && basename(command).toLowerCase() === "flutter"
+        ? [`${base}.bat`]
+        : [base, `${base}.exe`, ...(batch ? [`${base}.bat`] : [])]
+      : [base];
+    for (const candidate of candidates) {
       try {
-        if (process.platform === "win32" && !/\.exe$/iu.test(candidate)) continue;
+        if (process.platform === "win32" && !/\.exe$/iu.test(candidate)
+            && !(batch && /\.bat$/iu.test(candidate))) continue;
         if (!statSync(candidate).isFile()) continue;
         accessSync(candidate, process.platform === "win32" ? constants.F_OK : constants.X_OK);
         return candidate;
@@ -1668,9 +1677,10 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         throw new Error("stage must contain a command and string arguments");
       }
       stage.cwd = stageDirectory(request.root, stage.cwd);
+      const dartSdk = stage.name === "focused" && !request.full && isDartSdkTest(stage.command, stage.args);
       stage.command = request.needsCargo && ["fmt", "cargo-check"].includes(stage.name)
         ? cargo
-        : executable(stage.command, stage.cwd, childEnv);
+        : executable(stage.command, stage.cwd, childEnv, dartSdk);
       executables[stage.name] = stage.command;
     }
     const hostBindings = { executables, durationReporterUrl: nodeDurationReporterUrl };
@@ -1754,7 +1764,12 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       // The duration report only adds a machine-readable artifact beside the
       // stage's own output; it never decides the stage's state.
       const report = durationReportPlan(stage, runDir);
-      const args = report ? [...report.prefix, ...stage.args, ...report.suffix] : stage.args;
+      const dartStage = stage.name === "focused" && !request.full && isDartSdkTest(stage.command, stage.args);
+      const dartReport = dartStage && request.input === "commit" &&
+        supportsFocusedDartTest(stage.command, stage.args) ? startDartReport(runDir, stage.args) : undefined;
+      const args = report
+        ? [...report.prefix, ...stage.args, ...report.suffix]
+        : dartReport?.args ?? stage.args;
       const running = { ...entry,
         state: "running",
         started: new Date().toISOString(),
@@ -1762,7 +1777,10 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         cwd: stage.cwd,
         log: join(runDir, `${stage.name}.log`),
       };
-      reserveCommandResult(result, running, "stages", index, runDir, request.sourceId,
+      const reserved = dartReport ? {
+        ...running, dartReportDigest: `sha256:${"0".repeat(64)}`,
+      } : running;
+      reserveCommandResult(result, reserved, "stages", index, runDir, request.sourceId,
         { owned: stage.name === "focused" && !request.full, report });
       const proposed = { ...result, stages: result.stages.map((value, position) => position === index ? running : value) };
       save(resultPath, proposed);
@@ -1770,6 +1788,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       // before this point leaves this unspawned stage unrun.
       Object.assign(entry, running);
       let outcome;
+      let dartReportDigest;
       if (stage.name === "focused" && !request.full) {
         let stopProgress;
         let releaseCommandPhase;
@@ -1778,6 +1797,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
           releaseCommandPhase = commandPhase?.();
           outcome = await runOwnedCommand(stage.command, args, {
             cwd: stage.cwd, env: childEnv, log: entry.log, signal,
+            dartBatch: dartStage && /\.bat$/iu.test(stage.command),
             onOwner: (owner) => { entry.processOwner = owner; save(resultPath, result); },
             onStart: (pid) => {
               entry.pid = pid;
@@ -1799,6 +1819,9 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
               progress?.onWatching?.(pid);
             },
           });
+          if (dartReport && !outcome.error && !outcome.interrupted && !outcome.signal) {
+            dartReportDigest = captureDartReportDigest(dartReport.owned);
+          }
         } finally { stopProgress?.(); releaseCommandPhase?.(); }
         await Promise.all(notices);
       } else {
@@ -1810,11 +1833,12 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         ended: new Date().toISOString(),
         state: outcome.code === 0 && !outcome.error ? "passed" : "failed",
       });
+      if (dartReportDigest) entry.dartReportDigest = dartReportDigest;
       if (entry.error) entry.error = boundedRunError(entry.error, runDir);
       if (report) entry.durations = readDurationReport(report, stage.cwd);
       // A focused run's exit says nothing about how many tests ran; its
       // wrapped runner's own result lines do (scripts/test-counts.mjs).
-      if (stage.name === "focused" && !request.full && existsSync(entry.log)) {
+      if (stage.name === "focused" && !request.full && !dartReport && existsSync(entry.log)) {
         const log = readFileSync(entry.log, "utf8");
         const counts = focusedTestCounts(log);
         if (counts) entry.tests = counts;
@@ -2067,6 +2091,8 @@ export async function summarize(runDir) {
     lines.push(investigation.retryPolicy);
   }
   if (result.error) lines.push(`runner: ${result.error.slice(0, diagnosticLimit)}`);
+  const dartReport = terminal && focusedDartReportSummary(creditRequest, result, runDir);
+  if (dartReport) lines.push(dartReport);
   lines.push(...(result.diskSpace?.warnings ?? []));
   let remaining = 6000;
   // Failure excerpts get first use of the shared budget; earlier successful
