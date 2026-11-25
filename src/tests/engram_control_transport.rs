@@ -1078,6 +1078,7 @@ fn engram_control_process_tree_request(_suffix: &str) -> EngramControlRequest {
 }
 
 pub(super) struct EngramReadyProcess {
+    #[cfg(windows)]
     probe: EngramDescendantProbe,
     // The fixture processes that launched the descendant and named
     // themselves (Windows). They work in the temp root, so teardown waits for
@@ -1234,6 +1235,7 @@ impl EngramDescendantReady {
                 .write_all(&[1])
                 .expect("acknowledge descendant readiness");
             let _ = sender.send(EngramReadyProcess {
+                #[cfg(windows)]
                 probe,
                 #[cfg(windows)]
                 ancestors,

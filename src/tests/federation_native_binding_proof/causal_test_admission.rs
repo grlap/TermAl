@@ -17,7 +17,7 @@ fn source() -> Value {
 
 #[tokio::test]
 async fn large_multi_target_settlement_reopens_and_retries_every_original_operation() {
-    let mut fixture = Fixture::production_shape().await;
+    let fixture = Fixture::production_shape().await;
     let (mut server, handles) = super::causal_test_completion::connect(&fixture).await;
     let (input, transport, scope) = destination_with_targets(
         fixture.central.clone(),
@@ -272,7 +272,7 @@ async fn completion(app: &AppState) -> CausalTestCompletionDelivery {
 
 #[tokio::test]
 async fn supervisor_delivers_original_once_and_settled_receipts_stop_federation_polling() {
-    let mut fixture = Fixture::production_shape().await;
+    let fixture = Fixture::production_shape().await;
     let (mut server, handles) = super::causal_test_completion::connect(&fixture).await;
     let (input, transport, scope) = destination(fixture.central.clone(), &fixture.native);
     let (run, directory, selector) = original(&fixture, "automatic-admission", input).await;
@@ -422,7 +422,7 @@ async fn supervisor_delivers_original_once_and_settled_receipts_stop_federation_
 
 #[tokio::test]
 async fn unknown_write_recovers_same_bytes_after_reopen_and_reordered_newer_delivery() {
-    let mut fixture = Fixture::production_shape().await;
+    let fixture = Fixture::production_shape().await;
     let (mut server, handles) = super::causal_test_completion::connect(&fixture).await;
     let (input, transport, scope) = destination(fixture.central.clone(), &fixture.native);
     let (first_run, first_dir, first) = original(&fixture, "older-original", input.clone()).await;
@@ -546,7 +546,7 @@ async fn unknown_write_recovers_same_bytes_after_reopen_and_reordered_newer_deli
 
 #[tokio::test]
 async fn missing_capability_never_writes_and_recorded_uncredited_reasons_are_final() {
-    let mut fixture = Fixture::production_shape().await;
+    let fixture = Fixture::production_shape().await;
     let (mut server, handles) = super::causal_test_completion::connect(&fixture).await;
     let (input, transport, scope) = destination(fixture.central.clone(), &fixture.native);
     for (index, reason) in [

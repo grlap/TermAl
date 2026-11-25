@@ -3,6 +3,7 @@
 
 use super::*;
 pub(crate) enum EngramObservationSourceRefusal {
+    #[cfg(test)]
     Legacy(SourceBasisRefusal),
     OwnerUnavailable,
 }

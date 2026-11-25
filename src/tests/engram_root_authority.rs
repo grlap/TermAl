@@ -111,7 +111,7 @@ fn source_root_authority_read_separates_root_owner_from_current_service_ownershi
                 Some(&target.runtime_snapshot),
             );
         let result_kind = match &result {
-            Ok(EngramRootReconcileOutcome::Confirmed { .. }) => "confirmed",
+            Ok(EngramRootReconcileOutcome::Confirmed) => "confirmed",
             Ok(EngramRootReconcileOutcome::NoClaim) => "no claim",
             Ok(EngramRootReconcileOutcome::EvidenceWithheld { .. }) => "evidence withheld",
             Err(EngramRootReconcileFailure::AdmissionInvalid(_)) => "admission invalid",
@@ -141,7 +141,7 @@ fn source_root_authority_read_separates_root_owner_from_current_service_ownershi
                 "{mode}: stale service authority must reject the read: {result_kind}"
             ),
             "historical-routing" | "historical-queue" | "turn" => assert!(
-                matches!(result, Ok(EngramRootReconcileOutcome::Confirmed { .. })),
+                matches!(result, Ok(EngramRootReconcileOutcome::Confirmed)),
                 "{mode}: current authority must still publish: {result_kind}"
             ),
             _ => unreachable!(),

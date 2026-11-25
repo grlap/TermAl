@@ -14,6 +14,7 @@ pub(crate) struct CausalTestCompletionPlan {
 }
 
 impl MailboxStore {
+    #[cfg(test)]
     pub(crate) fn causal_test_completion_plans(&self) -> Result<Vec<CausalTestCompletionPlan>> {
         self.causal_test_completion_plans_without(CAUSAL_COMPLETION_BATCH, &BTreeSet::new())
     }
@@ -220,6 +221,7 @@ impl AppState {
 
     // The joined supervisor supplies the admission sink. Original frozen
     // pending operations recover without another origin read or live claim.
+    #[cfg(test)]
     pub(crate) async fn read_causal_test_completion_batch(
         &self,
     ) -> Result<Vec<CausalTestCompletionDelivery>, ApiError> {

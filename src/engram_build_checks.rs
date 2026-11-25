@@ -81,7 +81,10 @@ pub(crate) enum EngramBuildRejection {
     Path,
     Argv,
     Terminal,
-    Interval(&'static str),
+    Interval {
+        #[cfg(test)]
+        comparison: &'static str,
+    },
     Input,
     Association,
     Compound,
@@ -91,6 +94,13 @@ pub(crate) enum EngramBuildRejection {
 }
 
 impl EngramBuildRejection {
+    fn interval(_comparison: &'static str) -> Self {
+        Self::Interval {
+            #[cfg(test)]
+            comparison: _comparison,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -101,7 +111,7 @@ impl EngramBuildRejection {
             Self::Path => "path",
             Self::Argv => "argv",
             Self::Terminal => "terminal",
-            Self::Interval(_) => "interval",
+            Self::Interval { .. } => "interval",
             Self::Input => "input",
             Self::Association => "association",
             Self::Compound => "compound command",
@@ -130,8 +140,11 @@ pub(crate) fn engram_pipe_rejection(check: &EngramCheckCommand) -> EngramBuildRe
 #[derive(Clone, Debug)]
 pub(crate) struct EngramBuildDiagnostic {
     /// The check kind the summary names: `Build` or `Test`.
+    #[cfg(test)]
     pub(crate) subject: &'static str,
+    #[cfg(test)]
     observed_exit: Option<i64>,
+    #[cfg(test)]
     pub(crate) rejection: EngramBuildRejection,
 }
 
@@ -153,17 +166,20 @@ impl EngramBuildDiagnostic {
     }
 
     pub(crate) fn observed(
-        subject: &'static str,
-        exit: EngramCommandExit,
-        rejection: EngramBuildRejection,
+        _subject: &'static str,
+        _exit: EngramCommandExit,
+        _rejection: EngramBuildRejection,
     ) -> Self {
         Self {
-            subject,
-            observed_exit: match exit {
+            #[cfg(test)]
+            subject: _subject,
+            #[cfg(test)]
+            observed_exit: match _exit {
                 EngramCommandExit::Code(code) => Some(code),
                 _ => None,
             },
-            rejection,
+            #[cfg(test)]
+            rejection: _rejection,
         }
     }
 
@@ -176,7 +192,7 @@ impl EngramBuildDiagnostic {
         // Put the discriminating facts before the untrusted command text so
         // neither can be lost to the existing UTF-8 summary budget.
         let detail = match self.rejection {
-            EngramBuildRejection::Interval(comparison) => format!(" ({comparison})"),
+            EngramBuildRejection::Interval { comparison } => format!(" ({comparison})"),
             _ => String::new(),
         };
         let prefix = format!(
@@ -440,10 +456,10 @@ pub(crate) fn engram_validated_focused_stage_result(
     let time = |value: &Value, key: &str, invalid: &'static str| {
         text(value, key)
             .and_then(|text| engram_parse_time(&text))
-            .ok_or(Rejected::Interval(invalid))
+            .ok_or(Rejected::interval(invalid))
     };
     let observed_start =
-        engram_parse_time(&check.started_at).ok_or(Rejected::Interval("invalid observed_start"))?;
+        engram_parse_time(&check.started_at).ok_or(Rejected::interval("invalid observed_start"))?;
     let requested_start = time(&request, "started", "invalid request.started")?;
     let started = time(stage, "started", "invalid stage.started")?;
     let ended = time(stage, "ended", "invalid stage.ended")?;
@@ -456,7 +472,7 @@ pub(crate) fn engram_validated_focused_stage_result(
         .checked_sub_signed(chrono::Duration::seconds(
             ENGRAM_CARRIED_LAUNCH_SLACK_SECONDS,
         ))
-        .ok_or(Rejected::Interval("invalid observed_start window"))?;
+        .ok_or(Rejected::interval("invalid observed_start window"))?;
     let failed_comparison = if requested_start < earliest_start {
         Some("request.started < observed_start - 10s")
     } else if requested_start < observed_start && run_ended < observed_start {
@@ -475,7 +491,7 @@ pub(crate) fn engram_validated_focused_stage_result(
         None
     };
     if let Some(comparison) = failed_comparison {
-        return Err(Rejected::Interval(comparison));
+        return Err(Rejected::interval(comparison));
     }
     if !test_run_source_input_matches(&request, &results) {
         return Err(Rejected::Input);

@@ -151,11 +151,6 @@ impl TurnDispatchDeliveryOutcome {
     }
 
     #[cfg(test)]
-    pub(crate) fn unwrap_err(self) -> ApiError {
-        self.into_public_result().unwrap_err()
-    }
-
-    #[cfg(test)]
     pub(crate) fn is_err(&self) -> bool {
         matches!(self, Self::Held { error: Some(_) } | Self::Rejected(_))
     }

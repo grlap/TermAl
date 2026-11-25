@@ -140,7 +140,6 @@ enum Citation {
 struct ActualCheck {
     run_id: String,
     directory: PathBuf,
-    request: Value,
     results: Value,
     output: String,
     exit: i32,
@@ -396,7 +395,6 @@ impl Matrix {
         ActualCheck {
             run_id: request["runId"].as_str().unwrap().to_owned(),
             directory,
-            request,
             results,
             output: text,
             exit: output.status.code().expect("native launcher exit"),

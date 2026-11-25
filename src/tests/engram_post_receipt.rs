@@ -532,6 +532,7 @@ async fn successful_public_stop_never_retires_a_replacement_for_its_orchestrator
     let state = turn.state.clone();
     let session = turn.session.clone();
     let root_rx = &turn.receiver;
+    // Keep the prepared dispatch's sender alive without delivering it.
     let dispatch = prepare_ordinary_owned_head(&turn);
     {
         let mut inner = state.inner.lock().unwrap();
@@ -587,6 +588,7 @@ async fn successful_public_stop_never_retires_a_replacement_for_its_orchestrator
     .expect("successful Stop should settle without consuming a replacement owner");
     assert!(root_rx.try_recv().is_err());
     turn.assert_no_control();
+    drop(dispatch);
 }
 
 /// A successful ordinary Stop whose drain meets a pending receipted
