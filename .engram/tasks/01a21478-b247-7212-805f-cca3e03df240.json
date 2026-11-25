@@ -1,0 +1,29 @@
+{
+  "id": "01a21478-b247-7212-805f-cca3e03df240",
+  "external_ref": null,
+  "title": "Align docs after the diff-review conversations removal: stale review-comment wording, and restore the host-write inventory",
+  "outcome": "The docs no longer describe manual review comments or replies as current or planned, and the historical host-write inventory in host-architecture.md is accurate again for the commit it cites.",
+  "acceptance": [
+    "docs/features/markdown-document-view.md no longer says the Changes view shows review comments, and docs/roadmap.md no longer lists saved review comments, agent review replies or mobile review comments as deliverables or scope; diff-review-workflow.md's acceptance criteria are labelled historical or dropped.",
+    "The host-architecture.md case study that inventories commit 28e9ed5's host-write call sites again lists api_review.rs (2) with its original totals, noting that those sites were later removed with the feature, so the inventory matches the commit it names.",
+    "The doc link check passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
