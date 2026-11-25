@@ -1,0 +1,24 @@
+{
+  "id": "01a211fc-c8bd-7d20-842d-9ae0ca2b44c5",
+  "external_ref": null,
+  "title": "Global Sessions-search shortcut moves focus behind the open Resume paused dialog",
+  "outcome": "While the \"Resume paused sessions\" modal is open, app-level keyboard shortcuts such as Ctrl/Cmd+Shift+F (focus Sessions search) do not move focus to controls behind the modal, and Tab and Shift+Tab stay inside it.",
+  "acceptance": [
+    "Global Sessions-search shortcut moves focus behind the open Resume paused dialog is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a21213-d8b7-7310-a684-9af71c33db81",
+  "external_ref": null,
+  "title": "Cover focused launcher notices for Flutter and Dart forms",
+  "outcome": "Exercise host notice selection for supported and unsupported focused Flutter or Dart launcher arguments.",
+  "acceptance": [
+    "A supported reporter command suppresses the unsupported focused notice, and a rejected variant produces it."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

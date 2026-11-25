@@ -1,0 +1,24 @@
+{
+  "id": "01a21245-d1d5-77e3-9fa1-cf02d8341021",
+  "external_ref": null,
+  "title": "Authenticated relay RPC reports a pre-send local authority refusal as origin_read_failed",
+  "outcome": "When local authority changes after the relay wrapper's lease check but before the authenticated RPC sends (for example, a durability hold begins, or a lease or incarnation check fails), the causal-completion pull records the typed relay authority reason, not origin_read_failed, while the existing ApiError is kept.",
+  "acceptance": [
+    "Authenticated relay RPC reports a pre-send local authority refusal as origin_read_failed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

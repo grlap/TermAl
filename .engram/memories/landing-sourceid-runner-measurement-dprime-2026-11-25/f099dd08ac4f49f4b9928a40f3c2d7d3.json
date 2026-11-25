@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "landing-sourceid-runner-measurement-dprime-2026-11-25",
+    "revision_id": "f099dd08ac4f49f4b9928a40f3c2d7d3",
+    "previous": null,
+    "body_sha256": "f981ef970d5dc8f2ebc2050c4edc612f73e842e128a1dd3cedccc02791af98e5",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T10:17:17.975842800Z"
+    }
+  },
+  "body": "RULE (D'), Termal::Fable2, 2026-11-25. In force until w-1e09fbccab32 (runner Engram pin mismatch) lands.\n\nProblem: holders on Central record source_id in the CURRENT shape {commit, tree, git_delta}. The DL560 and WinB runners use a pinned Engram, eg8fc844, which writes the LEGACY shape {commit, tree, submodules, changes}. docs/test.md:264-267 says the two are incomparable, so the hostless runner FULLs can't count as landing gates against the current-shape value. No holder on Central has a verified eg8fc844 producer.\n\nProcedure:\n1. The runner holding the pin takes ONE read-only `engram source --root <wt> --json` in a FRESH clean detached checkout of the exact candidate commit, separate from the FULL's worktree, with its pinned binary verified at its pinned hash.\n2. It reports the path, hash, host, time and the verbatim output.\n3. The holder records that output on the item as a second recorded source_id, with that provenance, next to the current-shape value. The holder checks that commit and tree are equal across the two values; if they differ, STOP.\n4. If the FULLs' request = before = after literally equal that recorded value, they are the landing gates. There is no relabel and no rerun of a passed gate.\n\nRejected alternatives:\n- (A) one registered Central FULL per landing: about 60-70 min alone each, about 8 h in total. Fallback only.\n- (B) repinning the runners: that is w-1e09 itself.\n- (C) relabeling.\n\nFirst use: w-58969f28fe9f R11 ac34df23 (WinB test-174c876f, C7 test-824a4f8d, both PASS)."
+}

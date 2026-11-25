@@ -1,0 +1,30 @@
+{
+  "id": "01a21213-d86d-7543-9694-e74249f6bf33",
+  "external_ref": null,
+  "title": "Test Windows Dart SDK batch refusal of shell metacharacters",
+  "outcome": "Add behavior coverage for the Windows Dart/Flutter batch transport's argument or SDK path guard using the launcher SDK fixture.",
+  "acceptance": [
+    "A focused committed fixture with a shell-sensitive batch argument is refused; the SDK fixture does not start or publish a report."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

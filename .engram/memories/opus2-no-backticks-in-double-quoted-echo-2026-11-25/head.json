@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-no-backticks-in-double-quoted-echo-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d57deb449d48446e9ef2090da514a2a0"
+    ]
+  }
+}

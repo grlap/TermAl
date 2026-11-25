@@ -1,0 +1,30 @@
+{
+  "id": "01a21213-d812-70b3-8f55-5d2a1c4cb914",
+  "external_ref": null,
+  "title": "Cover failed Dart launcher receipts with realistic eligibility",
+  "outcome": "Verify clean failed focused Dart launcher runs remain readable as a settled failed receipt and supply no eligible closing baseline. The test fixture currently inherits eligible=true from commit_results(), unlike the launcher on failure.",
+  "acceptance": [
+    "A failed Dart launcher fixture persists input.eligible=false, and its settled receipt is read back as Failed while the closing baseline is ineligible."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

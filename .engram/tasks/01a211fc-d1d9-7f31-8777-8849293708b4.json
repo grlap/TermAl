@@ -1,0 +1,24 @@
+{
+  "id": "01a211fc-d1d9-7f31-8777-8849293708b4",
+  "external_ref": null,
+  "title": "Resume paused dialog's running message should say the bulk run continues after Close",
+  "outcome": "While a bulk Resume runs, the dialog tells the operator that closing it does not stop the run: the host goes on resuming the remaining sessions, and the outcomes can be seen afterwards with a fresh preview.",
+  "acceptance": [
+    "Resume paused dialog's running message should say the bulk run continues after Close is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

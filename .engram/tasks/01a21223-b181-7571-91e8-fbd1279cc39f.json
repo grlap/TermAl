@@ -1,0 +1,24 @@
+{
+  "id": "01a21223-b181-7571-91e8-fbd1279cc39f",
+  "external_ref": null,
+  "title": "Causal completion recovery still collapses batch and settlement failures into generic reasons",
+  "outcome": "When the causal-completion recovery worker's batch read fails, or a settlement's read, validation or publication fails, the original row (or a bounded worker diagnostic, when no row can be identified) names a typed stage for that failure instead of the generic pending_read_failed log line or the AdmissionFailed reason.",
+  "acceptance": [
+    "Causal completion recovery still collapses batch and settlement failures into generic reasons is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

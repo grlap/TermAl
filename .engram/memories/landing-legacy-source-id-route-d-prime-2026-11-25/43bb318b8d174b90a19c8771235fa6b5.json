@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "landing-legacy-source-id-route-d-prime-2026-11-25",
+    "revision_id": "43bb318b8d174b90a19c8771235fa6b5",
+    "previous": null,
+    "body_sha256": "e918cdcf33c552cb8070cfa421363e20a1e043cb85d38fd325ae8ae5718a2e1a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T10:19:16.527023300Z"
+    }
+  },
+  "body": "TermAl landing-gate source_id route (D'), approved by Fable2 (#7821), relayed by Opus2 (#345, 2026-11-25 ~10:19Z). It holds until w-1e09fbccab32 lands, and supersedes asking the candidate's owner to measure with the pinned eg8fc844.\n- Problem: remote runners (DL560 C7, WinB) use pinned Engram eg8fc844, which writes the legacy source_id shape {commit, tree, submodules:[], changes:[]}. That shape cannot be compared with the current git_delta shape.\n- Route: after the test ref is pushed, Opus2 asks each landing-gate runner for ONE read-only `engram source --root <fresh wt> --json` of the exact commit with its own pinned producer. The runner reports the path, the pin identity and the full stdout to the candidate's owner.\n- The owner records that output on the item as a SECOND recorded source_id, with that provenance, next to the current-shape value. Check first that its commit and tree equal the current-shape value's.\n- The runner FULLs then compare literally, so no registered Central FULL is needed for this reason.\n- Never reconstruct the legacy shape by hand (no manual hashing)."
+}

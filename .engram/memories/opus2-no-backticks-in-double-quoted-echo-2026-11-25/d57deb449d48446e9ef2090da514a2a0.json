@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-backticks-in-double-quoted-echo-2026-11-25",
+    "revision_id": "d57deb449d48446e9ef2090da514a2a0",
+    "previous": null,
+    "body_sha256": "028039255cd04b076b5d68ffca9d725d6debc4b6bd3589c993ae785573f7b083",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T10:19:57.367298900Z"
+    }
+  },
+  "body": "Termal::Opus2 own slip (2026-11-25, twice). In Bash, message text written with echo \"...\" that contains `backticks` EXECUTES the quoted text as a command: once \"full\" (not found), and once a real read-only \"engram source --root\" with no root on Central (it errored, harmless). The mailbox message then went out with a gap where the command should be. Rule: write every message file with a quoted heredoc (cat > file <<'EOF' ... EOF), never echo \"...\" with backticks; inside double quotes, write commands in plain quotes instead."
+}

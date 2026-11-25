@@ -1,0 +1,29 @@
+{
+  "id": "01a2121d-6cdc-7332-9221-fb19467f7f33",
+  "external_ref": null,
+  "title": "Narrow the relay phase trace's visibility: private elapsed_ms and snapshot alias; install as the only way to make the scope guard",
+  "outcome": "The relay phase trace in src/mailbox_relay_errors.rs exposes only what other modules use: MailboxRelayPhaseElapsed.elapsed_ms is private, the MailboxRelayPhaseSnapshot alias is not wider than its signatures need, and MailboxRelayPhaseScope can only be obtained through install, so no other module can construct and drop one to clear the thread-local trace without a matching install.",
+  "acceptance": [
+    "MailboxRelayPhaseElapsed.elapsed_ms is not visible outside src/mailbox_relay_errors.rs, and the MailboxRelayPhaseSnapshot alias is no wider than the visibility its signatures require.",
+    "MailboxRelayPhaseScope keeps its type visible but cannot be constructed outside its module except through MailboxRelayPhaseScope::install, so dropping a guard always follows a matching install.",
+    "Behaviour is unchanged: the relay phase trace, its expiry line and the home failure record are as before, and the existing relay tests pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "review-low",
+    "visibility"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

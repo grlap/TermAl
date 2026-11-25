@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed. Candidate c62 e7a38b869c54ab071ef9d2c09c235ca7a2e98d4c (tree a0ea4c31, base 082fb430) is now master; Opus2 pushed it at 08:46:09Z and verified it with ls-remote (landing note 65d62888), and I confirmed origin/master = e7a38b86. Independent evaluation 012cada8 passed both criteria at revision 13. A settled verification record now reaches the requesting session's next turn and resumes run waits naming the record. The limits are tracked as w-d73a959467a1, w-a6eefa5cc561, w-3c1dd299f0f6 and w-26621b52632d.",
+    "completed_at": "2026-11-25T08:48:32.384441200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

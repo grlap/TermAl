@@ -1,0 +1,30 @@
+{
+  "id": "01a2123f-b1ec-7952-8296-4b3c53214c54",
+  "external_ref": null,
+  "title": "Cover owned Dart reports across settled SourceId receipt readback",
+  "outcome": "Exercise the already acknowledged source-based verification receipt path after the owned Dart reporter image changes. This is distinct from the failed-stage eligibility fixture.",
+  "acceptance": [
+    "Build and acknowledge a passing Dart receipt, then verify it reads back while the owned report remains unchanged, even with a different worktree report. Replacing the owned report makes the acknowledged receipt fail body readback."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a211fc-db9a-74b1-ac78-7cc13f40afb5",
+  "external_ref": null,
+  "title": "CLI help and api.ts comment for resume-paused omit the Delete-pending skip",
+  "outcome": "The `termal sessions resume-paused` help text in src/coordination_cli.rs and the resumePausedQueues doc comment in ui/src/api.ts say that sessions whose Delete is pending are skipped as well as Stop-paused ones, matching docs/architecture.md and docs/features/agent-mailboxes.md.",
+  "acceptance": [
+    "CLI help and api.ts comment for resume-paused omit the Delete-pending skip is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
