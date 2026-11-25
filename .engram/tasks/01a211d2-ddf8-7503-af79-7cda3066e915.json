@@ -1,0 +1,26 @@
+{
+  "id": "01a211d2-ddf8-7503-af79-7cda3066e915",
+  "external_ref": null,
+  "title": "Check the original naming entry and full registration after rejected-run recovery",
+  "outcome": "Strengthen the preserved-name recovery regression beyond the current named-root, work-binding and rejection checks.",
+  "acceptance": [
+    "After an admitted old-fence run, verify that the owner naming path, generation and fence stay at their captured values, the evaluator uses that path and generation, and the original registration snapshot and frozen verification body bytes are unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

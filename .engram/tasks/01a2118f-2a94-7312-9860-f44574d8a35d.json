@@ -1,0 +1,26 @@
+{
+  "id": "01a2118f-2a94-7312-9860-f44574d8a35d",
+  "external_ref": null,
+  "title": "Measure repeated owner source observations for rejected-check acceptance",
+  "outcome": "Measure the cost of the existing preliminary and fresh source capture passes during explicit rejected-check admission and look for redundant capture work within the evidence budget.",
+  "acceptance": [
+    "Record capture count and timing for a rejected disclosure. Any reduction preserves the clean source observations before noting and after the evidence refresh, the registration witnesses and the evaluator's independent source capture."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

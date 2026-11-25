@@ -1,0 +1,29 @@
+{
+  "id": "01a211db-b063-7bf1-93e6-26621b52632d",
+  "external_ref": null,
+  "title": "A federation run wait (a run on another host) never names the origin's settled verification record",
+  "outcome": "Scoped out of w-56f386fdd7d3 as its fourth limit, by Termal::Fable2 on 2026-11-25 (Opus3 03723eab #6155, after evaluation 86ec2de4 of c62 on criterion revision 12).\n\nFacts, on base 082fb430, which predate w-56f3:\n- A run wait on a run of another host (label.remote) resumes with the origin host's native verdict.\n- remote_test_run_wait_section prints \"Credit: uncredited (producer_unsupported: remote_verification_record_v1 destination admission is unavailable)\" and names no verification record.\n- The fixture's origin settles its registered record, but the destination's resume carries only the native verdict (src/test_run_remote_waits.rs:224-247; src/tests/federation_native_binding_proof/remote_test_waits.rs:12-90, :88, :387).\n- The record's settlement reaches the run owner's next turn on the origin host.\n\nWanted: a waiter on another host is told the origin's settled verification record, by id and outcome, once that record settles. This needs destination admission of remote verification records, related to w-48c4a207f226 (K3: automatic qualified remote-run read and tree-bound admission).",
+  "acceptance": [
+    "A federation run wait (a run on another host) never names the origin's settled verification record is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "federation",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

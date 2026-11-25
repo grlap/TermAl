@@ -1,0 +1,24 @@
+{
+  "id": "01a2115f-b4f6-78e3-a3d8-28c947a53f78",
+  "external_ref": null,
+  "title": "Resume paused sessions dialog is marked aria-modal but has no focus trap or backdrop",
+  "outcome": "The \"Resume paused sessions\" dialog behaves as a modal: focus moves into it and stays there while it is open, Escape closes it, and the page behind it cannot be used, so its aria-modal claim is true.",
+  "acceptance": [
+    "Resume paused sessions dialog is marked aria-modal but has no focus trap or backdrop is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

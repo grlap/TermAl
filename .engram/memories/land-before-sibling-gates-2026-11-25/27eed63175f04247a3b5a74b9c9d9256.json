@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "land-before-sibling-gates-2026-11-25",
+    "revision_id": "27eed63175f04247a3b5a74b9c9d9256",
+    "previous": null,
+    "body_sha256": "681c8c65724542bcc5cda86e13854e9a183a7e4666655d13c381dfd3a3f1e8d4",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T05:23:59.872940700Z"
+    }
+  },
+  "body": "Scheduler rule (Termal::Opus2, 2026-11-25, after a repeat of the miss Fable2 #7755 warned about). At 05:20:15Z I pushed w-fb2a's test ref and launched its Windows landing FULL (on parent 3e614e82). At 05:21:26Z I landed w-b63e, which made fb2a's gates evidence-only, so a ~50-min Windows FULL was wasted.\nRule:\n- Before pushing a test ref or launching a landing FULL for candidate X, check for any OTHER candidate Y whose landing is imminent: acceptance running or passed, or both gates green.\n- If Y lands within ~30 min, land Y FIRST, then have X recut on the new master. Or hold X's gates until Y has landed.\n- Announce each landing to every owner with a candidate on the old parent BEFORE their gates start."
+}

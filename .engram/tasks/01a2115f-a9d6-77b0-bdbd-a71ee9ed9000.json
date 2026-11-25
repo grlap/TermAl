@@ -1,0 +1,24 @@
+{
+  "id": "01a2115f-a9d6-77b0-bdbd-a71ee9ed9000",
+  "external_ref": null,
+  "title": "CLI `sessions resume-paused` real run uses the 30 s bridge request timeout",
+  "outcome": "A real `termal sessions resume-paused` run over many paused sessions is not cut off by the bridge's ordinary 30 s request timeout. The CLI waits for the host's report instead of reporting a transport timeout while the action continues on the host.",
+  "acceptance": [
+    "CLI `sessions resume-paused` real run uses the 30 s bridge request timeout is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

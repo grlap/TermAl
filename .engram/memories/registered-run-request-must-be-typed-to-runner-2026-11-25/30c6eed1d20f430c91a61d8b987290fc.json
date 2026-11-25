@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "registered-run-request-must-be-typed-to-runner-2026-11-25",
+    "revision_id": "30c6eed1d20f430c91a61d8b987290fc",
+    "previous": "db2f240f5b8f408bb11d5c6e13dd15a4",
+    "body_sha256": "cb0f033cd0509519e32359804e3686cccd48bdaf43e5b5a410a72bd0120fb6bb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T06:32:46.542523500Z"
+    }
+  },
+  "body": "A registered launcher run selected with --request-message-id needs an original native message that (1) the LAUNCHING session received as its recipient, and (2) carries a TYPED testRequest. Send that testRequest with CLI `mailbox send --test-request-json '{\"mode\":\"full\",\"targets\":[{\"workRef\":\"w-…\",\"use\":{\"kind\":\"committed_input\",\"expected_commit\":\"<commit40>\",\"purpose\":\"landing_gate\"}}]}'`, or as the MCP send's testRequest object (docs/features/agent-mailboxes.md). Plain prose naming mode and commit is not a request. The runner's own outbound message (e.g. its READY to the scheduler) is refused with 409 \"selected test request belongs to another native recipient or sender\" (2026-11-25, Merger bfa9d8ac test-d900f09a, refused before any stage). Scheduler practice: fold the typed request into the LAUNCH NOW message under a new idempotency key, while the holder's claims are live (the host captures them at send), then give the runner that message id. A run refused at admission ran no stage and is not a gate result, so a corrected launch is not a rerun of a passed gate.\n\nAssociation is captured AT SEND: each typed target needs the RECIPIENT to hold a current claim on that workRef, with a unique named source root for it, named after the claim (naming takes effect at the next turn). Otherwise every target carries uncreditedReason \"association_stale: target has no unique current held claim and named root\", and the run earns no credit. Before handing over the id, read the sent message back with `mailbox read-message --message-id ID --json` and check that no target has an uncreditedReason. Get the runner's \"association ready\" first (2026-11-25, Merger 93013530 and 574d9a08 were both stale)."
+}

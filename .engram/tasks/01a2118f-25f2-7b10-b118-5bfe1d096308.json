@@ -1,0 +1,26 @@
+{
+  "id": "01a2118f-25f2-7b10-b118-5bfe1d096308",
+  "external_ref": null,
+  "title": "Identify the evaluated source in a historical rejected-check disclosure",
+  "outcome": "Clarify which source a rejected-check disclosure describes when the historical record attested a clean commit without a complete SourceId.",
+  "acceptance": [
+    "A disclosure for a historical Commit-format refusal clearly identifies the independently measured evaluated source and the historical input format. A behavior test verifies the original refused record and context-only scope are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "acceptance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

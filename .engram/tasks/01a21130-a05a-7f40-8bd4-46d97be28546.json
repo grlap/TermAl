@@ -1,0 +1,31 @@
+{
+  "id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "external_ref": null,
+  "title": "Standard test launcher: classify `flutter test` / `dart test` focused runs as Test, so they need no native route",
+  "outcome": "Requested by Greg (\"Greg wants the standard launcher\"), relayed by Engram::Asistant in TermAl mailbox 588693a8 #2698 (2026-11-25 ~05:31Z) from MacOS::ComovoOpus2. Related Comovo item: w-00fd88c6b1a9.\n\nThe registration problem itself is solved: fit_friends w-a12f1b68eac8 passed 2251 tests on the declared native route and is done. What remains is that a focused launcher run of `flutter test` gets `unclassified_stages`. Per docs/test.md:1360-1365, registered verification classifies focused stages only from recognised runner argv. Recognised today are cargo, Node/TAP, direct-Node and npx Vitest, and the doc-link Lint check. Flutter and Dart test commands have no launcher classification, so they can earn credit only on the declared native route.\n\nWanted: the standard launcher's focused stage recognises a defined set of `flutter test` and `dart test` argv forms as Test, the same way the direct-Node Vitest form is recognised (docs/test.md:414-439), and records the stage through the existing committed-input verification.\n\nConstraints:\n- Classify only explicitly listed forms: the runner, `test`, file or directory filters, and listed options. Watch modes, unknown options, shell wrappers and renamed binaries stay unclassified.\n- The existing rule stays: a generic launcher registration cannot adopt a declaration or a later artifact as its evidence (docs/test.md:1362-1365).\n- Windows, macOS and Linux runner resolution, including flutter.bat on Windows, is in scope.",
+  "acceptance": [
+    "A registered focused launcher run `node scripts/test-launcher.mjs focused --input commit -- flutter test … --file-reporter json:<path>` or `… -- dart test … --file-reporter json:<path>`, in a recognised argv form listed in docs/test.md, is recorded as a Test stage through the existing committed-input verification, and its PASS, FAIL or UNKNOWN is judged from that run's own Dart JSON reporter artifact by the existing Dart reader with the declared route's outcome rules (exit code alone never passes). Behaviour tests cover a passing, a failing and a truncated or all-skipped run of each runner, the platform form of the executable (including flutter.bat on Windows), and that a form without the JSON file reporter, an unlisted option, a watch mode or a shell wrapper stays unclassified.",
+    "docs/test.md lists the recognised Flutter and Dart argv forms beside the Vitest forms, states how this launcher route's assurance compares with the declared route (same reader and outcome rules; the artifact is the launcher run's own), and states that a generic launcher registration still cannot adopt a declaration or a later artifact as its evidence.",
+    "After the fix is landed and running on the Mac host (installed and restarted), MacOS::ComovoOpus2 (host:abf8bda6-1ac7-485c-91ce-5a06ac453653::session-6232) is sent one message naming the landing commit, the running build, the recognised `flutter test` and `dart test` argv forms, and the exact command to use from Comovo; the message's id is recorded on this item."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

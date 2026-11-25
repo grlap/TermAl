@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Every queue pause now records a typed reason with its time:\n- a failed or exited mailbox turn;\n- provider capacity;\n- a Stop, through master's pause_queue_for_operator_stop helper;\n- an unresolved Codex terminal;\n- a source-observation hold;\n- a failed human start;\n- a failed runtime reset or cleanup;\n- a failed save.\n\nWhat a failed turn's reason carries:\n- A bounded failure kind, taken only from typed provider signals: Claude's API status or Codex's codexErrorInfo.\n- A one-line summary under an allowlist rule: plain-prose words are kept up to the first non-plain word or credential label, then the rest becomes [redacted]. The summary is bounded to 120 characters, is computed before the state lock, and has a stated best-effort residual.\n\nWhere the reason shows:\n- It persists with the paused state and clears when the pause lifts.\n- termal_list_sessions shows queuePaused and queuePauseReason for local sessions.\n- The exact read's current status carries recipientQueuePause for local and same-host domain messages.\n- Strict StateSessionSummary rows are unchanged; the reasons travel in a StateResponse side map.\n\nCross-host propagation is out of scope, tracked as w-97d616820a66. Criterion 1, the cause of the 2026-11-23 stall, is recorded on the item.\n\nLanded as 082fb430 on master. Review pair R13-1 was clean. Landing FULLs passed on Linux (test-4ee47b80) and Windows (test-e05a689a). The independent acceptance evaluation (delegation-2358d1ea) passed both criteria.",
+    "completed_at": "2026-11-25T05:23:04.113610700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

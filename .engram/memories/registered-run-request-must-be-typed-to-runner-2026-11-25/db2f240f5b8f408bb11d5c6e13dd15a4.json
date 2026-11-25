@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "registered-run-request-must-be-typed-to-runner-2026-11-25",
+    "revision_id": "db2f240f5b8f408bb11d5c6e13dd15a4",
+    "previous": null,
+    "body_sha256": "08a529183c25aae44730bbc2ea04e46aa269eb96b9f04795fa37dcab391d5751",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T06:30:58.268499900Z"
+    }
+  },
+  "body": "A registered launcher run selected with --request-message-id needs an original native message that (1) the LAUNCHING session received as its recipient, and (2) carries a TYPED testRequest. Send that testRequest with CLI `mailbox send --test-request-json '{\"mode\":\"full\",\"targets\":[{\"workRef\":\"w-…\",\"use\":{\"kind\":\"committed_input\",\"expected_commit\":\"<commit40>\",\"purpose\":\"landing_gate\"}}]}'`, or as the MCP send's testRequest object (docs/features/agent-mailboxes.md). Plain prose naming mode and commit is not a request. The runner's own outbound message (e.g. its READY to the scheduler) is refused with 409 \"selected test request belongs to another native recipient or sender\" (2026-11-25, Merger bfa9d8ac test-d900f09a, refused before any stage). Scheduler practice: fold the typed request into the LAUNCH NOW message under a new idempotency key, while the holder's claims are live (the host captures them at send), then give the runner that message id. A run refused at admission ran no stage and is not a gate result, so a corrected launch is not a rerun of a passed gate."
+}

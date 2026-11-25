@@ -1,0 +1,28 @@
+{
+  "id": "01a211bd-da8b-7631-b38b-419f60a56300",
+  "external_ref": null,
+  "title": "Ordinary-carry overlap notice says a registered --input commit run \"will earn no credit\", although its registered record is unaffected",
+  "outcome": "Seen on 2026-11-25 with Engram w-8f12's registered FULL test-ab36871a (Opus2 4daa5b87 #7813; Sol-8e1f 13106 #3066). While the run was in progress, TermAl told the running session that the run would earn no credit, because WinB's remote proxy session-13475 overlapped it.\n\nFrom the source:\n- That notice comes from the ordinary carried-check path (src/engram_carried_checks.rs:1097-1124), which drops ordinary carry.\n- The registered --input commit record is prepared and sent independently of that fence (src/engram_verification_record.rs:1261-1344, 2343-2431).\n- The record was in fact sent. Engram refused it for an unrelated claim reason.\n\nThe notice misled the coordinators. They held WinB idle for registered Central runs, and the record's real refusal cause was first attributed to the overlap.\n\nWanted: for a run that is a registered committed-input run, the overlap notice says that only ordinary turn credit is affected, and that the registered verification record is decided separately (source_id equality and the claim). The notice for ordinary unregistered checks stays as it is.",
+  "acceptance": [
+    "When the ordinary carried-check overlap withholds credit during a registered --input commit run, the notice the session receives states that only ordinary turn credit is withheld and that the run's registered verification record is decided separately; a behaviour test covers a registered run overlapped by a remote-proxy turn and asserts the notice text. For an ordinary unregistered check the existing notice is unchanged, covered by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "diagnostics",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

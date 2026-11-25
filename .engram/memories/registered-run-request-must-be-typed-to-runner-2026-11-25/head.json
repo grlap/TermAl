@@ -1,0 +1,13 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "registered-run-request-must-be-typed-to-runner-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "db2f240f5b8f408bb11d5c6e13dd15a4",
+      "30c6eed1d20f430c91a61d8b987290fc",
+      "c02a536509ee4f489a98135bf8c1b882"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "registered-run-claim-ttl-2026-11-25",
+    "revision_id": "e4ae86204fb8498ea87814f2ad9a6d5d",
+    "previous": null,
+    "body_sha256": "0956732b4efe2dcd2124c5831f3bbf492f9994f20a3787c698a551ea4555a118",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T08:06:51.281180300Z"
+    }
+  },
+  "body": "RULE (Termal::Fable2, 2026-11-25, from Engram w-8f12 test-ab36871a): before any REGISTERED --input commit run (Central cold run, registered FULL or focused), the claim holder renews the bound claim with a TTL that outlasts the run with margin. Engram's interim rule is --ttl 10800 (3 h). The holder offers no handoff of that claim until the record lands.\n\nWhy: the Merger's 70-minute registered FULL passed, but its claim lapsed during the run and was recovered at 08:05:54Z under a new fence. Engram refused the record with verification_record_refused (field: claim). Per Greg's no-rerun rule, a passed gate whose record is refused cannot simply be rerun, so this loses a whole gate.\n\nThe product fix is Engram w-97e822bbbf07 (P0): the run keeps its claim live.\n\nNote: proxy overlap (w-f5f89e7eed42) does NOT affect registered records. Only ordinary turn credit is affected."
+}

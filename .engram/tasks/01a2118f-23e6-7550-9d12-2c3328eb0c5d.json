@@ -1,0 +1,26 @@
+{
+  "id": "01a2118f-23e6-7550-9d12-2c3328eb0c5d",
+  "external_ref": null,
+  "title": "Cover checkout changes during a retired note in a combined acceptance request",
+  "outcome": "Exercise retiredCheckDispositions and rejectedCheckDisposition in one request. The production source and registration checks run after earlier retired notes, but existing regressions cover isolated rejected requests.",
+  "acceptance": [
+    "A deterministic combined-request behavior test advances HEAD during the earlier retired note, gets committed_input_changed, and sees only the retired note and no evaluator. Cover a newly registered matching run during that same boundary with the corresponding refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

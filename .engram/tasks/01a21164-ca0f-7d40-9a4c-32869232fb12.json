@@ -1,0 +1,28 @@
+{
+  "id": "01a21164-ca0f-7d40-9a4c-32869232fb12",
+  "external_ref": null,
+  "title": "Docs: a selected native test request must be addressed TO the session that runs the launcher (recipient = runner)",
+  "outcome": "Reported by Engram::Fable (TermAl mailbox ebe242f7 #8796, 2026-11-25 ~06:28Z).\n\nWhat happened: Engram::Merger (session-11859) ran `full --request-message-id mailbox-message-1a294c09…`. That message was the Merger's own send TO Opus2 (session-8111), carrying a testRequest for w-6ea6 and w-8f12. Registration was correctly refused with 409 \"selected test request belongs to another native recipient or sender; phase=index_request\" (run test-d900f09a, 4 s, no stage ran).\n\nThis is working as designed. docs/features/test-runs.md:17-33 says only that the host \"checks the native recipient\". docs/features/agent-mailboxes.md:25-54 describes the typed request without stating plainly who must send it to whom.\n\nWanted: one plain statement and example in both docs, with no code change:\n- The session that runs the launcher must be the request's native RECIPIENT. Typically the scheduler or requester sends the testRequest to the runner session, and the runner passes that message's id.\n- A session's own outbound request cannot be selected by that session.",
+  "acceptance": [
+    "docs/features/test-runs.md (Selecting an original test request) and docs/features/agent-mailboxes.md (Typed native test requests) each state that the launcher's session must be the request's native recipient, with one example: a scheduler sends the typed testRequest to the runner session, and the runner passes that message id with --request-message-id; and that a session's own outbound request cannot be selected by that session. The doc-link check passes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "mailbox",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

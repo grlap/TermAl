@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-credit-runs-need-winb-proxy-idle-2026-11-25",
+    "revision_id": "c9ac51874bc646a49349b1c6f014165e",
+    "previous": "0283089b3b3b42ff97b6180ecc8cef02",
+    "body_sha256": "c9cf4b406bb8db5a5dd048d51a19f235cf3f8afbff5d76602f3fd700fd327f77",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15a41-cbbd-7bd2-af40-f5f89e7eed42",
+      "work_ref": "w-f5f89e7eed42"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T08:06:42.863521200Z"
+    }
+  },
+  "body": "SUPERSEDED (Fable2 #7812, 2026-11-25 08:05Z): WinB does NOT need to hold idle for Central REGISTERED runs. The registered --input commit run's verification record is prepared and sent WITHOUT the ordinary writer or carried-overlap fence (src/engram_verification_record.rs:2343-2431). It is protected by the terminal result, a clean input and request = before = after source_id (1261-1344), and is bound to the held claim, root and store (test_run_registration.rs:1039-1059). A concurrent LOCAL remote-proxy turn (WinB session-13475, a Mac proxy) only suppresses ORDINARY carried credit, i.e. unregistered check credit (engram_carried_checks.rs:1097-1124; open bug w-f5f89e7eed42). The launcher's \"native credit ineligible: remote-proxy overlap\" warning is about carried credit, not the registered record. When a registered record is refused, read its actual refusal field. On 2026-11-25 the Merger's w-8f12 FULL test-ab36871a PASSED, but its record was refused on field CLAIM (the claim was recovered under a new fence, lapsed, or a handoff was pending), which is unrelated to WinB. Practice: schedule WinB freely during Central registered runs. Avoid WinB overlap only where an ORDINARY (unregistered) Central check needs carried credit."
+}
