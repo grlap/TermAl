@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "cleanup-keep-roots-with-unsettled-verif-records-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4f019cfec0804d898ca9ef391b225525"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a213ee-bb76-73e3-92a6-23b44009dbde",
+  "external_ref": null,
+  "title": "After the launcher's worker is lost (e.g. a host restart), recovery settles the run as interrupted while its stage children keep running and writing the run directory",
+  "outcome": "A run that recovery settles as interrupted has no live stage processes left writing into its run directory, or the settlement says plainly that they are still alive.",
+  "acceptance": [
+    "When a launcher worker disappears while a stage child (cargo or a test binary) is still alive, `recover` either shows that the stage's process group is gone before it writes the interrupted result, or records in that result that live stage processes remain, with their pids.",
+    "A test that observes behaviour covers a run whose worker is killed while its stage child keeps running. The test checks what recovery reports, and that nothing changes the settled result."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "runner",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

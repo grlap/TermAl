@@ -1,0 +1,28 @@
+{
+  "id": "01a213cf-a421-7701-8dfc-bcf9fae7d7a5",
+  "external_ref": null,
+  "title": "Host re-examines received-but-unsettled verification records whose run directory was removed, logging \"state not written (os error 3)\" on every look",
+  "outcome": "Host re-examines received-but-unsettled verification records whose run directory was removed, logging \"state not written (os error 3)\" on every look",
+  "acceptance": [
+    "Host re-examines received-but-unsettled verification records whose run directory was removed, logging \"state not written (os error 3)\" on every look is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "greg-reported",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a213bc-7c10-7f12-bfaa-fbada6f2ee54",
+  "external_ref": null,
+  "title": "Wake the configured scheduler session when the host publishes a pending scheduled acceptance evaluation",
+  "outcome": "Wake the configured scheduler session when the host publishes a pending scheduled acceptance evaluation",
+  "acceptance": [
+    "Wake the configured scheduler session when the host publishes a pending scheduled acceptance evaluation is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "scheduler"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

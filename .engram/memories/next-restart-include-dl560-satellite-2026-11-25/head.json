@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "next-restart-include-dl560-satellite-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "c61a8a6df67242a6bddbf0550c4cfd4f",
+      "7cf8d7d2c22b4acfbe79c032c92ab17a"
+    ]
+  }
+}

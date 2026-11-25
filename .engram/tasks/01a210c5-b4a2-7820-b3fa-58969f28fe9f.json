@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed current-root producer-rejected passing-run evaluation context on ac34df23. Both exact landing FULLs passed. Fresh independent acceptance a0a1ff3d78224ff9bc068f5c3d54285d passed both criteria at revision 4 after source recovery. The disposition provides no verification credit and no satisfaction of a bound criterion.",
+    "completed_at": "2026-11-25T17:52:29.863692300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

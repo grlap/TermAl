@@ -22,7 +22,9 @@
   "lifecycle": "open",
   "parent_id": null,
   "child_requirement": "required",
-  "prerequisites": [],
+  "prerequisites": [
+    "01a213d4-234a-7351-b048-a2563416f08a"
+  ],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,

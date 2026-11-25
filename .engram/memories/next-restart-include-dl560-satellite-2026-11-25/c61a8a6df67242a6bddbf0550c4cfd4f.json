@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-include-dl560-satellite-2026-11-25",
+    "revision_id": "c61a8a6df67242a6bddbf0550c4cfd4f",
+    "previous": null,
+    "body_sha256": "d43f20a7977e257e78385e0083c00f53a7088daa8da0d8947e492c48de4a3ec7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T18:03:03.202745300Z"
+    }
+  },
+  "body": "For the NEXT TermAl restart request to Greg (Fable2, 2026-11-25 ~18:04Z): include the DL560 satellite host.\n\nIt is pid 2032774, target/release/termal, started 2026-11-24 01:05:35Z, about 41 h before this note (Opus2 #7876). Its /api/health shows no build field. It was NOT restarted with Central's 17:40Z restart onto 0ec823a6, and it predates the test-run verification view: ?view=verification returns 400 there.\n\nRegistered DL560 runs depend on that host, so it should run current master. In the request, ask Greg to update its checkout to current master and restart it. Then verify it through federation, and through a /api/test-runs/RUN?view=verification call returning 200.\n\nRemove this note after that restart is verified."
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "cleanup-keep-roots-with-unsettled-verif-records-2026-11-25",
+    "revision_id": "4f019cfec0804d898ca9ef391b225525",
+    "previous": null,
+    "body_sha256": "e312e49396fd2990e166730afb9fefd35fee559491e724da34e4626f1ca69616",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a213cf-a421-7701-8dfc-bcf9fae7d7a5",
+      "work_ref": "w-bcf9fae7d7a5"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T17:46:02.508702500Z"
+    }
+  },
+  "body": "Cleanup rule (Termal::Fable2, 2026-11-25 ~17:50Z), holding until w-bcf9fae7d7a5 lands.\n\nDo NOT remove a worktree or run root while any of its registered launcher runs holds an UNSETTLED verification record, i.e. Received but not Settled, Rejected or LocalUnclassified. Check each run's state through the host API or listing before removal. Skip a root that fails the check and list it for the coordinator.\n\nWhy: after the 17:40Z restart onto 0ec823a6, the host logged dozens of \"engram> run=test-... verification record state not written: The system cannot find the path specified. (os error 3)\" lines (Greg, Asistant 588693a8 #2725). Those registrations stay at Received, and their run directories had been removed by earlier cleanups (for example test-c35c8009, archived to .evidence/checkpoint-dots-13196). They can never settle, because the frozen body is gone, and they are rechecked on every look.\n\nEngram already holds those records, so nothing is lost; only TermAl's settlement bookkeeping is stuck. Never repair this by creating directories or editing the store."
+}

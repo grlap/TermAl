@@ -1,0 +1,28 @@
+{
+  "id": "01a213d4-234a-7351-b048-a2563416f08a",
+  "external_ref": null,
+  "title": "First recovered close after a restart records assumed_missing_baseline as an unadmitted change, invalidating a matching existing acceptance evaluation",
+  "outcome": "Preserve the existing evaluation when the first post-restart source report exactly matches its evaluated source on the same named binding, then demonstrate live completion with the original evaluation.",
+  "acceptance": [
+    "Engram w-95ecd29ce300 is landed and its build is the Engram that TermAl's Central host uses, so that an assumed_missing_baseline unadmitted change on an acceptance evaluation's own named-root binding, whose full comparable identity exactly equals that evaluation's stored source basis, no longer makes the evaluation stale; TermAl's source reporting is unchanged.",
+    "With that build running, after a TermAl restart an untouched equivalent live case records the matching source sighting on its original run and completes with done on its clean evaluated commit using the same evaluation as before the restart."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "restart"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

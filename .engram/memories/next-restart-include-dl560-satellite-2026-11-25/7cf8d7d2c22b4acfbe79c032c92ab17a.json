@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-include-dl560-satellite-2026-11-25",
+    "revision_id": "7cf8d7d2c22b4acfbe79c032c92ab17a",
+    "previous": "c61a8a6df67242a6bddbf0550c4cfd4f",
+    "body_sha256": "d5fb742fbd9c99244f7894f2c59f881bfcbe7fee95d1c3570531f509b61b50c2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T18:23:04.461666300Z"
+    }
+  },
+  "body": "For the NEXT TermAl restart request to Greg (Fable2, 2026-11-25; revised ~18:24Z with Opus2 #7891): include the DL560 satellite host.\n\nThe facts, repo and product only, with no process checks:\n- DL560's TermAl checkout HEAD is 9c628bd01e0c967c25d49bdc87795a39b1a0459b (2026-11-23, \"w-2422bd1d69b0: rustfmt on six persist files…\"). Its status is clean. It is an ancestor of master, 14 commits behind 0ec823a6.\n- GET /api/test-runs/RUN?view=verification still returns 400.\n- The satellite restarted with Greg's 18:14Z restart, but stayed on that old checkout.\n\nRegistered DL560 runs and the cleanup rule's verification check depend on that host.\n\nIn the next restart request, ask Greg to `git pull` DL560's TermAl checkout to current master and restart it. Verify by federation status (authenticated) plus Greg's or the runner's \"done\" and the checkout HEAD, and ?view=verification returning 200. No process or mtime checks. Remove this note after that restart is verified."
+}

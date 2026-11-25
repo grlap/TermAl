@@ -1,0 +1,30 @@
+{
+  "id": "01a213f1-c74e-7f82-94e2-c9fb071946b6",
+  "external_ref": null,
+  "title": "Codex /login and /logout in TermAl: switch the Codex account without restarting the host",
+  "outcome": "Codex /login and /logout in TermAl: switch the Codex account without restarting the host",
+  "acceptance": [
+    "On a supported local file-backed Codex host, exact /login and /logout in the local Codex UI open one operator account action before prompt dispatch. A single browser authorization signs in the host's managed Codex profiles. The UI reports success only after matching provider completion where applicable and account/read on fresh app-server processes confirms the effective signed-in or signed-out state. TermAl stays running. The fixture shows that disallowed browser origin, Host and remote entry points cannot start the operation and that challenge data stays out of shared surfaces and diagnostics.",
+    "The account action refuses before mutation while any affected Codex turn, approval, prepared dispatch or delegation-owned process is live or starting. A racing prepared dispatch cannot reach the provider during the switch. After success, an idle Codex session keeps the same saved thread ID and history, and its next explicit send and a newly launched Codex delegation use a successor app-server whose account/read reports the selected account in the fixture. A provider resume refusal stays visible with the original thread preserved. Other providers remain usable, and the account action neither drops nor automatically replays durable prompts.",
+    "First /logout refuses an unproven or legacy-seeded grant without sending provider logout and explains how to enroll. Revocation targets only a grant obtained through TermAl /login. After election, managed preparation never reads standalone credentials and copies only the host-owned file to the applicable managed siblings through the existing sync path. Logout remains effective on fresh launch and TermAl restart. The fixture covers late completion after cancel, interrupted enrollment, failed mirror updates and startup reconciliation, and shows that no stale mirror serves work once canonical state is known. No credential or challenge material enters TermAl logs, transcripts, SSE or persistent account-operation metadata. The UI offers a return to standalone seeding after verified managed sign-out.",
+    "In a separately authorized supervised local Windows smoke using test accounts, sign in to a different Codex account from the TermAl UI, send explicitly from an idle saved session, launch a new Codex delegation, and sign out. Record verified provider account state, successful successor use and the same saved thread identity, and confirm the standalone Codex sign-in remains usable through the switch and logout. The smoke is performed without restarting the TermAl host or inspecting credential material."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "codex-runtime",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
