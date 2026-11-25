@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "dl560-slot-move-cancel-first-2026-11-25",
+    "revision_id": "75828a4a021645c3a4921b811f216edc",
+    "previous": null,
+    "body_sha256": "eee4472ff4a49cabae5bdbfcb3623a270bc2a87f7ffca8a91117abc09bd9fa82",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T02:09:29.530760500Z"
+    }
+  },
+  "body": "Scheduler lesson (Termal::Opus2, 2026-11-25, from Fable2 #7764). On 2026-11-25 I moved a queued w-2506 Linux FULL from DL560 C7 to C6, then reversed the move. Both runners had already launched before the messages arrived, so two FULLs on identical input ran concurrently. Each one's wall time grew from ~14 min to ~50 min (rust-tests 1855 s vs ~800 s). Rules:\n(1) Do not move a queued run between DL560 slots (C6, C7, s4) unless the original runner first CONFIRMS by mail that the run has not started and is cancelled. Only then send the GO to the new slot.\n(2) Runners in a foreground launcher call read mail only between turns, so a cancel can cross a launch. Assume any queued GO may already have started.\n(3) If a duplicate starts anyway, nobody stops it: there is no supported stop for a runner blocked in its own foreground call. Name one run as the gate and the other as evidence only, and record both on the item."
+}

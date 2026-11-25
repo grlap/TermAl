@@ -1,0 +1,27 @@
+{
+  "id": "01a2103a-741a-7352-ab95-bac043b9a6dd",
+  "external_ref": null,
+  "title": "Queue pause reason: behaviour tests for the runtime-exit reason, cleanup-failure precedence and latch preservation",
+  "outcome": "From the w-b63e1af0ce4c R3-1 review (Claude, delegation-61c58f32, Low). None of the following is exercised by a test:\n- the RuntimeExited branch of a mailbox-woken turn's runtime exit, whose kind defaults to runtime_crashed;\n- the RuntimeCleanupFailed precedence when retain_cleanup_owner holds;\n- the runtime-exit else-branch, where the quarantine or dedicated hold keeps the earlier reason.\nThe capacity-precedence test also builds ProviderCapacityRetry and the pause by hand instead of going through prepare_provider_capacity_failure.\nWanted: deterministic behaviour tests for these paths.",
+  "acceptance": [
+    "Deterministic behaviour tests cover a mailbox-woken turn's runtime exit naming runtime_exited with failureKind runtime_crashed when no typed kind was reported, a runtime exit whose cleanup owner is retained naming runtime_cleanup_failed, and an exit under an existing quarantine or dedicated hold keeping the earlier reason; and the provider-capacity cause precedence is exercised through the real capacity-failure path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "queue-pause",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

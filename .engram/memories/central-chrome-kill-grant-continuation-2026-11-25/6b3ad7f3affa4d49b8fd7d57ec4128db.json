@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-kill-grant-continuation-2026-11-25",
+    "revision_id": "6b3ad7f3affa4d49b8fd7d57ec4128db",
+    "previous": "19cb519c59064e38a88c5ed5108dcde8",
+    "body_sha256": "a757b49eae6c08d7a72b715b49385072d7637c4df4be04f2fb7948ead82426ed",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T03:33:36.092317700Z"
+    }
+  },
+  "body": "CONTINUATION of central-chrome-kill-grant-2026-11-16 (full at 8 KiB; read both). NOT A GRANT USE (Opus2, 2026-11-24/25): for Opus3's w-56f386fdd7d3 c55 registered cold Central run (Fable2 #7740 bound-run exception: cold TermAl test binary on Central needs FV >= 29 GiB = 30,408,704 KiB, alone), Fable2 warned Greg in advance (#7743). Greg answered „Zamknij. Czekam na rezultaty.” and Engram::Asistant closed Chrome on Central on Greg's own word (Asistant 588693a8 #2659 / TermAl #126, ~23:44Z). Opus2 ran no Stop-Process; the grant was not used. FV after the close: 30,966,048 / 30,795,860 KiB (23:44:31Z / 23:44:37Z), 0 chrome. The run test-4e513af3 went alone at 23:50Z (FV 32.2 GB), lowest FV during the cold -j1 compile 14,413,500 KiB (single rustc ~16.4 GB private), PASS 899/0/1 at 00:02:57Z. Recorded on w-56f3 (evidence fc81c61e). Rules of the grant itself are unchanged.\n\nUSE RECORD 8 (Opus2, 2026-11-25). Need: Sol-c593's w-25061c7586c2 cold registered focused cargo test -j1 on 3e614e82 (.tmp/2506r5d), the last check before the w-2506 landing. Floor under Fable2 #7740: FV >= 30,408,704 KiB, alone. Authority: the grant (Asistant #2113) with Fable2 #7768 (no objection). Greg was warned via Asistant at 03:23Z, with a 'nie zamykaj' window to 03:30Z; no objection arrived. Census after Engram::Opus's Node END: 27,271,740 KiB (03:32:59Z) and 27,119,112 KiB (03:33:02Z), no cargo except the host's, no pairs or evaluators. Action, ONCE: Stop-Process -Name chrome at 03:33:11Z, 15 processes (3.62 GB private). FV before 27,098,320 KiB; after 31,390,124 KiB (03:33:16Z), 0 chrome processes. Nothing else touched. LAUNCH NOW went to Sol-c593 right after; reported to Fable2 for Greg; recorded on w-2506."
+}

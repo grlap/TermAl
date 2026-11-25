@@ -1,0 +1,29 @@
+{
+  "id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "external_ref": null,
+  "title": "When an item's required evidence is ready, the host durably schedules its acceptance evaluation and resumes the requester",
+  "outcome": "TermAl's host-side counterpart of Engram's w-41c10bfdcb07, raised by Engram::Fable in TermAl mailbox ebe242f7 #8767 (2026-11-25 ~02:33Z). Greg wants the stalls' causes fixed: „Prosze o naprawdę” (Asistant 43498a6e #1982), with no new gates. Engram's own part, the w-cc10 skill rule (\"a settled last check needs a real wake\"), lands separately in Engram.\n\nStall: on Engram's w-aab2, the acceptance evaluation was never requested for about 8 hours after its evidence was ready. The requester had no wake that led it to request the evaluation.\n\nWanted: when an item's required evidence becomes ready, the host durably records that the item's independent acceptance evaluation is due. It schedules the evaluation and wakes the requesting session, so the evaluation neither depends on the requester remembering nor waits on a lost wake.\n\nConstraints for the design (from the coordinator):\n- \"Ready\" must be decided from durable state the host already has: Engram's evaluation obligations (none action-required before evaluation) and registered verification records that passed at the judged revision for bound criteria, plus the executor's explicit READY where the project needs one. It must not be a guess.\n- An evaluator is a spawn. On Central it is subject to the capacity rules: one outstanding go-ahead at a time, the spawn floors, and the durable Central queue (memory central-durable-queue-file-2026-11-25). The host must not bypass those rules by spawning outside them.\n- The evaluation must stay independent, requested in a later turn than the check, as today.\n- Nothing becomes a new gate on landing.",
+  "acceptance": [
+    "When an item's required evidence is ready, the host durably schedules its acceptance evaluation and resumes the requester is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-needed",
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

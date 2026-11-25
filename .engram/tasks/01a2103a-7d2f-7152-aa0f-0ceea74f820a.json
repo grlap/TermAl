@@ -1,0 +1,26 @@
+{
+  "id": "01a2103a-7d2f-7152-aa0f-0ceea74f820a",
+  "external_ref": null,
+  "title": "Queue pause reason says provider_capacity after capacity retries are exhausted, though nothing retries any more",
+  "outcome": "From the w-b63e1af0ce4c R3-1 review (Claude, delegation-61c58f32, Low). When finish_provider_capacity_failure gives up (attempts >= 8), the pause keeps cause provider_capacity, and provider_capacity_retry stays set. Nothing retries after that, and an explicit Resume is needed. But the cause's documentation says \"recovery retries by itself\", so the coordinator is told to wait when it should act.\nWanted: once retries are exhausted, the reason says that an explicit Resume is needed, for example with its own cause or a summary, and the docs describe the exhausted case.",
+  "acceptance": [
+    "After provider-capacity retries are exhausted, the queue's pause reason shown in termal_list_sessions and in a held wake's exact read distinguishes that state from an automatic retry in progress and indicates that an explicit Resume is needed; a deterministic behaviour test covers the exhausted case."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "queue-pause"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

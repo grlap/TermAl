@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-no-rerun-after-pass-2026-11-25",
+    "revision_id": "16bef6b43b1d4e0da2c203cf660a1cc5",
+    "previous": null,
+    "body_sha256": "3568f9b800fd9fbd330ac14af03215911b713357beed51a520c67a493e8bf940",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T03:34:06.936052600Z"
+    }
+  },
+  "body": "Greg's word (2026-11-25 ~03:33Z, via Engram::Asistant #2684, relayed by Fable2 TermAl #7772), verbatim: „NIE!!!”. This answered the plan to rerun w-6ea6 Fix8's Windows FULL (Central test-0d4ba2d4, 12/12 PASS on d8309928) after Engram refused its verification record on work_revision (a label-only revision 5->6 after a deferred first delivery; Engram defect w-8d0243f80d1a).\nRule:\n- Do NOT schedule, queue or launch a repeat of a gate that has PASSED, on any host, just because its record delivery failed.\n- The existing run stays untouched as the evidence; Engram (or the host) recovers its use through a supported path.\n- Scheduler (Opus2) withdrew the queued rerun at 03:34Z, before any launch."
+}

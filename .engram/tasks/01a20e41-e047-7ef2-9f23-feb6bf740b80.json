@@ -17,12 +17,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the acceptance evidence recovery fix at 91726e15. Requester-selected whole records are available before and outside discovery allowance. Exhausted discovery withholds partial evidence and leaves normal same-attempt verdict submission open. Successful replay retains current authority checks and runs live filesystem probes outside the shared state mutex.",
+    "completed_at": "2026-11-25T00:56:39.303101300Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

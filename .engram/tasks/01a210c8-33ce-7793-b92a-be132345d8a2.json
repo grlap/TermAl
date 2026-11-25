@@ -1,0 +1,29 @@
+{
+  "id": "01a210c8-33ce-7793-b92a-be132345d8a2",
+  "external_ref": null,
+  "title": "Supported, explicit resend of a terminally refused verification record (same frozen body and key) after its refusal cause is fixed",
+  "outcome": "Requested by Kimi::Consultant (TermAl mailbox 852a55c9 #608 and #610, 2026-11-25) after Engram's Fix8 record was refused. The cause was a label-only item edit, field work_revision. Engram's fix is w-8d0243f80d1a plus w-e999c592a373.\n\nNeed: for criteria that ARE bound to a check kind, a passing run whose record Engram refused for a cause later fixed on Engram's side should be able to earn its credit without rerunning the tests. Greg: „nie mamy czasu na powtarzanie testów”.\n\nToday TermAl cannot do this:\n- verification_record_refused is one of the definite refusals (src/engram_verification_record.rs:69-74).\n- The registration then holds TestRunVerificationAck::Rejected, and a terminal refusal is never resent (docs/test.md:1237), not even by `recover` (docs/test.md:742).\n\nWanted: an explicit, operator-requested action that sends the run's unchanged frozen body again under its original key, termal-run:<run id>, once. It applies only to a run whose host-held state is Rejected. The prior refusal stays recorded. The new answer, received, settled or refused again, is recorded as usual. Nothing resends automatically.\n\nPrerequisites before design:\n- Engram confirms that a key whose body it refused is still free, so it can accept the same body under the same key.\n- Engram confirms which refusal fields can become acceptable after a fix. work_revision on a label-only edit can; claim, fence, run and root moves cannot.\n\nCoordinator: not P0. w-6ea6 itself is unblocked by w-58969f28fe9f, because its criteria are unbound. This item serves future bound cases.",
+  "acceptance": [
+    "Supported, explicit resend of a terminally refused verification record (same frozen body and key) after its refusal cause is fixed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "check-credit",
+    "cross-project",
+    "engram-interop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

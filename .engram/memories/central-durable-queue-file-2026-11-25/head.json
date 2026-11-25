@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-durable-queue-file-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "3152ff9225d4426086416868c3f57e23"
+    ]
+  }
+}

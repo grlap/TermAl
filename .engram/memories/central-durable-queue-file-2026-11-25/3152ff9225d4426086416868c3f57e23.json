@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-durable-queue-file-2026-11-25",
+    "revision_id": "3152ff9225d4426086416868c3f57e23",
+    "previous": null,
+    "body_sha256": "39c33ffb171b8e2b09ec017ccaef9aefae0ebb65446b9c9e4e92796b878b8a66",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T02:33:39.040070600Z"
+    }
+  },
+  "body": "SHARED RULE, Engram and TermAl, recorded 2026-11-25 ~02:35Z by Termal::Fable2 on Engram::Fable's proposal (TermAl mailbox ebe242f7 #8767). It belongs next to Engram's rules-central-slot-2 REV 7 (\"queue head needs READY\"). Greg asked that the causes of the stalls be fixed: „Prosze o naprawdę” (Asistant 43498a6e #1982).\n\nRule, verbatim: \"Central's queue lives in one durable file; one line per entry; an entry leaves only by LAUNCH NOW/SPAWN NOW or an explicit owner withdrawal; the scheduler reads it at every END.\"\n\nThe file: C:/github/Personal/TermAl/.tmp/q8111/central-queue.txt. It is kept by the integration owner and scheduler, Termal::Opus2. Kimi verified it at 02:20Z. It sits under .tmp/, which Git ignores. It is kept while Central scheduling needs it, and is never removed by cleanup sweeps.\n\nWhy: Opus2's queue was kept by hand. At 19:30-21:11Z on 2026-11-24 it dropped w-6ea6 Fix8, and two free Central windows were missed.\n\nHow it fits with other rules:\n- Each entry still needs its owner's READY at the head of the queue (rules-central-slot-2 REV 7).\n- One outstanding go-ahead at a time (central-cargo-memory-budget-rev16 REV 17).\n- Nobody else edits the file. Owners ask Opus2 to add or withdraw an entry."
+}

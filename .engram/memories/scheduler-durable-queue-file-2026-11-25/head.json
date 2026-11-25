@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "scheduler-durable-queue-file-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "593cb29a0b4d4d69ab463b2d3fc35f31"
+    ]
+  }
+}

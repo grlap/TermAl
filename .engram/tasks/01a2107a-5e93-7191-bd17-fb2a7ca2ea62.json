@@ -1,0 +1,30 @@
+{
+  "id": "01a2107a-5e93-7191-bd17-fb2a7ca2ea62",
+  "external_ref": null,
+  "title": "Remove the Rust compiler warnings from TermAl's build and test build",
+  "outcome": "Greg, 2026-11-25 ~02:12Z, relayed by Engram::Asistant (TermAl mailbox 588693a8 #2677): „uwaga do termal'a, mozemy posprzatac warnings, sporo ich przy buildzie to nie powinno byc trudne”. These are simple changes, and they must not displace current priorities.\n\nBaseline: the Windows full gate test-f43b85f6 on e6d8bd3c (parent ba577b3a), 2026-11-25.\n- The normal binary has 7 warnings:\n  - src/engram_build_checks.rs:84: field `0` is never read.\n  - src/engram_build_checks.rs:133: fields `subject`, `observed_exit` and `rejection` are never read.\n  - src/source_capture.rs:10: variant `UnsupportedGitlinks` is never constructed.\n  - src/engram_observation_source.rs:6: variant `Legacy` is never constructed.\n  - src/engram_root_authority.rs:308: field `fence` is never read.\n  - src/test_run_causal_completion_batch.rs:17: method `causal_test_completion_plans` is never used.\n  - src/test_run_causal_completion_batch.rs:223: method `read_causal_test_completion_batch` is never used.\n- The test binary has 26 warnings. They are listed in that run's rust-tests.log.\n\nWanted: the current master builds with no warnings on Linux and Windows. Each warning is fixed at its cause:\n- unused code is removed;\n- code used only by tests becomes cfg(test);\n- a value that should be read is read.\nA warning is not hidden by a crate-wide or module-wide allow.",
+  "acceptance": [
+    "On the candidate, the cargo-check stage and the rust-tests stage of `node scripts/test-launcher.mjs full --input commit` report no Rust compiler warnings, on Linux and on Windows. The warning counts, and the lists of their headers and paths, are recorded on the item from both full-gate runs, together with the baseline lists.",
+    "The cleanup adds no crate-level or module-level allow attribute. Every item-level allow introduced or deliberately retained to address a warning in this cleanup has a source comment explaining why the item is kept, and is listed on this work item. Pre-existing allowances unrelated to the warning baseline are outside this criterion.",
+    "Behaviour is unchanged. The full gate passes on the candidate on Linux and on Windows. The test names printed by `cargo test --bin termal -- --list` equal those of the candidate's parent, or each difference is recorded with its cause. No test is added that pins source text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "greg-reported",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
