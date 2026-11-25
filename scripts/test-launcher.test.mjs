@@ -91,7 +91,8 @@ const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 // Private launcher copies must include its complete runtime dependency
 // closure, including the native helpers selected only when a stage executes.
 const copiedLauncherFiles = Object.freeze([
-  "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-run-registration.mjs", "test-ui-bootstrap.mjs",
+  "test-launcher.mjs", "test-launcher-source.mjs", "test-launcher-input.mjs", "test-launcher-dart-report.mjs",
+  "test-run-registration.mjs", "test-ui-bootstrap.mjs",
   "source-id-budget.mjs", "source-id-budget-ms.json", "engram-call-budget-ms.json",
   "git-environment.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
@@ -109,6 +110,179 @@ const json = (path) => JSON.parse(readFileSync(path, "utf8"));
 const logPath = (runDir, entry) => isAbsolute(entry.log) ? entry.log : join(runDir, entry.log);
 const GiB = 1024n ** 3n;
 const capacity = (bytes) => ({ bavail: bytes, bsize: 1n });
+
+function dartSdkFixture(root, env) {
+  const windows = process.platform === "win32";
+  const sdk = join(root, ".git", "SDK tools");
+  mkdirSync(sdk);
+  const source = join(sdk, "report fixture.json");
+  const script = join(sdk, "runner.cjs");
+  const bytes = readFileSync(new URL("../src/tests/fixtures/declared-dart/flutter-pass.jsonl", import.meta.url));
+  writeFileSync(source, bytes);
+  const runnerSource = [
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "async function run() {",
+    "  const args = process.argv.slice(2);",
+    "  if (path.basename(process.argv[1]) === 'test') args.unshift('test');",
+    "  const reporterIndex = args.indexOf('--file-reporter');",
+    "  const report = reporterIndex === -1 ? undefined : args[reporterIndex + 1];",
+    "  const { DART_FIXTURE_RELEASE, DART_FIXTURE_ARGV, DART_FIXTURE_EXIT } = process.env;",
+    "  fs.writeFileSync(DART_FIXTURE_ARGV, JSON.stringify(args));",
+    "  if (DART_FIXTURE_RELEASE) {",
+    "    await new Promise((resolve, reject) => {",
+    "      const timer = setTimeout(() => { watcher.close(); reject(new Error('fixture release timed out')); }, 20000);",
+    "      const check = () => {",
+    "        if (!fs.existsSync(DART_FIXTURE_RELEASE)) return;",
+    "        clearTimeout(timer); watcher.close(); resolve();",
+    "      };",
+    "      const watcher = fs.watch(path.dirname(DART_FIXTURE_RELEASE), check);",
+    "      check();",
+    "    });",
+    "  } else if (report?.startsWith('json:')) {",
+    "    fs.copyFileSync(process.env.DART_FIXTURE_REPORT, report.slice(5));",
+    "  }",
+    "  process.exitCode = Number(DART_FIXTURE_EXIT ?? 0);",
+    "}",
+    "run().catch(error => { console.error(error); process.exitCode = 1; });",
+  ].join("\n");
+  writeFileSync(script, runnerSource);
+  for (const runner of ["flutter", "dart"]) {
+    const wrapper = join(sdk, windows ? runner + ".bat" : runner);
+    writeFileSync(wrapper, windows
+      ? '@echo off\r\n"%DART_FIXTURE_NODE%" "%DART_FIXTURE_SCRIPT%" %*\r\nexit /b %errorlevel%\r\n'
+      : '#!/bin/sh\nexec "$DART_FIXTURE_NODE" "$DART_FIXTURE_SCRIPT" "$@"\n');
+    if (!windows) chmodSync(wrapper, 0o755);
+  }
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+  const childEnv = {
+    ...env,
+    [pathKey]: sdk + delimiter + (env[pathKey] ?? ""),
+    DART_FIXTURE_NODE: process.execPath,
+    DART_FIXTURE_SCRIPT: script,
+    DART_FIXTURE_REPORT: source,
+  };
+  return { sdk, childEnv, bytes, runnerSource };
+}
+
+async function sdkRun(root, command, env, args) {
+  return createRun({
+    root,
+    input: "commit",
+    stages: [{ name: "focused", command, args: ["test", ...args] }],
+  }, env);
+}
+
+test("focused Dart SDK forwards native argv and retains its own reporter", async (t) => {
+  await repository(t, async (root, env) => {
+    const { sdk, childEnv, bytes, runnerSource } = dartSdkFixture(root, env);
+    const argvFile = join(sdk, "native-argv.json");
+    const windows = process.platform === "win32";
+    const filters = [windows ? "test\\widgets\\" : "test/widgets/", "test/sample file_test.dart"];
+    const runners = windows ? ["flutter", "dart", "dart.exe"] : ["flutter", "dart"];
+    for (const runner of runners) {
+      let expected = join(sdk, windows ? runner + ".bat" : runner);
+      if (runner === "dart.exe") {
+        expected = join(sdk, "dart.exe");
+        writeNodeStandIn(expected);
+        mkdirSync(join(root, ".git", "info"), { recursive: true });
+        writeFileSync(join(root, ".git", "info", "exclude"), "/test\n");
+        writeFileSync(join(root, "test"), runnerSource);
+      }
+      const runEnv = { ...childEnv, DART_FIXTURE_ARGV: argvFile };
+      // With both installed, the bare Dart command must choose dart.exe.
+      const command = runner === "flutter" ? relative(root, join(sdk, "flutter"))
+        : runner === "dart" && windows ? join(sdk, "dart") : "dart";
+      const runDir = await sdkRun(root, command, runEnv, filters);
+      const result = await executeRun(runDir, runEnv);
+      const [entry] = result.stages;
+      const owned = join(realpathSync.native(runDir), "focused.dart.json");
+      assert.equal(result.state, "passed", entry.error ?? result.error);
+      assert.equal(entry.command[0], expected);
+      assert.deepEqual(json(argvFile), ["test", ...filters, "--file-reporter", "json:" + owned]);
+      assert.deepEqual(entry.command.slice(1), json(argvFile));
+      assert.deepEqual(readFileSync(owned), bytes);
+      assert.equal(entry.dartReportDigest, "sha256:" + createHash("sha256").update(bytes).digest("hex"));
+      assert.equal(entry.tests, undefined);
+      assert.ok((await summarize(runDir)).includes(`Dart JSON reporter: ${owned}`));
+      assert.deepEqual(json(join(runDir, "request.json")).stages[0].args, ["test", ...filters]);
+    }
+  });
+});
+
+test("focused Dart SDK overlapping runs cannot adopt another run's reporter", async (t) => {
+  await repository(t, async (root, env) => {
+    const { sdk, childEnv, bytes } = dartSdkFixture(root, env);
+    const release = join(sdk, "release-first");
+    const firstEnv = { ...childEnv, DART_FIXTURE_ARGV: join(sdk, "first.json"), DART_FIXTURE_RELEASE: release };
+    const nextEnv = { ...childEnv, DART_FIXTURE_ARGV: join(sdk, "next.json") };
+    const firstDir = await sdkRun(root, "flutter", firstEnv, ["test/first"]);
+    const nextDir = await sdkRun(root, "flutter", nextEnv, ["test/second"]);
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    const firstResult = executeRun(firstDir, firstEnv, { progress: { onWatching: markStarted } });
+    try {
+      await Promise.race([
+        started,
+        firstResult.then((result) => { throw new Error(result.error ?? "first runner finished before the overlap"); }),
+      ]);
+      const next = await executeRun(nextDir, nextEnv);
+      assert.equal(next.state, "passed", next.stages[0].error ?? next.error);
+      assert.ok(next.stages[0].dartReportDigest);
+      assert.deepEqual(readFileSync(join(nextDir, "focused.dart.json")), bytes);
+    } finally {
+      writeFileSync(release, "");
+    }
+    const first = await firstResult;
+    assert.equal(first.state, "passed", first.stages[0].error ?? first.error);
+    assert.equal(first.stages[0].dartReportDigest, undefined);
+    assert.equal(existsSync(join(firstDir, "focused.dart.json")), false);
+    assert.match(await summarize(firstDir), /Dart JSON reporter: unavailable/u);
+  });
+});
+
+test("focused Dart SDK keeps the nonzero exit and its own reporter", async (t) => {
+  await repository(t, async (root, env) => {
+    const { sdk, childEnv, bytes } = dartSdkFixture(root, env);
+    const runEnv = { ...childEnv, DART_FIXTURE_ARGV: join(sdk, "native-argv.json"), DART_FIXTURE_EXIT: "7" };
+    const runDir = await sdkRun(root, "dart", runEnv, []);
+    const result = await executeRun(runDir, runEnv);
+    assert.equal(result.state, "failed");
+    assert.equal(result.exitCode, 7);
+    assert.deepEqual(readFileSync(join(runDir, "focused.dart.json")), bytes);
+  });
+});
+
+test("focused Dart SDK names the supported form for uncredited commands", async (t) => {
+  await repository(t, async (root, env) => {
+    const { sdk, childEnv, bytes } = dartSdkFixture(root, env);
+    const runEnv = { ...childEnv, DART_FIXTURE_ARGV: join(sdk, "native-argv.json") };
+    const output = join("ui", "node_modules", "caller report.json");
+    mkdirSync(join(root, dirname(output)), { recursive: true });
+    for (const extra of [["--file-reporter", "json:" + output], ["--watch"], ["--unlisted"]]) {
+      const runDir = await sdkRun(root, "dart", runEnv, extra);
+      const result = await executeRun(runDir, runEnv);
+      assert.equal(result.state, "passed", result.stages[0].error ?? result.error);
+      assert.deepEqual(json(runEnv.DART_FIXTURE_ARGV), ["test", ...extra]);
+      assert.equal(result.stages[0].dartReportDigest, undefined);
+      assert.equal(existsSync(join(runDir, "focused.dart.json")), false);
+      assert.match(await summarize(runDir), /Dart Test credit unavailable\..*flutter test.*omit --file-reporter/u);
+    }
+    assert.deepEqual(readFileSync(join(root, output)), bytes);
+
+    const windows = process.platform === "win32";
+    const runDir = await createRun({
+      root,
+      input: "commit",
+      stages: [{ name: "focused", command: windows ? "cmd" : "sh",
+        args: windows ? ["/d", "/c", "echo dart test"] : ["-c", "echo dart test"] }],
+    }, runEnv);
+    const result = await executeRun(runDir, runEnv);
+    assert.equal(result.state, "passed", result.stages[0].error ?? result.error);
+    assert.equal(result.stages[0].dartReportDigest, undefined);
+    assert.match(await summarize(runDir), /Dart Test credit unavailable\..*flutter test.*omit --file-reporter/u);
+  });
+});
 // The native capacity reader, captured before any fixture mocks it, so the
 // native smoke test can tell a leaked fixture mock from a real measurement.
 const nativeStatfsSync = fs.statfsSync;

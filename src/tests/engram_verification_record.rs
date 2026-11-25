@@ -40,6 +40,9 @@ mod doc_links;
 #[path = "engram_verification_vitest.rs"]
 mod vitest;
 
+#[path = "engram_verification_dart.rs"]
+mod dart;
+
 const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 const SESSION: &str = "session-record";
 const STARTED: &str = "2026-10-30T10:00:00.000Z";

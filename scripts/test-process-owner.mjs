@@ -11,7 +11,7 @@ export const OWNER_RESPONSE_CHARACTER_LIMIT = 262144;
 export const OWNER_STDERR_CHARACTER_LIMIT = 2400;
 const interruptReason = (signal) => `interrupt: ${String(signal.reason ?? "requested").slice(0, 512)}`;
 
-export async function runOwnedCommand(command, args, { cwd, env, log, signal, onStart, onOwner }, {
+export async function runOwnedCommand(command, args, { cwd, env, log, signal, onStart, onOwner, dartBatch }, {
   spawnOwner = spawn, platform = process.platform,
 } = {}) {
   const fd = openSync(log, "wx");
@@ -23,6 +23,7 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
   writeFileSync(bootstrap, `${JSON.stringify({ phase: "launcher-owner-request", pid: process.pid })}\n`, { flag: "wx" });
   writeFileSync(requestPath, JSON.stringify({
     command, args, cwd, log, ledger, nonce, cleanupBudgetMs: PROCESS_CLEANUP_BUDGET_MS,
+    ...(dartBatch ? { dartBatch: true } : {}),
   }), { flag: "wx" });
   if (signal?.aborted) return {
     code: 1, signal: null, interrupted: true,
