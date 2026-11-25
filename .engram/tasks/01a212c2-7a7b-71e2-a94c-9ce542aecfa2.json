@@ -1,0 +1,24 @@
+{
+  "id": "01a212c2-7a7b-71e2-a94c-9ce542aecfa2",
+  "external_ref": null,
+  "title": "WinB: rustc STATUS_ACCESS_VIOLATION (0xc0000005) compiling tokio during a TermAl FULL",
+  "outcome": "The cause of the rustc access violation seen on Windows B is diagnosed and classified as product, toolchain, runner or host environment, and either fixed or documented, so that a TermAl landing FULL on WinB does not fail with a compiler crash before any test runs.",
+  "acceptance": [
+    "WinB: rustc STATUS_ACCESS_VIOLATION (0xc0000005) compiling tokio during a TermAl FULL is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

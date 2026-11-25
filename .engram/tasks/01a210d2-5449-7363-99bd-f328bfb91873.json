@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "TermAl now keeps Engram's acceptance basis separate from the general work revision. A stable split is admitted, competing criteria changes still refuse, and private evidence and check-disposition receipts pin the general revision. Exact clean 317a27655d8015eb211979321a3716dd6fce6d39 passed the focused suite (585/0), both landing FULLs (DL560 bf6fbbcf and WinB d05f385f), and independent evaluation 7e02dcf0f7ec483e9e071d21f23c6881 (3/3). The clean review pair is recorded in 9fe435a1c1224052a2dc6259904c8d1d. Opus2 installed the release binary at 11:57:39Z, SHA-256 b1971402124f67360f1d57a3563db4562d989912c069285ec3406e7b6d8c10e2, as recorded in 9b38a8b628bb486c9c0ae0a2eaff4100. Greg's restart activates the installed build before Engram deploys its split. Neither remote landing run had claim-bound native verification credit.",
+    "completed_at": "2026-11-25T11:58:46.454897500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

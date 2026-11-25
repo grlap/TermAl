@@ -1,0 +1,30 @@
+{
+  "id": "01a212d1-05cf-70c0-8a91-d452a67c69b0",
+  "external_ref": null,
+  "title": "Name the supported focused command when a Windows Dart SDK shim is unclassified",
+  "outcome": "Focused Dart and Flutter launcher diagnostics recognize common unsupported Windows SDK shim spellings for feedback and point to the supported direct SDK command, preserving the existing argv admission and credit boundary.",
+  "acceptance": [
+    "On Windows an attempted focused launcher command using dart.cmd or flutter.cmd produces the supported direct SDK command diagnostic, stays unclassified for committed-input Test credit, and never adopts a launcher-owned Dart reporter for the shim. A behavior test exercises the refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a212a3-3575-7242-aee1-71f0283b1e4d",
+  "external_ref": null,
+  "title": "Cover incomplete focused Dart stages with process errors",
+  "outcome": "Add Rust result coverage for the Dart launcher path when error, signal or interrupt is present. Windows SDK metacharacter refusal is separately tracked in w-e74249f6bf33.",
+  "acceptance": [
+    "A focused Dart record with an error, signal or interruption is Indeterminate even if report bytes are present."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

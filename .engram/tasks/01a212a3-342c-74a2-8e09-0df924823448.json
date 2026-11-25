@@ -1,0 +1,30 @@
+{
+  "id": "01a212a3-342c-74a2-8e09-0df924823448",
+  "external_ref": null,
+  "title": "Exercise a completed wrapped Dart SDK invocation",
+  "outcome": "Change the Windows wrapper fixture to execute the fixture SDK rather than merely printing the command text.",
+  "acceptance": [
+    "A completed wrapped SDK invocation produces an argv witness, receives no injected reporter, and shows the supported direct form."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

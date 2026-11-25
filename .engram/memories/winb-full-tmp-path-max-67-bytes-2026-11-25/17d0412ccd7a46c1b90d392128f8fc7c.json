@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-full-tmp-path-max-67-bytes-2026-11-25",
+    "revision_id": "17d0412ccd7a46c1b90d392128f8fc7c",
+    "previous": null,
+    "body_sha256": "4be7d2023e448994d4261dd1e7cdc28dde57477ecab0dc6f700e7de11cf8ce26",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T12:51:08.474642100Z"
+    }
+  },
+  "body": "Runner lesson for Windows FULLs (WinB): before launching a TermAl FULL or a focused run that creates Git fixtures, check that the worktree's repository-local `.tmp` path is at most 67 UTF-8 bytes. src/test_temp_root.rs:72 panics on deeper fixture roots, to keep the suite's Git fixtures within Git's Windows path limits. Every fixture-using test then fails with \"test fixture directory … is N bytes long, more than the 67 …; use a shallower checkout\". That is a runner path-selection error, not a product failure, and it does not count as a valid gate.\nSource: the w-e8c7 E2n WinB repeat test-bc1b3d30 on 2026-11-25 (relay #95) used C:\\GitHub\\Personal\\TermAl\\.tmp\\j\\e8c7-full-29ad6709-winb-repeat1\\wt\\.tmp (72 bytes) and got 719 path-guard failures out of 8571 tests. Use short worktree names, such as .tmp/j/<item4>-<commit8>/wt, and check the length before launch."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a212a3-34a8-72b3-927f-5796f63bd56a",
+  "external_ref": null,
+  "title": "Distinguish transient Dart reporter I/O failures",
+  "outcome": "Consider receipt preparation retry for demonstrably transient sharing failures while preserving the accepted UNKNOWN for missing, invalid, unreadable or mismatched artifacts.",
+  "acceptance": [
+    "A transient sharing failure can recover during receipt preparation while a genuinely unavailable or unusable report yields UNKNOWN and an established receipt stays stable."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
