@@ -44,6 +44,52 @@ pub(super) fn runtime_observation_forward_revision(
         } == *current
 }
 
+fn runtime_observation_can_recover_named_root(
+    inner: &StateInner,
+    record: &SessionRecord,
+    job: &EngramRuntimeClosingJob,
+    binding: &EngramControlWorkBinding,
+) -> bool {
+    if record.engram.work_binding.is_some()
+        || record.engram.named_root.is_some()
+        || record.engram.pending_naming_selection.is_some()
+        || record.engram.runtime_closed_turn_ref.as_ref() != Some(&job.trace.host_turn_ref)
+        || !matches!(&job.scope.root, EngramNamedRootState::None)
+    {
+        return false;
+    }
+    let store = &job.scope.store;
+    let Some(root) = engram_work_source_root_for_claim(
+        &inner.engram_work_source_roots,
+        store,
+        &binding.work_id,
+        &binding.claim_id,
+    )
+    .filter(|root| root.named_by_session == record.session.id) else {
+        return false;
+    };
+    let root_key = engram_exact_path_key(FsPath::new(&root.root));
+    let matching = inner.engram_work_source_roots.iter().filter(|entry| {
+        &entry.store == store
+            && (entry.work_id == root.work_id
+                || (entry.common_dir_key == root.common_dir_key
+                    && engram_exact_path_key(FsPath::new(&entry.root)) == root_key))
+    });
+    matching.take(2).count() == 1
+        && engram_root_journal(&inner.engram_named_root_journal, store, &binding.claim_id)
+            .is_some_and(|journal| {
+                !journal.obsolete
+                    && !journal.requires_reconciliation()
+                    && journal
+                        .read_binding
+                        .as_ref()
+                        .is_some_and(|previous| engram_same_recovery_run(previous, binding))
+                    && journal.confirmed.as_ref().is_some_and(|(event, _)| {
+                        event.kind == EngramNamedRootKind::Bound && event.root.same_name(root)
+                    })
+            })
+}
+
 impl AppState {
     pub(crate) fn refresh_runtime_observation_focus(
         &self,
@@ -54,6 +100,7 @@ impl AppState {
         deadline: std::time::Instant,
     ) -> Result<(), ApiError> {
         let store = &job.scope.store;
+        let recovering_unbound = job.scope.binding.is_none();
         let revision_only = job
             .scope
             .binding
@@ -81,6 +128,14 @@ impl AppState {
                 return Err(ApiError::conflict("another turn already owns its opening"));
             }
             let settled = !engram_authority_work_unresolved(&inner, store, &binding.work_id);
+            if recovering_unbound
+                && (!settled
+                    || !runtime_observation_can_recover_named_root(&inner, record, job, binding))
+            {
+                return Err(ApiError::conflict(
+                    "unbound recovery needs this session's exact acknowledged named root",
+                ));
+            }
             if revision_only
                 && (!settled || !matches!(&job.scope.root, EngramNamedRootState::Bound { .. }))
             {
@@ -111,6 +166,8 @@ impl AppState {
                 && !record.runtime_stop_in_progress
                 && !record.engram.observation_delete_requested
                 && !session_resource_reset_in_progress(inner, record)
+                && (!recovering_unbound
+                    || runtime_observation_can_recover_named_root(inner, record, job, binding))
                 && Self::engram_root_runtime_is_current(record, &target.runtime_snapshot)
                 && job.scope.require_current(inner, session).is_ok()
                 && target
@@ -149,6 +206,26 @@ impl AppState {
             .and_then(parse_engram_result::<EngramNamedRootReadResponse>)
             .map_err(|_| ApiError::conflict("the focused claim's root proof is unavailable"))?;
         proof.validate_authority(store, binding)?;
+        // The named-root history can stay intact across a live claim
+        // renewal. Recovery must not publish the earlier held-claim view
+        // when this later read proves a different association.
+        if recovering_unbound
+            && !proof.claim.as_ref().is_some_and(|claim| {
+                claim.state == "active"
+                    && claim.fence == Some(binding.claim_fence)
+                    && claim
+                        .holder
+                        .as_deref()
+                        .is_none_or(|holder| holder == session)
+                    && claim
+                        .revision
+                        .is_none_or(|revision| revision == binding.work_revision)
+            })
+        {
+            return Err(ApiError::conflict(
+                "the named-root proof does not confirm the held claim association",
+            ));
+        }
         if revision_only && !runtime_observation_same_root(&proof.named_root, &job.scope.root) {
             return Err(ApiError::conflict(
                 "revision refresh cannot change the acknowledged root",

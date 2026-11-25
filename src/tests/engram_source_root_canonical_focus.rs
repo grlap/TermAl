@@ -2,9 +2,199 @@
 //! active turn, or let its controlled successor overtake its closing report.
 use super::*;
 
+#[test]
+fn restart_recovers_the_acknowledged_named_root_for_a_later_ordinary_turn() {
+    let label = "restart-named-opening";
+    let before = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&before.root);
+    let mut held = naming_claim(label);
+    let claim = &held.items[0];
+    let claim_id = claim.claim_id.clone();
+    let new_fence = claim.claim_fence + 1;
+    before
+        .transport
+        .named_roots
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .claim_fences
+        .insert(claim_id.clone(), claim.claim_fence);
+    let named = request_naming(&before, label, Some(&worktree), vec![held.clone()]).unwrap();
+    before.begin("Report the original named source.");
+    before.finish();
+    let source_owner = before
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner
+        .clone();
+    let mut new_source = before.sources.get(&worktree);
+    new_source.commit = "c".repeat(40);
+    new_source.tree = "d".repeat(40);
+    before.set_source_id(&worktree, new_source.clone());
+
+    before.state.trigger_shutdown_signal();
+    before.state.shutdown_persist_blocking();
+    let root = before.state.test_temp_root.as_ref().unwrap().clone();
+    let restarted = boot_on_test_temp_root(&root, || {
+        AppState::new_with_paths_engram_transport_and_clock_for_test(
+            before.root.to_string_lossy().into_owned(),
+            before.state.persistence_path.as_ref().clone(),
+            before.state.orchestrator_templates_path.as_ref().clone(),
+            before.transport.clone(),
+            EngramBudgetClock::scripted(),
+        )
+        .unwrap()
+    });
+    restarted
+        .inner
+        .lock()
+        .unwrap()
+        .test_observation_source_owner = source_owner;
+    let (runtime, commands, _process) = test_shared_codex_runtime(label);
+    install_single_wire_codex_fixture(&restarted, Some(runtime));
+    let after = EOCheckedTurn::from_session(
+        restarted,
+        before.session_id.clone(),
+        before.root.clone(),
+        before.transport.clone(),
+        Arc::new(Mutex::new(commands)),
+        before.sources.clone(),
+    );
+    after.begin("First ordinary turn after restart.");
+    let producer = after.transport.clone();
+    let authority = Arc::new(CanonicalFocusTransport {
+        inner: after.transport.clone(),
+        closing_read: Mutex::new(None),
+        before_named_root_read: Mutex::new(Some(Box::new(move || {
+            producer
+                .named_roots
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .claim_fences
+                .insert(claim_id, new_fence);
+        }))),
+        handoff_thread: std::thread::current().id(),
+        handoff_reads: std::sync::atomic::AtomicUsize::new(0),
+    });
+    after
+        .state
+        .install_control_test_transport(authority.clone());
+    finish_unbound_restart_turn(&after);
+    assert!(authority.before_named_root_read.lock().unwrap().is_none());
+    assert!(
+        after.record(|record| record.engram.work_binding.is_none()),
+        "the later named-root proof must prevent the earlier fence from being installed"
+    );
+
+    let claim = &mut held.items[0];
+    claim.claim_fence = new_fence;
+    let binding = claim.control_binding.as_mut().unwrap();
+    binding.claim_fence = new_fence;
+    after.transport.register_named_root_run(binding);
+    after
+        .transport
+        .set_current_work_binding(Some(binding.clone()));
+    after.transport.replace_held_claims([Ok(held)]);
+    after.begin("Recover the held claim under its current fence.");
+    finish_unbound_restart_turn(&after);
+
+    after.begin("Report the source from a fresh opening.");
+    let later = after.record(|record| {
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert_eq!(
+            trace
+                .opening_root
+                .as_ref()
+                .and_then(|opening| opening.source_root.as_ref())
+                .map(|root| root.generation),
+            Some(named.generation),
+            "a consistent live proof restores the named association for the next opening"
+        );
+        assert_eq!(
+            trace.opening_root.as_ref().unwrap().binding.claim_fence,
+            new_fence
+        );
+        trace.host_turn_ref.clone()
+    });
+    after.end();
+    let guard = phase_sync::PollGuard::new();
+    let recorded = loop {
+        let (failure, envelopes) = after.record(|record| {
+            let failure = record
+                .engram
+                .unadmitted_closing_jobs
+                .iter()
+                .find(|job| job.trace.host_turn_ref == later)
+                .and_then(|job| job.terminal_failure.clone());
+            let envelopes = record
+                .engram
+                .unadmitted_reports
+                .iter()
+                .find(|report| report.host_turn_ref == later && report.is_settled())
+                .map(|report| report.envelopes.clone());
+            (failure, envelopes)
+        });
+        assert!(failure.is_none(), "the recovered close failed: {failure:?}");
+        if let Some(envelopes) = envelopes {
+            break envelopes;
+        }
+        guard.wait("the recovered close settles its observation");
+    };
+    let sighting = recorded
+        .iter()
+        .find(|envelope| envelope.request["occurrence"]["kind"] == "source_sighting")
+        .expect("the recovered close must include a measured source sighting");
+    let EngramRuntimeObservationDelivery::Recorded { receipt } = &sighting.delivery else {
+        panic!(
+            "the source sighting did not reach the producer: {:?}",
+            sighting.delivery
+        );
+    };
+    assert_eq!(receipt["accounting"]["kind"], "sighting");
+    let basis = &sighting.request["occurrence"]["source_basis"];
+    assert_eq!(basis["workspace_id"], json!(named.root.unwrap()));
+    assert_eq!(basis["source_root_generation"], json!(named.generation));
+    assert_eq!(basis["source_root_state"], "named");
+    assert_eq!(basis["source_id"], json!(new_source));
+    after.state.trigger_shutdown_signal();
+    after.state.shutdown_persist_blocking();
+}
+
+fn finish_unbound_restart_turn(turn: &EOCheckedTurn) {
+    let unbound = turn.record(|record| {
+        let trace = record.engram.unadmitted_active_turn.as_ref().unwrap();
+        assert!(trace.opening_root.is_none());
+        trace.host_turn_ref.clone()
+    });
+    turn.end();
+    let guard = phase_sync::PollGuard::new();
+    while !turn.record(|record| {
+        record
+            .engram
+            .unadmitted_closing_jobs
+            .iter()
+            .any(|job| job.trace.host_turn_ref == unbound && job.terminal_failure.is_some())
+    }) {
+        guard.wait("the unbound restart turn is refused");
+    }
+    assert!(!turn.record(|record| {
+        record
+            .engram
+            .unadmitted_reports
+            .iter()
+            .any(|report| report.host_turn_ref == unbound)
+    }));
+}
+
 struct CanonicalFocusTransport {
     inner: Arc<ScriptedEngramControlTransport>,
     closing_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    before_named_root_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     handoff_thread: std::thread::ThreadId,
     handoff_reads: std::sync::atomic::AtomicUsize,
 }
@@ -14,6 +204,7 @@ pub(super) fn install_canonical_focus_reader(turn: &EOCheckedTurn) {
         .install_control_test_transport(Arc::new(CanonicalFocusTransport {
             inner: turn.transport.clone(),
             closing_read: Mutex::new(None),
+            before_named_root_read: Mutex::new(None),
             handoff_thread: std::thread::current().id(),
             handoff_reads: std::sync::atomic::AtomicUsize::new(0),
         }));
@@ -40,6 +231,11 @@ impl EngramControlTransport for CanonicalFocusTransport {
         timeout: Duration,
     ) -> Result<Value, EngramTransportError> {
         self.count_read();
+        if matches!(request, EngramControlRequest::NamedRootRead { .. })
+            && let Some(before_read) = self.before_named_root_read.lock().unwrap().take()
+        {
+            before_read();
+        }
         self.inner.request(connection, request, timeout)
     }
 
@@ -105,6 +301,7 @@ impl CanonicalFocusFixture {
         let transport = Arc::new(CanonicalFocusTransport {
             inner: turn.transport.clone(),
             closing_read: Mutex::new(None),
+            before_named_root_read: Mutex::new(None),
             handoff_thread: std::thread::current().id(),
             handoff_reads: std::sync::atomic::AtomicUsize::new(0),
         });
