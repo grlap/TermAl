@@ -66,6 +66,7 @@ impl AppState {
         &self,
         profile: SharedCodexProfile,
     ) -> Result<SharedCodexRuntime> {
+        let _admission = self.codex_account.admit_launch()?;
         let mut shared_runtime = self
             .shared_codex_runtime_slot(profile)
             .lock()
@@ -140,11 +141,11 @@ impl AppState {
                 .shared_codex_runtime_slot(profile)
                 .lock()
                 .expect("shared Codex runtime mutex poisoned");
-            slot.as_ref()
-                .is_some_and(|runtime| runtime.runtime_id == runtime_id)
-                .then(|| slot.take())
-                .flatten()
-                .map(|runtime| (profile, runtime))
+            let runtime = slot
+                .as_ref()
+                .filter(|runtime| runtime.runtime_id == runtime_id)?;
+            self.codex_account.retain_shared_exit(runtime);
+            slot.take().map(|runtime| (profile, runtime))
         })
     }
 
@@ -210,6 +211,10 @@ impl AppState {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, CodexResponseError> {
+        let _admission = self
+            .codex_account
+            .admit_launch()
+            .map_err(|error| CodexResponseError::Transport(error.to_string()))?;
         let runtime = self.shared_codex_runtime_for(profile).map_err(|err| {
             CodexResponseError::Transport(format!("failed to start shared Codex runtime: {err:#}"))
         })?;

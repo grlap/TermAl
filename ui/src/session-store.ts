@@ -47,6 +47,7 @@ export type ComposerDraftAttachment = Readonly<{
 
 export type ComposerSessionSnapshot = Readonly<{
   status: Session["status"];
+  remoteId?: Session["remoteId"];
   opencodeApprovalMode?: Session["opencodeApprovalMode"];
   approvalPolicy?: ApprovalPolicy | null;
   agent: AgentType;
@@ -501,6 +502,7 @@ function buildComposerSessionSnapshot(
     previous &&
     previous.id === session.id &&
     previous.name === session.name &&
+    previous.remoteId === session.remoteId &&
     previous.agent === session.agent &&
     previous.workdir === session.workdir &&
     previous.model === session.model &&
@@ -565,6 +567,7 @@ function buildComposerSessionSnapshot(
     model: session.model,
     modelOptions: nextModelOptions,
     name: session.name,
+    remoteId: session.remoteId,
     promptHistory,
     status: session.status,
     reasoningEffort: session.reasoningEffort,

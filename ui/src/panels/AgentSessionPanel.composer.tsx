@@ -45,6 +45,8 @@ import {
   type SlashPaletteItem,
 } from "./session-slash-palette";
 import { useComposerSessionSnapshot } from "../session-store";
+import { isLocalSessionRemote } from "../remotes";
+import { CodexAccountDialog, codexAccountCommand } from "./CodexAccountDialog";
 import {
   SESSION_MODEL_OPTIONS_DEFERRED_RETRY_LIMIT,
   sessionModelOptionsDeferredRetryDelay,
@@ -164,6 +166,7 @@ export const SessionComposer = memo(function SessionComposer({
   const slashOptionsRef = useRef<HTMLDivElement | null>(null);
   const composerPrimaryActionButtonRef = useRef<HTMLButtonElement | null>(null);
   const session = useComposerSessionSnapshot(sessionId);
+  const [codexAccountAction, setCodexAccountAction] = useState<"login" | "logout" | null>(null);
   // This state is intentionally narrow: it exists so slash-palette rendering
   // has a reactive draft. Plain prompt text lives in the uncontrolled textarea;
   // read the current prompt through `getComposerDraftValue()`.
@@ -321,13 +324,14 @@ export const SessionComposer = memo(function SessionComposer({
     isStopping ||
     isAgentCommandResolving ||
     isDelegationSpawning;
+  const isCodexAccountCommand = Boolean(codexAccountCommand(session?.agent, currentLocalDraftState.draft));
   const composerSendDisabled =
     !session ||
     isSending ||
     isStopping ||
     isUpdating ||
     isAgentCommandResolving ||
-    (slashPalette.kind !== "none" && slashPalette.items.length === 0);
+    (slashPalette.kind !== "none" && slashPalette.items.length === 0 && !isCodexAccountCommand);
   const composerDelegateDisabled =
     !session ||
     !canSpawnDelegation ||
@@ -357,11 +361,12 @@ export const SessionComposer = memo(function SessionComposer({
     { mode: "explorer", label: "Delegate · Explorer" },
   ];
   const composerPrimaryDisabled =
-    composerActionMode === "send"
+    composerActionMode === "send" || isCodexAccountCommand
       ? composerSendDisabled
       : composerDelegateDisabled;
   const composerPrimaryLabel =
-    composerActionMode === "send"
+    isCodexAccountCommand ? "Codex account"
+    : composerActionMode === "send"
       ? isSending
         ? isSessionBusy
           ? "Queueing..."
@@ -1056,6 +1061,23 @@ export const SessionComposer = memo(function SessionComposer({
       return;
     }
 
+    const draftToSend = getComposerDraftValue();
+    const accountAction = codexAccountCommand(session?.agent, draftToSend);
+    if (accountAction) {
+      if (!isLocalSessionRemote(session)) {
+        setAgentCommandResolverError({
+          message: "Open the Codex host's local TermAl UI to change its account.",
+          sessionId: activeSessionId,
+        });
+        return;
+      }
+      setCodexAccountAction(accountAction);
+      resetPromptHistory(activeSessionId);
+      updateLocalDraft(activeSessionId, "", { animateHeight: false });
+      commitDraft(activeSessionId, "");
+      return;
+    }
+
     if (slashPalette.kind !== "none") {
       if (activeSlashItem) {
         if (activeSlashItem.kind === "choice" && isUpdating) {
@@ -1072,7 +1094,6 @@ export const SessionComposer = memo(function SessionComposer({
       return;
     }
 
-    const draftToSend = getComposerDraftValue();
     const accepted = onSend(activeSessionId, draftToSend);
     if (!accepted) {
       focusComposerInput();
@@ -1088,6 +1109,10 @@ export const SessionComposer = memo(function SessionComposer({
   async function handleComposerDelegationSpawn(
     delegationMode: ComposerDelegationMode = composerDelegationMode,
   ) {
+    if (codexAccountCommand(session?.agent, getComposerDraftValue())) {
+      void handleComposerSend();
+      return;
+    }
     if (composerDelegateDisabled || !activeSessionId || !onSpawnDelegation) {
       focusComposerInput();
       return;
@@ -1191,7 +1216,7 @@ export const SessionComposer = memo(function SessionComposer({
   }
 
   function handleComposerPrimaryAction() {
-    if (composerActionMode === "send") {
+    if (composerActionMode === "send" || codexAccountCommand(session?.agent, getComposerDraftValue())) {
       void handleComposerSend();
       return;
     }
@@ -1200,6 +1225,13 @@ export const SessionComposer = memo(function SessionComposer({
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (!activeSessionId) {
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey &&
+      codexAccountCommand(session?.agent, getComposerDraftValue())) {
+      event.preventDefault();
+      void handleComposerSend();
       return;
     }
 
@@ -1413,6 +1445,15 @@ export const SessionComposer = memo(function SessionComposer({
 
   return (
     <footer className="composer">
+      {codexAccountAction && (
+        <CodexAccountDialog
+          initialAction={codexAccountAction}
+          onClose={() => {
+            setCodexAccountAction(null);
+            focusComposerInput();
+          }}
+        />
+      )}
       {showNewResponseIndicator ? (
         <button className="new-response-indicator" type="button" onClick={onScrollToLatest}>
           {newResponseIndicatorLabel}
@@ -1486,7 +1527,7 @@ export const SessionComposer = memo(function SessionComposer({
               ref={composerPrimaryActionButtonRef}
               actionLabel={composerPrimaryLabel}
               actionTitle={
-                composerActionMode === "send"
+                composerActionMode === "send" || isCodexAccountCommand
                   ? undefined
                   : composerDelegationButtonTitle
               }
