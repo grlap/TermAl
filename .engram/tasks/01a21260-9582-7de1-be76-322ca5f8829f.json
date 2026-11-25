@@ -1,0 +1,24 @@
+{
+  "id": "01a21260-9582-7de1-be76-322ca5f8829f",
+  "external_ref": null,
+  "title": "No behavioural test that `termal sessions resume-paused --dry-run` sends dryRun:true",
+  "outcome": "A test parses `termal sessions resume-paused --dry-run` and checks, against the existing fake HTTP server fixture, that the CLI sends exactly one POST to /api/queues/resume-paused with dryRun:true. A wiring regression that sends dryRun:false for a preview fails the test.",
+  "acceptance": [
+    "No behavioural test that `termal sessions resume-paused --dry-run` sends dryRun:true is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

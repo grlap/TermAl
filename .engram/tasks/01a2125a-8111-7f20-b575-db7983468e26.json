@@ -1,0 +1,24 @@
+{
+  "id": "01a2125a-8111-7f20-b575-db7983468e26",
+  "external_ref": null,
+  "title": "A failed diagnostic write in a hinted causal pull drops the whole hinted batch",
+  "outcome": "If note_ready_causal_pending (a diagnostics-only write) fails during take_causal_ready_plans, the hinted pull logs it and keeps the plan, or requeues the hints already taken from the ready queue, instead of ending read_ready_causal_test_completions and dropping those hints.",
+  "acceptance": [
+    "A failed diagnostic write in a hinted causal pull drops the whole hinted batch is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

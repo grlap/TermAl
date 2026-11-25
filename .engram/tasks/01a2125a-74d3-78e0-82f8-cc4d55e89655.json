@@ -1,0 +1,24 @@
+{
+  "id": "01a2125a-74d3-78e0-82f8-cc4d55e89655",
+  "external_ref": null,
+  "title": "Causal admission diagnostics can show a destination check that has already passed",
+  "outcome": "While recovery is inside the capability read or the admission call, after the destination target has resolved, the original row's admission diagnostic no longer shows destination_not_checked or a stale destination_target_unavailable. It advances when the destination passes, or it shows the last completed check separately from the in-flight stage.",
+  "acceptance": [
+    "Causal admission diagnostics can show a destination check that has already passed is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

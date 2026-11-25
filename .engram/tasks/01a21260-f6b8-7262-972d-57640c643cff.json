@@ -1,0 +1,28 @@
+{
+  "id": "01a21260-f6b8-7262-972d-57640c643cff",
+  "external_ref": null,
+  "title": "Resume (per-session and bulk) cancels a provider-capacity retry before dispatch, leaving a window where Stop returns 409 and records no operator stop",
+  "outcome": "Found by Codex in w-e8c7db25b458's E2m-1 review (candidate 92a09257 on ac34df23) and ruled pre-existing by Termal::Fable2 (d84e975b #85).\n\nresume_session_queue calls cancel_provider_capacity_retry under its own lock, before the Human drain and the queue step. Cancelling the retry changes the session from Idle to Error. If an operator's Stop takes the lock in that interval, begin_requested_stop_session misses its provider-capacity branch, because session_lifecycle.rs:885 only records an operator Stop for an Active or Approval session, or one still holding a capacity retry. Stop then returns 409 and records no operator Stop generation. The resume that follows dispatches the turn the operator tried to prevent.\n\nThe per-session Resume has always had this window. w-e8c7's bulk resume reuses the same shared fenced path unchanged, so it adds a caller but not the race.\n\nWanted: no interleaving of Resume and Stop lets Resume dispatch a turn after an operator's Stop was attempted. Candidate approaches are recording the operator Stop for a paused idle session in that window, or keeping the capacity-retry state until the dispatch is fenced.",
+  "acceptance": [
+    "A behaviour test interleaves an operator Stop into the window between Resume's provider-capacity retry cancellation and its dispatch, for both per-session and bulk Resume, and shows the Stop takes effect: no turn is dispatched and the Stop is recorded, rather than a 409 with no recorded stop."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "provider-capacity",
+    "queue",
+    "stop"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
