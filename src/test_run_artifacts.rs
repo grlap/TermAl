@@ -236,6 +236,7 @@ impl AppState {
             return;
         }
         let Some(command) = EngramHost::recognized_check(line)
+            .or_else(|| engram_observed_dart_launcher(line, provenance))
             .filter(|command| command.simple && EngramHost::launcher_arguments(command).is_some())
         else {
             return;

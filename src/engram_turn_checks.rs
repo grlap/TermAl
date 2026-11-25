@@ -1522,10 +1522,14 @@ impl AppState {
                 })
                 .flatten()
         });
-        if let Some(command) = recognised
+        let observation_command = recognised
             .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))
-            .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command))
+            .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command));
+        let dart_observation = (observation_command.is_none() && !has_original_start)
+            .then(|| ran.and_then(|line| engram_observed_dart_launcher(line, provenance)))
+            .flatten();
+        if let Some(command) = observation_command.or(dart_observation.as_ref())
             && !has_original_start
         {
             // The same start's validated target is also the observation's
