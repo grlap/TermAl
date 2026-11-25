@@ -1620,6 +1620,8 @@ mod engram_retry_schedule;
 
 mod provider_capacity_retry;
 use provider_capacity_retry::*;
+mod queue_pause_reason;
+use queue_pause_reason::*;
 mod message_sequence;
 use message_sequence::SharedSequence;
 type MessageSequence = SharedSequence<Message>;

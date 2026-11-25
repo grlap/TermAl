@@ -184,6 +184,7 @@ mod opencode_config;
 mod orchestrator;
 mod ordered_publication;
 pub(crate) mod phase_sync;
+mod queue_pause_reason;
 mod read_only_orientation;
 mod review_freeze;
 mod runtime_fixture_processes;
@@ -1569,6 +1570,7 @@ fn sample_remote_orchestrator_state(
             }],
             sessions: Vec::new(),
             mirrored_delegation_child_ids: Vec::new(),
+            queue_pause_reasons: BTreeMap::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
             test_run_overview: TestRunOverviewSnapshot::default(),

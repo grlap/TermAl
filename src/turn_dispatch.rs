@@ -467,6 +467,8 @@ impl AppState {
             .map(|attachment| attachment.metadata.clone())
             .collect::<Vec<_>>();
         record.active_turn_generation = record.active_turn_generation.wrapping_add(1).max(1);
+        // A failure kind belongs to the turn that reported it.
+        record.turn_failure_kind = None;
         // A later ordinary turn is a new interruption owner. Keep the marker
         // while its recovery prompt is active or still queued; a restart of
         // that recovery must not mint a second wake for the original turn.

@@ -422,6 +422,67 @@ queue is paused: a Stop or an operator's pause, a cancelled head, a pause an
 earlier build left, a settings change, or a failed mailbox turn. Such a wake
 waits for that hold to clear, not for a turn to end.
 
+Each pause records why it was made, until the pause is lifted. The reason is
+a typed `cause` (`turn_failed`, `runtime_exited`, `provider_capacity`,
+`stop_requested`, `terminal_unresolved`,
+`source_observation_hold`, `human_start_failed`, `runtime_reset_failed`,
+`runtime_cleanup_failed` or `persist_failed`) with its `pausedAt` time. A
+failed or exited turn also carries a `failureKind`: `provider_usage_limit`,
+`provider_auth`, `provider_overloaded`, `provider_other`, `runtime_crashed`
+or `unclassified`. The kind comes only from the provider's typed error
+signal for that turn (Claude's numeric API status, Codex's `codexErrorInfo`)
+and is `unclassified` when there was none; no message text is classified. A
+failed turn's reason also carries a `summary`, bounded in length and with
+credentials redacted on a best-effort basis. It keeps the leading words of
+the failure's first line for as long as each is plain prose, then replaces
+the rest of the line with `[redacted]`. A plain word is ASCII letters, with
+`'` or `-` only between letters, or a number of at most three digits such as
+an HTTP status, at most 32 characters long with its punctuation; it may open with `(` and end with
+up to two of `. , ; : ! ? )`. A plain word that is a credential label (`key`,
+`token`, `secret`, `password`, `Authorization`, `Cookie`, `signature`, the
+scheme words `Bearer`, `Basic`, `Digest` and `Token`, and the like, singular
+or plural, also as a part of a word split at `'`, `-`, camelCase or acronym
+boundaries, such as `accessToken` or `my-password`, or as the start of a part
+for the longer labels, such as `APITokenabc`) is kept through the label and
+any trailing punctuation, and ends the summary; anything joined to the label
+in the same word, as in `password-hunter` or `passwordHunter`, is redacted
+with the rest. A word that is not plain, or that starts with a
+known token prefix such as `sk-` or `ghp_`, ends it before itself, so URLs,
+JSON, `label=value` text and tokens never reach the summary. Only the first
+non-empty line counts: within it only spaces and tabs separate words, and any
+other whitespace (a line break, a lone CR, a vertical tab or form feed, the
+Unicode line separators) ends it. The summary is bounded to 120 characters
+including any truncation marker, a word that reaches past what is read is
+not shown, so the bound never shows part of a word that was not judged
+whole, and when the rest is redacted the kept words give way so that
+`[redacted]` is shown whole. The
+summary is worked out from at most one character past the bound, before the
+state lock is taken. What this best-effort rule leaves: a credential that
+follows no recognised label, scheme word or URL form and does not look like a
+token, that is a plain word of letters or a number of at most three digits,
+is not recognised. A label is recognised when it is a whole part of a word,
+where parts are split at a space, punctuation, a hyphen, an apostrophe, or a
+case or acronym change, or when it is a whole segment between hyphens or
+apostrophes with case ignored (`APIkey`). The longer labels (`token`,
+`secret`, `password`, `passwd`, `apikey`, `cookie`, `signature`,
+`credential` and `authorization`) are also recognised as the start of a part
+or segment (`APITokenabc`, `TOKENhunter`). A short label glued to lowercase
+letters inside one part, as in `pwdhunter` or `keyabc`, is not recognised and
+falls under that residual. A word with a digit or an underscore is not plain
+prose at all, so it is redacted whole (`pwd123`, `token_abc`). A
+pause the provider-capacity retry owns keeps the `provider_capacity` cause
+when the turn's failure settles. A coordinator sees `queuePaused` and
+`queuePauseReason` on each local session in `termal_list_sessions`, and the
+sender of a held wake sees `currentStatus.recipientQueuePause` in
+`termal_read_mailbox_message`, whether the message went through a local
+mailbox or through the federation domain to a recipient on the same host,
+without reading the paused session. In the state snapshot the reasons travel beside
+the session rows, in `queuePauseReasons`, because older peers decode those
+rows strictly.
+These views cover sessions on the host that records the pause; a paused
+session's reason does not yet reach another host's listing or a cross-host
+exact read.
+
 A wake whose own dispatch was held before provider hand-off records
 `durableButNotWoken` as its receipt outcome, and its `notificationState`
 stays `durableButNotWoken`, so the never-woken recovery still covers it.

@@ -225,7 +225,7 @@ impl AppState {
             _ if record.orchestrator_auto_dispatch_blocked => return None,
             _ => 0,
         };
-        record.set_auto_dispatch_blocked(true);
+        record.pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::ProviderCapacity));
         let nonce = Uuid::new_v4().to_string();
         record.provider_capacity_retry = Some(ProviderCapacityRetry {
             nonce: nonce.clone(),

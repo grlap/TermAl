@@ -474,7 +474,9 @@ pub(crate) fn apply_claude_frame_plan(
         };
         // Only a terminal plan reaches here: retries and duplicate results
         // have no terminal owner. Numeric 429 is a provider signal, not prose.
-        if is_error && message.get("api_error_status").and_then(Value::as_u64) == Some(429) {
+        if is_error
+            && let Some(api_status) = message.get("api_error_status").and_then(Value::as_u64)
+        {
             let generation = match &owner {
                 ClaudeResultOwner::Host(owner) | ClaudeResultOwner::HostAfterUnowned(owner) => {
                     Some(owner.turn_generation)
@@ -495,11 +497,19 @@ pub(crate) fn apply_claude_frame_plan(
                 ClaudeResultOwner::Stale | ClaudeResultOwner::Uncorrelated { .. } => None,
             };
             if let Some(generation) = generation {
-                context.state.note_evaluator_usage_limit(
+                context.state.note_turn_failure_kind(
                     &context.session_id,
                     &context.token,
                     generation,
+                    TurnFailureKind::from_claude_api_status(api_status),
                 );
+                if api_status == 429 {
+                    context.state.note_evaluator_usage_limit(
+                        &context.session_id,
+                        &context.token,
+                        generation,
+                    );
+                }
             }
         }
         if let Err(err) = context.state.finish_claude_result(

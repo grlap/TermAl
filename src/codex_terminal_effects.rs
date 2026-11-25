@@ -94,9 +94,24 @@ impl SharedCodexTerminalEffect {
             // reviewer's later MCP settlement. A duplicate finish owns nothing.
             if let SharedCodexTerminalOutcome::Failed {
                 usage_limit_refusal,
+                error,
                 ..
             } = &outcome
             {
+                // The typed code is a string, or an object keyed by the code.
+                let code = match error.get("codexErrorInfo") {
+                    Some(Value::String(code)) => Some(code.as_str()),
+                    Some(Value::Object(detail)) => detail.keys().next().map(String::as_str),
+                    _ => None,
+                };
+                if let Some(code) = code {
+                    state.note_turn_failure_kind(
+                        &owner.session_id,
+                        &owner.runtime,
+                        owner.generation,
+                        TurnFailureKind::from_codex_error_info(code),
+                    );
+                }
                 if *usage_limit_refusal
                     && !session
                         .reviewer_mcp_gate

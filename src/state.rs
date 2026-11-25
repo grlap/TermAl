@@ -919,6 +919,7 @@ mod state_broadcast_mailbox_tests {
             workspaces: Vec::new(),
             sessions: Vec::new(),
             mirrored_delegation_child_ids: Vec::new(),
+            queue_pause_reasons: BTreeMap::new(),
             delegations: Vec::new(),
             delegation_waits: Vec::new(),
             test_run_overview: TestRunOverviewSnapshot::default(),
@@ -2468,6 +2469,12 @@ pub(crate) struct SessionRecord {
     /// both block mailbox/workflow auto-dispatch until a manual user turn
     /// resets the latch in `start_turn_on_record`.
     pub(crate) orchestrator_auto_dispatch_blocked: bool,
+    /// Why the latch above is set, kept until the pause is lifted. Absent for
+    /// a pause recorded before reasons existed.
+    pub(crate) queue_pause_reason: Option<QueuePauseReason>,
+    /// In memory: the typed kind the provider reported for the current turn's
+    /// failure, read when that failure pauses the queue. A new turn clears it.
+    pub(crate) turn_failure_kind: Option<TurnFailureKind>,
     pub(crate) provider_capacity_retry: Option<ProviderCapacityRetry>,
     pub(crate) codex_terminal_identity_unresolved: bool,
     pub(crate) runtime_stop_in_progress: bool,
@@ -2536,6 +2543,7 @@ pub(crate) struct QueuePromotionSnapshot {
     pub(crate) preview: String,
     pub(crate) live_activity: Option<SessionLiveActivity>,
     pub(crate) auto_dispatch_blocked: bool,
+    pub(crate) queue_pause_reason: Option<QueuePauseReason>,
     pub(crate) operator_paused: bool,
     pub(crate) pause_epoch: u64,
     pub(crate) active_turn_mailbox_notification: Option<MailboxNotificationDelivery>,
@@ -2619,6 +2627,7 @@ impl SessionRecord {
             preview: self.session.preview.clone(),
             live_activity: self.session.live_activity.clone(),
             auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked,
+            queue_pause_reason: self.queue_pause_reason.clone(),
             operator_paused: self.engram.operator_paused,
             pause_epoch: self.auto_dispatch_pause_epoch,
             active_turn_mailbox_notification: self.active_turn_mailbox_notification.clone(),
@@ -2702,6 +2711,7 @@ impl SessionRecord {
         self.active_turn_start_message_count = snapshot.active_turn_start_message_count;
         self.orchestrator_auto_dispatch_blocked = snapshot.auto_dispatch_blocked;
         self.session.queue_paused = snapshot.auto_dispatch_blocked;
+        self.queue_pause_reason = snapshot.queue_pause_reason;
         self.engram.operator_paused = snapshot.operator_paused;
         self.auto_dispatch_pause_epoch = snapshot.pause_epoch;
     }
@@ -2723,13 +2733,49 @@ impl SessionRecord {
             // Lifting the pause lifts an operator's pause with it, and the
             // source-observation hold that only an explicit Resume lifts.
             self.engram.operator_paused = false;
+            self.queue_pause_reason = None;
         }
     }
 
+    /// An operator's Stop pauses the queue, records `stop_requested` as the
+    /// reason, and marks the pause as the operator's.
     pub(crate) fn pause_queue_for_operator_stop(&mut self) {
-        self.set_auto_dispatch_blocked(true);
+        self.pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::StopRequested));
         self.engram.operator_paused = true;
         self.operator_stop_generation = self.operator_stop_generation.wrapping_add(1);
+    }
+
+    /// Pauses the queue and records why, replacing any earlier reason, so a
+    /// coordinator or the sender of a held wake can see the cause without
+    /// reading this session. Production pauses go through here.
+    pub(crate) fn pause_auto_dispatch(&mut self, reason: QueuePauseReason) {
+        self.set_auto_dispatch_blocked(true);
+        self.queue_pause_reason = Some(reason);
+    }
+
+    /// Pauses for a failed turn, with the typed kind its provider reported for
+    /// this turn, if any, and the failure's redacted one-line summary. A
+    /// provider-capacity pause that its automatic retry owns keeps that cause,
+    /// so the reason does not claim the queue waits for someone to look.
+    /// `summary` is the failure's `queue_pause_summary`, computed before the
+    /// state lock was taken.
+    pub(crate) fn pause_auto_dispatch_for_turn(
+        &mut self,
+        cause: QueuePauseCause,
+        summary: Option<String>,
+    ) {
+        let kind = self.turn_failure_kind.take();
+        let capacity_owns_pause = self.provider_capacity_retry.is_some()
+            && self
+                .queue_pause_reason
+                .as_ref()
+                .is_some_and(|reason| reason.cause == QueuePauseCause::ProviderCapacity);
+        let cause = if capacity_owns_pause {
+            QueuePauseCause::ProviderCapacity
+        } else {
+            cause
+        };
+        self.pause_auto_dispatch(QueuePauseReason::turn(cause, kind, summary));
     }
 
     pub(crate) fn clear_runtime_reset(&mut self) {

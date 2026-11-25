@@ -188,7 +188,8 @@ impl TermalDelegationMcpBridge {
                         &row,
                         metadata_local_host,
                     );
-                    let mut listed = mailbox_peer_session_row(summary.unwrap_or(&Value::Null));
+                    let mut listed =
+                        mailbox_peer_session_row(metadata_state, summary.unwrap_or(&Value::Null));
                     listed["sessionId"] = row.session_id.into();
                     listed["name"] = name.into();
                     listed["localName"] = row.name.into();
@@ -231,12 +232,23 @@ fn mailbox_participant_summary<'a>(
     matches.next().is_none().then_some(first)
 }
 
-fn mailbox_peer_session_row(session: &Value) -> Value {
+fn mailbox_peer_session_row(state: &Value, session: &Value) -> Value {
+    let queue_paused = session.get("queuePaused").and_then(Value::as_bool);
+    // The reason travels beside the strict session rows; see StateResponse.
+    let queue_pause_reason = session
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(|id| state["queuePauseReasons"].get(id))
+        .filter(|_| queue_paused == Some(true))
+        .cloned()
+        .unwrap_or(Value::Null);
     json!({
         "sessionId": session.get("id").cloned().unwrap_or(Value::Null),
         "name": session.get("name").cloned().unwrap_or(Value::Null),
         "agent": session.get("agent").cloned().unwrap_or(Value::Null),
         "status": session.get("status").cloned().unwrap_or(Value::Null),
+        "queuePaused": queue_paused.map(Value::Bool).unwrap_or(Value::Null),
+        "queuePauseReason": queue_pause_reason,
         "workdir": session.get("workdir").cloned().unwrap_or(Value::Null),
         "preview": session.get("preview").cloned().unwrap_or(Value::Null),
         "projectId": session.get("projectId").cloned().unwrap_or(Value::Null),
@@ -252,7 +264,7 @@ pub(crate) fn mailbox_peer_session_listing(state: &Value, native_only: bool) -> 
         .filter(|session| is_root_peer_session(session, &delegation_child_ids))
         .filter(|session| !native_only || session.get("remoteId").is_none_or(Value::is_null))
         .map(|session| {
-            let mut row = mailbox_peer_session_row(session);
+            let mut row = mailbox_peer_session_row(state, session);
             if native_only {
                 row["localName"] = row["name"].clone();
                 row["name"] = row["sessionId"].clone();

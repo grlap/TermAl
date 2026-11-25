@@ -142,7 +142,9 @@ pub(crate) fn retain_source_observation_removal_locked(
         let record = &mut inner.sessions[index];
         record.hidden = false;
         record.engram.observation_delete_requested = true;
-        record.set_auto_dispatch_blocked(true);
+        record.pause_auto_dispatch(QueuePauseReason::now(
+            QueuePauseCause::SourceObservationHold,
+        ));
         record.session.preview =
             notice.unwrap_or_else(|| SOURCE_OBSERVATION_DELETE_RETAINED.to_owned());
         inner.stamp_session_at_index(index);

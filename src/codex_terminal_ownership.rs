@@ -68,7 +68,7 @@ pub(crate) fn hold_unresolved_codex_terminal(
     {
         clear_provider_capacity_retry(record);
         record.codex_terminal_identity_unresolved = true;
-        record.set_auto_dispatch_blocked(true);
+        record.pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::TerminalUnresolved));
         // The provider request remains unresolved; this is not a terminal
         // failure or an operator pause, and its accepted receipt stays accepted.
         record.session.status = SessionStatus::Active;

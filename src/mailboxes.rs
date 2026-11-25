@@ -1959,21 +1959,39 @@ pub(crate) async fn read_mailbox_message(
             .federation_mailbox_actor_if_bound(&session_id)?
             .is_some()
     {
-        return state
+        let mut message: MailboxMessage = state
             .federation_mailbox_operation(
                 &session_id,
                 FederationMailboxOperation::ReadMessage { message_id },
             )
             .await
-            .map(Json)
-            .map_err(mailbox_current_status_unavailable);
+            .map_err(mailbox_current_status_unavailable)?;
+        // A domain message names its recipient by its domain principal; when
+        // that recipient is a session on this host, its pause reason is ours
+        // to show, as on the local path below.
+        if message.current_status.is_some() {
+            let target = message.target_session_id.clone();
+            let reason = run_blocking_api(move || {
+                Ok(state.local_queue_pause_reason_for_participant(&target))
+            })
+            .await?;
+            if let Some(status) = message.current_status.as_mut() {
+                status.recipient_queue_pause = reason;
+            }
+        }
+        return Ok(Json(message));
     }
     let message = run_blocking_api(move || {
         state.ensure_mailbox_session_active(&session_id)?;
-        state
+        let mut message = state
             .mailbox_store
             .read_message(&session_id, &message_id)
-            .map_err(mailbox_api_error)
+            .map_err(mailbox_api_error)?;
+        if let Some(status) = message.current_status.as_mut() {
+            status.recipient_queue_pause =
+                state.local_queue_pause_reason(&message.target_session_id);
+        }
+        Ok(message)
     })
     .await?;
     Ok(Json(message))

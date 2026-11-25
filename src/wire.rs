@@ -3210,6 +3210,11 @@ pub(crate) struct StateResponse {
     pub(crate) sessions: Vec<StateSessionSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) mirrored_delegation_child_ids: Vec<String>,
+    /// Why each paused local session's queue is paused, keyed by session id.
+    /// Older peers strictly decode the session rows, so the reason travels
+    /// here, beside them, and a peer that does not know it ignores it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) queue_pause_reasons: BTreeMap<String, QueuePauseReason>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) delegations: Vec<DelegationStateSummary>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

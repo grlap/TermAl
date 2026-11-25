@@ -1310,6 +1310,17 @@ impl AppState {
         let mirrored_delegation_child_ids = mirrored_delegation_child_ids(&sessions)
             .map(str::to_owned)
             .collect();
+        let queue_pause_reasons = inner
+            .sessions
+            .iter()
+            .filter(|record| !record.hidden && record.orchestrator_auto_dispatch_blocked)
+            .filter_map(|record| {
+                record
+                    .queue_pause_reason
+                    .clone()
+                    .map(|reason| (record.session.id.clone(), reason))
+            })
+            .collect();
         StateResponse {
             remote_transport_statuses: self.remote_registry.transport_statuses(),
             revision: inner.revision,
@@ -1322,6 +1333,7 @@ impl AppState {
             workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
             sessions,
             mirrored_delegation_child_ids,
+            queue_pause_reasons,
             delegations: inner
                 .delegations
                 .iter()

@@ -228,6 +228,7 @@ pub(crate) fn state_diff_payload<'a>(
         // A cut's header lists no sessions; `cut.sessions` holds them.
         sessions: _,
         mirrored_delegation_child_ids: _,
+        queue_pause_reasons: _,
         delegations,
         delegation_waits,
         test_run_overview,

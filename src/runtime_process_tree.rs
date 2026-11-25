@@ -1029,7 +1029,9 @@ impl AppState {
                 && record.engram_mcp_installed == installed;
             record.clear_runtime_stop();
             if let Err(error) = outcome {
-                record.set_auto_dispatch_blocked(true);
+                record.pause_auto_dispatch(QueuePauseReason::now(
+                    QueuePauseCause::RuntimeResetFailed,
+                ));
                 inner.stamp_session_at_index(index);
                 self.commit_locked(&mut inner)?;
                 let callbacks = std::mem::take(&mut inner.sessions[index].deferred_stop_callbacks);
@@ -1042,7 +1044,9 @@ impl AppState {
                 matches!(ordinary_resume, Some(QueuedResumeIntent::HumanSend(_)))
                     || human.as_ref().is_some_and(|target| target.intake.is_some());
             if !same_context {
-                record.set_auto_dispatch_blocked(true);
+                record.pause_auto_dispatch(QueuePauseReason::now(
+                    QueuePauseCause::RuntimeResetFailed,
+                ));
                 inner.stamp_session_at_index(index);
                 if accepted_human_send {
                     // Cleanup confirmed the old runtime is gone. Retire its
@@ -1060,7 +1064,9 @@ impl AppState {
                 .as_ref()
                 .is_some_and(|saved| !transfer_human_reset_resume(record, saved, generation))
             {
-                record.set_auto_dispatch_blocked(true);
+                record.pause_auto_dispatch(QueuePauseReason::now(
+                    QueuePauseCause::RuntimeResetFailed,
+                ));
                 inner.stamp_session_at_index(index);
                 if accepted_human_send {
                     self.retire_dedicated_reset_runtime_locked(&mut inner, index, false)?;

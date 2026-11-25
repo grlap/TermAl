@@ -632,10 +632,20 @@ impl AppState {
                 if !retain_runtime_for_retry {
                     settle_retired_runtime_attempt(record, ending_turn);
                 }
-                let auto_dispatch_blocked = record.orchestrator_auto_dispatch_blocked
-                    || shutdown_error.is_some()
-                    || suppress_automatic_resume;
-                record.set_auto_dispatch_blocked(auto_dispatch_blocked);
+                if record.orchestrator_auto_dispatch_blocked {
+                    // An earlier pause still holds; its reason stays.
+                    record.set_auto_dispatch_blocked(true);
+                } else if shutdown_error.is_some() {
+                    // The old runtime could not be stopped cleanly.
+                    record.pause_auto_dispatch(QueuePauseReason::now(
+                        QueuePauseCause::RuntimeCleanupFailed,
+                    ));
+                } else if suppress_automatic_resume {
+                    record
+                        .pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::StopRequested));
+                } else {
+                    record.set_auto_dispatch_blocked(false);
+                }
                 if suppress_automatic_resume {
                     clear_queued_prompts_by_source(record, QueuedPromptSource::Orchestrator);
                 }
@@ -796,7 +806,7 @@ impl AppState {
                     inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid")
-                        .set_auto_dispatch_blocked(true);
+                        .pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::PersistFailed));
                     self.publish_state_locked(&inner);
                     (
                         None,
@@ -894,6 +904,9 @@ impl AppState {
     ) -> Result<bool> {
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
+        // Summarised before the state lock is taken; used only if this
+        // failure pauses a mailbox-woken turn's queue.
+        let pause_summary = queue_pause_summary(cleaned);
         let (should_dispatch_next, failed_mailbox_notification) = {
             let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
@@ -952,7 +965,7 @@ impl AppState {
                 // Restore the durable wake below, but do not immediately run
                 // the same poisoned queue head again. An explicit resume can
                 // retry it after the operator has inspected the failure.
-                record.set_auto_dispatch_blocked(true);
+                record.pause_auto_dispatch_for_turn(QueuePauseCause::TurnFailed, pause_summary);
             }
 
             if let Some(message_id) = message_id {
@@ -1242,6 +1255,9 @@ impl AppState {
     ) -> Result<bool> {
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
+        // Summarised before the state lock is taken; used only if this
+        // failure pauses a mailbox-woken turn's queue.
+        let pause_summary = queue_pause_summary(cleaned);
         let preserve_accepted_turn_state = mode.preserves_accepted_turn_state();
         let (
             commit_result,
@@ -1383,7 +1399,7 @@ impl AppState {
                     // A failed mailbox turn is recoverable, but immediately
                     // draining the restored wake would retry the same poisoned
                     // queue head forever and starve every prompt behind it.
-                    record.set_auto_dispatch_blocked(true);
+                    record.pause_auto_dispatch_for_turn(QueuePauseCause::TurnFailed, pause_summary);
                 }
                 // Synchronous command-channel rejection is requeued by
                 // `record_rejected_turn_dispatch`, which still owns the exact
@@ -1726,6 +1742,9 @@ impl AppState {
     ) -> Result<()> {
         let registered_check_notices = self.prepare_registered_check_notices(session_id);
         let cleaned = error_message.trim();
+        // Summarised before the state lock is taken; used only if this
+        // failure pauses a mailbox-woken turn's queue.
+        let pause_summary = queue_pause_summary(cleaned);
         let (commit_result, should_dispatch_next, failed_mailbox_notification) = {
             let Some(_observation_install) = self.runtime_observation_lifetime.enter("terminal")
             else {
@@ -1768,7 +1787,7 @@ impl AppState {
             let record = &mut inner.sessions[index];
             let failed_mailbox_notification = record.active_turn_mailbox_notification.take();
             if failed_mailbox_notification.is_some() {
-                record.set_auto_dispatch_blocked(true);
+                record.pause_auto_dispatch_for_turn(QueuePauseCause::TurnFailed, pause_summary);
             }
 
             record.session.status = SessionStatus::Error;
@@ -2310,12 +2329,35 @@ impl AppState {
                     }
                 }
                 let operator_paused = record.engram.operator_paused;
-                record.set_auto_dispatch_blocked(
-                    retain_cleanup_owner
-                        || preserve_automatic_resume_block
-                        || exited_mailbox_notification.is_some()
-                        || operator_paused,
-                );
+                let prior_pause_reason = record.queue_pause_reason.clone();
+                if retain_cleanup_owner {
+                    // The exited runtime's process tree is still owned for
+                    // Stop or Delete to retry its cleanup: that is the action
+                    // the operator needs, so it wins over the plain exit.
+                    record.pause_auto_dispatch(QueuePauseReason::now(
+                        QueuePauseCause::RuntimeCleanupFailed,
+                    ));
+                } else if exited_mailbox_notification.is_some() {
+                    // The runtime's own process ended the turn: that is the
+                    // typed signal, unless its provider reported a kind first.
+                    let kind = record
+                        .turn_failure_kind
+                        .take()
+                        .unwrap_or(TurnFailureKind::RuntimeCrashed);
+                    record.pause_auto_dispatch(QueuePauseReason::turn(
+                        QueuePauseCause::RuntimeExited,
+                        Some(kind),
+                        None,
+                    ));
+                } else {
+                    record.set_auto_dispatch_blocked(
+                        preserve_automatic_resume_block || operator_paused,
+                    );
+                    if record.orchestrator_auto_dispatch_blocked {
+                        // An earlier pause still holds; keep its reason.
+                        record.queue_pause_reason = prior_pause_reason;
+                    }
+                }
                 record.engram.operator_paused = operator_paused;
                 record.clear_runtime_stop();
                 // Unsent deferred hand-offs first; then the runtime went away
@@ -2387,7 +2429,7 @@ impl AppState {
                 let record = inner
                     .session_mut_by_index(index)
                     .expect("session index should be valid");
-                record.set_auto_dispatch_blocked(true);
+                record.pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::PersistFailed));
                 clear_active_turn_file_change_tracking(record);
             }
             if let Ok(revision) = &commit_result {

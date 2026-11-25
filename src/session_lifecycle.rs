@@ -1641,7 +1641,8 @@ impl AppState {
                     let record = inner
                         .session_mut_by_index(index)
                         .expect("session index should be valid");
-                    record.set_auto_dispatch_blocked(true);
+                    record
+                        .pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::PersistFailed));
                     clear_active_turn_file_change_tracking(record);
                     Err((
                         ApiError::internal(format!("failed to persist session state: {err:#}")),

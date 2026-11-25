@@ -651,7 +651,8 @@ impl AppState {
                     SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
                 )
             {
-                record.set_auto_dispatch_blocked(true);
+                record
+                    .pause_auto_dispatch(QueuePauseReason::now(QueuePauseCause::HumanStartFailed));
                 record.session.status = SessionStatus::Error;
                 let unsent = record
                     .queued_prompts

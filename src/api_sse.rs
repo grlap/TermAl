@@ -71,6 +71,7 @@ pub(crate) fn empty_state_events_response(server_instance_id: String) -> StateRe
         workspaces: Vec::new(),
         sessions: Vec::new(),
         mirrored_delegation_child_ids: Vec::new(),
+        queue_pause_reasons: BTreeMap::new(),
         delegations: Vec::new(),
         delegation_waits: Vec::new(),
         test_run_overview: TestRunOverviewSnapshot::default(),

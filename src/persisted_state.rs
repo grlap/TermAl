@@ -887,6 +887,8 @@ pub(crate) struct PersistedSessionRecord {
     #[serde(default, skip_serializing_if = "session_flag_is_false")]
     pub(crate) orchestrator_auto_dispatch_blocked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) queue_pause_reason: Option<QueuePauseReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) provider_capacity_retry: Option<ProviderCapacityRetry>,
     /// Original keys of removed control-only fields, retained without live
     /// tokens, grants, retry schedules or recovery owners.
@@ -1010,6 +1012,7 @@ impl PersistedSessionRecord {
             remote_id: self.remote_id.clone(),
             remote_session_id: self.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: self.orchestrator_auto_dispatch_blocked.clone(),
+            queue_pause_reason: self.queue_pause_reason.clone(),
             provider_capacity_retry: self.provider_capacity_retry.clone(),
             historical_control: self.historical_control.clone(),
             engram_carried_launches: self.engram_carried_launches.clone(),
@@ -1064,6 +1067,10 @@ impl PersistedSessionRecord {
             remote_id: record.remote_id.clone(),
             remote_session_id: record.remote_session_id.clone(),
             orchestrator_auto_dispatch_blocked: record.orchestrator_auto_dispatch_blocked,
+            queue_pause_reason: record
+                .orchestrator_auto_dispatch_blocked
+                .then(|| record.queue_pause_reason.clone())
+                .flatten(),
             provider_capacity_retry: record.provider_capacity_retry.clone(),
             historical_control: record.engram.historical_control.clone(),
             engram_carried_launches: record
@@ -1271,6 +1278,12 @@ impl PersistedSessionRecord {
             retained_dedicated_owners: Vec::new(),
             engram_mcp_runtime_quarantined: false,
             orchestrator_auto_dispatch_blocked: ordinary_paused,
+            queue_pause_reason: if ordinary_paused {
+                self.queue_pause_reason
+            } else {
+                None
+            },
+            turn_failure_kind: None,
             provider_capacity_retry: self.provider_capacity_retry,
             codex_terminal_identity_unresolved: false,
             engram: EngramSessionState {

@@ -794,6 +794,8 @@ fn push_remote_proxy_session_record(
         retained_dedicated_owners: Vec::new(),
         engram_mcp_runtime_quarantined: false,
         orchestrator_auto_dispatch_blocked: false,
+        queue_pause_reason: None,
+        turn_failure_kind: None,
         provider_capacity_retry: None,
         codex_terminal_identity_unresolved: false,
         runtime_stop_in_progress: false,

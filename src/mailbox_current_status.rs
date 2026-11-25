@@ -26,6 +26,14 @@ pub(crate) struct MailboxMessageCurrentStatus {
     pub(crate) summary: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) relay_progress: Option<MailboxRelayProgress>,
+    /// Why the recipient's queue is paused now, when the recipient is a local
+    /// session whose queue is paused, whether or not this message's own wake
+    /// is the one held: read it beside `notification_state` and
+    /// `recipient_acknowledged`. Added by the exact read on the recipient's
+    /// own host, for local and domain messages alike; a recipient on another
+    /// host is not covered yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) recipient_queue_pause: Option<QueuePauseReason>,
 }
 
 /// Adds the current projection to a message just read on `connection`, from
@@ -58,6 +66,7 @@ pub(crate) fn attach_mailbox_message_current_status(
         notification_state: message.notification_state.clone(),
         recipient_acknowledged,
         relay_progress: None,
+        recipient_queue_pause: None,
     });
     Ok(())
 }
