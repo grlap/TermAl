@@ -236,6 +236,7 @@ impl AppState {
             return;
         }
         let Some(command) = EngramHost::recognized_check(line)
+            .or_else(|| engram_observed_dart_launcher(line, provenance))
             .filter(|command| command.simple && EngramHost::launcher_arguments(command).is_some())
         else {
             return;
@@ -393,6 +394,16 @@ impl AppState {
         let mode = EngramHost::launcher_arguments(&command).and_then(|words| words.get(2).cloned());
         if (disk.preset == TestRunPreset::Full) != (mode.as_deref() == Some("full")) {
             refuse(ArtifactModeMismatch, &[(ModeMatches, false)]);
+            return;
+        }
+        // Keep the positional paths checked at launch tied to the actual
+        // focused Dart request, even if the shell decoded a word differently.
+        if let Some(Ok(planned)) =
+            engram_focused_launcher_words(&command.program, &command.argv[1..])
+            && engram_supports_focused_dart_test(planned)
+            && (disk.command_truncated || disk.command.as_deref() != Some(planned))
+        {
+            refuse(ArtifactRequestMismatch, &[(ObservationMatches, false)]);
             return;
         }
         // The locator is explicit; this interval is only an anti-replay guard,

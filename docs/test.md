@@ -438,6 +438,42 @@ it does not attest the package bytes or confine the runner's configuration.
 File-writing reporters should target ignored scratch (such as `.tmp/`), since
 creating an untracked report makes committed input ineligible.
 
+**Flutter and Dart JSON reporters.** From the named repository root, use
+one of these focused committed-input commands:
+
+```sh
+node scripts/test-launcher.mjs focused --input commit -- flutter test
+node scripts/test-launcher.mjs focused --input commit -- flutter test --no-pub --exclude-tags supabase-local
+node scripts/test-launcher.mjs focused --input commit -- flutter test test/integration -t integration --run-skipped --concurrency=1
+node scripts/test-launcher.mjs focused --input commit -- dart test test/
+```
+
+The recognised forms are `flutter test` and `dart test` with optional file
+or directory filters inside the named worktree. An explicit path to the SDK
+may be outside the worktree. Run in the foreground and omit `--file-reporter`
+to receive Test credit. A command with its own reporter keeps the SDK's
+behavior and earns no Test credit. The launcher summary names the supported form.
+Both runners allow `-t <tags>` or `--tags <tags>`, `--exclude-tags <tags>`,
+`--plain-name <text>`, `--run-skipped` and `--concurrency=<N>` with a
+positive count. Flutter also allows `--no-pub`. Other options, watch mode,
+renamed executables and shell wrappers stay unclassified. On Windows,
+the launcher resolves `flutter` or `flutter.bat` to the SDK batch file and accepts the native
+`dart.exe` or SDK `dart.bat` resolution of `dart`. The SDK batch route
+supports spaces and trailing backslashes in arguments. The batch route
+rejects shell metacharacters in arguments and in the SDK path.
+
+For those committed-input forms, the launcher appends
+`--file-reporter json:<run directory>/focused.dart.json` and records the
+effective arguments in `results.json`. At stage close it records the
+identity of the run's own report, up to 64 MiB. The summary gives the
+report's path or says it is unavailable.
+
+Registered Test verification uses the same Dart JSON reader and
+verdict rules as the declared native route. A nonzero process exit
+gives FAIL. On exit zero, a missing, unreadable, oversized, incomplete
+or all-skipped report gives UNKNOWN. Editing or supplying a report
+after the run cannot supply verification evidence for it.
+
 A direct `focused -- cargo test` skips `scripts/test-rust.sh`, so unless something
 sets a count libtest runs one test thread per available core, where `full` defaults
 to `RUST_TEST_THREADS=4`. On a many-core host a direct run is far harsher than a
@@ -1419,10 +1455,11 @@ run that failed at any stage, its first included, is still recorded failed.
 
 Registered verification classifies focused stages from their actual runner
 argv. The stage label `focused` alone no longer selects Test: an unsupported
-command produces an explicit unclassified-stage refusal. Declared native
-Flutter/.NET credit is reserved to the original host-observed native route;
-a generic focused launcher registration cannot adopt a declaration or a
-later artifact as that execution's evidence.
+command produces an explicit unclassified-stage refusal. The declared native
+route uses the original host-observed declaration and artifact. The supported
+focused Flutter and Dart forms above use the JSON report captured by that
+launcher run itself. A generic focused launcher registration cannot adopt a
+declaration or a later artifact as that execution's evidence.
 
 The exact focused argv `node scripts/check-doc-links.mjs`, with no arguments,
 is a registered Lint check. Run it from the named root with
