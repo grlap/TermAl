@@ -1,0 +1,27 @@
+{
+  "id": "01a2101e-71bc-7ca2-91bc-c883e6a8d505",
+  "external_ref": null,
+  "title": "A typed provider failure kind is lost when a Stop defers the turn's terminal callback, so the later pause reads unclassified",
+  "outcome": "A typed provider failure kind is lost when a Stop defers the turn's terminal callback, so the later pause reads unclassified",
+  "acceptance": [
+    "When a Stop is in progress as a turn's typed provider failure arrives (Claude api_error_status or Codex codexErrorInfo), and the Stop fails and replays that turn's deferred terminal callback, the resulting pause carries the provider's typed failure kind rather than unclassified; a behaviour test drives that replay."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "pause-reason",
+    "queue"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

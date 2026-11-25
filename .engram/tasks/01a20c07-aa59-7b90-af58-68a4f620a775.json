@@ -14,12 +14,19 @@
   "labels": [],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The shared-only shorthand spawn_codex_runtime is now compiled for tests only (#[cfg(test)]), because every production caller chooses an ownership through spawn_codex_runtime_owned_by. A non-test build no longer warns that it is never used, and no other warning changed. Comments in src/codex.rs and src/tests/shared_codex.rs, and the parked attachment-epoch note in docs/features/shared-codex-app-server.md, now name spawn_codex_runtime_owned_by as the function that clones the shared runtime id. No production logic changed.\n- Landed as ba577b3a by fast-forward from 1dda262e at 23:15:29Z (Opus2).\n- Review C2-1: clean.\n- Landing gate: Linux FULL test-17dd6770 on C7.\n- Evidence: Linux check test-ca0f74a1 (10 warnings against 11; only spawn_codex_runtime removed); callers test-d60e416e (413/0); Windows callers test-d270b8b5 (414/0, including the Windows-only profile-switch test).\n- Evaluation: attempt 2 passed 2 of 2.\n- Install: deferred by Opus2 until Central is free; he will record its hash.",
+    "completed_at": "2026-11-24T23:17:02.249544200Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

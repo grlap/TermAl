@@ -1,0 +1,27 @@
+{
+  "id": "01a20fe5-e260-7d60-945b-a60515172f66",
+  "external_ref": null,
+  "title": "A run wait that has already reported a run's settled record still holds that run against compaction while it follows other records",
+  "outcome": "Once a run wait's follow-up resume has named a run's record, that run is no longer held out of compaction and index retention by the wait, while the wait keeps following its other runs' records",
+  "acceptance": [
+    "A run wait that has already reported a run's settled record still holds that run against compaction while it follows other records is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

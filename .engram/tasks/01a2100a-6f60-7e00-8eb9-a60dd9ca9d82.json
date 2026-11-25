@@ -1,0 +1,29 @@
+{
+  "id": "01a2100a-6f60-7e00-8eb9-a60dd9ca9d82",
+  "external_ref": null,
+  "title": "Avoid repeatedly hashing Human Send attachments while holding the state lock",
+  "outcome": "When a fresh Human Send activates an older ordinary FIFO head, checking that the accepted Send still owns that activation hashes its queued content under StateInner at capture and at every owner recheck. A large valid image can make unrelated sessions wait while its attachment bytes are reread several times.",
+  "acceptance": [
+    "Capture and revalidation of the accepted Send carrier avoid repeatedly reading its full attachment payload under the shared state lock.",
+    "Canceling or replacing the accepted Send still invalidates its authorization to activate the older FIFO head, while legitimate Stop and exact receipt ownership checks still hold."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "queue",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

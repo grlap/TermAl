@@ -1,0 +1,28 @@
+{
+  "id": "01a2101e-7d69-7e61-be39-479dd2369a14",
+  "external_ref": null,
+  "title": "Queue pause reasons: test the typed-kind wiring from real Claude and Codex signals, persisted reload and promotion rollback",
+  "outcome": "Queue pause reasons: test the typed-kind wiring from real Claude and Codex signals, persisted reload and promotion rollback",
+  "acceptance": [
+    "Behaviour tests show: a Claude result frame with a numeric api_error_status and a Codex terminal failure with codexErrorInfo each yield the matching failureKind on the pause; a paused session's reason survives a persisted reload and is dropped when the reloaded pause is not an ordinary one; and a queue-promotion rollback restores the reason it captured."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "pause-reason",
+    "queue",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

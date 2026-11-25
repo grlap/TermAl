@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-chrome-kill-grant-continuation-2026-11-25",
+    "revision_id": "19cb519c59064e38a88c5ed5108dcde8",
+    "previous": null,
+    "body_sha256": "d6e46d4f5f693e5096f5ab5b3529945b22e214a8213dbf4ea5104928738492b0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T00:03:17.059431900Z"
+    }
+  },
+  "body": "CONTINUATION of central-chrome-kill-grant-2026-11-16 (full at 8 KiB; read both). NOT A GRANT USE (Opus2, 2026-11-24/25): for Opus3's w-56f386fdd7d3 c55 registered cold Central run (Fable2 #7740 bound-run exception: cold TermAl test binary on Central needs FV >= 29 GiB = 30,408,704 KiB, alone), Fable2 warned Greg in advance (#7743). Greg answered „Zamknij. Czekam na rezultaty.” and Engram::Asistant closed Chrome on Central on Greg's own word (Asistant 588693a8 #2659 / TermAl #126, ~23:44Z). Opus2 ran no Stop-Process; the grant was not used. FV after the close: 30,966,048 / 30,795,860 KiB (23:44:31Z / 23:44:37Z), 0 chrome. The run test-4e513af3 went alone at 23:50Z (FV 32.2 GB), lowest FV during the cold -j1 compile 14,413,500 KiB (single rustc ~16.4 GB private), PASS 899/0/1 at 00:02:57Z. Recorded on w-56f3 (evidence fc81c61e). Rules of the grant itself are unchanged."
+}

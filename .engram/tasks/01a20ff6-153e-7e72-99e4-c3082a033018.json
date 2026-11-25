@@ -1,0 +1,28 @@
+{
+  "id": "01a20ff6-153e-7e72-99e4-c3082a033018",
+  "external_ref": null,
+  "title": "Cover cached evidence replay while a verdict submission is in flight",
+  "outcome": "Verify that both successful replay caches share the existing operation guard with submission and release their lease when replay completes. Document the conflict in the evidence recovery contract if helpful.",
+  "acceptance": [
+    "While an evaluator verdict submission holds the operation guard, repeating an already successful selected and catalog readKey returns an in-progress conflict and exposes no cached evidence.",
+    "Once that operation is released, both identical readKey replays succeed with their original response, and a subsequent submission can acquire the guard."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

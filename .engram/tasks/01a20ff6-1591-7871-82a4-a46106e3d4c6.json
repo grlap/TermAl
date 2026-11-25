@@ -1,0 +1,28 @@
+{
+  "id": "01a20ff6-1591-7871-82a4-a46106e3d4c6",
+  "external_ref": null,
+  "title": "Cover evaluator evidence reads after the reader changes on the same store",
+  "outcome": "A changed Work reader configuration on the same store withdraws admission for previously captured acceptance evidence. Add behavioral coverage for a changed developer name or binary path while retaining the established store.",
+  "acceptance": [
+    "With the store unchanged and a cached selected or catalog reply present, changing the reader configuration makes replay return a conflict and withhold the previous body.",
+    "A fresh read on the same moved reader records an unfinished reason without issuing any tracker read."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
