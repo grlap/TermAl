@@ -308,6 +308,11 @@ pub(crate) fn handle_shared_codex_app_server_message(
         return Ok(());
     };
 
+    if matches!(method, "account/login/completed" | "account/updated") {
+        // A session app-server has no account action to receive these. Do not
+        // pass account payloads to thread-scoped fallback diagnostics.
+        return Ok(());
+    }
     if method == "account/rateLimits/updated" {
         let Some(rate_limits) = message.pointer("/params/rateLimits") else {
             log_unhandled_codex_event(

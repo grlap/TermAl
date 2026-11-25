@@ -98,6 +98,17 @@ impl OwnedCodexServers {
         Ok(home)
     }
 
+    pub(crate) fn has_unfinished(&self) -> bool {
+        !lock_unfinished(&self.unfinished).is_empty()
+    }
+
+    pub(crate) fn invalidate_prepared_homes(&self) {
+        self.prepared_homes
+            .lock()
+            .expect("Codex home preparation mutex poisoned")
+            .clear();
+    }
+
     /// Starts the cleanup worker unless it is running. Called before an
     /// owned server is launched, so a launch fails rather than leaving a
     /// server that nothing could end.

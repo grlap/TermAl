@@ -309,6 +309,8 @@ impl AppState {
         if engram_named_selection_capture_pending(record)
             || session_resource_reset_in_progress(inner, record)
             || record.engram.observation_delete_requested
+            || (record.session.agent == Agent::Codex
+                && self.codex_account.check_dispatch().is_err())
             || record.runtime_stop_in_progress
             || matches!(
                 record.session.status,
@@ -435,6 +437,9 @@ impl AppState {
         project_environment: ProjectEnvironment,
         read_only_git: bool,
     ) -> std::result::Result<StartedTurn, ApiError> {
+        if record.session.agent == Agent::Codex {
+            self.codex_account.check_dispatch()?;
+        }
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
         }
@@ -1656,6 +1661,10 @@ impl AppState {
             }
             let record = &inner.sessions[index];
             if ordinary_queue_dispatch_is_held(&inner, record, allow_blocked_dispatch) {
+                return Ok(None);
+            }
+            if record.session.agent == Agent::Codex && self.codex_account.check_dispatch().is_err()
+            {
                 return Ok(None);
             }
             if orphaned_workflow_only
