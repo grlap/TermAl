@@ -1385,6 +1385,7 @@ pub(crate) struct AppState {
     /// Delegation-owned app-servers by runtime id, with the profile whose
     /// Codex home they use (`owned_codex_server.rs`).
     pub(crate) owned_codex_servers: OwnedCodexServerRegistry,
+    pub(crate) codex_account: Arc<CodexAccountControl>,
     /// Runtime ids whose exit cascade has already been claimed. Several
     /// worker threads may report one shared-process death; only the first may
     /// terminalize sessions or rebind Engram.

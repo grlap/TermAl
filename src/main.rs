@@ -202,6 +202,7 @@ async fn run_server() -> Result<()> {
         .local_addr()
         .context("failed to read local backend address")?;
     state.set_local_http_base_url(format!("http://{bound}"));
+    state.prepare_codex_account_restore();
     eprintln!(
         "startup> listener bound elapsed_ms={}",
         boot_started.elapsed().as_millis()
@@ -367,6 +368,7 @@ fn app_router_with_acceptance_policy_limiter(
 
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/codex/account", post(codex_account_action))
         .route(
             "/api/diagnostics/persistence",
             get(get_persistence_diagnostics),
@@ -1695,6 +1697,8 @@ mod claude_outstanding_work;
 use claude_outstanding_work::*;
 mod codex_home;
 use codex_home::*;
+mod codex_account;
+use codex_account::*;
 mod claude_args;
 use claude_args::*;
 mod codex_bin;

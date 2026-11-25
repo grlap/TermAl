@@ -484,11 +484,15 @@ pub(crate) fn spawn_shared_codex_runtime(
     if !state.agent_runtime_spawning_enabled {
         bail!("agent runtime spawning is disabled for this AppState");
     }
-    if ownership == CodexServerOwnership::Delegation {
+    let _admission = if ownership == CodexServerOwnership::Delegation {
         // Before the launch: a server must never exist that nothing can end.
+        let admission = state.codex_account.admit_launch()?;
         state.owned_codex_servers.ensure_cleanup_worker()?;
-    }
-    let (codex_home, mut command) = codex_app_server_command(&state, profile, ownership)?;
+        Some(admission)
+    } else {
+        None
+    };
+    let (codex_home, mut command) = codex_app_server_command(&state, profile, ownership, false)?;
     let owned_launch = match ownership {
         CodexServerOwnership::Delegation => Some((
             profile,
@@ -499,10 +503,34 @@ pub(crate) fn spawn_shared_codex_runtime(
     start_shared_codex_runtime(state, codex_home, &mut command, owned_launch)
 }
 
+pub(crate) fn codex_profile_home(state: &AppState, profile: SharedCodexProfile) -> PathBuf {
+    #[cfg(test)]
+    if !test_launches_real_codex() {
+        return PathBuf::from(&state.default_workdir)
+            .join("fixture-codex-home")
+            .join(profile.codex_home_scope());
+    }
+    resolve_termal_codex_home(&state.default_workdir, profile.codex_home_scope())
+}
+
+pub(crate) fn spawn_codex_account_runtime(
+    state: &AppState,
+    profile: SharedCodexProfile,
+    wire: CodexAccountWire,
+) -> Result<SharedCodexRuntime> {
+    if !state.agent_runtime_spawning_enabled {
+        bail!("agent runtime spawning is disabled for this AppState");
+    }
+    let (home, mut command) =
+        codex_app_server_command(state, profile, CodexServerOwnership::Shared, true)?;
+    start_codex_runtime_process(state.clone(), home, &mut command, None, Some(wire))
+}
+
 fn codex_app_server_command(
     state: &AppState,
     profile: SharedCodexProfile,
     ownership: CodexServerOwnership,
+    account_operation: bool,
 ) -> Result<(PathBuf, Command)> {
     // Under test only a registered disposable protocol producer is launched:
     // it replaces executable discovery and the user Codex home, while launch,
@@ -513,10 +541,11 @@ fn codex_app_server_command(
         let Some(fixture) = test_codex_app_server_fixture(&state.default_workdir) else {
             bail!("a test launches a Codex app-server only through a registered fixture");
         };
-        let codex_home = PathBuf::from(&state.default_workdir).join("fixture-codex-home");
+        let codex_home = codex_profile_home(state, profile);
         fs::create_dir_all(&codex_home)?;
         let mut command = fixture();
         command
+            .env("CODEX_HOME", &codex_home)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -524,7 +553,14 @@ fn codex_app_server_command(
     }
     // Codex threads carry their own cwd, so one shared app-server can serve
     // every session of a profile.
-    let prepare = || prepare_termal_codex_home(&state.default_workdir, profile.codex_home_scope());
+    let seed_auth = !account_operation && state.codex_account.uses_standalone();
+    let prepare = || {
+        prepare_codex_home(
+            &state.default_workdir,
+            profile.codex_home_scope(),
+            seed_auth,
+        )
+    };
     // Shared and owned launches prepare a profile's home under one lock. A
     // delegation launch runs under the state lock, so it reuses the home as
     // last prepared instead of seeding it again.
@@ -566,6 +602,17 @@ pub(crate) fn start_shared_codex_runtime(
     command: &mut Command,
     owned: Option<(SharedCodexProfile, OwnedCodexServerLaunch)>,
 ) -> Result<SharedCodexRuntime> {
+    start_codex_runtime_process(state, codex_home, command, owned, None)
+}
+
+fn start_codex_runtime_process(
+    state: AppState,
+    codex_home: PathBuf,
+    command: &mut Command,
+    owned: Option<(SharedCodexProfile, OwnedCodexServerLaunch)>,
+    account_wire: Option<CodexAccountWire>,
+) -> Result<SharedCodexRuntime> {
+    let private_account_wire = account_wire.is_some();
     let runtime_id = Uuid::new_v4().to_string();
     let DedicatedRuntimeChild {
         process,
@@ -992,6 +1039,16 @@ pub(crate) fn start_shared_codex_runtime(
                     }
                     Err(err) => {
                         consecutive_bad_json_lines += 1;
+                        if private_account_wire {
+                            if consecutive_bad_json_lines
+                                >= SHARED_CODEX_MAX_CONSECUTIVE_BAD_JSON_LINES
+                            {
+                                runtime_failure =
+                                    Some("Codex account app-server sent invalid JSON".into());
+                                break;
+                            }
+                            continue;
+                        }
                         let preview = truncate_child_stdout_log_line(
                             trimmed,
                             SHARED_CODEX_STDOUT_LOG_PREVIEW_MAX_CHARS,
@@ -1012,6 +1069,10 @@ pub(crate) fn start_shared_codex_runtime(
                     }
                 };
 
+                if let Some(wire) = &account_wire {
+                    wire.receive(&message, &reader_pending_requests);
+                    continue;
+                }
                 if let Err(err) = handle_shared_codex_app_server_message(
                     &message,
                     &reader_state,
@@ -1034,6 +1095,9 @@ pub(crate) fn start_shared_codex_runtime(
                 }
             }
 
+            if let Some(wire) = &account_wire {
+                wire.exited();
+            }
             // Always fail pending requests and notify sessions, even on
             // clean EOF. Without this, sessions remain "active" in the UI
             // with no events ever arriving.
@@ -1065,7 +1129,7 @@ pub(crate) fn start_shared_codex_runtime(
         std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
-                if !should_forward_runtime_stderr_line("codex", &line) {
+                if private_account_wire || !should_forward_runtime_stderr_line("codex", &line) {
                     continue;
                 }
                 let timestamp = runtime_stderr_timestamp();
@@ -1093,6 +1157,9 @@ pub(crate) fn start_shared_codex_runtime(
             // keeper included; until then no failure path may kill it.
             if result.is_ok() {
                 owned_codex_server_exited(&wait_state, &wait_runtime_id);
+                wait_state
+                    .codex_account
+                    .finish_shared_exit(&wait_runtime_id);
             }
             match result {
                 Ok(status) if status.success() => {
@@ -1960,9 +2027,10 @@ pub(crate) fn finish_shared_codex_thread_setup(
                 }
             }
             Err(err) => {
-                if let Some(thread_id) =
-                    resumed_thread_id.filter(|_| is_lost_codex_rollout_error(&err))
-                {
+                if let Some(thread_id) = resumed_thread_id.filter(|_| {
+                    waiter_state.codex_account.uses_standalone()
+                        && is_lost_codex_rollout_error(&err)
+                }) {
                     if !shared_codex_thread_setup_is_current(
                         &waiter_sessions,
                         &waiter_session_id,

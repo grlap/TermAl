@@ -315,6 +315,106 @@ it("keeps ordinary sending available with historical Engram recovery metadata", 
   expect(onSend).toHaveBeenCalled();
 });
 
+function mockShowModal() {
+  const dialogPrototype = HTMLDialogElement.prototype;
+  const originalShowModal = Object.getOwnPropertyDescriptor(dialogPrototype, "showModal");
+  Object.defineProperty(dialogPrototype, "showModal", {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+  return () => {
+    if (originalShowModal) {
+      Object.defineProperty(dialogPrototype, "showModal", originalShowModal);
+    } else {
+      Reflect.deleteProperty(dialogPrototype, "showModal");
+    }
+  };
+}
+
+it.each(["/login", "/logout"] as const)(
+  "opens local Codex account controls for %s without sending a prompt",
+  async (command) => {
+    const restoreShowModal = mockShowModal();
+    const onSend = vi.fn(() => true);
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      status: { mode: "standalone", phase: "standalone", message: "Standalone sign-in" },
+    }), { headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      render(renderFooter({ session: makeSession("session-a"), onSend }));
+      const textarea = screen.getByLabelText("Message session-a");
+      fireEvent.change(textarea, { target: { value: command } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      const dialog = await screen.findByRole("dialog", { name: "Codex account" });
+      expect(within(dialog).getByRole("button", {
+        name: command === "/login" ? "Sign in with ChatGPT" : "Sign out",
+      })).toBeInTheDocument();
+      await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/api/codex/account"),
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "status" }) }),
+      ));
+      expect(onSend).not.toHaveBeenCalled();
+    } finally {
+      restoreShowModal();
+    }
+  },
+);
+
+it("recovers the Codex login dialog when a status poll fails during sign-in", async () => {
+  const restoreShowModal = mockShowModal();
+  const response = (body: object, status = 200) => new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(response({ status: {
+      mode: "standalone", phase: "standalone", message: "Standalone sign-in",
+    } }))
+    .mockResolvedValueOnce(response({
+      status: { mode: "enrolling", phase: "pending", message: "Awaiting sign-in" },
+      challenge: { attemptId: "fake-attempt", authorizationUrl: "https://auth.openai.com/authorize" },
+    }))
+    .mockResolvedValueOnce(response({ error: "Temporary status error" }, 500))
+    .mockResolvedValueOnce(response({ status: {
+      mode: "managed", phase: "signedIn", message: "Signed in",
+    } }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    render(renderFooter({ session: makeSession("session-a") }));
+    const textarea = screen.getByLabelText("Message session-a");
+    fireEvent.change(textarea, { target: { value: "/login" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    const dialog = await screen.findByRole("dialog", { name: "Codex account" });
+    await within(dialog).findByText("Standalone sign-in");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Sign in with ChatGPT" }));
+    await within(dialog).findByRole("link", { name: "Continue sign-in in your browser" });
+    await within(dialog).findByRole("alert", {}, { timeout: 2000 });
+    await within(dialog).findByText("Signed in", {}, { timeout: 2000 });
+    expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Codex account" })).not.toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledTimes(4);
+  } finally {
+    restoreShowModal();
+  }
+});
+
+it("keeps Codex account commands on the host that owns the session", () => {
+  const onSend = vi.fn(() => true);
+  render(renderFooter({ session: makeSession("session-a", { remoteId: "remote-host" }), onSend }));
+  const textarea = screen.getByLabelText("Message session-a");
+  fireEvent.change(textarea, { target: { value: "/login" } });
+  fireEvent.keyDown(textarea, { key: "Enter" });
+
+  expect(screen.getByText("Open the Codex host's local TermAl UI to change its account.")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Codex account" })).not.toBeInTheDocument();
+  expect(onSend).not.toHaveBeenCalled();
+});
+
 it("navigates projected prompt history from an empty composer and restores the draft", async () => {
   render(
     renderFooter({
