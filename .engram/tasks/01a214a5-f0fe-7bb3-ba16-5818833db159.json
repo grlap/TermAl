@@ -1,0 +1,29 @@
+{
+  "id": "01a214a5-f0fe-7bb3-ba16-5818833db159",
+  "external_ref": null,
+  "title": "Re-attest a pending verification record after a benign binding change (claim renewal or recovery, relabel, restart, root rename) instead of treating the refusal as terminal",
+  "outcome": "Preserve and settle an already registered verification record after a typed temporary lapse or missing named root, using the original immutable record and operation key after the same holder and workspace recover.",
+  "acceptance": [
+    "For an already registered committed-input launcher run, a definitive current-connection Engram verification_record_refused with structured field claim_live or root_bound leaves the record pending. When the original initiating session again holds the live claim for the same work and run and the original workspace is bound, TermAl re-sends the unchanged frozen record under the original operation key and settles the resulting receipt without re-running the tests. This works across a TermAl restart when the initiating session and run artifacts survive, including a same-holder claim recovery and same-workspace name at a later generation.",
+    "TermAl keeps the existing new-registration claim and name fence and does not change the recorded work, holder, named workspace, source, result or terminal artifacts during re-attestation. Other definitive fields, invalid_request and pre-existing terminal refusals without a typed retryable field retain their final disposition. An unknown delivery outcome replays only the original request, and an already received or settled receipt is never sent again.",
+    "Behavioral tests drive the registered verification sender through both typed waits, restart and same-holder recovery, and assert the same operation key and body at the transport and one settled receipt. Negative cases show no re-send on terminal refusals, no reroute to a different session or store, no re-attestation of altered source or terminal artifacts, and no second write after a lost response to an operation Engram had already accepted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "cross-project",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

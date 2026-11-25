@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "procedure-fixes-after-stalls-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "42f13917c58f48148139e7c7c6a5ca73"
+    ]
+  }
+}

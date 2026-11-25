@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "procedure-fixes-after-stalls-2026-11-25",
+    "revision_id": "42f13917c58f48148139e7c7c6a5ca73",
+    "previous": null,
+    "body_sha256": "9b72bd3e116fb802de2f73adcc3b01ca3809c0d3f88b41a0298471602a352aa0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T21:21:32.481282300Z"
+    }
+  },
+  "body": "TermAl procedure fixes after Greg's 2026-11-25 21:20Z request: „prosze poprawic procedury … do roboty” (Asistant #2760). Set by Termal::Fable2 with Engram::Fable (#8836). One rule per real stall. No TLA+: these were procedure errors, not protocol races.\n\n1. CREDIT AND WAITING. Only a test-launcher run with --input commit, in the claim's named root, can produce a registered verification record. A bare `cargo test`, `npx vitest` or other foreground command produces NO record: never wait for one, and never hold a queue slot for one. If you have no run id, there is nothing to wait for. (This mirrors Engram rules-merger-role-2; Engram's W8 stall 19:33–21:13Z.)\n\n2. RECOVERY OWNERS NEED A WAKE. Never name a recovery or follow-up owner in a note alone. The requester MAILS the owner at the moment action is needed, and the owner acts on that mail. No polling or watchers: the wake is a mail.\n\n3. SUPERSEDING RULINGS. A coordinator message that changes an earlier ruling starts with \"SUPERSEDES #N\". Before acting on any ruling, a worker re-reads its mailbox for a later one. If two rulings conflict, ask; don't pick one. (w-14dd A/B and w-46d9 crossed, 2026-11-25.)\n\n4. FIXTURES USE PRODUCTION PATHS. A behaviour-test fixture seeds and drives state through the same path production uses: stored records, real HTTP or send routes, not prepare-only helpers or returned copies. Re-check each new fixture against that before freezing. (w-c9fb R2 and R3 failed only on fixtures.)\n\n5. CENTRAL MEMORY. Cold TermAl test-binary runs default to DL560 (rev16 REV 19). Central is for warm runs and Engram work. The scheduler records idle FV after each restart, and a drift below the cold floor goes into the next restart request; it is not grounds for an exception."
+}

@@ -10,17 +10,17 @@
   "folder_exchange": {
     "complete": true,
     "export_basis": {
-      "inventory_fingerprint": "986b56f7a15ccf353707a18f0b43acdf2f18e1a3a32aeebea5f60bd8848f6341"
+      "inventory_fingerprint": "9d4049b88b9fc881e35ff69e88d56c2cb93bebabebbf02775a6c1f47529f0e13"
     },
     "incremental": {
       "format": "engram-task-sync-folder-incremental-v1",
-      "inventory_root": "e8e44cc0ad42693e0ae76c8d11477475334eef6144703a62f7c1080d8e7d3107",
-      "task_count": 5608,
+      "inventory_root": "9a30d87bde54c3b040b121e0da1a1b62e4d2e4c047a9ea60c2513e2dde4ffdb2",
+      "task_count": 5609,
       "cut": {
-        "position": 300701,
+        "position": 300959,
         "anchor": {
-          "object_kind": "work_event",
-          "object_id": "98f1134ccb954788a1eaf6e0cfc30932"
+          "object_kind": "work_observation",
+          "object_id": "258830bf6b574cc0bae33607d4d745fb"
         }
       }
     }

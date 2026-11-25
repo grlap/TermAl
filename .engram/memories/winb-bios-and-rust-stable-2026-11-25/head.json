@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "winb-bios-and-rust-stable-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "4f4110b7b46f41f9b757f882ba954c6f"
+    ]
+  }
+}
