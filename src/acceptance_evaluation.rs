@@ -773,6 +773,9 @@ pub(crate) struct AcceptanceEvaluationTask {
     /// show it and the submission acknowledges it.
     pub(crate) carried_failure: Option<AcceptanceCarriedFailure>,
     pub(crate) pinned_mode: Option<String>,
+    /// General work revision, as confirmed by the canonical read bracket.
+    pub(crate) work_revision: i64,
+    /// Revision at which the current acceptance contract began.
     pub(crate) acceptance_basis: i64,
     pub(crate) evidence_basis: i64,
     /// Oldest first, as the tracker's window orders them.
@@ -864,13 +867,6 @@ pub(crate) fn parse_acceptance_evaluation_task(
              does not evaluate acceptance, or its build predates acceptance evaluation"
         )));
     };
-    // The basis names the revision whose criteria the verdicts address, so the
-    // criteria must come from that same revision.
-    if contract.work.revision != acceptance_basis {
-        return Err(ApiError::conflict(format!(
-            "`{work_ref}` was revised while it was being read; request the evaluation again"
-        )));
-    }
     let bindings = acceptance_criterion_bindings(
         contract.work.acceptance_bindings,
         contract.work.acceptance.len(),
@@ -886,6 +882,7 @@ pub(crate) fn parse_acceptance_evaluation_task(
         bindings,
         carried_failure,
         pinned_mode: work.evaluation_mode,
+        work_revision: contract.work.revision,
         acceptance_basis,
         evidence_basis,
         evidence: show

@@ -29,8 +29,14 @@ impl EngramControlTransport for VerificationPages {
                 connection, work_ref, run_id, *run_cut,
             ));
         }
-        if matches!(request, EngramControlRequest::AcceptanceBindingRead { .. }) {
-            return Ok(self.binding.clone().expect("unexpected binding read"));
+        if let EngramControlRequest::AcceptanceBindingRead {
+            expected_work_revision,
+            ..
+        } = request
+        {
+            let binding = self.binding.as_ref().expect("unexpected binding read");
+            assert_eq!(binding["basis"]["work_revision"], *expected_work_revision);
+            return Ok(binding.clone());
         }
         assert!(matches!(
             request,
@@ -192,6 +198,62 @@ fn verify_private_source_markers(current: EngramSourceId, older: EngramSourceId)
             .contains("private-path.txt")
     );
     assert_eq!(transport.requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn acceptance_request_uses_the_contract_basis_and_reads_checks_at_the_planning_revision() {
+    let (state, project, parent, root) = fixture();
+    install_store(&state, &project, &root);
+    let (mut show, mut full, mut closure) = evidence_selection::canonical_binding_receipts();
+    let mut core = evidence_selection::canonical_core_receipt();
+    // Engram's safe show has the acceptance basis and shortened criteria.
+    // Its full and core receipts carry the newer general work revision.
+    show["status"]["work"]["acceptance"][1] = json!("Shortened criterion");
+    full["work"]["revision"] = json!(9);
+    full["work"]["title"] = json!("Renamed route task");
+    full["work"]["acceptance"][1] = json!("The full contract requires a passing route test");
+    core["status"]["work"]["revision"] = json!(9);
+    closure["basis"]["work_revision"] = json!(9);
+    closure["rows"][1]["binding"]["obligation"]["work_revision"] = json!(8);
+    let mut private = page(vec![], 0, 0, None);
+    private["basis"]["work_revision"] = json!(9);
+    let transport = Arc::new(VerificationPages {
+        binding: Some(closure),
+        pages: Mutex::new(vec![private].into()),
+        requests: Mutex::new(Vec::new()),
+    });
+    state.install_test_engram_transport(transport.clone());
+    let response = state
+        .request_acceptance_evaluation_with_runner(
+            &parent,
+            evaluation_request(None),
+            |_, args, _| {
+                if args.iter().any(|arg| arg == "inspect") {
+                    Ok(core.clone())
+                } else if args.iter().any(|arg| arg == "--full") {
+                    Ok(full.clone())
+                } else if args.iter().any(|arg| arg == "held") {
+                    Ok(json!({"items":[], "omitted":0}))
+                } else if args.first().map(String::as_str) == Some("control-policy") {
+                    Ok(policy_receipt(Some(&["same_session"])))
+                } else {
+                    Ok(show.clone())
+                }
+            },
+        )
+        .unwrap();
+    let wire = serde_json::to_value(response).unwrap();
+    assert_eq!(wire["acceptanceBasis"], 7);
+    assert_eq!(wire["evidenceBasis"], 42);
+    let brief = wire["brief"].as_str().unwrap();
+    assert!(brief.contains("acceptance_basis 7, evidence_basis 42"));
+    assert!(brief.contains("2. The full contract requires a passing route test"));
+    assert!(brief.contains("original obligation closure"));
+    assert!(!brief.contains("Shortened criterion"));
+    let verification_requests = transport.requests.lock().unwrap();
+    assert_eq!(verification_requests.len(), 1);
+    assert_eq!(verification_requests[0]["expected_work_revision"], 9);
+    assert_eq!(verification_requests[0]["run_cut"], 42);
 }
 
 #[test]

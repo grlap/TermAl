@@ -438,7 +438,7 @@ impl AppState {
                 || result["work"]
                     .get("work_id")
                     .is_some_and(|id| id.as_str() != task.canonical_work_id())
-                || result["work"]["revision"].as_i64() != Some(task.acceptance_basis)
+                || result["work"]["revision"].as_i64() != Some(disposition.identity.revision)
                 || result["work"]["lifecycle"] != "open"
                 || record.is_none()
             {

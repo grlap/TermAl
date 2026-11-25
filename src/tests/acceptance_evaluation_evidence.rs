@@ -517,6 +517,57 @@ fn criterion_evidence_request_refuses_crossed_core_brackets() {
 }
 
 #[test]
+fn acceptance_request_refuses_a_contract_revision_within_the_split_basis_bracket() {
+    for revised_before_full in [true, false] {
+        let (state, project, parent, root) = fixture();
+        install_store(&state, &project, &root);
+        let mut core = canonical_core_receipt();
+        core["status"]["work"]["revision"] = json!(9);
+        let mut full = full_receipt();
+        full["work"]["revision"] = json!(9);
+        if revised_before_full {
+            full["work"]["revision"] = json!(10);
+            full["work"]["acceptance"][1] = json!("The new contract requires two tests");
+        }
+        let show = show_receipt(None);
+        let shows = AtomicUsize::new(0);
+        let error = state
+            .request_acceptance_evaluation_with_runner(
+                &parent,
+                evaluation_request(None),
+                |_, args, _| {
+                    if args.iter().any(|arg| arg == "inspect") {
+                        Ok(core.clone())
+                    } else if args.iter().any(|arg| arg == "--full") {
+                        Ok(full.clone())
+                    } else if args.iter().any(|arg| arg == "held") {
+                        Ok(json!({"items":[], "omitted":0}))
+                    } else {
+                        assert!(args.iter().any(|arg| arg == "--notes"));
+                        let mut receipt = show.clone();
+                        if shows.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                            receipt["acceptance_basis"] = json!(10);
+                            receipt["status"]["work"]["acceptance"][1] =
+                                json!("The new contract requires two tests");
+                        }
+                        Ok(receipt)
+                    }
+                },
+            )
+            .err()
+            .expect("a changed contract must be refused");
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        let expected = if revised_before_full {
+            "contract identity changed"
+        } else {
+            "changed while criterion evidence was read"
+        };
+        assert!(error.message.contains(expected), "{error:?}");
+        assert!(state.inner.lock().unwrap().delegations.is_empty());
+    }
+}
+
+#[test]
 fn criterion_evidence_request_closing_core_spends_the_original_deadline() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);

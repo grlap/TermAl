@@ -195,7 +195,7 @@ pub(crate) fn acceptance_initial_evidence_basis(
     validate_acceptance_projection_identity(work, identity)?;
     let basis: AcceptanceAgentEvidenceBasis = serde_json::from_value(show.clone())
         .map_err(|_| ApiError::bad_gateway("engram work show: malformed initial evidence basis"))?;
-    if basis.acceptance_basis != identity.revision || basis.evidence_basis < 0 {
+    if !(1..=identity.revision).contains(&basis.acceptance_basis) || basis.evidence_basis < 0 {
         return Err(ApiError::conflict(
             "the task revision changed after the opening core identity; request a new evaluation",
         ));
@@ -1246,7 +1246,7 @@ impl AppState {
         let expected = AcceptanceBindingEvidenceBasis {
             project_id: store.project_id.clone(),
             work_id: identity.work_id.clone(),
-            work_revision: task.acceptance_basis,
+            work_revision: identity.revision,
             run_id: run_id.clone(),
             run_cut: task.evidence_basis,
         };
@@ -1397,7 +1397,7 @@ pub(crate) fn apply_acceptance_binding_evidence(
         if obligation.obligation_id.is_empty()
             || !is_engram_record_id(&obligation.definition)
             || !is_engram_record_id(&obligation.triggering_observation)
-            || obligation.work_revision > task.acceptance_basis
+            || obligation.work_revision > task.work_revision
             || obligation.work_revision < 1
             || !position_valid(obligation.trigger_position)
             || !position_valid(obligation.definition_position)

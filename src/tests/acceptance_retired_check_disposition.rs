@@ -300,6 +300,50 @@ fn a_disposition_without_a_record_acknowledgement_never_spawns() {
 }
 
 #[test]
+fn a_disposition_receipt_must_match_the_general_revision_when_the_basis_is_older() {
+    for receipt_revision in [9, 7] {
+        let fixture = retired_check_fixture("passed");
+        let ordinary = independent_reader();
+        let response = fixture.state.request_acceptance_evaluation_with_runner(
+            &fixture.parent,
+            disposition_request(COMMITTED_RUN_ID),
+            |connection, args, timeout| {
+                if args.iter().any(|arg| arg == "note") {
+                    return Ok(json!({
+                        "operation": "note",
+                        "evidence": DISPOSITION_RECORD,
+                        "work": {
+                            "short_ref": "w-task",
+                            "work_id": SIGHTED_WORK_ID,
+                            "revision": receipt_revision,
+                            "lifecycle": "open"
+                        }
+                    }));
+                }
+                let mut receipt = ordinary(connection, args, timeout)?;
+                if args.iter().any(|arg| arg == "inspect") {
+                    receipt["status"]["work"]["revision"] = json!(9);
+                } else if args.iter().any(|arg| arg == "--full") {
+                    receipt["work"]["revision"] = json!(9);
+                }
+                Ok(receipt)
+            },
+        );
+        if receipt_revision == 9 {
+            let AcceptanceEvaluationRequestResponse::Spawned { delegation, .. } = response.unwrap()
+            else {
+                panic!("the receipt at the general revision must admit an evaluator");
+            };
+            assert!(delegation.delegation.prompt.contains(DISPOSITION_RECORD));
+        } else {
+            let error = refusal(&fixture.state, response, "receipt at the older basis");
+            assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+            assert!(error.message.contains("supplied no acknowledgement"));
+        }
+    }
+}
+
+#[test]
 fn a_current_root_check_cannot_be_excluded() {
     let (state, parent, _store, named_root) = named_root_parent();
     let head = commit_named_root(&named_root);

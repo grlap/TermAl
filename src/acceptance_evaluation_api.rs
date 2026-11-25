@@ -1468,13 +1468,9 @@ impl AppState {
         let full = read(connection, &full_args, task_timeout()?)
             .map_err(|e| acceptance_evaluation_transport_error("engram work show --full", e))?;
         if let Some(identity) = &discovery.identity {
-            validate_acceptance_projection_identity(&show["status"]["work"], identity)?;
+            // The full read carries the general revision. The acceptance
+            // basis comes from the notes read and is rechecked at closing.
             acceptance_full_contract_identity(&full, identity)?;
-            if show["acceptance_basis"].as_i64() != Some(identity.revision) {
-                return Err(ApiError::conflict(
-                    "the task revision changed after the opening core identity; request a new evaluation",
-                ));
-            }
         }
         let recovery_manifest = match (
             discovery.identity.as_ref(),

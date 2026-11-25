@@ -1230,17 +1230,6 @@ fn acceptance_task_snapshot_refuses_what_cannot_be_evaluated() {
     let task = parse_acceptance_evaluation_task(clipped, full_receipt()).unwrap();
     assert_eq!(task.criteria, ["The route exists", "A test covers it"]);
 
-    // Criteria from another revision than the basis names are never judged.
-    let mut revised = full_receipt();
-    revised["work"]["revision"] = json!(8);
-    let error = parse_acceptance_evaluation_task(show_receipt(None), revised).unwrap_err();
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(
-        error.message.contains("revised while it was being read"),
-        "{}",
-        error.message
-    );
-
     assert_eq!(
         parse_acceptance_evaluation_task(json!({"notes": []}), full_receipt())
             .unwrap_err()
@@ -1253,6 +1242,16 @@ fn acceptance_task_snapshot_refuses_what_cannot_be_evaluated() {
             .status,
         StatusCode::BAD_GATEWAY
     );
+}
+
+#[test]
+fn acceptance_task_snapshot_keeps_the_general_revision_separate_from_the_basis() {
+    let mut full = full_receipt();
+    full["work"]["revision"] = json!(8);
+    let task = parse_acceptance_evaluation_task(show_receipt(None), full).unwrap();
+    assert_eq!(task.work_revision, 8);
+    assert_eq!(task.acceptance_basis, 7);
+    assert_eq!(task.criteria, ["The route exists", "A test covers it"]);
 }
 
 // The tracker's first window is byte-bounded: on the first live task it held

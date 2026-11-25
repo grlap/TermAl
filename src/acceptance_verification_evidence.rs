@@ -38,7 +38,7 @@ impl AppState {
         let expected = AcceptanceBindingEvidenceBasis {
             project_id: store.project_id.clone(),
             work_id: identity.work_id.clone(),
-            work_revision: task.acceptance_basis,
+            work_revision: identity.revision,
             run_id: run_id.clone(),
             run_cut: task.evidence_basis,
         };
