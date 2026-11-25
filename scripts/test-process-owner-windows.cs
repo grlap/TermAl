@@ -60,6 +60,17 @@ public static class TestCommandOwner {
     }
     return output.Append('\\', slashes * 2).Append('"').ToString();
   }
+  static string QuoteDartBatchWord(string value) {
+    // cmd expands percent sequences inside quotes, and the SDK batch files
+    // can forward their command line. Do not hand shell syntax to either.
+    foreach (char ch in value) {
+      if (Char.IsControl(ch) || "\"%!&|<>^".IndexOf(ch) >= 0)
+        throw new ArgumentException("unsupported character in Dart SDK batch argument");
+    }
+    // cmd passes %* to the native SDK executable. Use its argument
+    // quoting rules, including backslashes immediately before a quote.
+    return Quote(value);
+  }
   static uint Active(IntPtr job) {
     Accounting info;
     Check(QueryInformationJobObject(job, 1, out info, (uint)Marshal.SizeOf(typeof(Accounting)), IntPtr.Zero), "query job accounting");
@@ -119,7 +130,7 @@ public static class TestCommandOwner {
   static void Trace(string path, string phase) {
     File.AppendAllText(path, new JavaScriptSerializer().Serialize(new { phase = phase, pid = Process.GetCurrentProcess().Id }) + "\n", new UTF8Encoding(false));
   }
-  public static void Run(string command, string[] args, string cwd, string log, string ledger, string nonce, int budget, string bootstrap) {
+  public static void Run(string command, string[] args, string cwd, string log, string ledger, string nonce, int budget, string bootstrap, bool dartBatch) {
     Trace(bootstrap, "native-entered");
     // Raw redirected streams work without a console, including DETACHED_PROCESS.
     var controlInput = Console.OpenStandardInput();
@@ -165,11 +176,24 @@ public static class TestCommandOwner {
       foreach (string key in winners) block.Append(key).Append('=').Append(variables[key]).Append('\0');
       if (block.Length == 0) block.Append('\0');
       environment = Marshal.StringToHGlobalUni(block.Append('\0').ToString());
-      var line = new StringBuilder(Quote(command)); foreach (string arg in args ?? new string[0]) line.Append(' ').Append(Quote(arg));
+      string application = command;
+      var line = new StringBuilder();
+      if (dartBatch) {
+        string runner = Path.GetFileName(command).ToLowerInvariant();
+        if (runner != "dart.bat" && runner != "flutter.bat")
+          throw new ArgumentException("unsupported Dart SDK batch runner");
+        application = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        line.Append(Quote(application)).Append(" /d /v:off /s /c \"").Append(QuoteDartBatchWord(command));
+        foreach (string arg in args ?? new string[0]) line.Append(' ').Append(QuoteDartBatchWord(arg));
+        line.Append('"');
+      } else {
+        line.Append(Quote(command));
+        foreach (string arg in args ?? new string[0]) line.Append(' ').Append(Quote(arg));
+      }
       string controlReason;
       if (ControlRequested(out controlReason)) { interrupted = true; trigger = controlReason; }
       else {
-        Check(CreateProcessW(command, line, IntPtr.Zero, IntPtr.Zero, true, 0x08080404, environment, cwd, ref startup, out child), "create contained command");
+        Check(CreateProcessW(application, line, IntPtr.Zero, IntPtr.Zero, true, 0x08080404, environment, cwd, ref startup, out child), "create contained command");
         result["pid"] = child.Pid;
         Emit(new { type = "started", nonce = nonce, pid = child.Pid, ownerPid = Process.GetCurrentProcess().Id });
         if (ControlRequested(out controlReason)) { interrupted = true; trigger = controlReason; }

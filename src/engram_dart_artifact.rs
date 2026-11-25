@@ -1,9 +1,251 @@
-// Dart test's newline-delimited JSON reporter, selected from the same bounded
-// artifact image as TRX. No file, command, declaration or lifecycle ownership.
+// Dart test's newline-delimited JSON reporter and the registered focused
+// launcher's binding to its own bounded reporter image.
 // Protocol: dart-lang/test, pkgs/test/doc/json_reporter.md. Unknown event types
 // or versions are UNKNOWN; additive fields on known events remain compatible.
 
 use super::*;
+use crate::delegations::delegation_git_boundary::open_metadata_entry;
+use std::io::Read as _;
+
+pub(crate) const ENGRAM_LAUNCHER_DART_REPORT: &str = "focused.dart.json";
+
+/// Read the run-owned image captured at stage close for verification and
+/// receipt readback.
+fn engram_launcher_dart_result(
+    run_dir: &FsPath,
+    stage: &Value,
+) -> Result<(String, EngramTrxReading), &'static str> {
+    let digest = stage
+        .get("dartReportDigest")
+        .and_then(Value::as_str)
+        .ok_or("the launcher captured no Dart JSON reporter for this run")?;
+    let path = run_dir.join(ENGRAM_LAUNCHER_DART_REPORT);
+    let run_dir = fs::canonicalize(run_dir).map_err(|_| "the run directory is unreadable")?;
+    let unreadable = "the captured Dart JSON reporter is missing or unreadable";
+    let file = open_metadata_entry(&path).map_err(|_| unreadable)?;
+    let metadata = file.metadata().map_err(|_| unreadable)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || review_freeze_is_reparse(&metadata)
+        || fs::canonicalize(&path).ok().as_ref() != Some(&run_dir.join(ENGRAM_LAUNCHER_DART_REPORT))
+    {
+        return Err(unreadable);
+    }
+    let mut bytes = Vec::new();
+    file.take(ENGRAM_ARTIFACT_MAX_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| unreadable)?;
+    if bytes.len() > ENGRAM_ARTIFACT_MAX_BYTES {
+        return Err("the captured Dart JSON reporter is too large");
+    }
+    if file_content_hash(&bytes) != digest {
+        return Err("the captured Dart JSON reporter differs from its stage record");
+    }
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes);
+    Ok((digest.to_owned(), engram_read_dart_json(bytes)))
+}
+
+fn engram_dart_runner(program: &str) -> Option<&'static str> {
+    let name = program.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
+    match name.as_str() {
+        "flutter" => Some("flutter"),
+        "dart" => Some("dart"),
+        "flutter.bat" if cfg!(windows) => Some("flutter"),
+        "dart.exe" | "dart.bat" if cfg!(windows) => Some("dart"),
+        _ => None,
+    }
+}
+
+pub(crate) fn engram_is_focused_dart_sdk_test(argv: &[String]) -> bool {
+    matches!(argv, [program, subcommand, ..]
+        if subcommand == "test" && engram_dart_runner(program).is_some())
+}
+
+/// The requested argv for a launcher-owned reporter. The launcher adds
+/// the reporter itself, so a caller-supplied reporter is unsupported.
+pub(crate) fn engram_supports_focused_dart_test(argv: &[String]) -> bool {
+    engram_focused_dart_selectors(argv).is_some()
+}
+
+pub(crate) fn engram_focused_dart_selectors(argv: &[String]) -> Option<Vec<&str>> {
+    let [program, subcommand, args @ ..] = argv else {
+        return None;
+    };
+    let runner = engram_dart_runner(program).filter(|_| subcommand == "test")?;
+    let mut seen = BTreeSet::new();
+    let mut selectors = Vec::new();
+    let mut args = args.iter().map(String::as_str);
+    while let Some(arg) = args.next() {
+        if arg.is_empty() || arg.chars().any(char::is_control) {
+            return None;
+        }
+        if !arg.starts_with('-') {
+            selectors.push(arg);
+            continue;
+        }
+        let option = if arg == "-t" {
+            "--tags"
+        } else if arg.starts_with("--concurrency=") {
+            "--concurrency"
+        } else {
+            arg
+        };
+        if !seen.insert(option) {
+            return None;
+        }
+        match option {
+            "--no-pub" if runner == "flutter" => {}
+            "--run-skipped" => {}
+            "--concurrency" => {
+                let valid = arg.strip_prefix("--concurrency=").is_some_and(|count| {
+                    count.bytes().all(|byte| byte.is_ascii_digit())
+                        && count.parse::<u32>().is_ok_and(|count| count != 0)
+                });
+                if !valid {
+                    return None;
+                }
+            }
+            "--exclude-tags" | "--tags" | "--plain-name" => {
+                let tags = args.next()?;
+                if tags.trim().is_empty()
+                    || tags.starts_with('-')
+                    || tags.chars().any(char::is_control)
+                {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(selectors)
+}
+
+/// Bind the effective command to its requested runner and args plus exactly
+/// this run's reporter suffix. Keep the run-specific path out of the stable
+/// verification command.
+pub(crate) fn engram_focused_dart_check_argv(
+    run_dir: &FsPath,
+    root: &FsPath,
+    stage: &Value,
+    planned: &[String],
+) -> Option<Vec<String>> {
+    let observed = test_run_argv(stage.get("command"))?;
+    let [program, args @ .., flag, value] = observed.as_slice() else {
+        return None;
+    };
+    let cwd = FsPath::new(stage.get("cwd")?.as_str()?);
+    if !root.is_absolute()
+        || !cwd.is_absolute()
+        || fs::canonicalize(root).ok()? != fs::canonicalize(cwd).ok()?
+    {
+        return None;
+    }
+    if flag != "--file-reporter"
+        || args != &planned[1..]
+        || engram_dart_runner(program) != engram_dart_runner(&planned[0])
+        || !engram_explicit_dart_runner_matches(cwd, &planned[0], program)
+    {
+        return None;
+    }
+    let path = FsPath::new(value.strip_prefix("json:")?);
+    let owned = fs::canonicalize(run_dir)
+        .ok()?
+        .join(ENGRAM_LAUNCHER_DART_REPORT);
+    let matches_owned = if cfg!(windows) {
+        engram_exact_path_key(path) == engram_exact_path_key(&owned)
+    } else {
+        path == owned
+    };
+    if !path.is_absolute() || !matches_owned {
+        return None;
+    }
+    let mut command = observed;
+    command.truncate(planned.len());
+    Some(command)
+}
+
+fn engram_explicit_dart_runner_matches(cwd: &FsPath, requested: &str, observed: &str) -> bool {
+    if !requested.contains(['/', '\\']) && !FsPath::new(requested).is_absolute() {
+        // The launcher resolved this name through PATH.
+        return true;
+    }
+    let mut path = engram_lexical_path(&cwd.join(requested));
+    let executable = FsPath::new(observed);
+    if !executable.is_absolute() {
+        return false;
+    }
+    if cfg!(windows) && path.extension().is_none() {
+        // The launcher adds only the appropriate supported SDK suffixes.
+        // Runner-name equality is already checked by the caller.
+        let Some(suffix) = executable.extension().and_then(|suffix| suffix.to_str()) else {
+            return false;
+        };
+        if !suffix.eq_ignore_ascii_case("bat")
+            && !(engram_dart_runner(requested) == Some("dart")
+                && suffix.eq_ignore_ascii_case("exe"))
+        {
+            return false;
+        }
+        path.set_extension(suffix);
+    }
+    if cfg!(windows) {
+        engram_exact_path_key(&path) == engram_exact_path_key(executable)
+    } else {
+        path.as_path() == executable
+    }
+}
+
+pub(crate) fn engram_focused_dart_check_result(
+    run_dir: &FsPath,
+    stage: &Value,
+    check: &mut EngramVerificationRecordCheck,
+) {
+    use EngramVerificationRecordCheckOutcome as Outcome;
+    check.counts = None;
+    if check.outcome == Outcome::NotRun {
+        return;
+    }
+    let completed = matches!(check.outcome, Outcome::Passed | Outcome::Failed)
+        && stage.get("interrupted").and_then(Value::as_bool) != Some(true)
+        && ["signal", "error"]
+            .iter()
+            .all(|key| stage.get(key).is_none_or(Value::is_null));
+    let result = match stage
+        .get("code")
+        .and_then(Value::as_i64)
+        .filter(|_| completed)
+    {
+        Some(0) => engram_launcher_dart_result(run_dir, stage),
+        Some(code) => {
+            check.outcome = Outcome::Failed;
+            check.summary = Some(format!("focused: failed (the command exited {code})"));
+            return;
+        }
+        None => Err("the Dart runner did not complete"),
+    };
+    let verdict = match result {
+        Ok((digest, reading)) => {
+            check
+                .refs
+                .push(format!("artifact:{ENGRAM_LAUNCHER_DART_REPORT}"));
+            check.refs.push(format!("artifact_digest:{digest}"));
+            check.counts = reading
+                .counters
+                .map(|values| values.values.into_iter().collect());
+            reading.verdict
+        }
+        Err(reason) => EngramTrxVerdict::Unknown(reason.to_owned()),
+    };
+    let (outcome, text) = match verdict {
+        EngramTrxVerdict::Pass => (Outcome::Passed, "passed (Dart JSON reporter)".to_owned()),
+        EngramTrxVerdict::Fail(reason) => (Outcome::Failed, format!("failed ({reason})")),
+        EngramTrxVerdict::Unknown(reason) => {
+            (Outcome::Indeterminate, format!("unknown ({reason})"))
+        }
+    };
+    check.outcome = outcome;
+    check.summary = Some(format!("focused: {text}"));
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum EngramDeclaredArtifactFormat {

@@ -25,7 +25,7 @@ try {
   }
   [TestCommandOwner]::Run([string]$request.command, [string[]]$request.args,
     [string]$request.cwd, [string]$request.log, [string]$request.ledger,
-    [string]$request.nonce, [int]$request.cleanupBudgetMs, $BootstrapPath)
+    [string]$request.nonce, [int]$request.cleanupBudgetMs, $BootstrapPath, [bool]$request.dartBatch)
   Write-BootstrapPhase 'native-returned'
 } catch {
   Write-BootstrapPhase 'script-failed'

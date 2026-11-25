@@ -760,18 +760,52 @@ pub(crate) fn engram_check_worktree_from(
     directories: Option<&[Option<String>]>,
     credit_root: Option<(&FsPath, &str)>,
 ) -> Option<EngramCheckTarget> {
+    engram_check_target_from(check, directories, |cwd| {
+        engram_check_worktree_in(check, workdir, cwd, credit_root)
+    })
+}
+
+pub(crate) fn engram_dart_observation_worktree(
+    check: &EngramCheckCommand,
+    workdir: &FsPath,
+    directories: Option<&[Option<String>]>,
+    source_root: Option<&EngramWorkSourceRoot>,
+) -> Option<EngramCheckTarget> {
+    let selectors = engram_observed_dart_selectors(&check.program, check.argv.get(1..)?)?;
+    let credit_root =
+        source_root.map(|root| (FsPath::new(&root.root), root.common_dir_key.as_str()));
+    engram_check_target_from(check, directories, |cwd| {
+        let target = engram_check_directory_target(workdir, cwd, credit_root)?;
+        let root_key = engram_exact_path_key(&target.root);
+        // The launcher runs the planned stage at the root. Only the Dart
+        // grammar's positional selectors name what the SDK will test there.
+        selectors
+            .iter()
+            .all(|path| {
+                !path.starts_with('~')
+                    && !path.contains(['$', '%', '!'])
+                    && !engram_network_path(path)
+                    && engram_path_within(
+                        &engram_exact_path_key(&engram_canonical_path(&target.root.join(path))),
+                        &root_key,
+                    )
+            })
+            .then_some(target)
+    })
+}
+
+fn engram_check_target_from(
+    check: &EngramCheckCommand,
+    directories: Option<&[Option<String>]>,
+    resolve: impl Fn(Option<&str>) -> Option<EngramCheckTarget>,
+) -> Option<EngramCheckTarget> {
     if let Some(directory) = check.directory.as_deref() {
         let directory = engram_resolve_shell_move(None, directory)?;
-        return engram_check_worktree_in(check, workdir, Some(&directory), credit_root);
+        return resolve(Some(&directory));
     }
     let mut target = None;
     for directory in directories? {
-        target = Some(engram_check_worktree_in(
-            check,
-            workdir,
-            directory.as_deref(),
-            credit_root,
-        )?);
+        target = Some(resolve(directory.as_deref())?);
     }
     target
 }
@@ -866,25 +900,11 @@ pub(crate) fn engram_check_worktree_in(
     cwd: Option<&str>,
     credit_root: Option<(&FsPath, &str)>,
 ) -> Option<EngramCheckTarget> {
-    // A network place is never resolved (`engram_network_path`), whether the
-    // runtime reported it or the session works there: the command runs in
-    // `directory`, relative to `workdir`.
-    let directory = cwd.map_or_else(|| workdir.to_path_buf(), |cwd| workdir.join(cwd));
-    if engram_network_path(&workdir.to_string_lossy())
-        || engram_network_path(&directory.to_string_lossy())
-    {
-        return None;
-    }
-    // What a check is credited to is compared exactly: a case-sensitive
-    // volume may hold two worktrees whose paths differ only in case.
-    let root = credit_root.map_or_else(
-        || engram_worktree_root_path(workdir),
-        |(root, _)| root.to_path_buf(),
-    );
-    let root_key = engram_exact_path_key(&root);
-    if engram_exact_path_key(&engram_worktree_root_path(&directory)) != root_key {
-        return None;
-    }
+    let target = engram_check_directory_target(workdir, cwd, credit_root)?;
+    let EngramCheckTarget {
+        root, directory, ..
+    } = &target;
+    let root_key = engram_exact_path_key(root);
     let line = engram_check_line(&check.normalized, check.simple);
     // Qualified pipes already passed this check in the same Bash scan that
     // produced argv, including escaped quotes. Do not reinterpret that proof
@@ -942,7 +962,32 @@ pub(crate) fn engram_check_worktree_in(
             !pinned_binary && engram_argument_values(word).into_iter().any(escapes)
         })
     });
-    (!named_elsewhere).then_some(EngramCheckTarget {
+    (!named_elsewhere).then_some(target)
+}
+
+fn engram_check_directory_target(
+    workdir: &FsPath,
+    cwd: Option<&str>,
+    credit_root: Option<(&FsPath, &str)>,
+) -> Option<EngramCheckTarget> {
+    // The runtime's reported directory is relative to its session workdir.
+    // Check both before asking the filesystem to resolve them.
+    let directory = cwd.map_or_else(|| workdir.to_path_buf(), |cwd| workdir.join(cwd));
+    if engram_network_path(&workdir.to_string_lossy())
+        || engram_network_path(&directory.to_string_lossy())
+    {
+        return None;
+    }
+    // Case-sensitive volumes can hold two differently cased worktree paths.
+    let root = credit_root.map_or_else(
+        || engram_worktree_root_path(workdir),
+        |(root, _)| root.to_path_buf(),
+    );
+    if engram_exact_path_key(&engram_worktree_root_path(&directory)) != engram_exact_path_key(&root)
+    {
+        return None;
+    }
+    Some(EngramCheckTarget {
         root,
         directory,
         common_dir_key: credit_root.map(|(_, common_dir_key)| common_dir_key.to_owned()),

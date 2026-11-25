@@ -69,6 +69,26 @@ pub(crate) fn engram_check_command_in(
     command: &str,
     runtime: EngramShellDialect,
 ) -> Option<EngramCheckCommand> {
+    engram_check_command_with(command, |line| engram_plain_check_command_in(line, runtime))
+}
+
+/// A supported Dart SDK launch supplies run custody. Its registered report
+/// still owns the check verdict.
+pub(crate) fn engram_observed_dart_launcher(
+    command: &str,
+    provenance: &EngramObservationProvenance,
+) -> Option<EngramCheckCommand> {
+    let runtime = match provenance {
+        EngramObservationProvenance::Claude(_) => EngramShellDialect::Bash,
+        _ => EngramShellDialect::Unknown,
+    };
+    engram_check_command_with(command, |line| engram_parse_dart_launch(line, runtime))
+}
+
+fn engram_check_command_with(
+    command: &str,
+    parse_plain: impl FnOnce(&str) -> Option<EngramCheckCommand>,
+) -> Option<EngramCheckCommand> {
     let command = command.trim();
     if let Some((directory, test)) = engram_one_call_prefix(command) {
         // The test after the change is one simple command of its own: a
@@ -76,14 +96,14 @@ pub(crate) fn engram_check_command_in(
         // its exit status or run something elsewhere. It is read as a plain
         // line, never as another one-call line, so nesting cannot recurse.
         let unwrapped = engram_unwrap_shell_command(test).1 == EngramShellDialect::Unknown;
-        return engram_plain_check_command_in(test, runtime)
+        return parse_plain(test)
             .filter(|check| check.simple && unwrapped)
             .map(|check| EngramCheckCommand {
                 directory: Some(directory),
                 ..check
             });
     }
-    engram_plain_check_command_in(command, runtime)
+    parse_plain(command)
 }
 
 /// Re-read a later description/end using the qualification fixed at start.
@@ -187,6 +207,69 @@ pub(crate) fn engram_plain_check_command_in(
         },
         directory: None,
     })
+}
+
+fn engram_parse_dart_launch(
+    command: &str,
+    runtime: EngramShellDialect,
+) -> Option<EngramCheckCommand> {
+    let (line, wrapper) = engram_unwrap_shell_command(command);
+    let dialect = match (wrapper, runtime) {
+        (EngramShellDialect::Unknown, EngramShellDialect::Unknown) if cfg!(unix) => {
+            EngramShellDialect::Bash
+        }
+        (EngramShellDialect::Unknown, runtime) => runtime,
+        (wrapper, _) => wrapper,
+    };
+    // Dollar and backtick expansions can also occur inside double quotes.
+    if line.contains(['$', '`', '\n', '\r'])
+        || (matches!(
+            dialect,
+            EngramShellDialect::Cmd | EngramShellDialect::Unknown
+        ) && line.contains(['%', '!']))
+    {
+        return None;
+    }
+    let scan = engram_scan_shell_words(&line, dialect)?;
+    if scan.unquoted_pipe
+        || scan.unquoted_command_operator
+        || scan.unquoted_expression
+        || scan.ambiguous_quote_escape
+    {
+        return None;
+    }
+    let argv: Vec<_> = scan.words.into_iter().map(|(_, word)| word).collect();
+    let program = engram_program_name(&argv[0]);
+    engram_is_observed_dart_launcher(&program, &argv[1..]).then(|| EngramCheckCommand {
+        kind: EngramVerificationKind::Test,
+        normalized: line.trim().to_owned(),
+        simple: true,
+        program,
+        argv,
+        literal_pipe: false,
+        dialect,
+        directory: None,
+    })
+}
+
+pub(crate) fn engram_is_observed_dart_launcher(program: &str, args: &[String]) -> bool {
+    engram_observed_dart_selectors(program, args).is_some()
+}
+
+pub(crate) fn engram_observed_dart_selectors<'a>(
+    program: &str,
+    args: &'a [String],
+) -> Option<Vec<&'a str>> {
+    let inner = engram_focused_launcher_words(program, args)?.ok()?;
+    // The envelope parser validates the option pairs and the separator.
+    let options = &args[2..args.len() - inner.len() - 1];
+    if !options
+        .chunks_exact(2)
+        .any(|pair| pair[0] == "--input" && pair[1] == "commit")
+    {
+        return None;
+    }
+    engram_focused_dart_selectors(inner)
 }
 
 // Bash quotes protect only the first argv boundary. Batch programs and
@@ -352,6 +435,7 @@ fn engram_shell_word_spans_as(line: &str, bash: bool) -> Option<Vec<(usize, Stri
 struct EngramShellWordScan {
     words: Vec<(usize, String)>,
     unquoted_pipe: bool,
+    unquoted_command_operator: bool,
     ambiguous_quote_escape: bool,
     /// Syntax that can expand or evaluate before the runner sees argv.
     /// Observational only for legacy decoder APIs; qualification refuses it.
@@ -362,6 +446,7 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
     let bash = dialect == EngramShellDialect::Bash;
     let mut words = Vec::new();
     let mut unquoted_pipe = false;
+    let mut unquoted_command_operator = false;
     let mut unquoted_expression = false;
     // PowerShell also recognizes typographic quotes, which this decoder does
     // not model. Without explicit Bash context they cannot prove containment.
@@ -450,6 +535,8 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
                 let word_start = start.is_none();
                 start.get_or_insert(index);
                 unquoted_pipe |= other == '|';
+                unquoted_command_operator |=
+                    matches!(other, '&' | ';' | '<' | '>') || (word_start && other == '#');
                 unquoted_expression |= matches!(
                     other,
                     '(' | ')' | '{' | '}' | '`' | '^' | '*' | '?' | '[' | ']'
@@ -471,6 +558,7 @@ fn engram_scan_shell_words(line: &str, dialect: EngramShellDialect) -> Option<En
     (!words.is_empty()).then_some(EngramShellWordScan {
         words,
         unquoted_pipe,
+        unquoted_command_operator,
         ambiguous_quote_escape,
         unquoted_expression,
     })
