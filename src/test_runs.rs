@@ -164,6 +164,10 @@ pub(crate) struct TestRunDetail {
     pub(crate) limitations: Option<String>,
     /// Only what results.json's `input` records (src/test_run_committed_input.rs).
     pub(crate) committed_input: Option<TestRunCommittedInput>,
+    /// The run's Engram verification record as the host itself holds it
+    /// (src/engram_verification_record.rs), not the state file beside the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) verification_record: Option<TestRunVerificationRecordView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1352,6 +1356,7 @@ impl AppState {
             points.mark("terminals_retained");
             // Run waits may settle from here on (`refresh_test_run_waits`).
             inner.test_runs.scanned_once = true;
+            inner.test_run_scan_generation += 1;
             if inner.revision != transport_revision {
                 let projection = self.test_run_history_projection_locked(&inner);
                 inner

@@ -97,6 +97,11 @@ pub(crate) struct TestRunRegistration {
     // informational mirror and never stands in for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) verification_record: Option<TestRunVerificationAck>,
+    // The Settled record's notice was put in the owning session's pending
+    // lines, which live in memory only, and no accepted prompt has carried
+    // it yet; a load presents it again (src/engram_received_check_notice.rs).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) settlement_notice_undelivered: bool,
 }
 
 impl TestRunRegistration {
@@ -105,11 +110,14 @@ impl TestRunRegistration {
     // acknowledged registration. Diagnostics may also change, but every identity
     // field and any completion already present must still match. Full equality remains required
     // for publishing a durable completion and retiring its compaction custody.
+    // Whether a settlement notice is still undelivered is delivery
+    // bookkeeping, never identity.
     pub(crate) fn matches_registration_snapshot(&self, expected: &Self) -> bool {
-        if expected.native_completion.is_some() {
-            return self == expected;
-        }
         let mut identity = self.clone();
+        identity.settlement_notice_undelivered = expected.settlement_notice_undelivered;
+        if expected.native_completion.is_some() {
+            return &identity == expected;
+        }
         identity.native_completion = None;
         // Factual diagnostics may change during an off-lock ACK read. They
         // grant nothing and cannot invalidate the original registration ACK.
@@ -1122,6 +1130,7 @@ impl AppState {
                 validated_unbound: project.engram.is_none(),
                 monitoring_interrupted_at: None,
                 verification_record: None,
+                settlement_notice_undelivered: false,
             };
             if let Some(compacted) = inner.test_run_compacted.get(&request.run_id) {
                 if compacted

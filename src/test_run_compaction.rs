@@ -212,6 +212,29 @@ fn test_run_compaction_eligible_with(
         || index.registration_failures.contains(&run.run_id)
         || (inner.test_run_registrations.contains_key(&run.run_id)
             && !index.registered.contains(&run.run_id))
+        // A record Engram received is still being settled, possibly after a
+        // retry: its Settled ack and the owner's notice are written to the
+        // live registration only.
+        || inner
+            .test_run_registrations
+            .get(&run.run_id)
+            .is_some_and(|registration| {
+                matches!(
+                    registration.verification_record,
+                    Some(TestRunVerificationAck::Received { .. })
+                )
+            })
+        // A settlement notice its owner has not yet received survives a
+        // restart only on the live registration; a gone owner never will.
+        || inner
+            .test_run_registrations
+            .get(&run.run_id)
+            .is_some_and(|registration| {
+                registration.settlement_notice_undelivered
+                    && inner
+                        .find_session_index(&registration.owning_session_id)
+                        .is_some()
+            })
     {
         return false;
     }
@@ -485,6 +508,13 @@ impl AppState {
         // The exact survivor/proofs are already durable. A subsequent removal
         // commit may fail; then retain all old detail and retry on a later tick.
         let registration = inner.test_run_registrations.remove(id);
+        // Process-local; a restored registration's next look finds it again.
+        inner.test_run_unassociated_receipts.remove(id);
+        inner.test_run_record_pending.remove(id);
+        inner.test_run_record_final_at_scan.remove(id);
+        inner.test_run_record_bodies_built.remove(id);
+        inner.test_run_record_looks_in_flight.remove(id);
+        inner.test_run_record_look_published.remove(id);
         let observations: Vec<_> = expected
             .observations
             .iter()

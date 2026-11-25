@@ -1053,6 +1053,9 @@ pub(crate) fn test_run_detail(run_dir: &FsPath) -> Result<TestRunDetail, ApiErro
         after: test_run_str(&results, "after"),
         limitations: test_run_str(&results, "limitations"),
         committed_input: TestRunCommittedInput::read(&results),
+        // The host's own record, never this directory: the exact run read
+        // fills it from the registration (src/test_runs_api.rs).
+        verification_record: None,
     })
 }
 

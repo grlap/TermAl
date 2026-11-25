@@ -16,6 +16,7 @@ mod observations;
 mod prompt_evidence;
 mod registration;
 mod run_wait_evidence;
+mod verification_records;
 
 struct WaitFixture {
     state: AppState,
@@ -915,7 +916,14 @@ fn failed_prompt(
     let wait = wait_on(summaries);
     let refs: Vec<Option<&TestRunSummary>> = summaries.iter().map(Some).collect();
     let verdicts = test_run_wait_verdicts(&wait, &refs, |_| false);
-    build_test_run_wait_prompt(&wait, &refs, &verdicts, failures, &HashMap::new())
+    build_test_run_wait_prompt(
+        &wait,
+        &refs,
+        &verdicts,
+        failures,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
 }
 
 #[test]

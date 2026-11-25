@@ -724,6 +724,89 @@ fn planning_keeps_handed_off_unreadable_runs_pending_with_a_failed_sibling() {
     }
 }
 
+/// A read that failed, or found another run, while the run's directory was
+/// being removed: the directory is gone by the time the read is classified,
+/// so the run reads as removed, and is followed like any removal.
+#[test]
+fn a_directory_removed_while_it_is_read_is_classified_as_removed() {
+    let fixture = WaitFixture::new("registered-removal-race");
+    let present = durable_run(&fixture, "test-present");
+    let removed = fixture.runs_dir().join("test-removed-mid-read");
+    assert!(!removed.exists());
+    for reason in [
+        Some(TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable),
+        Some(TestRunWaitRegistrationUnknownReason::IdentityChanged),
+        None,
+    ] {
+        // The results read after the request parse found nothing, or the
+        // locator read found another run, or the read failed for now.
+        let transient = reason.is_none();
+        assert_eq!(
+            test_run_wait_registration_read_outcome(&removed, reason, transient),
+            (
+                Some(TestRunWaitRegistrationUnknownReason::ArtifactsRemoved),
+                false
+            ),
+            "{reason:?}"
+        );
+        // In a directory still there, the read's own answer stands.
+        assert_eq!(
+            test_run_wait_registration_read_outcome(&present, reason, transient),
+            (reason, transient),
+            "{reason:?}"
+        );
+    }
+    // A retired registration is not a read at all.
+    assert_eq!(
+        test_run_wait_registration_read_outcome(
+            &removed,
+            Some(TestRunWaitRegistrationUnknownReason::RegistrationRetired),
+            false
+        ),
+        (
+            Some(TestRunWaitRegistrationUnknownReason::RegistrationRetired),
+            false
+        )
+    );
+}
+
+/// A read that could not resolve the run's path has no locator: it is no
+/// evidence of another run, only another run, request or locator is.
+#[test]
+fn a_read_without_a_locator_is_never_taken_for_another_run() {
+    let fixture = WaitFixture::new("registered-locator-missing");
+    fixture.scan(&[]);
+    let directory = durable_run(&fixture, "test-locator");
+    fixture.busy();
+    fixture.register(&["test-locator"], "all").unwrap();
+    let label = fixture.pending_waits()[0].runs[0].clone();
+    let read = || TestRunDisk::read(&directory, None).expect("readable run");
+    assert_eq!(
+        test_run_wait_identity(&label, &read()),
+        TestRunWaitIdentity::Match
+    );
+    let mut unresolved = read();
+    unresolved.locator_identity = None;
+    assert_eq!(
+        test_run_wait_identity(&label, &unresolved),
+        TestRunWaitIdentity::Missing
+    );
+    let mut moved = read();
+    moved.locator_identity = Some("another-locator".into());
+    assert_eq!(
+        test_run_wait_identity(&label, &moved),
+        TestRunWaitIdentity::Differs
+    );
+    let mut other = read();
+    other.run_id = "test-other".into();
+    other.locator_identity = None;
+    assert_eq!(
+        test_run_wait_identity(&label, &other),
+        TestRunWaitIdentity::Differs,
+        "another run is evidence whatever the locator read"
+    );
+}
+
 #[test]
 fn deterministic_registration_artifact_loss_needs_no_grace_refresh() {
     for change in ["directory", "request.json", "results.json"] {
@@ -751,7 +834,11 @@ fn deterministic_registration_artifact_loss_needs_no_grace_refresh() {
             1,
             "{change} must settle on the first refresh"
         );
-        assert!(prompts[0].contains("UNKNOWN (registered artifacts unreadable)"));
+        assert!(prompts[0].contains(if change == "directory" {
+            "UNKNOWN (registered run directory removed)"
+        } else {
+            "UNKNOWN (registered artifacts unreadable)"
+        }));
         assert!(fixture.pending_waits().is_empty());
         fixture.state.refresh_test_run_waits();
         assert_eq!(fixture.queued_prompts(), prompts);

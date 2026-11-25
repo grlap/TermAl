@@ -452,7 +452,8 @@ impl EngramSessionState {
     /// line already pending is not repeated but moves to the newest place,
     /// so the last line always tells the latest state (name, clear, name
     /// again ends on the name); only the newest
-    /// `ENGRAM_SOURCE_ROOT_PENDING_LINES` are kept. A line given again after
+    /// `ENGRAM_SOURCE_ROOT_PENDING_LINES` are kept, besides every settled
+    /// verification record's line, which is never dropped. A line given again after
     /// a prompt carrying it was built is a new line: that prompt's
     /// acceptance does not take it, or an older line would end the next
     /// prompt's lines. The lines are kept one per text line, so a line break
@@ -507,8 +508,21 @@ impl EngramSessionState {
                 .join("\n");
         }
         lines.push(line);
-        let excess = lines.len().saturating_sub(ENGRAM_SOURCE_ROOT_PENDING_LINES);
-        lines.drain(..excess);
+        // A settled verification record's line is never pushed out: the cap
+        // counts, and drops the oldest of, the other lines only.
+        let settled = |line: &str| line.starts_with(ENGRAM_SETTLED_RECORD_LINE_PREFIX);
+        let mut excess = lines
+            .iter()
+            .filter(|line| !settled(line.as_str()))
+            .count()
+            .saturating_sub(ENGRAM_SOURCE_ROOT_PENDING_LINES);
+        lines.retain(|line| {
+            if excess == 0 || settled(line.as_str()) {
+                return true;
+            }
+            excess -= 1;
+            false
+        });
         self.pending_source_root_line = Some(lines.join("\n"));
         // A repair line pushed out of the pending lines takes its origin.
         self.prune_retained_history_repair_origins();
@@ -1861,10 +1875,10 @@ impl AppState {
         {
             return;
         }
-        let Some((delivered, _)) = engram.source_root_line_delivery.take() else {
+        let Some((delivered_text, _)) = engram.source_root_line_delivery.take() else {
             return;
         };
-        let delivered = delivered.lines().collect::<HashSet<_>>();
+        let delivered = delivered_text.lines().collect::<HashSet<_>>();
         engram.pending_source_root_line = engram
             .pending_source_root_line
             .as_deref()
@@ -1878,6 +1892,11 @@ impl AppState {
             .filter(|left| !left.is_empty());
         // A delivered repair line no longer has an origin to retire.
         engram.prune_retained_history_repair_origins();
+        if Self::note_settlement_notices_delivered_locked(&mut inner, session_id, &delivered_text)
+            && let Err(error) = self.persist_internal_locked(&inner)
+        {
+            eprintln!("engram> session={session_id} delivered settlement not persisted: {error:#}");
+        }
     }
 
     pub(crate) fn name_engram_source_root(

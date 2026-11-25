@@ -103,6 +103,9 @@ pub(in crate::tests) fn compacted_native_completion_producer_fixture(
         .clone()
         .expect("original native settlement retained");
     record_native_evidence(&fixture, &native);
+    // The owner's next prompt carries the settled record's notice; until it
+    // does, compaction keeps the registration that notice is presented from.
+    compaction::deliver_settlement_notice(&fixture, &native.registration.owning_session_id);
     let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
     fixture
         .state

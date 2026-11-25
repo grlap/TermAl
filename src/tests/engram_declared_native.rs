@@ -3008,3 +3008,188 @@ fn a_valid_native_artifact_larger_than_four_mib_retains_its_verdict_and_counts()
             .is_some_and(|counts| counts["passed"] > 0)
     );
 }
+
+#[test]
+fn a_finished_native_runs_rewritten_results_make_no_record() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let fixture = NativeFixture::new("native-results-rewritten", true);
+    fixture.held_revision(4);
+    fixture.prepare();
+    let mut recorder = fixture.recorder();
+    fixture.start(&mut recorder);
+    fixture.wait();
+    fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+    let (_, registration, _, results) = fixture.finish(&mut recorder, 0);
+    let inputs = engram_verification_record_inputs(&registration);
+    assert!(matches!(inputs, EngramVerificationRecordInputs::Read(..)));
+    assert!(!inputs.make_no_record_of_a_finished_run());
+    // Rewritten after the host wrote it: it still parses and still reads as
+    // finished, but it is not the terminal the host recorded.
+    let mut rewritten = results.clone();
+    rewritten["laterValue"] = json!(true);
+    fs::write(
+        PathBuf::from(&registration.run_directory).join("results.json"),
+        serde_json::to_vec_pretty(&rewritten).unwrap(),
+    )
+    .unwrap();
+    let inputs = engram_verification_record_inputs(&registration);
+    assert!(matches!(
+        inputs,
+        EngramVerificationRecordInputs::NativeResultsChanged
+    ));
+    assert!(
+        inputs.make_no_record_of_a_finished_run(),
+        "a run wait on the finished run resumes, naming that no record comes"
+    );
+    assert!(
+        matches!(
+            engram_verification_record_prepare(&registration),
+            EngramVerificationRecordPrepared::Waiting
+        ),
+        "the producer looks again later, as before"
+    );
+    // So is one rewritten to something that does not parse at all.
+    fs::write(
+        PathBuf::from(&registration.run_directory).join("results.json"),
+        "{",
+    )
+    .unwrap();
+    assert!(matches!(
+        engram_verification_record_inputs(&registration),
+        EngramVerificationRecordInputs::NativeResultsChanged
+    ));
+}
+
+#[test]
+fn a_native_look_while_its_terminal_results_are_published_finds_no_record_yet() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let fixture = NativeFixture::new("native-publication-gap", true);
+    fixture.held_revision(4);
+    fixture.prepare();
+    let mut recorder = fixture.recorder();
+    fixture.start(&mut recorder);
+    fixture.wait();
+    fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+    let (start, registration, _, _) = fixture.finish(&mut recorder, 0);
+    let path = PathBuf::from(&registration.run_directory).join("results.json");
+    let terminal = fs::read(&path).unwrap();
+    // The host records the run's terminal before it replaces the running
+    // results it wrote at the start; a look in between reads those.
+    assert!(registration.declared_terminal.is_some());
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({"runId": start.run_id, "state": "running"})).unwrap(),
+    )
+    .unwrap();
+    let state = &fixture.fixture.state;
+    let look = |state: &AppState| {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_record_pending
+            .get(&registration.run_id)
+            .cloned()
+    };
+    state.prepare_engram_verification_record(&registration);
+    // That look finds no record; only a run wait that marked the run before
+    // it began could count it (test_run_wait_records.rs).
+    assert!(
+        matches!(
+            look(state),
+            Some(EngramVerificationRecordLook::NoRecord { .. })
+        ),
+        "{:?}",
+        look(state)
+    );
+    // Once the terminal results are published, the next look finds the
+    // record buildable.
+    fs::write(&path, &terminal).unwrap();
+    state.prepare_engram_verification_record(&registration);
+    assert!(
+        !matches!(
+            look(state),
+            Some(EngramVerificationRecordLook::NoRecord { .. })
+        ),
+        "{:?}",
+        look(state)
+    );
+}
+
+#[test]
+fn a_native_run_with_an_unchanged_dirty_source_is_told_when_it_settles() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let fixture = NativeFixture::new("native-dirty-settled-notice", false);
+    fs::write(
+        fixture.fixture.root.join("local.txt"),
+        "local state before\n",
+    )
+    .unwrap();
+    fixture.record_change("local.txt", "??");
+    fixture.held_revision(4);
+    fixture.prepare();
+    let mut recorder = fixture.recorder();
+    fixture.start(&mut recorder);
+    fixture.wait();
+    fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
+    let (_, registration, request, results) = fixture.finish(&mut recorder, 0);
+    let body = engram_verification_record_body(&registration, &request, &results).unwrap();
+    assert!(
+        body.input.clean_commit().is_none(),
+        "the run's input is a dirty source, not a clean commit"
+    );
+    let operation = "0123456789abcdef0123456789abcdef".to_owned();
+    let receipt = EngramVerificationRecordReceipt {
+        operation: operation.clone(),
+        producer: operation,
+        verifications: engram_verification_record_emitted_stages(&body)
+            .into_iter()
+            .enumerate()
+            .map(|(index, stage)| EngramVerificationRecordVerification {
+                stage: stage.to_owned(),
+                record_id: format!("{:032x}", index + 1),
+            })
+            .collect(),
+        run_outcome: body.run.outcome,
+    };
+    let notice = ReceivedCheckNotice::at_settlement(
+        &registration,
+        &body,
+        &receipt,
+        std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET,
+    )
+    .expect("a settled record is told whatever its input");
+    assert!(
+        notice
+            .line()
+            .contains("confirms no current-input or ordinary-check credit"),
+        "{}",
+        notice.line()
+    );
+    // The settlement step writes the Settled ack and presents the line in
+    // one state step: the owner's next turn carries it.
+    let state = &fixture.fixture.state;
+    state.note_engram_verification_record_ack_presenting(
+        &registration,
+        TestRunVerificationAck::Settled {
+            receipt: receipt.clone(),
+            body_digest: engram_verification_record_body_digest(&body),
+        },
+        Some(notice),
+    );
+    let inner = state.inner.lock().unwrap();
+    let owner = &inner.sessions[inner
+        .find_session_index(&registration.owning_session_id)
+        .unwrap()];
+    let pending = owner
+        .engram
+        .pending_source_root_line
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        pending.contains(ENGRAM_SETTLED_RECORD_LINE_PREFIX)
+            && pending.contains(&receipt.verifications[0].record_id),
+        "{pending}"
+    );
+    assert!(inner.test_run_registrations[&registration.run_id].settlement_notice_undelivered);
+}

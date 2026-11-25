@@ -6,6 +6,10 @@
 
 use super::*;
 pub(crate) const RECEIVED_NOTICE_CAPTURE_BUDGET: Duration = ENGRAM_SOURCE_COMMAND_BUDGET;
+/// A settled verification record's own host line. It is never merged into
+/// the check-credit line or cut with it, and never counts toward the
+/// pending-line cap, so the next prompt carries every undelivered settlement.
+pub(crate) const ENGRAM_SETTLED_RECORD_LINE_PREFIX: &str = "[TermAl] Verification record settled:";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReceivedNoticeSourceUnavailable {
@@ -57,13 +61,54 @@ impl ReceivedCheckNotice {
         {
             return None;
         }
+        Self::read_run(registration, &frozen.body, receipt, deadline)
+    }
+
+    /// At settlement, the body and receipt the settlement itself validated
+    /// stand in for the frozen file and the Settled ack, and the run's files
+    /// are not read again: a read that fails now would leave the settled
+    /// record untold. The body is already the host's: the producer froze it
+    /// from its own rebuild or compared it equal to that rebuild before the
+    /// receipt was held, and completion refuses any other body
+    /// (`AcknowledgedBodyChanged`) before this runs. Every settled record is
+    /// told, whatever its input: a native run's unchanged dirty source too.
+    /// The line names the run and its records and confirms no credit, so it
+    /// needs no clean commit (`read_run`, which feeds credit, keeps its gate).
+    /// Called off the state lock, before the ack is written.
+    pub(crate) fn at_settlement(
+        registration: &TestRunRegistration,
+        body: &EngramVerificationRecordBody,
+        receipt: &EngramVerificationRecordReceipt,
+        deadline: std::time::Instant,
+    ) -> Option<Self> {
+        if engram_verification_record_receipt_check(body, receipt).is_err() {
+            return None;
+        }
+        Some(Self::validated(registration, receipt, deadline))
+    }
+
+    fn read_run(
+        registration: &TestRunRegistration,
+        body: &EngramVerificationRecordBody,
+        receipt: &EngramVerificationRecordReceipt,
+        deadline: std::time::Instant,
+    ) -> Option<Self> {
+        let directory = FsPath::new(&registration.run_directory);
         let disk = TestRunDisk::read(directory, None)?;
         if !test_run_registered_disk_matches(registration, &disk)
-            || !registered_closing_clean_input(registration, &disk)
+            || !registered_settled_clean_input(registration, &disk)
         {
             return None;
         }
-        frozen.body.input.clean_commit()?;
+        body.input.clean_commit()?;
+        Some(Self::validated(registration, receipt, deadline))
+    }
+
+    fn validated(
+        registration: &TestRunRegistration,
+        receipt: &EngramVerificationRecordReceipt,
+        deadline: std::time::Instant,
+    ) -> Self {
         #[cfg(test)]
         {
             let hook = TEST_RECEIVED_NOTICE_SOURCE_READ
@@ -74,11 +119,11 @@ impl ReceivedCheckNotice {
                 hook(deadline);
             }
         }
-        Some(Self {
+        Self {
             registration: registration.clone(),
             receipt: receipt.clone(),
             deadline,
-        })
+        }
     }
 
     pub(super) fn matches_root(
@@ -89,13 +134,16 @@ impl ReceivedCheckNotice {
         Self::registration_matches_root(&self.registration, root, binding)
     }
 
+    // The run's claim, store, worktree and named-root generation tie it to
+    // the root; who named the root does not. A successor that inherited the
+    // root keeps its predecessor as the namer, and the notice still goes
+    // only to the run's own owner.
     fn registration_matches_root(
         run: &TestRunRegistration,
         root: &EngramWorkSourceRoot,
         binding: &EngramControlWorkBinding,
     ) -> bool {
-        run.owning_session_id == root.named_by_session
-            && run.authority_store.as_ref() == Some(&root.store)
+        run.authority_store.as_ref() == Some(&root.store)
             && run.work_binding.as_ref() == Some(binding)
             && binding.work_id == root.work_id
             && binding.claim_id == root.claim_id
@@ -113,31 +161,17 @@ impl ReceivedCheckNotice {
             .is_some_and(|actual| actual.matches_registration_snapshot(&self.registration))
     }
 
+    /// The part of `line` that names the run and its records, whatever the
+    /// reason suffix says; two lines for the same settlement share it.
+    fn recorded(&self) -> String {
+        format!(
+            "{ENGRAM_SETTLED_RECORD_LINE_PREFIX}{}",
+            settled_receipt_recorded(&self.registration.run_id, &self.receipt)
+        )
+    }
+
     pub(crate) fn line(&self) -> String {
-        let outcome = match self.receipt.run_outcome {
-            EngramVerificationRecordRunOutcome::Passed => "passed",
-            EngramVerificationRecordRunOutcome::Failed => "failed",
-            EngramVerificationRecordRunOutcome::Indeterminate => "indeterminate",
-        };
-        let records = self
-            .receipt
-            .verifications
-            .iter()
-            .take(8)
-            .map(|record| record.record_id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let more = self.receipt.verifications.len().saturating_sub(8);
-        let records = if more == 0 {
-            records
-        } else {
-            format!("{records} (+{more} more in the run record)")
-        };
-        let recorded = format!(
-            "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} registered launcher run {} {outcome}; \
-            Engram received verification record(s) {records} for that run.",
-            self.registration.run_id
-        );
+        let recorded = self.recorded();
         let reason = if std::time::Instant::now() >= self.deadline {
             "notice capture deadline elapsed"
         } else {
@@ -147,6 +181,46 @@ impl ReceivedCheckNotice {
             "{recorded} Current input confirmation is unavailable ({reason}); \
             this notice confirms no current-input or ordinary-check credit."
         )
+    }
+}
+
+/// `ReceivedCheckNotice::recorded` without the credit-line prefix: the text a
+/// pending or delivered line holds once it tells this settlement.
+fn settled_receipt_recorded(run_id: &str, receipt: &EngramVerificationRecordReceipt) -> String {
+    let outcome = match receipt.run_outcome {
+        EngramVerificationRecordRunOutcome::Passed => "passed",
+        EngramVerificationRecordRunOutcome::Failed => "failed",
+        EngramVerificationRecordRunOutcome::Indeterminate => "indeterminate",
+    };
+    let records = receipt
+        .verifications
+        .iter()
+        .take(8)
+        .map(|record| record.record_id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = receipt.verifications.len().saturating_sub(8);
+    let records = if more == 0 {
+        records
+    } else {
+        format!("{records} (+{more} more in the run record)")
+    };
+    format!(
+        " registered launcher run {run_id} {outcome}; \
+        Engram received verification record(s) {records} for that run."
+    )
+}
+
+/// A settlement whose notice no accepted prompt has carried yet, with the
+/// text that tells it.
+fn undelivered_settlement(run: &TestRunRegistration) -> Option<String> {
+    match run.verification_record.as_ref() {
+        Some(TestRunVerificationAck::Settled { receipt, .. })
+            if run.settlement_notice_undelivered =>
+        {
+            Some(settled_receipt_recorded(&run.run_id, receipt))
+        }
+        _ => None,
     }
 }
 
@@ -168,25 +242,6 @@ pub(super) fn registered_launcher_notice(
 }
 
 impl AppState {
-    pub(crate) fn schedule_received_launcher_notice(
-        &self,
-        registration: &TestRunRegistration,
-        deadline: std::time::Instant,
-    ) {
-        let Some(current) = self.pending_received_launcher_registration(registration) else {
-            return;
-        };
-        let owner = self.clone();
-        if let Err(error) =
-            self.capture_lifetime
-                .spawn_observer("termal-received-launcher-notice", move || {
-                    owner.refresh_received_launcher_notice(&current, deadline);
-                })
-        {
-            eprintln!("engram> optional received notice worker failed: {error}");
-        }
-    }
-
     // Terminal paths publish their original native correlation first. The
     // existing cancellable observer reads settled receipts off the provider
     // reader. One absolute budget covers the whole batch.
@@ -213,7 +268,16 @@ impl AppState {
                     read_received_registered_check_notices_until(&mut prepared, deadline);
                     for notice in prepared {
                         if let Some(received) = notice.received {
-                            owner.publish_received_launcher_notice(received);
+                            if check_capture_cancellation().is_err() {
+                                return;
+                            }
+                            let mut inner = owner.inner.lock().expect("state mutex poisoned");
+                            // The settlement step already presented this
+                            // receipt; the close only upgrades its own
+                            // fragment and never adds the line again.
+                            Self::publish_received_launcher_notice_locked(
+                                &mut inner, &received, false,
+                            );
                         }
                     }
                 })
@@ -222,139 +286,168 @@ impl AppState {
         }
     }
 
-    // A receipt can arrive after turn close but before its pending advice is
-    // delivered. Replace only the exact registered-run fragment emitted by
-    // the original correlation owner, preserving every other check's warning.
-    // Text controls delivery only; host registration, artifact and live root
-    // identity below remain the authority. Never match by command/path/time.
-    fn pending_received_launcher_registration(
-        &self,
-        registration: &TestRunRegistration,
-    ) -> Option<TestRunRegistration> {
-        let current = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
-            let index = inner.find_session_index(&registration.owning_session_id)?;
-            let pending = inner.sessions[index]
-                .engram
-                .pending_source_root_line
-                .as_deref()
-                .unwrap_or_default();
-            if ![
-                TestRunState::Running,
-                TestRunState::Passed,
-                TestRunState::Failed,
-            ]
-            .iter()
-            .any(|state| {
-                let line = registered_launcher_notice(registration, state);
-                pending.contains(
-                    line.strip_prefix(ENGRAM_CHECK_CREDIT_LINE_PREFIX)
-                        .unwrap_or(&line),
-                )
-            }) {
-                return None;
-            }
-            inner
-                .test_run_registrations
-                .get(&registration.run_id)
-                .cloned()
-        };
-        current.filter(|current| {
-            current.request_identity == registration.request_identity
-                && current.run_directory == registration.run_directory
-                && matches!(
-                    current.verification_record,
-                    Some(TestRunVerificationAck::Settled { .. })
-                )
-        })
-    }
-
-    fn refresh_received_launcher_notice(
-        &self,
-        registration: &TestRunRegistration,
-        deadline: std::time::Instant,
+    // A receipt settles in the same state step that presents it
+    // (`note_engram_verification_record_ack_presenting`), so no turn can open
+    // between the two. The line is its own line for the owning session's next
+    // prompt, also while the turn that launched the run is still open: that
+    // turn's close composes only the plain fragment beside it.
+    pub(crate) fn present_settled_receipt_locked(
+        inner: &mut StateInner,
+        received: &mut ReceivedCheckNotice,
     ) {
-        let Some(current) = self.pending_received_launcher_registration(registration) else {
-            return;
-        };
-        let Some(received) = ReceivedCheckNotice::read(&current, deadline) else {
-            return;
-        };
-        self.publish_received_launcher_notice(received);
-    }
-
-    fn publish_received_launcher_notice(&self, received: ReceivedCheckNotice) {
-        if check_capture_cancellation().is_err() {
-            return;
-        }
-        let current = &received.registration;
-        let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(&current.owning_session_id) else {
-            return;
-        };
-        if !received.is_current(&inner) {
-            return;
-        }
-        let Some(target) =
-            Self::engram_source_root_target_locked(&inner, &current.owning_session_id)
-                .ok()
-                .flatten()
+        let registration = &received.registration;
+        let Some(current) = inner
+            .test_run_registrations
+            .get(&registration.run_id)
+            .filter(|current| {
+                current.request_identity == registration.request_identity
+                    && current.run_directory == registration.run_directory
+                    && matches!(
+                        current.verification_record,
+                        Some(TestRunVerificationAck::Settled { .. })
+                    )
+            })
+            .cloned()
         else {
             return;
         };
-        let Some(binding) = target.work_binding.as_ref() else {
-            return;
-        };
-        if target.settings.authority_store_key.as_ref() != current.authority_store.as_ref()
-            || !inner
-                .engram_work_source_roots
-                .iter()
-                .any(|root| received.matches_root(root, binding))
-            || !inner.test_run_observations.values().any(|row| {
-                engram_verification_record_row_matches(row, current)
-                    && row.work_binding.as_ref() == Some(binding)
+        received.registration = current;
+        Self::publish_received_launcher_notice_locked(inner, received, true);
+        // Pending lines live in memory only, so the Settled ack keeps, in
+        // the same persist, that this notice is still to be delivered.
+        let recorded = settled_receipt_recorded(&received.registration.run_id, &received.receipt);
+        let pending = inner
+            .find_session_index(&received.registration.owning_session_id)
+            .and_then(|index| {
+                inner.sessions[index]
+                    .engram
+                    .pending_source_root_line
+                    .as_deref()
             })
-        {
-            return;
+            .is_some_and(|pending| pending.contains(&recorded));
+        if pending {
+            inner
+                .test_run_registrations
+                .update_unindexed_fields(&received.registration.run_id, |row| {
+                    row.settlement_notice_undelivered = true
+                });
         }
-        let engram = &mut inner.sessions[index].engram;
-        let Some(pending) = engram.pending_source_root_line.as_ref() else {
-            return;
-        };
-        let replacement = received.line();
-        let replacement = replacement
-            .strip_prefix(ENGRAM_CHECK_CREDIT_LINE_PREFIX)
-            .unwrap_or(&replacement);
-        let mut lines = pending.lines().map(str::to_owned).collect::<Vec<_>>();
-        let mut changed = false;
-        for line in &mut lines {
-            if !line.starts_with(ENGRAM_CHECK_CREDIT_LINE_PREFIX) {
-                continue;
-            }
-            for state in [
-                TestRunState::Running,
-                TestRunState::Passed,
-                TestRunState::Failed,
-            ] {
-                let old = registered_launcher_notice(current, &state);
-                let old = old
-                    .strip_prefix(ENGRAM_CHECK_CREDIT_LINE_PREFIX)
-                    .unwrap_or(&old);
-                if line.contains(old) {
-                    let replaced = line.replace(old, replacement);
-                    if replaced.len() <= ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES {
-                        *line = replaced;
-                        changed = true;
-                    }
+    }
+
+    /// Clears the undelivered mark of each of `session_id`'s settlements that
+    /// the prompt the runtime just accepted carried (`delivered`). Returns
+    /// whether any was cleared, for the caller to persist.
+    pub(crate) fn note_settlement_notices_delivered_locked(
+        inner: &mut StateInner,
+        session_id: &str,
+        delivered: &str,
+    ) -> bool {
+        let told = inner
+            .test_run_registrations
+            .values()
+            .filter(|run| run.owning_session_id == session_id)
+            .filter(|run| undelivered_settlement(run).is_some_and(|text| delivered.contains(&text)))
+            .map(|run| run.run_id.clone())
+            .collect::<Vec<_>>();
+        for run_id in &told {
+            inner
+                .test_run_registrations
+                .update_unindexed_fields(run_id, |row| row.settlement_notice_undelivered = false);
+        }
+        if !told.is_empty() {
+            // The mark held these runs out of history compaction; a pass
+            // that already looked selects them again.
+            inner.test_runs.compaction_examined_revision = None;
+        }
+        // Safety net: a settlement still undelivered whose line has left the
+        // pending lines without an accepted prompt is put back.
+        Self::present_undelivered_settlements_locked(inner, Some(session_id));
+        !told.is_empty()
+    }
+
+    /// At load, presents again each settlement no accepted prompt carried
+    /// before the host stopped, to its owning session's next prompt.
+    pub(crate) fn present_undelivered_settlements_at_load(inner: &mut StateInner) {
+        Self::present_undelivered_settlements_locked(inner, None);
+    }
+
+    /// Puts the line of each settlement no accepted prompt has carried, of
+    /// `session` or of every session, before its owner's next prompt unless
+    /// a pending line already tells it. The Settled ack was checked when it
+    /// settled; nothing is read again.
+    pub(crate) fn present_undelivered_settlements_locked(
+        inner: &mut StateInner,
+        session: Option<&str>,
+    ) {
+        let lines = inner
+            .test_run_registrations
+            .values()
+            .filter(|run| session.is_none_or(|session| run.owning_session_id == session))
+            .filter_map(|run| {
+                let Some(TestRunVerificationAck::Settled { receipt, .. }) =
+                    run.verification_record.as_ref()
+                else {
+                    return None;
+                };
+                let text = undelivered_settlement(run)?;
+                let notice = ReceivedCheckNotice {
+                    registration: run.clone(),
+                    receipt: receipt.clone(),
+                    deadline: std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET,
+                };
+                Some((run.owning_session_id.clone(), text, notice.line()))
+            })
+            .collect::<Vec<_>>();
+        for (session_id, text, line) in lines {
+            if let Some(index) = inner.find_session_index(&session_id) {
+                let engram = &mut inner.sessions[index].engram;
+                if !engram
+                    .pending_source_root_line
+                    .as_deref()
+                    .is_some_and(|pending| pending.contains(&text))
+                {
+                    engram.set_pending_source_root_line(line);
                 }
             }
         }
-        if changed {
-            engram.pending_source_root_line = Some(lines.join("\n"));
-            // Delivery removes only the exact text already composed. This
-            // receipt rewrite is not newer command feedback and must not
-            // cancel an in-flight placement notice for another command.
+    }
+
+    // Text controls delivery only; host registration, artifact and live root
+    // identity below remain the authority. Never match by command/path/time.
+    // A pending line that already names this settlement, whatever its reason
+    // suffix, is left as it is. Only the settlement step (`append`) adds the
+    // line; the turn-close worker's late read adds nothing.
+    pub(crate) fn publish_received_launcher_notice_locked(
+        inner: &mut StateInner,
+        received: &ReceivedCheckNotice,
+        append: bool,
+    ) {
+        let current = &received.registration;
+        let Some(index) = inner.find_session_index(&current.owning_session_id) else {
+            return;
+        };
+        // The current registration and its validated Settled receipt are the
+        // authority, as for the load and reset re-presentations: the line goes
+        // only to the run's own owning session, whatever claim, root or
+        // Engram setting that session has now, and confirms no credit. A run
+        // with no launch observation row (a lint-only run) is told as well.
+        if !received.is_current(inner) {
+            return;
         }
+        let engram = &mut inner.sessions[index].engram;
+        let recorded = settled_receipt_recorded(&current.run_id, &received.receipt);
+        if !append
+            || engram
+                .pending_source_root_line
+                .as_deref()
+                .is_some_and(|pending| pending.contains(&recorded))
+        {
+            return;
+        }
+        // Its own line, never merged into the check-credit line nor counted
+        // toward the pending-line cap: the next prompt carries every
+        // settlement still undelivered, beside the run's plain fragment.
+        engram.set_pending_source_root_line(received.line());
     }
 }
 

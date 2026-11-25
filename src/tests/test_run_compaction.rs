@@ -612,6 +612,22 @@ fn an_unsafe_alias_preserves_the_original_registration_and_every_association() {
     );
 }
 
+/// The owner's accepted prompt carries its settled record's notice, as a
+/// real delivery does; the run's compaction hold ends with it.
+pub(in crate::tests) fn deliver_settlement_notice(fixture: &RunFixture, session_id: &str) {
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let index = inner.find_session_index(session_id).unwrap();
+    let carried = inner.sessions[index]
+        .engram
+        .pending_source_root_line
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        AppState::note_settlement_notices_delivered_locked(&mut inner, session_id, &carried),
+        "the owner was told the settlement: {carried}"
+    );
+}
+
 #[test]
 fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
     let (fixture, id, store, binding, native) =
@@ -627,6 +643,7 @@ fn bound_compact_proof_needs_current_canonical_revalidation_after_boot() {
         "registration and artifact facts alone create no pending native verification"
     );
     record_native_evidence(&fixture, &native);
+    deliver_settlement_notice(&fixture, &native.registration.owning_session_id);
     assert_eq!(
         fixture
             .summary(&id)
@@ -756,6 +773,7 @@ fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
         "registration and artifact facts alone create no pending native verification"
     );
     record_native_evidence(&fixture, &native);
+    deliver_settlement_notice(&fixture, &native.registration.owning_session_id);
     assert_eq!(
         fixture
             .summary(&id)
@@ -808,6 +826,84 @@ fn revalidated_eligible_run_is_compacted_by_the_idle_step_not_inline() {
         inner.test_run_compacted[&id].observations[0].execution_id,
         execution_id
     );
+}
+
+/// A record Engram received but this host has not settled yet, as after a
+/// settlement attempt whose durability check ran out of time, holds the run's
+/// live registration: its Settled ack and notice are written there only.
+/// Once the record is final, compaction selects the run again.
+#[test]
+fn a_run_whose_record_is_received_but_not_settled_is_not_compacted() {
+    let (fixture, id, store, binding, native) = native_evidence_fixture("compaction-received-hold");
+    record_native_evidence(&fixture, &native);
+    deliver_settlement_notice(&fixture, &native.registration.owning_session_id);
+    fill_unbound_history(&fixture, TEST_RUN_TERMINAL_RUNS_PER_PROJECT + 1);
+    let read = serde_json::from_value(completed_lifecycle(&fixture, &store, &binding)).unwrap();
+    fixture
+        .state
+        .revalidate_test_run_lifecycle(&store, &binding, &read);
+    // The receipt is associated and durable, but the Settled ack is not
+    // written yet.
+    let settled = {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        let settled = inner.test_run_registrations.get(&id).unwrap().clone();
+        let Some(TestRunVerificationAck::Settled {
+            receipt,
+            body_digest,
+        }) = settled.verification_record.clone()
+        else {
+            panic!("the fixture settled the record");
+        };
+        inner
+            .test_run_registrations
+            .update_unindexed_fields(&id, |row| {
+                row.verification_record = Some(TestRunVerificationAck::Received {
+                    receipt,
+                    body_digest,
+                });
+            });
+        settled
+    };
+    let compacted = |fixture: &RunFixture| {
+        fixture
+            .state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_compacted
+            .get(&id)
+            .is_some_and(|row| row.compacted)
+    };
+    fixture.state.step_test_run_compaction();
+    assert!(
+        !compacted(&fixture)
+            && fixture
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_registrations
+                .contains_key(&id),
+        "the registration stays while its record is received but not settled"
+    );
+    // A later attempt settles it: the next idle step compacts the run.
+    let mut received = settled.clone();
+    received.verification_record = fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_registrations
+        .get(&id)
+        .unwrap()
+        .verification_record
+        .clone();
+    fixture.state.note_engram_verification_record_ack(
+        &received,
+        settled.verification_record.clone().unwrap(),
+    );
+    fixture.state.step_test_run_compaction();
+    assert!(compacted(&fixture), "the settled run is compacted");
 }
 
 #[test]

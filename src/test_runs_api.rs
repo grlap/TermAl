@@ -211,6 +211,14 @@ pub(crate) async fn get_test_run(
     query: Result<Query<TestRunDetailQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
     let Query(query) = query.map_err(|err| api_query_rejection("test run detail", err))?;
+    if query.view == Some(TestRunDetailView::Verification) {
+        // The host's own record only: no index, artifact or file read.
+        return run_blocking_api(move || {
+            let inner = state.inner.lock().expect("state mutex poisoned");
+            test_run_verification_read(&inner, &run_id).map(|read| Json(read).into_response())
+        })
+        .await;
+    }
     let registration = query.view == Some(TestRunDetailView::Registration);
     let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
     diagnostics.method = "GET";
@@ -269,9 +277,17 @@ pub(crate) fn get_test_run_observed(
         include_detail,
     )?;
     if include_detail {
+        // The request identity the exact or retained selection recorded for
+        // the artifact this detail describes.
+        let selected_request = diagnostics.request_digest.clone();
         let inner = diagnostics.lock(&state.inner);
         response.0.detail.native_completion_refusal =
             test_run_native_completion_refusal_for_detail(&inner, &response.0.run);
+        response.0.detail.verification_record = test_run_verification_record_for_detail(
+            &inner,
+            &response.0.run,
+            selected_request.as_deref(),
+        );
     }
     Ok(response)
 }

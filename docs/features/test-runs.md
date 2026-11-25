@@ -1345,8 +1345,14 @@ of the reviewed `/review-changes` contract.
     no polling or replacement wait. Before indexing, an unreadable directory,
     request or previously observed published results settles
     `UNKNOWN (registered artifacts unreadable)` after one refresh of grace for
-    a transient read failure. A removed directory or an oversized artifact is
-    deterministic and needs no grace. The wait retains publication history and
+    a transient read failure. A removed directory settles
+    `UNKNOWN (registered run directory removed)`, also when the removal raced
+    a read that failed or found another run; it and an oversized artifact
+    are deterministic and need no grace. A bound run the index dropped because
+    its files could not be read, its directory still there, settles
+    `UNKNOWN (registered artifacts unreadable)` rather than `not indexed`. A
+    read that could not resolve the run's path is a failed read, never taken
+    for a replaced run or a changed identity. The wait retains publication history and
     hands off permanently to the existing indexed verdict rules after a healthy
     matching index entry arrives; later indexed read uncertainty stays pending.
     Before that handoff, retirement settles `UNKNOWN (registration retired)` and replacement settles
@@ -1394,7 +1400,9 @@ A run that left the index after the wait was registered settles as `UNKNOWN
 (not indexed)` when its original identity cannot come back:
 
 - its `request.json` is gone (with its directory or alone) or cannot be read,
-  checked on disk without the state lock; or
+  checked on disk without the state lock. For a run bound to a registration,
+  whose directory is still there, that settles `UNKNOWN (registered artifacts
+  unreadable)` instead, and the wait does not follow its record; or
 - the waiting session's project no longer exists. After `delete_project`
   that is also the run's project, since a wait requires them to match. The
   session stays, without a project, and the index stops scanning that
@@ -1427,7 +1435,11 @@ unpublished executor is never described as proven gone.
   lifecycle of `DelegationWaitRecord`, which is not widened.
   - It exists only while pending.
   - Resuming or consuming it deletes it, and `testRunWaitConsumed` reports
-    the reason.
+    the reason. The one exception is a wait that resumed while a run's
+    Engram verification record was still open (see "Resume prompt"): it
+    stays pending on its open records, resumes again naming each one
+    once the host settles, refuses or leaves it pending, and is consumed
+    at the resume that names its last open record.
   - It reuses the delegation-wait machinery: refresh on index change, the
     same prompt queue and dispatch rules, and boot reconciliation.
   - The refresh runs after every background rescan, once the rescan has
@@ -1563,6 +1575,106 @@ it was cut before: the launcher caps diagnostics and records that it did, and
 the read caps them at 8 KiB. Its code fence is longer than any run of
 backticks in the excerpt, so test output that contains a fence cannot close
 it.
+
+A run that the host sends an Engram verification record for (a
+committed-input or native run bound through its named root) and that passed
+or failed, or whose verdict is unknown (its directory removed, say) while a
+record of it may still be in flight (received by Engram, built by this host,
+or being sent again), also gets a `Verification record:` line in its section, which counts toward the
+mandatory content so no excerpt pushes it out. A look the host has begun but
+not finished at the resume is waited for first, so the first prompt can come
+one look later; a wait defers once per run, for that run's look then in
+flight, never again for a later look of that run, and then decides from what
+the run's latest completed look found. When the host's latest look left such a
+run's record pending for good, the line names that reason. The line names the
+record as the host holds it:
+- `settled` or `received, not yet settled`, with Engram's record ids and
+  the run outcome Engram recorded;
+- `refused`, by Engram or by the host, or `refused by this host before
+  sending`, with the refusal;
+- or `not sent yet`.
+
+The host's own final record also settles the run for the wait when the
+index has no verdict for the run it indexed: one it reads as unknown, or
+whose latest read failed, after the record settled or was refused. Its record was
+built from the run's terminal results, so the run finished. A settled
+record gives the run outcome Engram recorded as the verdict; a refused one,
+or an indeterminate outcome, gives `UNKNOWN`. Such a failed run's
+diagnostics are not available here. A run the index has not listed yet,
+or still reads as running, keeps the wait while the next rescan may read
+its terminal results with their diagnostics: once a full rescan begun
+after the record became final has completed without that, the final record
+decides, as `UNKNOWN` unless it settled with a pass or a failure. A run whose
+record settled or was refused gets no recovery hint. The record is only
+ever taken from the registration of the run the wait admitted: a later
+registration under the same run id, for another request, is not that run's.
+
+The verdict comes first and is never held back for a record. A wait that
+resumed while any such record was still open stays pending. TermAl queues
+a prompt for it, with the same queue and dispatch rules, naming each open
+record once it has one of these; records still being sent wait on their
+own, and the wait ends when every record has been named:
+- it settled or was refused;
+- its registration is gone;
+- the host's latest look, begun after the wait resumed on the run, found
+  that the run's own request or results no longer make a record: its run
+  directory was removed or its files rewritten (`not sent`, or `received,
+  not yet settled` with Engram's record ids when Engram already has it). A
+  look begun earlier may have read a run whose terminal results were still
+  being published, so it ends nothing. The wait itself reads no run file,
+  so a send already under way keeps it until its answer lands;
+- Engram received it, but the host's latest attempt to settle it found no
+  launch observation of the run carrying its records, so the host cannot
+  settle it yet (`received, not yet settled`, with Engram's record ids). A
+  restarted host finds this again on its first look at the held receipt;
+  if the record settles later, the run owner's next prompt names it;
+- the host's latest look left it pending, named by the reason the host
+  keeps in memory for its latest completed look. A look already under way
+  when the wait would end is waited for first, unless the wait has already
+  deferred once for that run: a wait defers once per run, never again for a
+  later look of that run, so it never ends on a reason older than the look
+  under way when it deferred. The state file beside the run, which can
+  be older or, in a run directory that refuses writes, missing, never ends
+  a wait; a restarted host decides after its first look, within seconds.
+  A pending record may never be sent. The exceptions are
+  the reasons the host answers by sending the same record again: Engram's
+  deferral (`remote_deferred`), a call that failed without an answer
+  (`transport_failed`), and a held receipt that does not answer the record
+  (`receipt_mismatch`). For those the wait keeps waiting.
+
+That moment comes from the host's own record of the run, read at the wait
+refresh that follows each test-run rescan, not from a timer. A run whose
+verdict is unknown at the first resume is followed up only when a record of
+it may already be in flight, as above, and never when it is unknown because
+its registered files could not be read (`registered artifacts unreadable`). A run whose verdict is not in yet, in
+a wait another run settled, gets a `Verification record:` line only when its
+record is already settled or refused, and is not followed up: no look of it
+is waited for, and if its record settles later, the run owner's next prompt
+names it on a "Verification record settled" line. A launcher run whose results carry no
+committed-input record is not followed up, since no record can be
+built from them; its line says so. A Stop or a removed
+session consumes the wait as usual. A settlement also reaches the session's
+next prompt, on its own line (`[TermAl] Verification record settled:`). The
+host writes that line in the same state step that records the settlement, so
+any turn opened after it carries the line, also when the record settles while
+the turn that launched the run is still open. The line stands beside the
+run's own pending notice and is never merged into the check-credit line, cut
+with it, or pushed out by the limit on pending host lines, so the next prompt
+names every settled record not yet delivered. The line goes only to the run's
+own owning session, on the run's current registration and its validated
+receipt, whatever claim, named root or Engram setting that session has by
+then. A run with no launch observation row, such as a lint-only run, is told
+the same way. A turn close that
+then adds the run's own correlation notice does not repeat the settled line.
+Pending host lines live in memory, so the run's registration also records,
+with the settlement, that the line is not yet delivered; a host started from
+that saved state puts the line before the session's next prompt again. The
+mark clears once the runtime accepts a prompt carrying the line; until then
+history compaction leaves the run's registration in place, unless the owning
+session no longer exists. Compaction also leaves it in place while Engram
+has received the run's record but this host has not settled it yet, as
+after a settlement attempt that ran out of time: the Settled ack and the
+line are written to the live registration only.
 
 ### Rollout: ships switched on
 

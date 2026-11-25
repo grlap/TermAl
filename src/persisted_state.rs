@@ -618,6 +618,33 @@ impl PersistedState {
                 ..TestRunIndex::default()
             },
             test_run_cards_epoch: self.test_run_cards_epoch,
+            // Process-local; the producer's first look finds it again.
+            test_run_unassociated_receipts: HashMap::new(),
+            test_run_record_pending: HashMap::new(),
+            test_run_look_sequence: 0,
+            test_run_scan_generation: 0,
+            test_run_record_final_at_scan: HashMap::new(),
+            test_run_record_bodies_built: HashSet::new(),
+            test_run_record_looks_in_flight: HashMap::new(),
+            test_run_record_look_published: HashMap::new(),
+            // Every settled run's state-file copy is checked once, and written
+            // again where a write was lost before the restart.
+            test_run_unmirrored_settlements: self
+                .test_run_registrations
+                .values()
+                .chain(
+                    self.test_run_compacted
+                        .values()
+                        .filter_map(|row| row.registration.as_ref()),
+                )
+                .filter(|registration| {
+                    matches!(
+                        registration.verification_record,
+                        Some(TestRunVerificationAck::Settled { .. })
+                    )
+                })
+                .map(|registration| registration.run_id.clone())
+                .collect(),
             test_run_compacted: self
                 .test_run_compacted
                 .into_iter()
@@ -800,6 +827,8 @@ impl PersistedState {
         engram_end_orphaned_work_source_roots(&mut inner.engram_work_source_roots, |named_by| {
             session_ids.contains(named_by)
         });
+        // Pending host lines are not persisted; a settlement none carried yet is.
+        AppState::present_undelivered_settlements_at_load(&mut inner);
         Ok(inner)
     }
 }

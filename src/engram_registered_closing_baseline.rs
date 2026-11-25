@@ -9,6 +9,24 @@ pub(crate) fn registered_closing_clean_input(
     registration: &TestRunRegistration,
     disk: &TestRunDisk,
 ) -> bool {
+    registered_clean_input(registration, disk, true)
+}
+
+/// `registered_closing_clean_input` without the launcher's eligibility,
+/// which no failed run carries: the settlement of a clean failed run is
+/// still told, though it earns nothing.
+pub(crate) fn registered_settled_clean_input(
+    registration: &TestRunRegistration,
+    disk: &TestRunDisk,
+) -> bool {
+    registered_clean_input(registration, disk, false)
+}
+
+fn registered_clean_input(
+    registration: &TestRunRegistration,
+    disk: &TestRunDisk,
+    require_eligible: bool,
+) -> bool {
     let directory = FsPath::new(&registration.run_directory);
     let TestRunJson::Parsed(request, _, _) = test_run_read_json(&directory.join("request.json"))
     else {
@@ -42,7 +60,7 @@ pub(crate) fn registered_closing_clean_input(
         return false;
     };
     if !input.clean_before
-        || input.eligible != Some(true)
+        || (require_eligible && input.eligible != Some(true))
         || input.outcome != Some(TestRunCommittedInputOutcome::Clean)
         || input.after.as_ref().is_none_or(|after| !after.clean)
     {

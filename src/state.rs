@@ -2044,6 +2044,55 @@ pub(crate) struct StateInner {
     pub(crate) test_run_registrations: TestRunRegistrationStore,
     pub(crate) test_run_observations: TestRunObservationStore,
     pub(crate) test_run_compacted: TestRunCompactedStore,
+    /// Process-local: run id to the body digest of a held receipt whose
+    /// settlement found no launch observation of the run carrying its
+    /// records (`EngramVerificationRecordSettlement::NoLaunchRow`); a run wait
+    /// resumes on it naming the received records. Removed once a launch
+    /// observation carries them. A restarted host finds it again on the
+    /// producer's first look at the held receipt.
+    pub(crate) test_run_unassociated_receipts: HashMap<String, String>,
+    /// Process-local: run id to what the producer's latest look at the run's
+    /// record came to, a pending reason or no blocker
+    /// (`AppState::prepare_engram_verification_record` and the send step).
+    /// A run wait decides from it, never from the state file beside the run,
+    /// which can be older or unwritten. A restarted host writes it again on
+    /// the producer's first look; until then a run wait keeps waiting.
+    pub(crate) test_run_record_pending: HashMap<String, EngramVerificationRecordLook>,
+    /// Process-local: the place the producer's next look at any run's record
+    /// takes, counted up as each look begins and before it reads a file. A
+    /// run wait notes it when it marks a run, and counts a look that found no
+    /// record only from a look begun at or after that place
+    /// (test_run_wait_records.rs).
+    pub(crate) test_run_look_sequence: u64,
+    /// Process-local: how many rescans have installed their index since this
+    /// host started (`refresh_test_runs`).
+    pub(crate) test_run_scan_generation: u64,
+    /// Process-local: run id to `test_run_scan_generation` when the run's
+    /// verification record became final. A run wait takes the verdict of a run
+    /// the index has not listed from its final record once a full rescan
+    /// begun after that has completed (test_run_waits.rs). A restarted host
+    /// counts from its first rescans.
+    pub(crate) test_run_record_final_at_scan: HashMap<String, u64>,
+    /// Process-local: runs whose record body a producer look of this process
+    /// froze (ready to send, or held with its receipt), so a send of it may be
+    /// in flight from memory. A run wait follows such a run's record even when
+    /// its verdict is unknown, as when its directory was removed
+    /// (test_run_wait_records.rs).
+    pub(crate) test_run_record_bodies_built: HashSet<String>,
+    /// Process-local: run id to the place of a producer look that has begun
+    /// but not yet published what it came to. A run wait's first resume
+    /// waits for it before deciding whether a record of the run may be in
+    /// flight (test_run_wait_records.rs).
+    pub(crate) test_run_record_looks_in_flight: HashMap<String, u64>,
+    /// Process-local: run id to the place of the latest producer look that
+    /// published what it came to. A run wait that deferred for a look in
+    /// flight decides once that look has published (test_run_wait_records.rs).
+    pub(crate) test_run_record_look_published: HashMap<String, u64>,
+    /// Process-local: settled runs whose Settled state file beside the run
+    /// (the launcher summary's copy) could not be written; the producer's
+    /// ticks write it again. A loaded host starts with every settled run here,
+    /// so a copy left behind before a restart is repaired too.
+    pub(crate) test_run_unmirrored_settlements: BTreeSet<String>,
     /// When this host first ran with test-run cards; runs that started
     /// earlier never get one (`test_run_cards.rs`). Persisted, never derived
     /// from "now" again once stored.
@@ -2181,6 +2230,15 @@ impl StateInner {
             test_run_registrations: TestRunRegistrationStore::default(),
             test_run_observations: TestRunObservationStore::default(),
             test_run_compacted: TestRunCompactedStore::default(),
+            test_run_unassociated_receipts: HashMap::new(),
+            test_run_record_pending: HashMap::new(),
+            test_run_look_sequence: 0,
+            test_run_scan_generation: 0,
+            test_run_record_final_at_scan: HashMap::new(),
+            test_run_record_bodies_built: HashSet::new(),
+            test_run_record_looks_in_flight: HashMap::new(),
+            test_run_record_look_published: HashMap::new(),
+            test_run_unmirrored_settlements: BTreeSet::new(),
             test_run_cards_epoch: None,
             test_run_cards: PersistTracked::default(),
             test_run_waits: PersistTracked::default(),

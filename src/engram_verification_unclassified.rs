@@ -137,6 +137,13 @@ impl AppState {
                 );
                 return false;
             }
+            // When it became final, for a run wait on a run the index has not
+            // listed (test_run_waits.rs).
+            let generation = inner.test_run_scan_generation;
+            inner
+                .test_run_record_final_at_scan
+                .entry(registration.run_id.clone())
+                .or_insert(generation);
         }
         true
     }

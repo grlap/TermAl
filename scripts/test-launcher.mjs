@@ -1994,6 +1994,21 @@ function requestOnlySummary(runDir) {
   ].join("\n")}\n`;
 }
 
+// Engram's receipt for the run's record, as the host mirrored it: the record
+// ids and the run outcome Engram recorded. Text from the file is bounded and
+// stripped of control characters; it is reported, never trusted as a verdict.
+function verificationReceiptLine(verification) {
+  const clean = (value) => String(value).replace(/[\x00-\x1f\x7f]/g, " ").slice(0, diagnosticLimit);
+  const receipt = verification.receipt ?? {};
+  const records = Array.isArray(receipt.verifications)
+    ? receipt.verifications.map((entry) => entry?.record_id).filter((id) => typeof id === "string")
+    : [];
+  const status = verification.state === "settled" ? "settled" : "received, not yet settled";
+  const ids = records.length ? clean(records.join(" ")) : "none named";
+  const outcome = typeof receipt.run_outcome === "string" ? clean(receipt.run_outcome) : "unknown";
+  return `verification: ${status}; Engram record(s) ${ids}; run outcome ${outcome}`;
+}
+
 export async function summarize(runDir) {
   let result;
   try {
@@ -2031,6 +2046,8 @@ export async function summarize(runDir) {
     if (verification.state === "rejected") {
       const detail = typeof verification.detail === "string" ? verification.detail : "reason unavailable";
       lines.push(`verification: rejected: ${detail.replace(/[\r\n\x1b]/g, " ").slice(0, diagnosticLimit)}`);
+    } else if (verification.state === "settled" || verification.state === "received") {
+      lines.push(verificationReceiptLine(verification));
     }
   } catch (error) {
     if (error.code !== "ENOENT") lines.push("verification: status unreadable");

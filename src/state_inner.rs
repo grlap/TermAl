@@ -599,6 +599,15 @@ impl StateInner {
             });
             self.review_packet_retention_failures
                 .retain(|(parent, _, _), _| *parent != session_id);
+            // A gone owner releases its runs' settlement-notice hold on
+            // history compaction; a pass that already looked selects again.
+            if self
+                .test_run_registrations
+                .values()
+                .any(|run| run.settlement_notice_undelivered && run.owning_session_id == session_id)
+            {
+                self.test_runs.compaction_examined_revision = None;
+            }
             self.removed_session_ids.push(session_id);
         }
     }

@@ -1231,8 +1231,39 @@ refusal separately from the native test verdict, as `verification: rejected:`
 with Engram's refusal code and, for a refusal of the `claim` field, fixed
 host text naming its causes and correction; Engram's own message and reason
 are never shown. A passing test can therefore still have a
-rejected verification record. Both the run command and each check command
-have Engram's 8192 UTF-8 byte limit; a longer command is reported as
+rejected verification record. The same file also mirrors a record that
+Engram answered. The `summary` reports it as `verification: settled;
+Engram record(s) ID...; run outcome OUTCOME` once the host settled it, or
+as `verification: received, not yet settled; …` before that. The host's own
+record stays the authority; the file beside the run only mirrors it, and the
+host writes a settled copy again while the run directory exists. The
+authoritative read-only route to a run's record ids and outcome is
+`GET /api/test-runs/{id}?view=verification`, for example
+`curl -s "$TERMAL_BASE_URL/api/test-runs/RUN_ID?view=verification"` from a
+session. It answers `{ "runId", "verificationRecord" }` from the host's own
+record, live or retained, without reading the run's files, so it is right
+whatever the run directory holds or accepts. `verificationRecord` has
+`state` (`settled`, `received`, `rejected` or `refusedByHost`), `recordIds`,
+`runOutcome` and, for a refusal, `detail`; it is null while the host holds
+no answer for the run, and an unknown run is 404. The full detail
+(`GET /api/test-runs/{id}`) also carries it as `detail.verificationRecord`
+when the run's files can be read.
+
+A run wait in `any` mode resumes as soon as one of its runs settles. Its
+first prompt names each run's record the host already holds. It follows a
+run's open record for a run the index shows as passed or failed, and for a
+run whose verdict is unknown (its directory removed, say) only when a record
+of it may be in flight: received by Engram, built by this host, or being
+sent again; a run reported unknown because its registered files could not
+be read is not followed either. A run the index does not yet show as finished
+is reported as `NOT SETTLED YET` and is not followed: if its record settles later, the run
+owner's next prompt names it, not this wait. A followed record ends the
+wait with one more prompt once it settles, is refused, or is left pending
+for a reason the host names. A passed or failed run whose results cannot be
+read at the resume is followed, never holding the other runs back.
+
+Both the run command and each check command have Engram's 8192 UTF-8 byte
+limit; a longer command is reported as
 `verification_command_too_long`, with its field and byte count. Commands and
 their fingerprints are preserved, and a terminal refusal is not resent.
 Engram refuses a record whose claim, fence or run moved after registration

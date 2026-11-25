@@ -14,6 +14,9 @@ pub(crate) struct TestRunDetailQuery {
 pub(crate) enum TestRunDetailView {
     Detail,
     Registration,
+    /// The run's Engram verification record as the host holds it
+    /// (`test_run_verification_read`), with no read of the run's files.
+    Verification,
 }
 
 const TEST_RUN_REGISTRATION_CONFIRMATION_MAX_BYTES: usize = 64 * 1024;

@@ -31,6 +31,9 @@ pub(crate) const TEST_RUN_WAIT_EXCERPT_MAX_BYTES: usize = 8 * 1024;
 #[path = "test_run_wait_observations.rs"]
 mod test_run_wait_observations;
 pub(crate) use test_run_wait_observations::*;
+#[path = "test_run_wait_records.rs"]
+mod test_run_wait_records;
+use test_run_wait_records::*;
 /// How long registration waits for the forced rescan when an id is unknown.
 #[cfg(not(test))]
 const TEST_RUN_WAIT_FORCED_RESCAN_BOUND: Duration = Duration::from_secs(1);
@@ -76,6 +79,29 @@ pub(crate) struct TestRunWaitRegistrationProgress {
     /// accepted observation, including a no-op success, advances this fence.
     #[serde(skip)]
     pub(crate) generation: u64,
+    /// The wait resumed on this run's verdict while the run's Engram
+    /// verification record was still open. The wait stays only to resume
+    /// again, naming that record, when it settles, is refused or is left
+    /// pending (test_run_wait_records.rs).
+    #[serde(default)]
+    pub(crate) record_follow_up: bool,
+    /// Runtime only: the producer's look sequence when this run was marked
+    /// (`StateInner::test_run_look_sequence`). A look that found no record
+    /// ends the wait only when it began at or after this place, after the run
+    /// was known to have finished. A restarted host keeps no look, so every
+    /// look it takes counts.
+    #[serde(skip)]
+    pub(crate) record_follow_up_after: u64,
+    /// Runtime only: the place of the producer look this run's wait is
+    /// deferring for, set when it first deferred. The wait waits for that one
+    /// look only, then decides from what it published (test_run_wait_records.rs).
+    #[serde(skip)]
+    pub(crate) record_deferred_for: Option<u64>,
+    /// The wait deferred once for this run's producer look in flight. It
+    /// never defers again for a later look of this run, across a restart too
+    /// (test_run_wait_records.rs).
+    #[serde(default)]
+    pub(crate) record_deferred: bool,
 }
 
 impl TestRunWaitRegistrationProgress {
@@ -148,7 +174,11 @@ pub(crate) enum TestRunWaitVerdict {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TestRunWaitRegistrationUnknownReason {
+    /// The registered run's files could not be read: an unsupported or
+    /// oversized artifact, or reads that kept failing.
     ArtifactsUnreadable,
+    /// The registered run's directory is gone.
+    ArtifactsRemoved,
     RegistrationRetired,
     IdentityChanged,
 }
@@ -210,21 +240,60 @@ pub(crate) fn test_run_fs_path(display: &str) -> PathBuf {
     PathBuf::from(display)
 }
 
+/// What a run the index no longer lists left on disk
+/// (`test_run_wait_run_gone`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TestRunWaitRunGone {
+    /// Its original request can still be indexed: not gone.
+    Present,
+    /// Its run directory is gone.
+    Removed,
+    /// Its directory is there, but its files could not be read.
+    Unreadable,
+    /// Its directory holds another run, or another request for it.
+    Replaced,
+}
+
+/// Whether a directory is gone, as opposed to unreadable.
+fn test_run_wait_directory_removed(path: &FsPath) -> bool {
+    fs::metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
 /// A missing index entry stays pending only while its original request can
 /// still be indexed. A readable replacement is not evidence for that request.
-/// This complete label and disk comparison runs outside StateInner.
-fn test_run_wait_run_gone(label: &TestRunWaitRunLabel) -> bool {
+/// A fenced label tells a removed directory from one whose files could not
+/// be read. This complete label and disk comparison runs outside StateInner.
+fn test_run_wait_run_gone(label: &TestRunWaitRunLabel) -> TestRunWaitRunGone {
     let run_dir = test_run_fs_path(&label.run_dir);
     if label.request_identity.is_some() {
-        return TestRunDisk::read(&run_dir, None).is_none_or(|disk| {
-            disk.run_id != label.run_id || !test_run_wait_identity_matches(label, &disk)
-        });
+        let unread = || {
+            if test_run_wait_directory_removed(&run_dir) {
+                TestRunWaitRunGone::Removed
+            } else {
+                TestRunWaitRunGone::Unreadable
+            }
+        };
+        return match TestRunDisk::read(&run_dir, None) {
+            None => unread(),
+            Some(disk) => match test_run_wait_identity(label, &disk) {
+                TestRunWaitIdentity::Match => TestRunWaitRunGone::Present,
+                TestRunWaitIdentity::Differs => TestRunWaitRunGone::Replaced,
+                // Its locator could not be read: no evidence of another run.
+                TestRunWaitIdentity::Missing => unread(),
+            },
+        };
     }
-    // Unfenced old labels retain their existing readable-request grace.
-    !matches!(
+    // Unfenced old labels retain their existing readable-request grace; a
+    // request they cannot read counts as gone, as before (they send no
+    // record, so how it went is not told apart).
+    if matches!(
         test_run_read_json(&run_dir.join("request.json")),
         TestRunJson::Parsed(..)
-    )
+    ) {
+        TestRunWaitRunGone::Present
+    } else {
+        TestRunWaitRunGone::Removed
+    }
 }
 
 pub(crate) fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -> String {
@@ -250,6 +319,8 @@ pub(crate) fn test_run_wait_verdict_label(verdict: Option<TestRunWaitVerdict>) -
             match reason {
                 TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable =>
                     "registered artifacts unreadable",
+                TestRunWaitRegistrationUnknownReason::ArtifactsRemoved =>
+                    "registered run directory removed",
                 TestRunWaitRegistrationUnknownReason::RegistrationRetired => "registration retired",
                 TestRunWaitRegistrationUnknownReason::IdentityChanged =>
                     "registered identity changed",
@@ -287,6 +358,7 @@ fn test_run_wait_run_section(
     verdict: Option<TestRunWaitVerdict>,
     failure: Option<&TestRunCardFailure>,
     evidence: Option<&TestRunWaitEvidence>,
+    record: Option<&str>,
 ) -> String {
     if let Some(remote) = &label.remote {
         return remote_test_run_wait_section(label, remote, verdict);
@@ -393,13 +465,19 @@ fn test_run_wait_run_section(
         }
         Some(TestRunWaitVerdict::Pass | TestRunWaitVerdict::RemoteConflict) => {}
     }
+    // Part of the mandatory section, so the excerpt budget never cuts it.
+    if let Some(record) = record {
+        lines.push(format!("- Verification record: {record}"));
+    }
     lines.push(format!(
         "- Inspect: `node scripts/test-launcher.mjs summary \"{run_dir}\"`"
     ));
+    // A run whose record is settled or refused finished: nothing to recover.
     if matches!(
         verdict,
         Some(TestRunWaitVerdict::Unknown(_) | TestRunWaitVerdict::UnknownRegistration(_))
-    ) {
+    ) && !record.is_some_and(test_run_wait_record_text_final)
+    {
         lines.push(format!(
             "- Settle it: `node scripts/test-launcher.mjs recover \"{run_dir}\"` (never a pass)"
         ));
@@ -462,13 +540,15 @@ fn test_run_wait_failure<'a>(
 /// The resume prompt. Headers and commands are never cut; each failed run's
 /// excerpt gets min(8 KiB, (64 KiB minus everything else) / number of runs).
 /// `UNKNOWN` is never phrased as a pass. `verdicts` are the runs' verdicts
-/// (`test_run_wait_verdicts`), in registration order.
+/// (`test_run_wait_verdicts`), in registration order. `records` names each
+/// recorded run's verification record (test_run_wait_records.rs).
 pub(crate) fn build_test_run_wait_prompt(
     wait: &TestRunWaitRecord,
     summaries: &[Option<&TestRunSummary>],
     verdicts: &[Option<TestRunWaitVerdict>],
     failures: &HashMap<String, TestRunCardFailureRead>,
     evidence: &HashMap<String, TestRunWaitEvidence>,
+    records: &HashMap<String, String>,
 ) -> String {
     let head = test_run_wait_prompt_head(wait, verdicts);
     let sections: Vec<String> = wait
@@ -483,6 +563,7 @@ pub(crate) fn build_test_run_wait_prompt(
                 *verdict,
                 test_run_wait_failure(failures, &label.run_id),
                 evidence.get(&label.run_id),
+                records.get(&label.run_id).map(String::as_str),
             )
         })
         .collect();
@@ -572,6 +653,40 @@ fn test_run_wait_summaries(
         .collect()
 }
 
+/// What a disk read says of a fenced label's identity: the run, request and
+/// locator it was admitted with (`Match`); positively another run, request or
+/// locator (`Differs`); or a read that could not establish the locator, as
+/// when resolving the run's path failed just then (`Missing`), which is no
+/// evidence of a replacement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TestRunWaitIdentity {
+    Match,
+    Differs,
+    Missing,
+}
+
+pub(crate) fn test_run_wait_identity(
+    label: &TestRunWaitRunLabel,
+    disk: &TestRunDisk,
+) -> TestRunWaitIdentity {
+    let Some(identity) = label.request_identity.as_ref() else {
+        return TestRunWaitIdentity::Match;
+    };
+    if disk.run_id != label.run_id
+        || disk.request_identity.as_ref() != Some(identity)
+        || label.locator_identity.is_none()
+    {
+        return TestRunWaitIdentity::Differs;
+    }
+    match &disk.locator_identity {
+        None => TestRunWaitIdentity::Missing,
+        Some(locator) if label.locator_identity.as_ref() == Some(locator) => {
+            TestRunWaitIdentity::Match
+        }
+        Some(_) => TestRunWaitIdentity::Differs,
+    }
+}
+
 fn test_run_wait_identity_matches(label: &TestRunWaitRunLabel, disk: &TestRunDisk) -> bool {
     // Keep the run/request/locator fence. Source equality uses the launcher's
     // own observations, without an independent parent-held expected value.
@@ -612,9 +727,12 @@ fn test_run_wait_registration_observation(
     let mut reason = None;
     match TestRunDisk::read_classified(&path, None) {
         TestRunRead::Run(disk) => {
-            if disk.run_id != label.run_id || !test_run_wait_identity_matches(label, &disk) {
+            let identity = test_run_wait_identity(label, &disk);
+            if identity == TestRunWaitIdentity::Differs {
                 reason = Some(TestRunWaitRegistrationUnknownReason::IdentityChanged);
-            } else if disk.read_failures > 0 {
+            } else if identity == TestRunWaitIdentity::Missing || disk.read_failures > 0 {
+                // A locator that could not be resolved just now is a failed
+                // read, never taken for another run.
                 transient = true;
             } else if disk.results.is_some() {
                 progress.results_seen = true;
@@ -629,9 +747,8 @@ fn test_run_wait_registration_observation(
         TestRunRead::Pending => {
             // A removed directory is deterministic; a missing/malformed
             // request in an existing directory may be a replacement race.
-            if fs::metadata(&path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
-            {
-                reason = Some(TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable);
+            if test_run_wait_directory_removed(&path) {
+                reason = Some(TestRunWaitRegistrationUnknownReason::ArtifactsRemoved);
             } else {
                 transient = true;
             }
@@ -640,6 +757,7 @@ fn test_run_wait_registration_observation(
             reason = Some(TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable);
         }
     }
+    (reason, transient) = test_run_wait_registration_read_outcome(&path, reason, transient);
     progress.unreadable_reads = if transient {
         progress.unreadable_reads.saturating_add(1).min(2)
     } else {
@@ -650,6 +768,32 @@ fn test_run_wait_registration_observation(
     }
     progress.generation = progress.generation.saturating_add(1);
     (progress, reason)
+}
+
+/// What a registered-path read came to, once a removal that raced it is
+/// told apart: a read that failed, or found another run, in a directory that
+/// is gone by now read a directory being removed, so the run's directory was
+/// removed, whatever the read made of it.
+pub(crate) fn test_run_wait_registration_read_outcome(
+    path: &FsPath,
+    reason: Option<TestRunWaitRegistrationUnknownReason>,
+    transient: bool,
+) -> (Option<TestRunWaitRegistrationUnknownReason>, bool) {
+    let failed = transient
+        || matches!(
+            reason,
+            Some(
+                TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable
+                    | TestRunWaitRegistrationUnknownReason::IdentityChanged
+            )
+        );
+    if failed && test_run_wait_directory_removed(path) {
+        return (
+            Some(TestRunWaitRegistrationUnknownReason::ArtifactsRemoved),
+            false,
+        );
+    }
+    (reason, transient)
 }
 
 /// Removes every pending run wait of a session whose turn the user stopped.
@@ -900,6 +1044,7 @@ impl AppState {
                         }
                     })
                     .collect();
+                let record_bound = test_run_wait_record_mandatory_bound();
                 let mandatory = test_run_wait_prompt_head(&wait, &worst).len()
                     + wait
                         .runs
@@ -915,6 +1060,12 @@ impl AppState {
                                 *verdict,
                                 None,
                                 Some(&TestRunWaitEvidence::mandatory_bound()),
+                                // Only a run that sends a record names one.
+                                inner
+                                    .test_run_registrations
+                                    .get(&label.run_id)
+                                    .is_some_and(engram_verification_record_registration_bound)
+                                    .then_some(record_bound.as_str()),
                             )
                             .len()
                             .max(if label.remote.is_some() { 4096 } else { 0 })
@@ -1043,14 +1194,24 @@ impl AppState {
         // summaries and pre-handoff registrations may settle off-lock, even
         // when an indexed summary is still nonterminal. This is only an I/O
         // upper bound; phase 2 decides the actual verdicts and consumption.
-        let (checks, reads) = {
+        let (checks, reads, input_reads) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner.test_run_waits.is_empty() {
                 return TestRunWaitRefresh::default();
             }
             let mut checks: Vec<(String, TestRunWaitRunLabel)> = Vec::new();
             let mut reads: BTreeMap<String, PathBuf> = BTreeMap::new();
+            let mut input_reads: BTreeMap<String, PathBuf> = BTreeMap::new();
             for wait in &inner.test_run_waits {
+                // A wait already resumed waits on records only, decided from
+                // the host's own record and latest look; it reads no run file.
+                if wait
+                    .runs
+                    .iter()
+                    .any(|label| label.registration_progress.record_follow_up)
+                {
+                    continue;
+                }
                 let owned_summaries = test_run_wait_summaries(&inner, wait);
                 let summaries: Vec<_> = owned_summaries.iter().map(Option::as_ref).collect();
                 for (label, summary) in wait.runs.iter().zip(&summaries) {
@@ -1075,6 +1236,8 @@ impl AppState {
                         summary.is_none()
                             || (label.registration_backed && !label.registration_progress.indexed)
                             || test_run_wait_verdict(*summary, false).is_some()
+                            || (label.remote.is_none()
+                                && test_run_wait_record_final_locked(&inner, label))
                     };
                 let mut possibilities = wait.runs.iter().zip(&summaries);
                 let possibly_satisfied = match wait.mode {
@@ -1084,6 +1247,7 @@ impl AppState {
                 if !possibly_satisfied {
                     continue;
                 }
+                input_reads.extend(test_run_wait_input_reads_locked(&inner, &summaries));
                 for summary in summaries.into_iter().flatten() {
                     if summary.state == TestRunState::Failed {
                         if let Some(entry) = inner.test_runs.find(&summary.run_id) {
@@ -1092,14 +1256,29 @@ impl AppState {
                     }
                 }
             }
-            (checks, reads)
+            (checks, reads, input_reads)
         };
         after_pick();
-        let gone: HashSet<(String, String)> = checks
+        // Each read run's answer, or `None` when its results could not be
+        // read: the first resume then decides that run from the host's own
+        // state, never holding the wait's other runs back.
+        let inputs: HashMap<String, Option<bool>> = input_reads
+            .into_iter()
+            .map(|(run_id, run_dir)| {
+                let committed = test_run_wait_results_have_committed_input(&run_dir);
+                (run_id, committed)
+            })
+            .collect();
+        let gone: HashMap<(String, String), TestRunWaitRunGone> = checks
             .iter()
             .filter(|(_, label)| !label.registration_backed || label.registration_progress.indexed)
-            .filter(|(_, label)| test_run_wait_run_gone(label))
-            .map(|(wait_id, label)| (wait_id.clone(), label.run_id.clone()))
+            .map(|(wait_id, label)| {
+                (
+                    (wait_id.clone(), label.run_id.clone()),
+                    test_run_wait_run_gone(label),
+                )
+            })
+            .filter(|(_, gone)| *gone != TestRunWaitRunGone::Present)
             .collect();
         let registration_observations: HashMap<_, _> = checks
             .into_iter()
@@ -1139,6 +1318,45 @@ impl AppState {
                         continue;
                     }
                 }
+                if wait
+                    .runs
+                    .iter()
+                    .any(|label| label.registration_progress.record_follow_up)
+                {
+                    let deferred_before = test_run_wait_deferred_runs(&wait);
+                    let follow_up = test_run_wait_record_follow_up_locked(&inner, &mut wait);
+                    progress_changed |= test_run_wait_deferred_runs(&wait) > deferred_before;
+                    let Some((prompt, reported)) = follow_up else {
+                        remaining.push(wait);
+                        continue;
+                    };
+                    let queued =
+                        queue_delegation_wait_resume_locked(&mut inner, &wait.session_id, prompt);
+                    if queued.dispatch_requested {
+                        refresh.dispatch_sessions.push(wait.session_id.clone());
+                    }
+                    refresh.queue_results.insert(wait.id.clone(), queued);
+                    for label in wait
+                        .runs
+                        .iter_mut()
+                        .filter(|label| reported.contains(&label.run_id))
+                    {
+                        label.registration_progress.record_follow_up = false;
+                    }
+                    if wait
+                        .runs
+                        .iter()
+                        .any(|label| label.registration_progress.record_follow_up)
+                    {
+                        // Named the records that reached an outcome; kept
+                        // for those still being sent.
+                        progress_changed = true;
+                        remaining.push(wait);
+                    } else {
+                        consumed.push((wait, TestRunWaitConsumedReason::Completed));
+                    }
+                    continue;
+                }
                 let owned_summaries = test_run_wait_summaries(&inner, &wait);
                 let summaries: Vec<_> = owned_summaries.iter().map(Option::as_ref).collect();
                 // A run that left the index since the check above was not
@@ -1152,14 +1370,15 @@ impl AppState {
                     .is_none_or(|project_id| inner.find_project(project_id).is_none());
                 let mut verdicts = test_run_wait_verdicts(&wait, &summaries, |run_id| {
                     project_removed
-                        || gone.contains(&(wait.id.clone(), run_id.to_owned()))
+                        || gone.contains_key(&(wait.id.clone(), run_id.to_owned()))
                         || wait
                             .runs
                             .iter()
                             .find(|label| label.run_id == run_id)
                             .zip(inner.test_runs.find(run_id))
                             .is_some_and(|(label, entry)| {
-                                !test_run_wait_identity_matches(label, &entry.disk)
+                                test_run_wait_identity(label, &entry.disk)
+                                    == TestRunWaitIdentity::Differs
                             })
                 });
                 for (index, label) in wait.runs.iter().enumerate() {
@@ -1170,6 +1389,24 @@ impl AppState {
                             test_run_wait_observation_verdict(&inner, label, project_removed);
                     } else if !inner.test_runs.scanned_once {
                         verdicts[index] = None;
+                    }
+                }
+                // A bound run the index dropped because its files could not
+                // be read, its directory still there, is unknown for that
+                // reason, not as one gone from the index: such a run is not
+                // followed for its record (test_run_wait_records.rs).
+                for (index, label) in wait.runs.iter().enumerate() {
+                    if verdicts[index]
+                        == Some(TestRunWaitVerdict::Unknown(
+                            TestRunCardUnknownReason::NotIndexed,
+                        ))
+                        && gone.get(&(wait.id.clone(), label.run_id.clone()))
+                            == Some(&TestRunWaitRunGone::Unreadable)
+                        && test_run_wait_label_registration_locked(&inner, label).is_some()
+                    {
+                        verdicts[index] = Some(TestRunWaitVerdict::UnknownRegistration(
+                            TestRunWaitRegistrationUnknownReason::ArtifactsUnreadable,
+                        ));
                     }
                 }
                 for (index, label) in wait.runs.iter_mut().enumerate() {
@@ -1190,7 +1427,8 @@ impl AppState {
                         .get(&label.run_id)
                         .is_some_and(|row| test_run_wait_registration_matches(label, row))
                         || inner.test_runs.find(&label.run_id).is_some_and(|entry| {
-                            !test_run_wait_identity_matches(label, &entry.disk)
+                            test_run_wait_identity(label, &entry.disk)
+                                == TestRunWaitIdentity::Differs
                         })
                     {
                         Some(TestRunWaitRegistrationUnknownReason::IdentityChanged)
@@ -1231,6 +1469,55 @@ impl AppState {
                         verdicts[index] = Some(TestRunWaitVerdict::UnknownRegistration(reason));
                     }
                 }
+                // The host's own final record outranks an index that has no
+                // verdict for the run: at once for one it reads as unknown, or
+                // whose latest read failed. An index that may still answer
+                // with the run's terminal results and their diagnostics, for
+                // a run it has not listed or still reads as running after a
+                // successful read, gets until a full rescan begun after the
+                // record became final has completed: it rescans on every tick
+                // while a run runs, lists the project's run directories,
+                // which hold every registered run, and keeps a run a pending
+                // wait names. One gone from disk is settled as not indexed
+                // above.
+                let mut from_record: HashSet<String> = HashSet::new();
+                if inner.test_runs.scanned_once {
+                    for (index, label) in wait.runs.iter().enumerate() {
+                        if verdicts[index].is_some()
+                            || label.remote.is_some()
+                            || label.observation.is_some()
+                        {
+                            continue;
+                        }
+                        let read_failed =
+                            inner.test_runs.find(&label.run_id).is_some_and(|entry| {
+                                test_run_wait_identity_matches(label, &entry.disk)
+                                    && entry.disk.read_failures > 0
+                            });
+                        let index_may_answer = summaries[index].is_none_or(|summary| {
+                            summary.state == TestRunState::Running && !read_failed
+                        });
+                        if index_may_answer {
+                            // The rescan that completed this generation may
+                            // have begun before the record became final; the
+                            // next one began after it.
+                            let final_at = inner
+                                .test_run_record_final_at_scan
+                                .get(&label.run_id)
+                                .copied()
+                                .unwrap_or(0);
+                            if inner.test_run_scan_generation < final_at.saturating_add(2) {
+                                continue;
+                            }
+                        }
+                        if let Some(verdict) =
+                            test_run_wait_record_verdict_locked(&inner, label, summaries[index])
+                        {
+                            verdicts[index] = Some(verdict);
+                            from_record.insert(label.run_id.clone());
+                        }
+                    }
+                }
                 if !test_run_wait_satisfied(&wait, &verdicts) {
                     remaining.push(wait);
                     continue;
@@ -1253,6 +1540,9 @@ impl AppState {
                                 label.remote.is_none() && label.observation.is_none()
                             })
                         && !failures.contains_key(run_id)
+                        // A verdict the host's record gave has no failure read:
+                        // the index has no failed results to read it from.
+                        && !from_record.contains(run_id)
                 });
                 if unread_failure {
                     remaining.push(wait);
@@ -1279,15 +1569,34 @@ impl AppState {
                         ))
                     })
                     .collect();
-                let prompt =
-                    build_test_run_wait_prompt(&wait, &summaries, &verdicts, &failures, &evidence);
+                // A run that settled after the reads were picked has no
+                // committed-input read yet: the next refresh reads it, as it
+                // does an unread failure.
+                let deferred_before = test_run_wait_deferred_runs(&wait);
+                let Some((records, follow_up)) = test_run_wait_first_resume_records_locked(
+                    &inner, &mut wait, &verdicts, &inputs,
+                ) else {
+                    // Its one deferral is kept across a restart.
+                    progress_changed |= test_run_wait_deferred_runs(&wait) > deferred_before;
+                    remaining.push(wait);
+                    continue;
+                };
+                let prompt = build_test_run_wait_prompt(
+                    &wait, &summaries, &verdicts, &failures, &evidence, &records,
+                );
                 let queued =
                     queue_delegation_wait_resume_locked(&mut inner, &wait.session_id, prompt);
                 if queued.dispatch_requested {
                     refresh.dispatch_sessions.push(wait.session_id.clone());
                 }
                 refresh.queue_results.insert(wait.id.clone(), queued);
-                consumed.push((wait, TestRunWaitConsumedReason::Completed));
+                if follow_up {
+                    // Resumed, and kept for the later resumes its marks ask.
+                    progress_changed = true;
+                    remaining.push(wait);
+                } else {
+                    consumed.push((wait, TestRunWaitConsumedReason::Completed));
+                }
             }
             *inner.test_run_waits = remaining;
             if !consumed.is_empty() {

@@ -103,6 +103,7 @@ fn registered_history(count: usize) -> RunFixture {
                 validated_unbound: true,
                 monitoring_interrupted_at: None,
                 verification_record: None,
+                settlement_notice_undelivered: false,
             }
         });
         let mut row = inner.test_run_observations.get_mut(&execution).unwrap();
@@ -946,4 +947,31 @@ fn idle_history_pending_compaction_is_polled_at_an_unchanged_revision_and_fenced
         visits <= 1 + 2 * 255,
         "one completion, one snapshot and one fresh selection, not Cartesian history: {visits}"
     );
+}
+
+#[test]
+fn an_undelivered_settlement_notice_holds_its_run_out_of_compaction_while_its_owner_exists() {
+    let fixture = registered_history(1);
+    let id = "test-history-0000";
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let summary = test_run_compaction_summary(&inner, id).unwrap();
+    assert!(test_run_compaction_eligible(&inner, &summary));
+    // Its settlement notice waits for the owner's next prompt: compaction
+    // would retire the registration that carries it across a restart.
+    inner
+        .test_run_registrations
+        .update_unindexed_fields(id, |row| row.settlement_notice_undelivered = true);
+    assert!(!test_run_compaction_eligible(&inner, &summary));
+    // An owner that no longer exists takes no further turn, so the mark no
+    // longer holds the run.
+    inner
+        .test_run_registrations
+        .update_unindexed_fields(id, |row| {
+            row.owning_session_id = "session-removed".to_owned()
+        });
+    assert!(test_run_compaction_eligible(&inner, &summary));
+    // Removing that owner asks a pass that already looked to select again.
+    inner.test_runs.compaction_examined_revision = Some(inner.revision);
+    inner.record_removed_session("session-removed".to_owned());
+    assert_eq!(inner.test_runs.compaction_examined_revision, None);
 }

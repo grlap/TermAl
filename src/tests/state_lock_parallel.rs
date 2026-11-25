@@ -194,6 +194,7 @@ fn seed_model(root: &FsPath) -> (PathBuf, Vec<String>) {
                 validated_unbound: true,
                 monitoring_interrupted_at: None,
                 verification_record: None,
+                settlement_notice_undelivered: false,
             },
         );
     }

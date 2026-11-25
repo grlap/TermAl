@@ -232,6 +232,9 @@ fn reset_engram_session_associations_locked(
             eprintln!("engram> session={session_id} {line}");
             record.engram.set_pending_source_root_line(line);
         }
+        // A settlement already presented under the ended association keeps
+        // its undelivered mark; its line goes back before the next prompt.
+        AppState::present_undelivered_settlements_locked(inner, Some(session_id.as_str()));
         inner.stamp_session_at_index(index);
         previous.push((session_id.clone(), old));
     }

@@ -49,6 +49,10 @@ pub(crate) const ENGRAM_VERIFICATION_RECORD_BODY_FILE: &str = "engram-verificati
 pub(crate) const ENGRAM_VERIFICATION_RECORD_STATE_FILE: &str =
     "engram-verification-record-state.json";
 
+/// The most settled runs one producer pass writes the summary's state-file
+/// copy for again (`repair_settled_verification_mirrors`).
+const ENGRAM_VERIFICATION_MIRROR_REPAIRS_PER_TICK: usize = 16;
+
 /// The most one pass over the registered runs may take, on its own thread
 /// (src/engram_retry_schedule.rs), so it never holds up the owed binds; each
 /// Engram call and durability wait gets what is left of it.
@@ -598,7 +602,9 @@ impl EngramVerificationRecordRoute {
 
 /// Whether a registration is bound the way a committed-input registration is
 /// (src/test_run_named_root.rs): a claim, its named root and its store.
-fn engram_verification_record_registration_bound(registration: &TestRunRegistration) -> bool {
+pub(crate) fn engram_verification_record_registration_bound(
+    registration: &TestRunRegistration,
+) -> bool {
     registration.work_binding.is_some()
         && registration.named_root.is_some()
         && registration.authority_store.is_some()
@@ -1707,25 +1713,32 @@ pub(crate) fn engram_verification_record_progress(
 
 /// Records `progress` beside the run when it differs from what is there, so
 /// an unchanged pending reason is neither rewritten nor logged again.
+/// Writes `progress` to the state file beside the run, a copy the launcher
+/// summary reads; whether the file holds it now. A failure is logged.
 pub(crate) fn engram_verification_record_set_progress(
     run_dir: &FsPath,
     run_id: &str,
     progress: EngramVerificationRecordProgress,
-) {
-    if engram_verification_record_progress(run_dir).as_ref() == Some(&progress) {
-        return;
+) -> bool {
+    match engram_verification_record_put_progress(run_dir, &progress) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("engram> run={run_id} verification record state not written: {error}");
+            false
+        }
     }
-    let written = serde_json::to_vec(&progress)
-        .map_err(io::Error::other)
-        .and_then(|bytes| {
-            engram_verification_record_write(
-                &run_dir.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE),
-                &bytes,
-            )
-        });
-    if let Err(error) = written {
-        eprintln!("engram> run={run_id} verification record state not written: {error}");
+}
+
+/// `engram_verification_record_set_progress` without its log line.
+fn engram_verification_record_put_progress(
+    run_dir: &FsPath,
+    progress: &EngramVerificationRecordProgress,
+) -> io::Result<()> {
+    if engram_verification_record_progress(run_dir).as_ref() == Some(progress) {
+        return Ok(());
     }
+    let bytes = serde_json::to_vec(progress).map_err(io::Error::other)?;
+    engram_verification_record_write(&run_dir.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE), &bytes)
 }
 
 /// The frozen body beside `run_dir`, read back exactly; `None` when it is
@@ -1735,13 +1748,33 @@ pub(crate) fn engram_verification_record_frozen(
     run_id: &str,
 ) -> Option<EngramVerificationRecordFrozen> {
     let text = fs::read_to_string(run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)).ok()?;
-    let (record, body) = engram_verification_record_parse(&text)?;
+    engram_verification_record_frozen_text(run_dir, run_id, &text)
+}
+
+fn engram_verification_record_frozen_text(
+    run_dir: &FsPath,
+    run_id: &str,
+    text: &str,
+) -> Option<EngramVerificationRecordFrozen> {
+    let (record, body) = engram_verification_record_parse(text)?;
     Some(EngramVerificationRecordFrozen {
         run_dir: run_dir.to_path_buf(),
         run_id: run_id.to_owned(),
         record,
         body,
     })
+}
+
+/// The frozen body's text beside the run: `Ok(None)` when there is none,
+/// `Ok(Some(None))` when its bytes were read but are not UTF-8 (a body that
+/// does not parse), `Err(())` when it cannot be read just now (a read to try
+/// again later, never a refusal of the body).
+fn engram_verification_record_body_text(run_dir: &FsPath) -> Result<Option<Option<String>>, ()> {
+    match fs::read(run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE)) {
+        Ok(bytes) => Ok(Some(String::from_utf8(bytes).ok())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
 }
 
 /// Whether `body` is exactly the record the host builds again from its own
@@ -1763,6 +1796,250 @@ pub(crate) fn engram_verification_record_is_host_body(
         .is_ok_and(|rebuilt| rebuilt == *body)
 }
 
+/// A run's Engram verification record as the host itself holds it, for the
+/// exact run read (`GET /api/test-runs/{id}`, `detail.verificationRecord`):
+/// the host's own ack, whatever the state file beside the run says.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TestRunVerificationRecordView {
+    /// `settled`, `received` (Engram answered; not yet settled here),
+    /// `rejected` (refused by Engram) or `refusedByHost` (before sending).
+    pub(crate) state: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) record_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) run_outcome: Option<EngramVerificationRecordRunOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) detail: Option<String>,
+}
+
+/// `run_id`'s registration, live or else retained with its compacted history.
+pub(crate) fn test_run_registration_live_or_retained<'a>(
+    inner: &'a StateInner,
+    run_id: &str,
+) -> Option<&'a TestRunRegistration> {
+    inner.test_run_registrations.get(run_id).or_else(|| {
+        inner
+            .test_run_compacted
+            .get(run_id)
+            .and_then(|row| row.registration.as_ref())
+    })
+}
+
+fn test_run_verification_record_view(
+    ack: &TestRunVerificationAck,
+) -> TestRunVerificationRecordView {
+    let receipt_view =
+        |state, receipt: &EngramVerificationRecordReceipt| TestRunVerificationRecordView {
+            state,
+            record_ids: receipt
+                .verifications
+                .iter()
+                .map(|record| record.record_id.clone())
+                .collect(),
+            run_outcome: Some(receipt.run_outcome),
+            detail: None,
+        };
+    let refusal_view = |state, detail: &String| TestRunVerificationRecordView {
+        state,
+        record_ids: Vec::new(),
+        run_outcome: None,
+        detail: Some(detail.clone()),
+    };
+    match ack {
+        TestRunVerificationAck::Settled { receipt, .. } => receipt_view("settled", receipt),
+        TestRunVerificationAck::Received { receipt, .. } => receipt_view("received", receipt),
+        TestRunVerificationAck::Rejected { detail } => refusal_view("rejected", detail),
+        TestRunVerificationAck::LocalUnclassified { detail } => {
+            refusal_view("refusedByHost", detail)
+        }
+    }
+}
+
+/// The host's own ack of `run`'s record, live or retained, for the exact
+/// run's detail; none while nothing was received or refused.
+/// `selected_request` is the request identity of the artifact the detail was
+/// selected for: only that artifact's own registration lends it a record,
+/// never a registration under a reused run id for another request.
+pub(crate) fn test_run_verification_record_for_detail(
+    inner: &StateInner,
+    run: &TestRunSummary,
+    selected_request: Option<&str>,
+) -> Option<TestRunVerificationRecordView> {
+    let registration = test_run_registration_live_or_retained(inner, &run.run_id)?;
+    if selected_request != Some(registration.request_identity.as_str()) {
+        return None;
+    }
+    registration
+        .verification_record
+        .as_ref()
+        .map(test_run_verification_record_view)
+}
+
+/// The authoritative read of a run's record
+/// (`GET /api/test-runs/{id}?view=verification`): the host's own ack from
+/// the run's live or retained registration, with no read of the run's files.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TestRunVerificationRead {
+    pub(crate) run_id: String,
+    /// Null while the host holds no answer for the run.
+    pub(crate) verification_record: Option<TestRunVerificationRecordView>,
+}
+
+pub(crate) fn test_run_verification_read(
+    inner: &StateInner,
+    run_id: &str,
+) -> Result<TestRunVerificationRead, ApiError> {
+    let registration = test_run_registration_live_or_retained(inner, run_id)
+        .ok_or_else(|| ApiError::not_found("unknown test run"))?;
+    Ok(TestRunVerificationRead {
+        run_id: registration.run_id.clone(),
+        verification_record: registration
+            .verification_record
+            .as_ref()
+            .map(test_run_verification_record_view),
+    })
+}
+
+/// Keeps `look` as the run's latest look, under the state lock.
+fn store_engram_verification_record_look_locked(
+    inner: &mut StateInner,
+    run_id: &str,
+    look: EngramVerificationRecordLook,
+) {
+    inner
+        .test_run_record_pending
+        .insert(run_id.to_owned(), look);
+    // A held receipt found unassociated belongs to the look that found it:
+    // only this look's own completion, which follows it, may find it again.
+    inner.test_run_unassociated_receipts.remove(run_id);
+}
+
+/// What the producer's latest look at a run's record came to, kept in memory
+/// (`StateInner::test_run_record_pending`) for a run wait to decide from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum EngramVerificationRecordLook {
+    /// The look left the record pending, for this reason.
+    Pending(EngramVerificationRecordPending),
+    /// The look found nothing holding the record back: it is being sent or
+    /// settled, or read again later.
+    NoBlocker,
+    /// The run's own request or results, as this look read them, make no
+    /// record (`EngramVerificationRecordInputs::make_no_record_of_a_finished_run`).
+    /// For a finished run that means its run directory was removed or its
+    /// files rewritten; a look that began before the run was known to have
+    /// finished may only have read it mid-publication. `begun` is the look's
+    /// place in `StateInner::test_run_look_sequence`, taken before it read
+    /// any file, so that a run wait counts only a look begun after it marked
+    /// the run (test_run_wait_records.rs).
+    NoRecord { begun: u64 },
+}
+
+/// What a bound run's own request and terminal results, which its record is
+/// built from, come to on one read. Reads only; writes nothing.
+pub(crate) enum EngramVerificationRecordInputs {
+    /// Both read: the request and the terminal results.
+    Read(Value, Value),
+    /// The results are not terminal yet: read again later.
+    Waiting,
+    /// The request or results could not be read just now (a failed read, or
+    /// launcher results that do not parse): read again later. Unlike
+    /// `Waiting`, this read decided nothing about the run.
+    Unreadable,
+    /// No results file beside a readable request: a run still going, which
+    /// the producer looks at again later. Of a run already known to have
+    /// finished, the results are gone.
+    ResultsMissing,
+    /// Files that were read, or are gone, from which no record is built: an
+    /// unbound run, a missing or malformed request, a request that is not
+    /// committed input or not the registered one, or results that hold no
+    /// committed-input record.
+    NotEligible,
+    /// A declared native run's results over the run JSON bound.
+    NativeResultsTooLarge,
+    /// A launcher run's results over the run JSON bound, which are not read:
+    /// the producer looks again later. Of a run already known to have
+    /// finished, its results were rewritten past what a record is built
+    /// from.
+    ResultsTooLarge,
+    /// A declared native run whose host-written terminal is recorded, but
+    /// whose results now read as something else: the producer looks again
+    /// later. Of a run already known to have finished, they were rewritten
+    /// after the host wrote them, which no later read undoes; a look begun
+    /// earlier may have read them while the host was still publishing them.
+    NativeResultsChanged,
+}
+
+impl EngramVerificationRecordInputs {
+    /// Whether these inputs, read for a run already known to have finished,
+    /// can no longer make a record: its files were removed or rewritten.
+    /// What the producer's look keeps for a run wait
+    /// (`EngramVerificationRecordLook::NoRecord`).
+    pub(crate) fn make_no_record_of_a_finished_run(&self) -> bool {
+        matches!(
+            self,
+            Self::NotEligible
+                | Self::ResultsMissing
+                | Self::ResultsTooLarge
+                | Self::NativeResultsChanged
+        )
+    }
+}
+
+pub(crate) fn engram_verification_record_inputs(
+    registration: &TestRunRegistration,
+) -> EngramVerificationRecordInputs {
+    use EngramVerificationRecordInputs as Inputs;
+    if !engram_verification_record_registration_bound(registration) {
+        return Inputs::NotEligible;
+    }
+    let run_dir = PathBuf::from(&registration.run_directory);
+    let request = match test_run_read_json(&run_dir.join("request.json")) {
+        TestRunJson::Parsed(request, _, _) => request,
+        // A read that failed just now (a version race or a filesystem
+        // error) is read again on a later tick; it is never a refusal.
+        TestRunJson::Failed => return Inputs::Unreadable,
+        _ => return Inputs::NotEligible,
+    };
+    if !test_run_request_is_committed_input(&request) && registration.declared_native.is_none() {
+        return Inputs::NotEligible;
+    }
+    if test_run_registration_identity(&request).ok().as_ref()
+        != Some(&registration.request_identity)
+    {
+        return Inputs::NotEligible;
+    }
+    let results = match test_run_read_json(&run_dir.join("results.json")) {
+        TestRunJson::Parsed(results, _, _)
+            if engram_verification_record_results_are_terminal(registration, &results) =>
+        {
+            results
+        }
+        TestRunJson::TooLarge if registration.declared_native.is_some() => {
+            return Inputs::NativeResultsTooLarge;
+        }
+        // Read whole, whether it parses or not, but not the terminal the host
+        // wrote and recorded: rewritten since.
+        TestRunJson::Parsed(..) | TestRunJson::Malformed(_)
+            if registration.declared_native.is_some()
+                && registration.declared_terminal.is_some() =>
+        {
+            return Inputs::NativeResultsChanged;
+        }
+        TestRunJson::TooLarge => return Inputs::ResultsTooLarge,
+        TestRunJson::Missing => return Inputs::ResultsMissing,
+        TestRunJson::Failed | TestRunJson::Malformed(_) => return Inputs::Unreadable,
+        _ => return Inputs::Waiting,
+    };
+    // A run whose results hold no committed-input record never emits; only
+    // a record that cannot be built from a present one is held pending.
+    if registration.declared_native.is_none() && TestRunCommittedInput::read(&results).is_none() {
+        return Inputs::NotEligible;
+    }
+    Inputs::Read(request, results)
+}
+
 /// Looks at one registered run off the state lock: whether it emits, and
 /// when it does, its frozen record, built and persisted on the first look.
 /// The run directory is the launcher's and so an agent's to write: on every
@@ -1779,6 +2056,18 @@ pub(crate) fn engram_verification_record_is_host_body(
 /// observed neither holds nor stops the send.
 pub(crate) fn engram_verification_record_prepare(
     registration: &TestRunRegistration,
+) -> EngramVerificationRecordPrepared {
+    engram_verification_record_prepare_noting(registration, &std::cell::Cell::new(false))
+}
+
+/// `engram_verification_record_prepare`, setting `no_record` to whether the
+/// run's own request and results, as the last read this decision made of them
+/// found them, make no record
+/// (`EngramVerificationRecordInputs::make_no_record_of_a_finished_run`); left
+/// as it is when the decision read neither.
+fn engram_verification_record_prepare_noting(
+    registration: &TestRunRegistration,
+    no_record: &std::cell::Cell<bool>,
 ) -> EngramVerificationRecordPrepared {
     use EngramVerificationRecordPrepared as Prepared;
     if !engram_verification_record_registration_bound(registration) {
@@ -1812,42 +2101,24 @@ pub(crate) fn engram_verification_record_prepare(
     // The run's own request and terminal results, as the record is built
     // from; `Err` is what the look comes to without them.
     let inputs = || -> std::result::Result<(Value, Value), Prepared> {
-        let TestRunJson::Parsed(request, _, _) = test_run_read_json(&run_dir.join("request.json"))
-        else {
-            return Err(Prepared::NotEligible);
-        };
-        if !test_run_request_is_committed_input(&request) && registration.declared_native.is_none()
-        {
-            return Err(Prepared::NotEligible);
-        }
-        if test_run_registration_identity(&request).ok().as_ref()
-            != Some(&registration.request_identity)
-        {
-            return Err(Prepared::NotEligible);
-        }
-        let results = match test_run_read_json(&run_dir.join("results.json")) {
-            TestRunJson::Parsed(results, _, _)
-                if engram_verification_record_results_are_terminal(registration, &results) =>
-            {
-                results
-            }
-            TestRunJson::TooLarge if registration.declared_native.is_some() => {
-                return Err(pending(EngramVerificationRecordPending::BodyNotBuilt {
+        let read = engram_verification_record_inputs(registration);
+        no_record.set(read.make_no_record_of_a_finished_run());
+        match read {
+            EngramVerificationRecordInputs::Read(request, results) => Ok((request, results)),
+            EngramVerificationRecordInputs::Waiting
+            | EngramVerificationRecordInputs::Unreadable
+            | EngramVerificationRecordInputs::ResultsMissing
+            | EngramVerificationRecordInputs::ResultsTooLarge
+            | EngramVerificationRecordInputs::NativeResultsChanged => Err(Prepared::Waiting),
+            EngramVerificationRecordInputs::NotEligible => Err(Prepared::NotEligible),
+            EngramVerificationRecordInputs::NativeResultsTooLarge => {
+                Err(pending(EngramVerificationRecordPending::BodyNotBuilt {
                     detail: format!(
                         "native_results_too_large: exceeds the existing {TEST_RUN_JSON_MAX_BYTES} byte run JSON bound"
                     ),
-                }));
+                }))
             }
-            _ => return Err(Prepared::Waiting),
-        };
-        // A run whose results hold no committed-input record never emits;
-        // only a record that cannot be built from a present one is held
-        // pending.
-        if registration.declared_native.is_none() && TestRunCommittedInput::read(&results).is_none()
-        {
-            return Err(Prepared::NotEligible);
         }
-        Ok((request, results))
     };
     // Answered: settled from the receipt, never built or sent again, once
     // the frozen body is the host's own record and the receipt answers it.
@@ -1857,20 +2128,31 @@ pub(crate) fn engram_verification_record_prepare(
     // the host's record of rewritten run files, but not the body the receipt
     // answered, is never settled from that receipt.
     if let Some((receipt, body_digest)) = held {
-        let Some(frozen) = engram_verification_record_frozen(&run_dir, &registration.run_id) else {
-            return Prepared::Pending(EngramVerificationRecordPending::BodyUnreadable);
+        // A body that cannot be read just now is read again later; one that
+        // is gone or does not parse is unreadable.
+        let Ok(text) = engram_verification_record_body_text(&run_dir) else {
+            return Prepared::Waiting;
         };
-        let rebuilt = inputs().ok().and_then(|(request, results)| {
-            engram_verification_record_build_body(
+        let Some(frozen) = text.flatten().and_then(|text| {
+            engram_verification_record_frozen_text(&run_dir, &registration.run_id, &text)
+        }) else {
+            return pending(EngramVerificationRecordPending::BodyUnreadable);
+        };
+        let rebuilt = match inputs() {
+            Ok((request, results)) => engram_verification_record_build_body(
                 registration,
                 &request,
                 &results,
                 Some(&frozen.body.input),
             )
-            .ok()
-        });
+            .ok(),
+            // Results that cannot be read just now are read again on a later
+            // tick; only readable inputs can show the body is not the host's.
+            Err(Prepared::Waiting) => return Prepared::Waiting,
+            Err(_) => None,
+        };
         if rebuilt.as_ref() != Some(&frozen.body) {
-            return Prepared::Pending(EngramVerificationRecordPending::BodyMismatch);
+            return pending(EngramVerificationRecordPending::BodyMismatch);
         }
         if !engram_verification_record_digest_answers(&body_digest, &frozen.body) {
             return pending(EngramVerificationRecordPending::AcknowledgedBodyChanged);
@@ -1899,7 +2181,16 @@ pub(crate) fn engram_verification_record_prepare(
     if let Some(reason) = refusal {
         return pending(reason);
     }
-    let retained = engram_verification_record_frozen(&run_dir, &registration.run_id);
+    // A retained body that cannot be read just now is read again later: built
+    // without its retained input, the record could look like another body.
+    let Ok(retained_text) = engram_verification_record_body_text(&run_dir) else {
+        return Prepared::Waiting;
+    };
+    let retained = retained_text.as_ref().and_then(|text| {
+        text.as_deref().and_then(|text| {
+            engram_verification_record_frozen_text(&run_dir, &registration.run_id, text)
+        })
+    });
     let built = match retained.as_ref() {
         Some(frozen) => engram_verification_record_build_body(
             registration,
@@ -1930,18 +2221,20 @@ pub(crate) fn engram_verification_record_prepare(
             return pending(EngramVerificationRecordPending::BodyNotBuilt { detail });
         }
     };
+    // The body this look already read, or the one it writes now: one read
+    // of the frozen body per look, so no second read can fail after the
+    // first succeeded.
     let body_path = run_dir.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
-    let text = match fs::read_to_string(&body_path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+    let text = match retained_text {
+        Some(text) => text,
+        None => {
             if engram_verification_record_write(&body_path, rebuilt_text.as_bytes()).is_err() {
                 return pending(EngramVerificationRecordPending::PersistFailed);
             }
-            rebuilt_text
+            Some(rebuilt_text)
         }
-        Err(_) => String::new(),
     };
-    let Some((record, body)) = engram_verification_record_parse(&text) else {
+    let Some((record, body)) = text.as_deref().and_then(engram_verification_record_parse) else {
         return pending(EngramVerificationRecordPending::BodyUnreadable);
     };
     if body != rebuilt {
@@ -2219,6 +2512,9 @@ pub(crate) struct EngramVerificationRecordCursor {
     // Presentation repaired once per unchanged registration in this process.
     // A fresh process retries from the authoritative local disposition.
     pub(crate) local_refusals: HashMap<String, EngramLocalRefusalPresentation>,
+    /// The settled run whose state-file copy the last repair looked at; the
+    /// next repair goes on after it (`repair_settled_verification_mirrors`).
+    pub(crate) last_mirror_repair: Option<String>,
 }
 
 #[derive(Debug)]
@@ -2400,7 +2696,7 @@ impl AppState {
             ) {
                 cursor.repair_local_refusal(self, &registration)
             } else {
-                match engram_verification_record_prepare(&registration) {
+                match self.prepare_engram_verification_record(&registration) {
                     EngramVerificationRecordPrepared::Ready(frozen) => {
                         let step = if let Some(retired) =
                             engram_verification_record_retire_legacy(&frozen)
@@ -2466,7 +2762,105 @@ impl AppState {
                 cursor.back_off(&attempted, clock.now());
             }
         }
+        // Copies for the launcher summary come after the producer's own work,
+        // within what is left of this pass.
+        self.repair_settled_verification_mirrors(cursor, deadline, stopping);
         looked
+    }
+
+    /// `engram_verification_record_prepare` for the producer's look, keeping
+    /// what the look came to in memory (`test_run_record_pending`): its
+    /// pending reason, or that it found none. A run wait decides from this
+    /// latest look, even when the state file beside the run cannot be
+    /// written or is older.
+    pub(crate) fn prepare_engram_verification_record(
+        &self,
+        registration: &TestRunRegistration,
+    ) -> EngramVerificationRecordPrepared {
+        // The look's place in the sequence, taken before it reads any file,
+        // and the look in flight until it publishes what it came to.
+        let begun = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            let begun = inner.test_run_look_sequence;
+            inner.test_run_look_sequence += 1;
+            inner
+                .test_run_record_looks_in_flight
+                .insert(registration.run_id.clone(), begun);
+            begun
+        };
+        let no_record = std::cell::Cell::new(false);
+        let prepared = engram_verification_record_prepare_noting(registration, &no_record);
+        // A frozen body this process may send from memory.
+        let built = matches!(
+            prepared,
+            EngramVerificationRecordPrepared::Ready(_)
+                | EngramVerificationRecordPrepared::ReceiptHeld { .. }
+        );
+        let look = match &prepared {
+            EngramVerificationRecordPrepared::Pending(reason) => {
+                EngramVerificationRecordLook::Pending(reason.clone())
+            }
+            // The same read the look came from says whether the run's own
+            // files still make a record. For a run still going, or one read
+            // while its terminal results were being published, that says
+            // nothing yet: a run wait counts it only when the look began
+            // after the wait knew the run had finished.
+            EngramVerificationRecordPrepared::NotEligible
+            | EngramVerificationRecordPrepared::Waiting
+                if no_record.get() =>
+            {
+                EngramVerificationRecordLook::NoRecord { begun }
+            }
+            _ => EngramVerificationRecordLook::NoBlocker,
+        };
+        // The look, its frozen body and its end, published together: a run
+        // wait never sees one without the others.
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        if built {
+            inner
+                .test_run_record_bodies_built
+                .insert(registration.run_id.clone());
+        }
+        store_engram_verification_record_look_locked(&mut inner, &registration.run_id, look);
+        let published = inner
+            .test_run_record_look_published
+            .entry(registration.run_id.clone())
+            .or_insert(begun);
+        *published = (*published).max(begun);
+        if inner
+            .test_run_record_looks_in_flight
+            .get(&registration.run_id)
+            == Some(&begun)
+        {
+            inner
+                .test_run_record_looks_in_flight
+                .remove(&registration.run_id);
+        }
+        drop(inner);
+        prepared
+    }
+
+    /// Keeps what the run's latest look came to: `reason`, or no blocker.
+    fn note_engram_verification_record_look(
+        &self,
+        run_id: &str,
+        reason: Option<EngramVerificationRecordPending>,
+    ) {
+        let look = match reason {
+            Some(reason) => EngramVerificationRecordLook::Pending(reason),
+            None => EngramVerificationRecordLook::NoBlocker,
+        };
+        self.store_engram_verification_record_look(run_id, look);
+    }
+
+    /// Keeps `look` as the run's latest look.
+    fn store_engram_verification_record_look(
+        &self,
+        run_id: &str,
+        look: EngramVerificationRecordLook,
+    ) {
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        store_engram_verification_record_look_locked(&mut inner, run_id, look);
     }
 
     /// `complete_engram_verification_record_until`, waiting at most
@@ -2496,30 +2890,9 @@ impl AppState {
         receipt: &EngramVerificationRecordReceipt,
         deadline: std::time::Instant,
     ) -> EngramVerificationRecordSettlement {
-        // Optional presentation must never spend the receipt's durability
-        // deadline. Finish settlement first, including all early outcomes,
-        // then queue the owned notice worker within the caller's remaining
-        // time and its presentation cap. Never extend a verification tick.
-        let settled = self.complete_engram_verification_record_state_until(
-            registration,
-            body,
-            receipt,
-            deadline,
-        );
-        if std::time::Instant::now() < deadline
-            && !matches!(
-                settled,
-                EngramVerificationRecordSettlement::ReceiptMismatch { .. }
-                    | EngramVerificationRecordSettlement::AcknowledgedBodyChanged
-                    | EngramVerificationRecordSettlement::NotDurable { .. }
-            )
-        {
-            self.schedule_received_launcher_notice(
-                registration,
-                deadline.min(std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET),
-            );
-        }
-        settled
+        // The requester's notice is presented in the Settled step itself
+        // (`complete_engram_verification_record_state_until`).
+        self.complete_engram_verification_record_state_until(registration, body, receipt, deadline)
     }
 
     fn complete_engram_verification_record_state_until(
@@ -2565,7 +2938,25 @@ impl AppState {
                 receipt: receipt.clone(),
             },
         );
-        let rows = match self.settle_engram_verification_record(registration, body, receipt) {
+        // Whether a launch observation of the run carries the records, kept
+        // for a run wait, which resumes on a receipt none carries.
+        let association = self.settle_engram_verification_record(registration, body, receipt);
+        {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
+            match &association {
+                EngramVerificationRecordAssociation::Associated(_) => {
+                    inner
+                        .test_run_unassociated_receipts
+                        .remove(&registration.run_id);
+                }
+                EngramVerificationRecordAssociation::NoLaunchRow => {
+                    inner
+                        .test_run_unassociated_receipts
+                        .insert(registration.run_id.clone(), body_digest.clone());
+                }
+            }
+        }
+        let rows = match association {
             EngramVerificationRecordAssociation::Associated(rows) => rows,
             EngramVerificationRecordAssociation::NoLaunchRow => {
                 return EngramVerificationRecordSettlement::NoLaunchRow;
@@ -2587,21 +2978,108 @@ impl AppState {
                 return EngramVerificationRecordSettlement::NotDurable { detail };
             }
         }
-        self.note_engram_verification_record_ack(
+        // The requester's notice is read off the lock now that durability is
+        // confirmed, however late the confirmation came, and presented in
+        // the same state step as the Settled ack, so no turn opens between
+        // them and no settlement goes untold.
+        let notice = ReceivedCheckNotice::at_settlement(
+            registration,
+            body,
+            receipt,
+            std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET,
+        );
+        self.note_engram_verification_record_ack_presenting(
             registration,
             TestRunVerificationAck::Settled {
                 receipt: receipt.clone(),
                 body_digest,
             },
+            notice,
         );
-        engram_verification_record_set_progress(
+        // The state file is a copy for the launcher summary: one that cannot
+        // be written now is written again by the producer's ticks.
+        if !engram_verification_record_set_progress(
             run_dir,
             &registration.run_id,
             EngramVerificationRecordProgress::Settled {
                 receipt: receipt.clone(),
             },
-        );
+        ) {
+            self.inner
+                .lock()
+                .expect("state mutex poisoned")
+                .test_run_unmirrored_settlements
+                .insert(registration.run_id.clone());
+        }
         EngramVerificationRecordSettlement::Settled
+    }
+
+    /// Writes the Settled state file again, from the host's own Settled ack
+    /// (live or retained registration), for settled runs whose copy could not
+    /// be written (`test_run_unmirrored_settlements`). It runs after the
+    /// producer's own work, at most `ENGRAM_VERIFICATION_MIRROR_REPAIRS_PER_TICK`
+    /// runs a tick in turn from `cursor`, and stops at `deadline` or when
+    /// stopping. A run is dropped once its copy holds, once it is no longer
+    /// settled, or once its run directory is gone (no summary can read a copy
+    /// there; a restart seeds it again from the registration). A state path
+    /// that is not a regular file is left alone, never read.
+    fn repair_settled_verification_mirrors(
+        &self,
+        cursor: &mut EngramVerificationRecordCursor,
+        deadline: std::time::Instant,
+        stopping: &dyn Fn() -> bool,
+    ) {
+        let clock = self.engram_budget_clock();
+        let pending: Vec<(String, Option<(PathBuf, EngramVerificationRecordReceipt)>)> = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let after = cursor.last_mirror_repair.clone().unwrap_or_default();
+            let ids = &inner.test_run_unmirrored_settlements;
+            ids.range::<String, _>((
+                std::ops::Bound::Excluded(&after),
+                std::ops::Bound::Unbounded,
+            ))
+            .chain(ids.range::<String, _>(..=&after))
+            .take(ENGRAM_VERIFICATION_MIRROR_REPAIRS_PER_TICK)
+            .map(|run_id| {
+                let settled = test_run_registration_live_or_retained(&inner, run_id).and_then(
+                    |row| match &row.verification_record {
+                        Some(TestRunVerificationAck::Settled { receipt, .. }) => {
+                            Some((PathBuf::from(&row.run_directory), receipt.clone()))
+                        }
+                        _ => None,
+                    },
+                );
+                (run_id.clone(), settled)
+            })
+            .collect()
+        };
+        for (run_id, settled) in pending {
+            if stopping() || clock.now() >= deadline {
+                break;
+            }
+            cursor.last_mirror_repair = Some(run_id.clone());
+            let done = settled.is_none_or(|(run_dir, receipt)| {
+                let state_file = run_dir.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE);
+                if !run_dir.is_dir() {
+                    return true;
+                }
+                if fs::symlink_metadata(&state_file).is_ok_and(|meta| !meta.file_type().is_file()) {
+                    return false;
+                }
+                engram_verification_record_put_progress(
+                    &run_dir,
+                    &EngramVerificationRecordProgress::Settled { receipt },
+                )
+                .is_ok()
+            });
+            if done {
+                self.inner
+                    .lock()
+                    .expect("state mutex poisoned")
+                    .test_run_unmirrored_settlements
+                    .remove(&run_id);
+            }
+        }
     }
 
     /// Waits, until `deadline` on `clock`, for the persistence worker to read
@@ -2631,12 +3109,21 @@ impl AppState {
     }
 
     /// Keeps what one send step observed on the run's registration: a
-    /// received receipt or a rejection; a pending step changes nothing.
+    /// received receipt or a rejection; a pending step keeps only its reason
+    /// in memory (`test_run_record_pending`), and any other step that it
+    /// found no blocker.
     pub(crate) fn note_engram_verification_record_step(
         &self,
         registration: &TestRunRegistration,
         step: &EngramVerificationRecordStep,
     ) {
+        self.note_engram_verification_record_look(
+            &registration.run_id,
+            match step {
+                EngramVerificationRecordStep::Pending(reason) => Some(reason.clone()),
+                _ => None,
+            },
+        );
         let ack = match step {
             EngramVerificationRecordStep::Received { body, receipt } => {
                 TestRunVerificationAck::Received {
@@ -2663,6 +3150,18 @@ impl AppState {
         registration: &TestRunRegistration,
         ack: TestRunVerificationAck,
     ) {
+        self.note_engram_verification_record_ack_presenting(registration, ack, None);
+    }
+
+    /// `note_engram_verification_record_ack`, presenting `notice` to the
+    /// requesting session under the same lock once the ack is written
+    /// (`AppState::present_settled_receipt_locked`).
+    pub(crate) fn note_engram_verification_record_ack_presenting(
+        &self,
+        registration: &TestRunRegistration,
+        ack: TestRunVerificationAck,
+        notice: Option<ReceivedCheckNotice>,
+    ) {
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let changes = inner.test_run_registrations.get(&registration.run_id).is_some_and(|row| {
             row.request_identity == registration.request_identity
@@ -2685,11 +3184,26 @@ impl AppState {
         if !changes {
             return;
         }
+        if !matches!(ack, TestRunVerificationAck::Received { .. }) {
+            // When it became final, for a run wait on a run the index has not
+            // listed (test_run_waits.rs).
+            let generation = inner.test_run_scan_generation;
+            inner
+                .test_run_record_final_at_scan
+                .entry(registration.run_id.clone())
+                .or_insert(generation);
+            // A received record held the run against compaction
+            // (test_run_compaction.rs): select again now that it is final.
+            inner.test_runs.compaction_examined_revision = None;
+        }
         inner
             .test_run_registrations
             .update_unindexed_fields(&registration.run_id, |row| {
                 row.verification_record = Some(ack)
             });
+        if let Some(mut notice) = notice {
+            AppState::present_settled_receipt_locked(&mut inner, &mut notice);
+        }
         if let Err(error) = self.persist_internal_locked(&inner) {
             eprintln!(
                 "engram> run={} verification record outcome not persisted: {error:#}",

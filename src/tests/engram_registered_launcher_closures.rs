@@ -57,6 +57,18 @@ impl RegisteredLauncherTurn {
         Self::after_start_with_input(turn, recorder, true)
     }
 
+    /// A committed run whose only stage is a lint check: its record names
+    /// no test producer, so no launch observation row is associated with it.
+    fn committed_lint() -> Self {
+        let turn = Self::committed_turn("received-lint-notice");
+        let cwd = turn.record(|record| record.engram.observed_source_root().unwrap().root.clone());
+        let mut recorder = turn.recorder();
+        recorder
+            .command_started_in(KEY, COMMITTED_COMMAND, Some(COMMITTED_COMMAND), Some(&cwd))
+            .unwrap();
+        Self::after_start_with_stage(turn, recorder, true, &["scripts/check-doc-links.mjs"])
+    }
+
     fn committed_turn(label: &str) -> EOCheckedTurn {
         let turn = EOCheckedTurn::idle(label, true);
         // The production reader ignores global/system Git configuration.
@@ -95,6 +107,20 @@ impl RegisteredLauncherTurn {
         recorder: SessionRecorder,
         committed: bool,
     ) -> Self {
+        Self::after_start_with_stage(
+            turn,
+            recorder,
+            committed,
+            &["--test", "scripts/test-launcher.test.mjs"],
+        )
+    }
+
+    fn after_start_with_stage(
+        turn: EOCheckedTurn,
+        recorder: SessionRecorder,
+        committed: bool,
+        args: &[&str],
+    ) -> Self {
         turn.wait_for_snapshots();
         let open = turn.record(|record| {
             record
@@ -126,8 +152,7 @@ impl RegisteredLauncherTurn {
             "runId": run_id, "root": root.to_string_lossy(),
             "owner": turn.session_id, "creatorPid": std::process::id(),
             "started": started, "full": false, "detached": false,
-            "stages": [{ "name": "focused", "command": "node",
-                "args": ["--test", "scripts/test-launcher.test.mjs"] }],
+            "stages": [{ "name": "focused", "command": "node", "args": args }],
         });
         let source_id = committed.then(|| receipt_source_fixture(&root));
         if let Some(source) = &source_id {
@@ -243,6 +268,20 @@ impl RegisteredLauncherTurn {
         EngramVerificationRecordReceipt,
         EngramVerificationRecordSettlement,
     ) {
+        self.receive_until_with(passed, deadline, &|| {})
+    }
+
+    /// `receive_until`, calling `before_completion` once the record is
+    /// prepared and answered, before the host completes it.
+    fn receive_until_with(
+        &self,
+        passed: bool,
+        deadline: Option<std::time::Instant>,
+        before_completion: &dyn Fn(),
+    ) -> (
+        EngramVerificationRecordReceipt,
+        EngramVerificationRecordSettlement,
+    ) {
         let registration =
             self.turn.state.inner.lock().unwrap().test_run_registrations[&self.run_id].clone();
         let source_before = self
@@ -258,8 +297,9 @@ impl RegisteredLauncherTurn {
             "sourceIdBefore":source_before, "sourceIdAfter":source_after,
             "stages":[{"name":"focused", "state":if passed {"passed"} else {"failed"},
                 "code":if passed {0} else {1}, "started":at, "ended":at}],
+            // As the launcher writes it: a failed run is never eligible.
             "input":{"kind":"commit", "commit":head, "cleanBefore":true,
-                "after":{"commit":head,"clean":true,"paths":[]}, "outcome":"clean","eligible":true}
+                "after":{"commit":head,"clean":true,"paths":[]}, "outcome":"clean","eligible":passed}
         })).unwrap()).unwrap();
         let EngramVerificationRecordPrepared::Ready(frozen) =
             engram_verification_record_prepare(&registration)
@@ -275,6 +315,7 @@ impl RegisteredLauncherTurn {
             }],
             run_outcome: frozen.body.run.outcome,
         };
+        before_completion();
         let settlement = self.turn.state.complete_engram_verification_record_until(
             &registration,
             &frozen.body,
@@ -761,15 +802,20 @@ fn a_late_received_notice_preserves_other_warnings_and_an_in_flight_delivery() {
     let mut fixture = RegisteredLauncherTurn::committed();
     fixture.background_reply();
     fixture.finish();
-    fixture.turn.record_mut(|record| {
+    let carried = fixture.turn.record_mut(|record| {
         record.engram.set_pending_source_root_line(format!(
             "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} unrelated check remains Unknown"
         ));
-        record.engram.source_root_line_delivery = Some((
-            record.engram.pending_source_root_line.clone().unwrap(),
-            record.active_turn_generation,
-        ));
+        let carried = record.engram.pending_source_root_line.clone().unwrap();
+        record.engram.source_root_line_delivery =
+            Some((carried.clone(), record.active_turn_generation));
+        carried
     });
+    // The prompt in flight carries the other warning.
+    assert!(
+        carried.contains("unrelated check remains Unknown"),
+        "{carried}"
+    );
     let generation = fixture.turn.record(|record| record.active_turn_generation);
     let feedback_revision = fixture
         .turn
@@ -786,11 +832,14 @@ fn a_late_received_notice_preserves_other_warnings_and_an_in_flight_delivery() {
         .turn
         .state
         .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    // The in-flight prompt carried the other warning, so its acceptance takes
+    // that warning out unchanged; the settlement, on its own line, was not
+    // carried and waits for the next prompt.
     let (line, closed) = fixture.line();
     assert!(
         !closed
             && line.contains(&receipt.verifications[0].record_id)
-            && line.contains("unrelated check remains Unknown"),
+            && !line.contains("unrelated check remains Unknown"),
         "{line}"
     );
 }
@@ -1129,10 +1178,16 @@ fn received_source_confirmation_is_owned_and_never_blocks_the_terminal_path() {
         let observation = fixture.turn.finish();
         assert_ordinary_observation_has_no_native_credit(&fixture.turn, &observation);
         entered_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+        // The record settled while the launching turn was open, so the
+        // settlement itself already named it; the close added its own
+        // correlation fragment beside it.
         let before = fixture.line().0;
         assert!(
             before.contains("correlated with")
-                && !before.contains(&receipt.verifications[0].record_id),
+                && before
+                    .matches(receipt.verifications[0].record_id.as_str())
+                    .count()
+                    == 1,
             "{before}"
         );
         assert!(
@@ -1172,18 +1227,18 @@ fn received_source_confirmation_is_owned_and_never_blocks_the_terminal_path() {
                 "shutdown cannot publish a queued proof"
             );
         } else {
-            assert!(
-                fixture
-                    .line()
-                    .0
-                    .contains(&receipt.verifications[0].record_id)
-            );
+            // The released proof finds the line already pending and adds
+            // nothing: the next prompt names the record exactly once.
+            assert_eq!(fixture.line().0, before);
             let prompt = fixture
                 .turn
                 .begin_prompt("Report the received outcome.")
                 .prompt;
-            assert!(
-                prompt.contains(&receipt.verifications[0].record_id),
+            assert_eq!(
+                prompt
+                    .matches(receipt.verifications[0].record_id.as_str())
+                    .count(),
+                1,
                 "{prompt}"
             );
         }
@@ -1343,29 +1398,40 @@ fn a_late_received_notice_reads_off_lock_after_durable_settlement() {
                 state.inner.is_not_held_by_current_thread_for_test(),
                 "other sessions must retain access during a notice capture"
             );
+            // The run's record is read after its association is durable and
+            // before the Settled ack, which presents it in the same step.
             let inner = state.inner.lock().unwrap();
             assert!(
                 matches!(
                     inner.test_run_registrations[&run_id].verification_record,
-                    Some(TestRunVerificationAck::Settled { .. })
+                    Some(TestRunVerificationAck::Received { .. })
                 ),
-                "presentation must not precede durable settlement"
+                "the read precedes the Settled step"
             );
             drop(inner);
-            assert!(matches!(
-                engram_verification_record_progress(&directory),
-                Some(EngramVerificationRecordProgress::Settled { .. })
-            ));
             seen.store(true, std::sync::atomic::Ordering::SeqCst);
         }),
     );
     let receipt = fixture.receive(true);
     assert!(observed.load(std::sync::atomic::Ordering::SeqCst));
+    let (line, _) = fixture.line();
+    assert!(line.contains(&receipt.verifications[0].record_id), "{line}");
     assert!(
-        fixture
-            .line()
-            .0
-            .contains(&receipt.verifications[0].record_id)
+        matches!(
+            fixture
+                .turn
+                .state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_registrations[&fixture.run_id]
+                .verification_record,
+            Some(TestRunVerificationAck::Settled { .. })
+        ) && matches!(
+            engram_verification_record_progress(&directory),
+            Some(EngramVerificationRecordProgress::Settled { .. })
+        ),
+        "presentation comes with the durable settlement"
     );
 }
 
@@ -2515,4 +2581,1039 @@ fn a_registered_launcher_preparation_rejects_changed_generation_runtime_and_owne
             "{change}"
         );
     }
+}
+
+#[test]
+fn a_failed_runs_record_settling_after_its_turn_closed_reaches_the_very_next_turn() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    // The run's notice is still pending, or was already delivered, when the
+    // record settles. Either way the turn opened right after the Settled ack
+    // carries the record.
+    for delivered in [false, true] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        fixture.finish();
+        if delivered {
+            // The run's own notice reaches a prompt, which the runtime accepts.
+            let carried = fixture.turn.begin_prompt("Carry on.").prompt;
+            assert!(carried.contains(&fixture.run_id), "{carried}");
+            let generation = fixture.turn.record(|record| record.active_turn_generation);
+            fixture
+                .turn
+                .state
+                .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+            assert!(
+                !fixture.line().0.contains(&fixture.run_id),
+                "the delivered notice left the pending lines"
+            );
+            fixture.turn.end();
+        } else {
+            assert!(
+                fixture.line().0.contains(&fixture.run_id),
+                "the run's notice is still pending"
+            );
+        }
+        let receipt = fixture.receive(false);
+        // Settlement itself put the line in place: no worker is left to
+        // publish it, so no turn can open before it.
+        assert!(
+            !fixture
+                .turn
+                .state
+                .capture_lifetime
+                .state
+                .lock()
+                .unwrap()
+                .workers
+                .iter()
+                .any(|worker| worker.thread.thread().name()
+                    == Some("termal-received-launcher-notice")),
+            "delivered={delivered}: no received-notice worker"
+        );
+        let prompt = fixture
+            .turn
+            .begin_prompt("Report the settled outcome.")
+            .prompt;
+        // The record is named exactly once, on its own settled line beside
+        // any pending fragment of the run.
+        assert!(
+            prompt.contains(&fixture.run_id)
+                && prompt
+                    .matches(receipt.verifications[0].record_id.as_str())
+                    .count()
+                    == 1
+                && prompt.contains("failed"),
+            "delivered={delivered}: {prompt}"
+        );
+        // Once delivered, it does not come back.
+        let generation = fixture.turn.record(|record| record.active_turn_generation);
+        fixture
+            .turn
+            .state
+            .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+        assert!(
+            !fixture
+                .line()
+                .0
+                .contains(&receipt.verifications[0].record_id),
+            "delivered={delivered}: {}",
+            fixture.line().0
+        );
+    }
+}
+
+#[test]
+fn a_foreground_failed_run_settling_inside_its_own_turn_reaches_the_next_turn() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    // A foreground launcher run: it ends inside the turn, and its reply
+    // carries the run's locator, so its check ends with the run attached.
+    fixture.write_results("failed");
+    fixture
+        .recorder
+        .command_completed_with_exit(
+            KEY,
+            &fixture.command.clone(),
+            &format!("RUN {}", test_run_display_path(&fixture.directory)),
+            CommandStatus::Error,
+            EngramCommandExit::Code(1),
+        )
+        .unwrap();
+    fixture.turn.wait_for_snapshots();
+    assert!(
+        fixture.turn.record(|record| record
+            .engram
+            .active_turn_checks
+            .iter()
+            .all(|check| check.key != KEY || check.end.is_some())),
+        "the foreground check ended inside its turn"
+    );
+    // The record settles while that turn is still open.
+    let receipt = fixture.receive(false);
+    fixture.turn.finish();
+    fixture.wait_for_received_notices();
+    let prompt = fixture
+        .turn
+        .begin_prompt("Report the settled outcome.")
+        .prompt;
+    assert!(
+        prompt.contains(&fixture.run_id)
+            && prompt
+                .matches(receipt.verifications[0].record_id.as_str())
+                .count()
+                == 1
+            && prompt.contains("failed"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn a_settlement_confirmed_durable_after_its_deadline_still_reaches_the_next_turn() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    // The run's own notice was delivered, so no close is left to tell the
+    // settlement: only the settlement step can.
+    let carried = fixture.turn.begin_prompt("Carry on.").prompt;
+    assert!(carried.contains(&fixture.run_id), "{carried}");
+    let generation = fixture.turn.record(|record| record.active_turn_generation);
+    fixture
+        .turn
+        .state
+        .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    fixture.turn.end();
+    // Durability is confirmed after the settlement's deadline: with no
+    // persistence worker the fence saves synchronously and succeeds, whatever
+    // the deadline. No clock is waited on.
+    let original_writer = fixture.turn.state.persist_tx.clone();
+    let (closed_tx, closed_rx) = mpsc::channel();
+    drop(closed_rx);
+    fixture.turn.state.persist_tx = closed_tx;
+    let expired = fixture.turn.state.engram_budget_clock().now() - Duration::from_secs(1);
+    let (receipt, settlement) = fixture.receive_until(false, Some(expired));
+    fixture.turn.state.persist_tx = original_writer;
+    assert_eq!(settlement, EngramVerificationRecordSettlement::Settled);
+    let prompt = fixture
+        .turn
+        .begin_prompt("Report the settled outcome.")
+        .prompt;
+    assert!(
+        prompt
+            .matches(receipt.verifications[0].record_id.as_str())
+            .count()
+            == 1
+            && prompt.contains("failed"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn the_turn_close_worker_never_repeats_a_settlement_already_delivered() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    // The record settles while its launching turn is open: the settlement
+    // step presents it, and the turn close then schedules its own worker.
+    let receipt = fixture.receive(false);
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    *fixture
+        .turn
+        .state
+        .capture_lifetime
+        .before_capture
+        .lock()
+        .unwrap() = Some(Arc::new(move || {
+        if std::thread::current().name() != Some("termal-received-launcher-notice") {
+            return;
+        }
+        entered_tx.send(()).unwrap();
+        release_rx
+            .lock()
+            .unwrap()
+            .recv_timeout(DEADLOCK_GUARD)
+            .unwrap();
+    }));
+    fixture.turn.finish();
+    entered_rx.recv_timeout(DEADLOCK_GUARD).unwrap();
+    // The next prompt carries the settlement and is accepted while the close
+    // worker is still parked.
+    let prompt = fixture.turn.begin_prompt("Carry on.").prompt;
+    assert_eq!(
+        prompt
+            .matches(receipt.verifications[0].record_id.as_str())
+            .count(),
+        1,
+        "{prompt}"
+    );
+    let generation = fixture.turn.record(|record| record.active_turn_generation);
+    fixture
+        .turn
+        .state
+        .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    release_tx.send(()).unwrap();
+    fixture.wait_for_received_notices();
+    *fixture
+        .turn
+        .state
+        .capture_lifetime
+        .before_capture
+        .lock()
+        .unwrap() = None;
+    let (line, _) = fixture.line();
+    assert!(
+        !line.contains(&receipt.verifications[0].record_id),
+        "a delivered settlement is not told again: {line}"
+    );
+}
+
+#[test]
+fn a_late_close_worker_does_not_add_a_second_settled_text() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    let receipt = fixture.receive(false);
+    fixture.finish();
+    // The close worker's read came back after its deadline, so its line's
+    // reason differs from the line the settlement step presented.
+    let registration = fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_registrations[&fixture.run_id]
+        .clone();
+    let late = ReceivedCheckNotice::read(
+        &registration,
+        std::time::Instant::now() - Duration::from_secs(1),
+    )
+    .expect("the settled receipt reads");
+    assert!(late.line().contains("deadline elapsed"));
+    {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        AppState::publish_received_launcher_notice_locked(&mut inner, &late, false);
+    }
+    let (line, _) = fixture.line();
+    assert_eq!(
+        line.matches(receipt.verifications[0].record_id.as_str())
+            .count(),
+        1,
+        "{line}"
+    );
+}
+
+#[test]
+fn a_lint_only_runs_settlement_with_no_launch_row_reaches_the_next_turn() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let fixture = RegisteredLauncherTurn::committed_lint();
+    let receipt = fixture.receive(false);
+    {
+        let inner = fixture.turn.state.inner.lock().unwrap();
+        assert!(matches!(
+            inner.test_run_registrations[&fixture.run_id].verification_record,
+            Some(TestRunVerificationAck::Settled { .. })
+        ));
+        assert!(
+            !inner.test_run_observations.values().any(|row| row
+                .artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.run_id == fixture.run_id)),
+            "no launch observation row carries the run"
+        );
+    }
+    fixture.turn.finish();
+    let prompt = fixture
+        .turn
+        .begin_prompt("Report the settled outcome.")
+        .prompt;
+    assert!(
+        prompt
+            .matches(receipt.verifications[0].record_id.as_str())
+            .count()
+            == 1
+            && prompt.contains("failed"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn a_settlement_whose_fragment_has_no_room_to_grow_is_still_told() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    // The run's pending fragment sits in a merged credit line already at its
+    // size limit, so the settled text cannot replace it in place.
+    let run_id = fixture.run_id.clone();
+    fixture.turn.record_mut(|record| {
+        let pending = record.engram.pending_source_root_line.clone().unwrap();
+        assert!(pending.contains(&run_id), "{pending}");
+        let full = pending
+            .lines()
+            .map(|line| {
+                if !line.contains(&run_id) {
+                    return line.to_owned();
+                }
+                let room = ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES - line.len() - " Also: ".len();
+                format!("{line} Also: {}", "x".repeat(room))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        record.engram.pending_source_root_line = Some(full);
+    });
+    let receipt = fixture.receive(false);
+    let prompt = fixture
+        .turn
+        .begin_prompt("Report the settled outcome.")
+        .prompt;
+    assert!(
+        prompt
+            .matches(receipt.verifications[0].record_id.as_str())
+            .count()
+            == 1
+            && prompt.contains("failed"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn an_undelivered_settlement_is_told_once_after_a_host_restart() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let carried = fixture.turn.begin_prompt("Carry on.").prompt;
+    assert!(carried.contains(&fixture.run_id), "{carried}");
+    let generation = fixture.turn.record(|record| record.active_turn_generation);
+    fixture
+        .turn
+        .state
+        .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    fixture.turn.end();
+    let receipt = fixture.receive(false);
+    let record_id = receipt.verifications[0].record_id.clone();
+    // What a host started from the saved state puts before that session's
+    // next prompt.
+    let after_restart = || {
+        let loaded = load_state(fixture.turn.state.persistence_path.as_path())
+            .unwrap()
+            .unwrap();
+        let index = loaded.find_session_index(&fixture.turn.session_id).unwrap();
+        loaded.sessions[index]
+            .engram
+            .pending_source_root_line
+            .clone()
+            .unwrap_or_default()
+    };
+    // The host stops before any prompt carried the settlement.
+    let line = after_restart();
+    assert_eq!(line.matches(record_id.as_str()).count(), 1, "{line}");
+    assert!(line.contains("failed"), "{line}");
+    // Once an accepted prompt carried it, a restart does not tell it again.
+    let prompt = fixture
+        .turn
+        .begin_prompt("Report the settled outcome.")
+        .prompt;
+    assert_eq!(prompt.matches(record_id.as_str()).count(), 1, "{prompt}");
+    let generation = fixture.turn.record(|record| record.active_turn_generation);
+    fixture
+        .turn
+        .state
+        .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    let line = after_restart();
+    assert!(!line.contains(&record_id), "{line}");
+    // A delivery that releases a held run asks compaction to select again.
+    // Under one lock, so no rescan pass can select in between.
+    let mut inner = fixture.turn.state.inner.lock().unwrap();
+    inner
+        .test_run_registrations
+        .update_unindexed_fields(&fixture.run_id, |row| {
+            row.settlement_notice_undelivered = true
+        });
+    inner.test_runs.compaction_examined_revision = Some(inner.revision);
+    assert!(AppState::note_settlement_notices_delivered_locked(
+        &mut inner,
+        &fixture.turn.session_id,
+        &prompt
+    ));
+    assert_eq!(inner.test_runs.compaction_examined_revision, None);
+}
+
+#[test]
+fn a_successor_holding_an_inherited_named_root_is_told_its_runs_settlement() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    // After a handoff the root keeps its predecessor as the namer, while the
+    // run belongs to the successor holding the same claim. The run's own
+    // owner is told even once the root's claim has moved on: the current
+    // registration and its settled receipt are the authority, not the root.
+    for claim_matches in [true, false] {
+        let mut fixture = RegisteredLauncherTurn::committed();
+        fixture.background_reply();
+        fixture.finish();
+        {
+            let mut inner = fixture.turn.state.inner.lock().unwrap();
+            let root = &mut inner.engram_work_source_roots[0];
+            assert_eq!(root.named_by_session, fixture.turn.session_id);
+            root.named_by_session = "session-predecessor".to_owned();
+            if !claim_matches {
+                root.claim_fence += 1;
+            }
+        }
+        let receipt = fixture.receive(false);
+        let (line, _) = fixture.line();
+        assert_eq!(
+            line.matches(receipt.verifications[0].record_id.as_str())
+                .count(),
+            1,
+            "claim_matches={claim_matches}: {line}"
+        );
+    }
+}
+
+#[test]
+fn every_settlement_still_undelivered_reaches_the_very_next_prompt_once() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    // Three failed runs of this owner settle before its next turn: this
+    // fixture's run and two more registered to the same owner, presented by
+    // the same settlement step.
+    let first = fixture.receive(false);
+    let mut records = vec![first.verifications[0].record_id.clone()];
+    {
+        let mut inner = fixture.turn.state.inner.lock().unwrap();
+        let settled = inner.test_run_registrations[&fixture.run_id].clone();
+        for ordinal in 1..=2u32 {
+            let mut run = settled.clone();
+            run.run_id = format!("{}-{ordinal}", fixture.run_id);
+            run.settlement_notice_undelivered = false;
+            let mut receipt = first.clone();
+            receipt.verifications[0].record_id = format!("{ordinal:032x}");
+            let Some(TestRunVerificationAck::Settled { body_digest, .. }) =
+                settled.verification_record.clone()
+            else {
+                panic!("the fixture's run settled");
+            };
+            run.verification_record = Some(TestRunVerificationAck::Settled {
+                receipt: receipt.clone(),
+                body_digest,
+            });
+            inner
+                .test_run_registrations
+                .insert(run.run_id.clone(), run.clone());
+            records.push(receipt.verifications[0].record_id.clone());
+            let mut notice = ReceivedCheckNotice {
+                registration: run,
+                receipt,
+                deadline: std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET,
+            };
+            AppState::present_settled_receipt_locked(&mut inner, &mut notice);
+        }
+    }
+    // Later check-credit feedback long enough to force the merge cut, and
+    // more host lines than the pending-line cap keeps.
+    fixture.turn.record_mut(|record| {
+        for ordinal in 0..3 {
+            record.engram.set_pending_source_root_line(format!(
+                "{ENGRAM_CHECK_CREDIT_LINE_PREFIX} later check {ordinal} {}",
+                "x".repeat(ENGRAM_CHECK_CREDIT_LINE_MAX_BYTES / 2)
+            ));
+        }
+        for ordinal in 0..6 {
+            record
+                .engram
+                .set_pending_source_root_line(format!("[TermAl] host line {ordinal}"));
+        }
+    });
+    let prompt = fixture
+        .turn
+        .begin_prompt("Report the settled outcomes.")
+        .prompt;
+    for record in &records {
+        assert_eq!(
+            prompt.matches(record.as_str()).count(),
+            1,
+            "{record}: {prompt}"
+        );
+    }
+    let generation = fixture.turn.record(|record| record.active_turn_generation);
+    fixture
+        .turn
+        .state
+        .acknowledge_engram_source_root_line_delivery(&fixture.turn.session_id, generation);
+    fixture.turn.end();
+    let prompt = fixture.turn.begin_prompt("Carry on.").prompt;
+    for record in &records {
+        assert!(!prompt.contains(record.as_str()), "{record}: {prompt}");
+    }
+}
+
+#[test]
+fn a_settlement_pending_when_engram_is_turned_off_still_reaches_the_next_prompt() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let receipt = fixture.receive(false);
+    let record_id = receipt.verifications[0].record_id.clone();
+    assert_eq!(fixture.line().0.matches(record_id.as_str()).count(), 1);
+    // Turning Engram off resets the session's association and its pending
+    // host lines; the settlement already presented under the claim stays.
+    let project_id = fixture
+        .turn
+        .record(|record| record.session.project_id.clone().unwrap());
+    fixture
+        .turn
+        .state
+        .update_project_engram_settings(
+            &project_id,
+            EngramProjectSettings {
+                enabled: false,
+                ..EngramProjectSettings::default()
+            },
+        )
+        .expect("disabling Engram should succeed");
+    assert!(
+        fixture
+            .turn
+            .record(|record| record.engram.work_binding.is_none()),
+        "the association was reset"
+    );
+    let (line, _) = fixture.line();
+    assert_eq!(line.matches(record_id.as_str()).count(), 1, "{line}");
+}
+
+#[test]
+fn a_receipt_settling_after_engram_is_turned_off_still_reaches_its_owner() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    // The receipt is already held when Engram is turned off: the run's own
+    // record is read just before the Settled step, and the project's Engram
+    // association ends right then.
+    let project_id = fixture
+        .turn
+        .record(|record| record.session.project_id.clone().unwrap());
+    let state = fixture.turn.state.clone();
+    TEST_RECEIVED_NOTICE_SOURCE_READ.lock().unwrap().insert(
+        fixture.run_id.clone(),
+        Box::new(move |_| {
+            state
+                .update_project_engram_settings(
+                    &project_id,
+                    EngramProjectSettings {
+                        enabled: false,
+                        ..EngramProjectSettings::default()
+                    },
+                )
+                .expect("disabling Engram should succeed");
+        }),
+    );
+    let receipt = fixture.receive(false);
+    assert!(
+        fixture
+            .turn
+            .record(|record| record.engram.work_binding.is_none()),
+        "the association ended before the settlement"
+    );
+    let (line, _) = fixture.line();
+    assert_eq!(
+        line.matches(receipt.verifications[0].record_id.as_str())
+            .count(),
+        1,
+        "{line}"
+    );
+}
+
+#[test]
+fn only_the_current_registrations_settled_receipt_is_presented() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let receipt = fixture.receive(false);
+    let mut other = receipt.clone();
+    other.verifications[0].record_id = "0123456789abcdef0123456789abcdef".to_owned();
+    let mut inner = fixture.turn.state.inner.lock().unwrap();
+    let current = inner.test_run_registrations[&fixture.run_id].clone();
+    let deadline = std::time::Instant::now() + RECEIVED_NOTICE_CAPTURE_BUDGET;
+    // Not the current registration: another request under the same run id.
+    let mut stale = current.clone();
+    stale.request_identity = "another-request".to_owned();
+    AppState::present_settled_receipt_locked(
+        &mut inner,
+        &mut ReceivedCheckNotice {
+            registration: stale,
+            receipt: other.clone(),
+            deadline,
+        },
+    );
+    // Not settled: the host holds this receipt as received only.
+    let Some(TestRunVerificationAck::Settled { body_digest, .. }) =
+        current.verification_record.clone()
+    else {
+        panic!("the fixture's run settled");
+    };
+    inner
+        .test_run_registrations
+        .update_unindexed_fields(&fixture.run_id, |row| {
+            row.verification_record = Some(TestRunVerificationAck::Received {
+                receipt: other.clone(),
+                body_digest,
+            })
+        });
+    let received = inner.test_run_registrations[&fixture.run_id].clone();
+    AppState::present_settled_receipt_locked(
+        &mut inner,
+        &mut ReceivedCheckNotice {
+            registration: received,
+            receipt: other.clone(),
+            deadline,
+        },
+    );
+    let index = inner.find_session_index(&fixture.turn.session_id).unwrap();
+    let line = inner.sessions[index]
+        .engram
+        .pending_source_root_line
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        !line.contains(other.verifications[0].record_id.as_str()),
+        "{line}"
+    );
+}
+
+#[test]
+fn a_receipt_settling_while_the_runs_results_cannot_be_read_is_still_told() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    // The record was built and answered; its results cannot be read just
+    // when the host completes it. The settlement and its notice rest on the
+    // validated receipt, not on another read of the run's files.
+    let results = fixture.directory.join("results.json");
+    let (receipt, settlement) = fixture.receive_until_with(false, None, &|| {
+        fs::write(&results, "{").unwrap();
+    });
+    assert_eq!(settlement, EngramVerificationRecordSettlement::Settled);
+    let (line, _) = fixture.line();
+    assert_eq!(
+        line.matches(receipt.verifications[0].record_id.as_str())
+            .count(),
+        1,
+        "{line}"
+    );
+}
+
+#[test]
+fn a_held_receipt_whose_inputs_cannot_be_read_now_is_retried_and_a_body_not_utf8_refused() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.receive_not_durable();
+    let registration = fixture
+        .turn
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_registrations[&fixture.run_id]
+        .clone();
+    let results = fixture.directory.join("results.json");
+    let readable = fs::read(&results).unwrap();
+    // Unreadable just now: the held receipt waits for a later tick, and no
+    // refusal of its body is recorded.
+    fs::write(&results, "{").unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::Waiting
+    ));
+    assert!(matches!(
+        engram_verification_record_progress(&fixture.directory),
+        Some(EngramVerificationRecordProgress::Received { .. })
+    ));
+    // Readable again: the same body is the host's, and the receipt settles it.
+    fs::write(&results, &readable).unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::ReceiptHeld { .. }
+    ));
+    // The request whose read fails just now (here a directory in its place,
+    // which no read takes for a missing file) is retried the same way.
+    let request = fixture.directory.join("request.json");
+    let request_bytes = fs::read(&request).unwrap();
+    fs::remove_file(&request).unwrap();
+    fs::create_dir(&request).unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::Waiting
+    ));
+    assert!(matches!(
+        engram_verification_record_progress(&fixture.directory),
+        Some(EngramVerificationRecordProgress::Received { .. })
+    ));
+    fs::remove_dir(&request).unwrap();
+    fs::write(&request, &request_bytes).unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::ReceiptHeld { .. }
+    ));
+    // So is the frozen body whose read fails just now: not unreadable.
+    let body = fixture.directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
+    let body_bytes = fs::read(&body).unwrap();
+    fs::remove_file(&body).unwrap();
+    fs::create_dir(&body).unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::Waiting
+    ));
+    fs::remove_dir(&body).unwrap();
+    fs::write(&body, &body_bytes).unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::ReceiptHeld { .. }
+    ));
+    // A body whose bytes are read but are not UTF-8 does not parse: it is
+    // unreadable, a reason left beside the run, not a read to try again.
+    fs::write(&body, [0xFF, 0xFE, b'{']).unwrap();
+    assert!(matches!(
+        engram_verification_record_prepare(&registration),
+        EngramVerificationRecordPrepared::Pending(EngramVerificationRecordPending::BodyUnreadable)
+    ));
+    assert!(matches!(
+        engram_verification_record_progress(&fixture.directory),
+        Some(EngramVerificationRecordProgress::Pending {
+            reason: EngramVerificationRecordPending::BodyUnreadable
+        })
+    ));
+}
+
+#[test]
+fn an_unsent_frozen_body_unreadable_now_is_retried_and_one_not_utf8_is_refused() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let state = fixture.turn.state.clone();
+    let run_id = fixture.run_id.clone();
+    let body = fixture.directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
+    // Frozen but not answered yet: its body cannot be read just now.
+    let (_, settlement) = fixture.receive_until_with(false, None, &|| {
+        let registration = state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
+        assert!(registration.verification_record.is_none());
+        let body_bytes = fs::read(&body).unwrap();
+        fs::remove_file(&body).unwrap();
+        fs::create_dir(&body).unwrap();
+        assert!(matches!(
+            engram_verification_record_prepare(&registration),
+            EngramVerificationRecordPrepared::Waiting
+        ));
+        fs::remove_dir(&body).unwrap();
+        // Read, but not UTF-8: a body that does not parse, so unreadable.
+        fs::write(&body, [0xFF, 0xFE, b'{']).unwrap();
+        assert!(matches!(
+            engram_verification_record_prepare(&registration),
+            EngramVerificationRecordPrepared::Pending(
+                EngramVerificationRecordPending::BodyUnreadable
+            )
+        ));
+        fs::write(&body, &body_bytes).unwrap();
+        assert!(matches!(
+            engram_verification_record_prepare(&registration),
+            EngramVerificationRecordPrepared::Ready(_)
+        ));
+    });
+    assert_eq!(settlement, EngramVerificationRecordSettlement::Settled);
+}
+
+#[test]
+fn a_held_receipt_no_launch_row_carries_is_kept_and_found_again_after_a_restart() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    // No launch reply carries the run's locator, so no launch row of the
+    // run carries its artifact.
+    let fixture = RegisteredLauncherTurn::committed();
+    let (_, settlement) = fixture.receive_until(false, None);
+    assert_eq!(settlement, EngramVerificationRecordSettlement::NoLaunchRow);
+    let state = &fixture.turn.state;
+    let registration = state.inner.lock().unwrap().test_run_registrations[&fixture.run_id].clone();
+    let Some(TestRunVerificationAck::Received { body_digest, .. }) =
+        registration.verification_record.clone()
+    else {
+        panic!("the receipt is held, not settled");
+    };
+    let unassociated = || {
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_unassociated_receipts
+            .get(&fixture.run_id)
+            .cloned()
+    };
+    assert_eq!(unassociated(), Some(body_digest.clone()));
+    // A restarted host holds no process-local state: the producer's next
+    // look at the held receipt finds it again.
+    state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_unassociated_receipts
+        .clear();
+    let EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } =
+        engram_verification_record_prepare(&registration)
+    else {
+        panic!("the held receipt is looked at again");
+    };
+    assert_eq!(
+        state.complete_engram_verification_record(&registration, &frozen.body, &receipt),
+        EngramVerificationRecordSettlement::NoLaunchRow
+    );
+    assert_eq!(unassociated(), Some(body_digest));
+}
+
+#[test]
+fn a_pending_reason_whose_state_file_cannot_be_written_is_still_kept() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let state = fixture.turn.state.clone();
+    let run_id = fixture.run_id.clone();
+    let directory = fixture.directory.clone();
+    let (_, settlement) = fixture.receive_until_with(false, None, &|| {
+        let registration = state.inner.lock().unwrap().test_run_registrations[&run_id].clone();
+        let remembered = || {
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_record_pending
+                .get(&run_id)
+                .cloned()
+        };
+        let body = directory.join(ENGRAM_VERIFICATION_RECORD_BODY_FILE);
+        let body_bytes = fs::read(&body).unwrap();
+        fs::remove_file(&body).unwrap();
+        let state_file = directory.join(ENGRAM_VERIFICATION_RECORD_STATE_FILE);
+        let _ = fs::remove_file(&state_file);
+        // A run directory that refuses the host's writes: neither temporary
+        // file that the body and the state file are written through can be
+        // created (a directory stands in each place).
+        let blocked = [
+            body.with_extension("json.tmp"),
+            state_file.with_extension("json.tmp"),
+        ];
+        for path in &blocked {
+            fs::create_dir(path).unwrap();
+        }
+        assert!(matches!(
+            state.prepare_engram_verification_record(&registration),
+            EngramVerificationRecordPrepared::Pending(
+                EngramVerificationRecordPending::PersistFailed
+            )
+        ));
+        assert!(
+            engram_verification_record_progress(&directory).is_none(),
+            "no state file beside the run says why"
+        );
+        assert_eq!(
+            remembered(),
+            Some(EngramVerificationRecordLook::Pending(
+                EngramVerificationRecordPending::PersistFailed
+            ))
+        );
+        for path in &blocked {
+            fs::remove_dir(path).unwrap();
+        }
+        fs::write(&body, &body_bytes).unwrap();
+        let built = || {
+            state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_record_bodies_built
+                .contains(&run_id)
+        };
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .test_run_record_bodies_built
+            .remove(&run_id);
+        assert!(matches!(
+            state.prepare_engram_verification_record(&registration),
+            EngramVerificationRecordPrepared::Ready(_)
+        ));
+        // The look that froze the body says so with it, and is no longer in
+        // flight: a run wait follows a record this process may be sending.
+        assert!(built());
+        assert!(
+            !state
+                .inner
+                .lock()
+                .unwrap()
+                .test_run_record_looks_in_flight
+                .contains_key(&run_id)
+        );
+        assert_eq!(
+            remembered(),
+            Some(EngramVerificationRecordLook::NoBlocker),
+            "any other outcome replaces it: the look found no blocker"
+        );
+    });
+    assert_eq!(settlement, EngramVerificationRecordSettlement::Settled);
+}
+
+#[test]
+fn a_settlement_whose_state_file_cannot_be_written_is_read_from_the_host_and_repaired() {
+    let _placement = TestTempRootDirectoryScope::repository_local();
+    let mut fixture = RegisteredLauncherTurn::committed();
+    fixture.background_reply();
+    fixture.finish();
+    let state = fixture.turn.state.clone();
+    let directory = fixture.directory.clone();
+    // The state file beside the run cannot be written while the record
+    // settles (a directory stands where it is written through).
+    let blocked = directory
+        .join(ENGRAM_VERIFICATION_RECORD_STATE_FILE)
+        .with_extension("json.tmp");
+    let (receipt, settlement) = fixture.receive_until_with(false, None, &|| {
+        fs::create_dir(&blocked).unwrap();
+    });
+    assert_eq!(settlement, EngramVerificationRecordSettlement::Settled);
+    assert!(
+        !matches!(
+            engram_verification_record_progress(&directory),
+            Some(EngramVerificationRecordProgress::Settled { .. })
+        ),
+        "the launcher summary's copy did not take the settlement"
+    );
+    // The exact run read reports the host's own settled record anyway.
+    let mut diagnostics = TestRunRegistrationDiagnostics::new(&state.server_instance_id);
+    let Ok(response) =
+        get_test_run_observed(state.clone(), &fixture.run_id, &mut diagnostics, true)
+    else {
+        panic!("the exact run read answers");
+    };
+    let view = response.0.detail.verification_record.clone();
+    assert_eq!(
+        view,
+        Some(TestRunVerificationRecordView {
+            state: "settled",
+            record_ids: receipt
+                .verifications
+                .iter()
+                .map(|record| record.record_id.clone())
+                .collect(),
+            run_outcome: Some(receipt.run_outcome),
+            detail: None,
+        })
+    );
+    // Only under the request identity its selection recorded: a registration
+    // under the same run id for another request lends that detail nothing.
+    let selected = diagnostics.request_digest.clone();
+    assert!(selected.is_some());
+    {
+        let inner = state.inner.lock().unwrap();
+        assert_eq!(
+            test_run_verification_record_for_detail(&inner, &response.0.run, selected.as_deref()),
+            view
+        );
+        assert_eq!(
+            test_run_verification_record_for_detail(
+                &inner,
+                &response.0.run,
+                Some("another-request-under-the-same-run-id"),
+            ),
+            None
+        );
+    }
+    // Writable again: the producer's next tick writes the copy, so the
+    // launcher summary converges.
+    fs::remove_dir(&blocked).unwrap();
+    state.engram_verification_records_tick();
+    assert!(matches!(
+        engram_verification_record_progress(&directory),
+        Some(EngramVerificationRecordProgress::Settled { .. })
+    ));
+    // The authoritative read answers from the host alone, through the HTTP
+    // route, even once the run's own results no longer read.
+    fs::write(directory.join("results.json"), "{").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let app = app_router(state.clone());
+    let read = |target: String| {
+        runtime.block_on(request_json::<Value>(
+            &app,
+            Request::builder().uri(target).body(Body::empty()).unwrap(),
+        ))
+    };
+    let (status, body) = read(format!(
+        "/api/test-runs/{}?view=verification",
+        fixture.run_id
+    ));
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["runId"], json!(fixture.run_id));
+    assert_eq!(body["verificationRecord"]["state"], "settled", "{body}");
+    assert_eq!(
+        body["verificationRecord"]["recordIds"],
+        json!(
+            receipt
+                .verifications
+                .iter()
+                .map(|record| record.record_id.clone())
+                .collect::<Vec<_>>()
+        )
+    );
+    let (status, _) = read("/api/test-runs/test-unknown-run?view=verification".to_owned());
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

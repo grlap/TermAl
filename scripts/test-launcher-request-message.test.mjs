@@ -328,6 +328,33 @@ test("a hostless passing run says why it earned no credit and how to get it", as
   assert.ok(summary.includes(correction), summary);
 });
 
+// The host mirrors a run's verification record into the run directory after
+// the launcher exits. The summary is the documented read-only route to it.
+async function failedRunWithRecordState(t, state) {
+  const f = fixture(t);
+  initializeRepository(f.root);
+  const runEnv = hostlessEnv();
+  const runDir = await createRun({ root: f.root, input: "commit",
+    stages: [{ name: "focused", command: process.execPath, args: ["-e", "process.exit(1)"] }] }, runEnv);
+  assert.equal((await executeRun(runDir, runEnv)).state, "failed");
+  writeFileSync(join(runDir, "engram-verification-record-state.json"), JSON.stringify(state));
+  return await summarize(runDir);
+}
+const failedReceipt = { operation: "verification_record", producer: "termal-host",
+  verifications: [{ stage: "focused", record_id: "record-0001" }, { stage: "focused", record_id: "record-0002" }],
+  run_outcome: "failed" };
+
+test("a failed run's settled verification record is named in its summary with its outcome", async (t) => {
+  const summary = await failedRunWithRecordState(t, { state: "settled", receipt: failedReceipt });
+  assert.match(summary, /^verification: settled; Engram record\(s\) record-0001 record-0002; run outcome failed$/mu);
+});
+
+test("a received but unsettled verification record is named in the summary as not yet settled", async (t) => {
+  const summary = await failedRunWithRecordState(t, { state: "received", receipt: failedReceipt });
+  assert.match(summary,
+    /^verification: received, not yet settled; Engram record\(s\) record-0001 record-0002; run outcome failed$/mu);
+});
+
 test("a hostless plain-input run keeps only its input: plain explanation", async (t) => {
   const summary = await creditRun(t, hostlessEnv(), "plain");
   assert.match(summary, /^input: plain; no committed-input verification: /mu);
