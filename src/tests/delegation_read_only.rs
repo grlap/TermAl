@@ -225,25 +225,6 @@ async fn read_only_delegation_blocks_write_capable_surfaces() {
         assert_read_only_delegation_error(&body, "Read-only Enforcement");
     }
 
-    let review = default_review_document("read-only-review-guard");
-    let (status, body): (StatusCode, Value) = request_json(
-        &app,
-        Request::builder()
-            .method("PUT")
-            .uri(format!(
-                "/api/reviews/read-only-review-guard?sessionId={}&projectId={}",
-                child_session_id, proxy_remote_project_id
-            ))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_vec(&review).expect("review document should serialize"),
-            ))
-            .unwrap(),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_read_only_delegation_error(&body, "Read-only Enforcement");
-
     for terminal_route in ["/api/terminal/run", "/api/terminal/run/stream"] {
         let (status, body): (StatusCode, Value) = request_json(
             &app,

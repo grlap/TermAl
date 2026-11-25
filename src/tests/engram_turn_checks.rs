@@ -4634,11 +4634,10 @@ fn a_write_through_termal_overlaps_open_checks_of_its_worktree_only() {
 }
 
 #[test]
-fn git_terminal_and_review_writes_through_termal_overlap_an_open_check() {
+fn git_and_terminal_writes_through_termal_overlap_an_open_check() {
     // A commit's hooks may rewrite files, a file action or a sync rewrites
-    // them, a streamed command runs on a worker of its own, and a review
-    // document lands under the worktree; each marks the check open there,
-    // even when it fails.
+    // them, and a streamed command runs on a worker of its own; each marks
+    // the check open there, even when it fails.
     let turn = EOCheckedTurn::start("host-commit-stream", true);
     let pending = Arc::new(EngramBasisCapture::default());
     let check = turn.finished_check(0, pending.clone());
@@ -4728,29 +4727,6 @@ fn git_terminal_and_review_writes_through_termal_overlap_an_open_check() {
     ));
     assert!(synced.is_err(), "a repository without a remote cannot sync");
     assert!(overlapped(), "a Git sync in the check's worktree");
-
-    turn.record_mut(|record| record.engram.active_turn_checks[0].overlapped = false);
-    let change_set_id = "host-write-review";
-    let saved = runtime.block_on(async {
-        request_response(
-            &app,
-            Request::builder()
-                .method("PUT")
-                .uri(format!(
-                    "/api/reviews/{change_set_id}?projectId={}",
-                    project_id.as_deref().expect("the turn's project")
-                ))
-                .header(axum::http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::to_vec(&default_review_document(change_set_id))
-                        .expect("the review should serialize"),
-                ))
-                .expect("the request should build"),
-        )
-        .await
-    });
-    assert_eq!(saved.status(), StatusCode::OK, "the review should save");
-    assert!(overlapped(), "a review saved under the check's worktree");
     pending.finish(None);
 }
 

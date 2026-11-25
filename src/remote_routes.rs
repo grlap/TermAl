@@ -348,18 +348,6 @@ impl AppState {
         )
     }
 
-    pub(crate) fn remote_put_json_with_query_scope<T: DeserializeOwned>(
-        &self,
-        scope: &RemoteScope,
-        path: &str,
-        mut query: Vec<(String, String)>,
-        body: Value,
-    ) -> Result<T, ApiError> {
-        apply_remote_scope_to_query(scope, &mut query);
-        self.remote_registry
-            .request_json(&scope.remote, Method::PUT, path, &query, Some(body))
-    }
-
     // -- remote config + project binding --
     // Helpers for finding a `RemoteConfig` by id and lazily creating the
     // paired remote project (when a local project first needs a remote

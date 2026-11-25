@@ -17,28 +17,18 @@ Related:
 - [File Change Awareness](./file-change-awareness.md) — stale-save,
   rebase, and conflict semantics the review editor reuses unchanged.
 
-## Agent replies in diff review comments
+## Status
 
-**Severity:** Medium â€” closes the review feedback loop.
-
-When the user leaves review comments on a diff preview and hands them off to an agent, the agent
-currently has no way to reply inline. Comments are one-directional: user writes, agent reads.
-
-**Desired behavior:**
-- When an agent addresses a review comment, it can post a reply on the same anchor
-- Agent replies appear inline in the diff preview alongside the user's original comment
-- Each comment thread shows the back-and-forth (user comment â†’ agent reply â†’ user follow-up)
-- Agent replies set the comment status to `resolved` or leave it `open` with an explanation
-
-**Tasks:**
-- Extend the review comment schema to support threaded replies with an `author` field (`user` or `agent`)
-- Add a backend endpoint or convention for the agent to append replies to an existing review file
-- Update the diff preview UI to render comment threads instead of single comments
-- Update the agent handoff prompt to instruct the agent to write replies, not just resolve silently
-
-
-
-This is the concrete delivery plan for the diff-preview and saved-review workflow.
+The manual review conversations described in this brief were removed on
+2026-11-25: review threads and comments on a diff, the review documents
+stored under `<project>/.termal/reviews/`, "Copy review path", "Insert review
+into prompt" and the `/api/reviews` routes. Review files that already exist
+stay on disk; TermAl no longer reads or writes them. The diff preview, its
+tabs and change-set identity remain as described here. Independent agent
+reviews run through review delegations
+([Agent Delegation Sessions](./agent-delegation-sessions.md)). The sections
+on review comments, the review file format, the review API and the agent
+handoff are kept as the historical plan.
 
 ## Goals
 

@@ -2001,7 +2001,7 @@ counts and what fences it, and so what a turn's report says about a check.
   workdir changed since) counts as the same worktree,
   and a network path is keyed as written, unresolved. Writes through TermAl
   itself count the same way: a file saved
-  from the editor, a review document saved under `.termal/reviews`, a Git
+  from the editor, a Git
   file action, sync or commit (whose hooks may rewrite files) and a
   terminal command, each as it starts and as it ends. A
   command abandoned before it ran (a denied Claude call, a declined Codex

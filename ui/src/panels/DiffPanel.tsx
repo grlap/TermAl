@@ -3,16 +3,10 @@ import type { ClipboardEvent, FormEvent, KeyboardEvent, ReactNode } from "react"
 import { flushSync } from "react-dom";
 import {
   fetchFile,
-  fetchReviewDocument,
-  saveReviewDocument,
   type FileResponse,
   type GitDiffDocumentContent,
   type GitDiffSection,
   type OpenPathOptions,
-  type ReviewAnchor,
-  type ReviewComment,
-  type ReviewDocument,
-  type ReviewThread,
 } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { FileTabIcon } from "../file-tab-icon";
@@ -44,13 +38,6 @@ import {
 } from "../source-renderers";
 import { type SourceSaveOptions } from "./SourcePanel";
 import { rebaseContentOntoDisk } from "./content-rebase";
-import {
-  buildReviewHandoffPrompt,
-  createReviewComment,
-  ensureReviewDocument,
-  ensureReviewFiles,
-  type ReviewOriginContext,
-} from "./diff-review-document";
 import {
   DEFAULT_DIFF_EDITOR_STATUS,
   DEFAULT_EDITOR_STATUS,
@@ -129,13 +116,6 @@ const LARGE_MARKDOWN_FULL_RENDER_LINE_LIMIT = 1_200;
 
 type DiffViewScrollPositions = Record<DiffViewMode, number>;
 
-type ReviewState = {
-  status: "idle" | "loading" | "ready" | "error";
-  review: ReviewDocument | null;
-  reviewFilePath: string | null;
-  error: string | null;
-};
-
 type MarkdownDiffSaveHandler = () => Promise<void> | void;
 
 function createInitialDiffViewScrollPositions(): DiffViewScrollPositions {
@@ -170,7 +150,6 @@ function isLargeMarkdownDocumentContent(content: string) {
 export function DiffPanel({
   appearance,
   changeType,
-  changeSetId = null,
   fontSizePx,
   diff,
   documentEnrichmentNote = null,
@@ -182,18 +161,15 @@ export function DiffPanel({
   language,
   sessionId,
   projectId = null,
-  originAgentName = null,
   workspaceRoot = null,
   workspaceFilesChangedEvent = null,
   onOpenPath,
-  onInsertReviewIntoPrompt,
   onOpenConversation,
   onSaveFile,
   summary,
 }: {
   appearance: MonacoAppearance;
   changeType: DiffMessage["changeType"];
-  changeSetId?: string | null;
   fontSizePx: number;
   diff: string;
   documentEnrichmentNote?: string | null;
@@ -205,11 +181,9 @@ export function DiffPanel({
   language?: string | null;
   sessionId: string | null;
   projectId?: string | null;
-  originAgentName?: string | null;
   workspaceRoot?: string | null;
   workspaceFilesChangedEvent?: WorkspaceFilesChangedEvent | null;
   onOpenPath: (path: string, options?: OpenPathOptions) => void;
-  onInsertReviewIntoPrompt?: (reviewFilePath: string, prompt: string) => void;
   onOpenConversation?: () => void;
   onSaveFile: (path: string, content: string, options?: SourceSaveOptions) => Promise<FileResponse | void>;
   summary: string;
@@ -219,15 +193,8 @@ export function DiffPanel({
   const [latestFile, setLatestFile] = useState<LatestFileState>(() =>
     createInitialLatestFileState(isGitSubmoduleDiff ? null : filePath),
   );
-  const [reviewState, setReviewState] = useState<ReviewState>({
-    status: "idle",
-    review: null,
-    reviewFilePath: null,
-    error: null,
-  });
   const normalizedSessionId = sessionId?.trim() ?? "";
   const normalizedProjectId = projectId?.trim() ?? "";
-  const normalizedChangeSetId = changeSetId?.trim() ?? "";
   const hasScope = Boolean(normalizedSessionId || normalizedProjectId);
   const [editValue, setEditValue] = useState("");
   const [markdownEditContent, setMarkdownEditContent] = useState<string | null>(null);
@@ -250,13 +217,10 @@ export function DiffPanel({
   const [isRebasingFile, setIsRebasingFile] = useState(false);
   const [isReloadingFile, setIsReloadingFile] = useState(false);
   const [diffEditConflictOnDisk, setDiffEditConflictOnDisk] = useState(false);
-  const [reviewSaveError, setReviewSaveError] = useState<string | null>(null);
-  const [isSavingReview, setIsSavingReview] = useState(false);
   const [externalFileNotice, setExternalFileNotice] = useState<string | null>(null);
   const [editEditorStatus, setEditEditorStatus] = useState<MonacoCodeEditorStatus>(DEFAULT_EDITOR_STATUS);
   const [visualEditorStatus, setVisualEditorStatus] = useState<MonacoDiffEditorStatus>(DEFAULT_DIFF_EDITOR_STATUS);
   const [copiedPath, setCopiedPath] = useState(false);
-  const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const editEditorRef = useRef<MonacoCodeEditorHandle | null>(null);
   const diffEditorRef = useRef<MonacoDiffEditorHandle | null>(null);
   const structuredDiffScrollRef = useRef<HTMLDivElement | null>(null);
@@ -629,11 +593,9 @@ export function DiffPanel({
     setSaveError(null);
     setExternalFileNotice(null);
     setDiffEditConflictOnDisk(false);
-    setReviewSaveError(null);
     setIsSaving(false);
     setIsRebasingFile(false);
     setIsReloadingFile(false);
-    setIsSavingReview(false);
     setMarkdownEditContentState(null);
     setRenderLargeMarkdownFullDocument(false);
     clearRenderedMarkdownDraftSegments();
@@ -759,70 +721,6 @@ export function DiffPanel({
   ]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    if (!normalizedChangeSetId) {
-      setReviewState({
-        status: "idle",
-        review: null,
-        reviewFilePath: null,
-        error: null,
-      });
-      return;
-    }
-
-    if (!hasScope) {
-      setReviewState({
-        status: "error",
-        review: null,
-        reviewFilePath: null,
-        error: "This diff preview is no longer associated with a live session or project.",
-      });
-      return;
-    }
-
-    setReviewState({
-      status: "loading",
-      review: null,
-      reviewFilePath: null,
-      error: null,
-    });
-
-    void fetchReviewDocument(normalizedChangeSetId, {
-      sessionId: normalizedSessionId || null,
-      projectId: normalizedProjectId || null,
-    })
-      .then((response) => {
-        if (cancelled) {
-          return;
-        }
-
-        setReviewState({
-          status: "ready",
-          review: response.review,
-          reviewFilePath: response.reviewFilePath,
-          error: null,
-        });
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        setReviewState({
-          status: "error",
-          review: null,
-          reviewFilePath: null,
-          error: getErrorMessage(error),
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hasScope, normalizedChangeSetId, normalizedProjectId, normalizedSessionId]);
-
-  useEffect(() => {
     if (latestFile.status === "ready") {
       const pendingEditValue = pendingEditValueRef.current;
       const shouldPreserveSaveError = preserveSaveErrorOnLatestFileAdoptionRef.current;
@@ -894,25 +792,6 @@ export function DiffPanel({
     ? normalizeDisplayPath(effectiveDisplayPath)
     : null;
   const copyablePath = displayFilePath ?? filePathTitle;
-  const hasReviewScope = normalizedChangeSetId.length > 0 && hasScope;
-  const canEditReview = hasReviewScope && reviewState.status === "ready";
-  const reviewThreads = useMemo<ReviewThread[]>(
-    () => reviewState.review?.threads ?? [],
-    [reviewState.review],
-  );
-  const openReviewThreadCount = useMemo(
-    () => reviewThreads.filter((thread) => thread.status === "open").length,
-    [reviewThreads],
-  );
-  const reviewOriginContext = useMemo<ReviewOriginContext>(
-    () => ({
-      agentName: originAgentName,
-      messageId: diffMessageId,
-      sessionId: normalizedSessionId || null,
-      workdir: workspaceRoot ?? null,
-    }),
-    [diffMessageId, normalizedSessionId, originAgentName, workspaceRoot],
-  );
 
   useEffect(() => {
     if (!workspaceFilesChangedEvent || !filePath || !hasScope) {
@@ -1057,20 +936,6 @@ export function DiffPanel({
       window.clearTimeout(timeoutId);
     };
   }, [copiedPath]);
-
-  useEffect(() => {
-    if (!copiedReviewPath) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setCopiedReviewPath(false);
-    }, 1600);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [copiedReviewPath]);
 
   async function handleSave(options?: SourceSaveOptions) {
     if (!commitRenderedMarkdownDrafts()) {
@@ -1399,116 +1264,6 @@ export function DiffPanel({
     }
   }
 
-  async function handleCopyReviewPath() {
-    if (!reviewState.reviewFilePath) {
-      return;
-    }
-
-    try {
-      await copyTextToClipboard(reviewState.reviewFilePath);
-      setCopiedReviewPath(true);
-    } catch {
-      setCopiedReviewPath(false);
-    }
-  }
-
-  async function mutateReviewDocument(mutator: (current: ReviewDocument) => ReviewDocument) {
-    if (!normalizedChangeSetId) {
-      throw new Error("This diff preview does not have a stable change set id yet.");
-    }
-    if (!hasScope) {
-      throw new Error("This diff preview is no longer associated with a live session or project.");
-    }
-    if (reviewState.status !== "ready") {
-      throw new Error("Review threads must load successfully before they can be edited.");
-    }
-
-    setIsSavingReview(true);
-    setReviewSaveError(null);
-    try {
-      const nextReview = mutator(
-        ensureReviewDocument(reviewState.review, normalizedChangeSetId, {
-          changeType,
-          filePath,
-          origin: reviewOriginContext,
-        }),
-      );
-      const response = await saveReviewDocument(normalizedChangeSetId, nextReview, {
-        sessionId: normalizedSessionId || null,
-        projectId: normalizedProjectId || null,
-      });
-      setReviewState({
-        status: "ready",
-        review: response.review,
-        reviewFilePath: response.reviewFilePath,
-        error: null,
-      });
-    } catch (error) {
-      setReviewSaveError(getErrorMessage(error));
-      throw error;
-    } finally {
-      setIsSavingReview(false);
-    }
-  }
-
-  async function handleCreateThread(anchor: ReviewAnchor, body: string) {
-    await mutateReviewDocument((current) => ({
-      ...current,
-      files: ensureReviewFiles(current.files ?? [], filePath, changeType),
-      threads: [
-        ...(current.threads ?? []),
-        {
-          id: `thread-${crypto.randomUUID()}`,
-          anchor,
-          status: "open",
-          comments: [createReviewComment(body)],
-        },
-      ],
-    }));
-  }
-
-  async function handleReplyToThread(threadId: string, body: string) {
-    await mutateReviewDocument((current) => ({
-      ...current,
-      threads: (current.threads ?? []).map((thread) =>
-        thread.id === threadId
-          ? {
-              ...thread,
-              comments: [...thread.comments, createReviewComment(body)],
-            }
-          : thread,
-      ),
-    }));
-  }
-
-  async function handleUpdateThreadStatus(
-    threadId: string,
-    status: ReviewThread["status"],
-  ) {
-    await mutateReviewDocument((current) => ({
-      ...current,
-      threads: (current.threads ?? []).map((thread) =>
-        thread.id === threadId
-          ? {
-              ...thread,
-              status,
-            }
-          : thread,
-      ),
-    }));
-  }
-
-  function handleInsertIntoPrompt() {
-    if (!reviewState.reviewFilePath || !onInsertReviewIntoPrompt) {
-      return;
-    }
-
-    onInsertReviewIntoPrompt(
-      reviewState.reviewFilePath,
-      buildReviewHandoffPrompt(reviewState.reviewFilePath, reviewThreads),
-    );
-  }
-
   function handleOpenMarkdownSourceLink(target: MarkdownFileLinkTarget) {
     onOpenPath(target.path, {
       line: target.line,
@@ -1641,42 +1396,9 @@ export function DiffPanel({
                 Back to conversation
               </button>
             ) : null}
-            {reviewState.reviewFilePath ? (
-              <button className="ghost-button" type="button" onClick={() => void handleCopyReviewPath()}>
-                {copiedReviewPath ? "Review path copied" : "Copy review path"}
-              </button>
-            ) : null}
-            {reviewState.reviewFilePath && onInsertReviewIntoPrompt ? (
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={handleInsertIntoPrompt}
-                disabled={openReviewThreadCount === 0}
-                title={
-                  openReviewThreadCount === 0
-                    ? "No open review threads to insert."
-                    : "Insert the review handoff into the session draft."
-                }
-              >
-                Insert review into prompt
-              </button>
-            ) : null}
           </div>
         </div>
         {visibleSummary ? <p className="support-copy file-viewer-summary diff-preview-summary">{visibleSummary}</p> : null}
-        {reviewState.status === "error" ? (
-          <p className="support-copy diff-preview-note">{`Review threads unavailable: ${reviewState.error}`}</p>
-        ) : null}
-        {reviewState.reviewFilePath ? (
-          <div className="diff-review-summary" aria-label="Change-set review threads">
-            <span className="chip">{`${reviewThreads.length} review thread${reviewThreads.length === 1 ? "" : "s"}`}</span>
-            <span className="chip">{`${openReviewThreadCount} open`}</span>
-            {isSavingReview ? <span className="support-copy">Saving review...</span> : null}
-          </div>
-        ) : null}
-        {reviewSaveError ? (
-          <p className="support-copy diff-preview-note">{`Review update failed: ${reviewSaveError}`}</p>
-        ) : null}
         {/*
          * Surface the full save-error message alongside the "Save failed"
          * pill. Previously `saveError` was only used to compute the pill
@@ -1733,11 +1455,6 @@ export function DiffPanel({
               {isReloadingFile ? "Reloading..." : "Reload from disk"}
             </button>
           </div>
-        ) : null}
-        {!normalizedChangeSetId && canUseStructuredPreview ? (
-          <p className="support-copy diff-preview-note">
-            Review comments are unavailable for this diff because it does not have a stable change set id yet.
-          </p>
         ) : null}
       </div>
 
@@ -1840,15 +1557,6 @@ export function DiffPanel({
             filePath={filePath}
             preview={preview}
             scrollRef={structuredDiffScrollRef}
-            threads={reviewThreads}
-            isSavingReview={isSavingReview || reviewState.status === "loading"}
-            onCreateThread={canEditReview ? (anchor, body) => handleCreateThread(anchor, body) : undefined}
-            onReplyToThread={canEditReview ? (threadId, body) => handleReplyToThread(threadId, body) : undefined}
-            onUpdateThreadStatus={
-              canEditReview
-                ? (threadId, status) => handleUpdateThreadStatus(threadId, status)
-                : undefined
-            }
           />
         ) : null}
 
@@ -1910,14 +1618,8 @@ export function DiffPanel({
           </footer>
         ) : null}
 
-        {viewMode !== "edit" && viewMode !== "markdown" && (diffPreviewNote || (reviewThreads.length > 0 && viewMode !== "changes")) ? (
-          <p className="support-copy diff-preview-note">
-            {diffPreviewNote ?? ""}
-            {diffPreviewNote && reviewThreads.length > 0 && viewMode !== "changes" ? " " : ""}
-            {reviewThreads.length > 0 && viewMode !== "changes"
-              ? "Review threads render inline in Changed only view."
-              : ""}
-          </p>
+        {viewMode !== "edit" && viewMode !== "markdown" && diffPreviewNote ? (
+          <p className="support-copy diff-preview-note">{diffPreviewNote}</p>
         ) : null}
       </div>
     </div>

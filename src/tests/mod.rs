@@ -269,7 +269,6 @@ mod remote_state_events;
 mod remote_sync_noop_stamp;
 mod remote_terminal;
 mod response_board;
-mod review;
 mod runtime_rpc;
 mod server_instance_lock;
 mod session_actions;
@@ -1019,7 +1018,6 @@ pub(crate) fn test_app_state() -> AppState {
         coordination_board_store,
         orchestrator_templates_path: Arc::new(test_temp_root.path().join("orchestrators.json")),
         orchestrator_templates_lock: Arc::new(Mutex::new(())),
-        review_documents_lock: Arc::new(Mutex::new(())),
         engram_carried_poll_lock: Arc::new(Mutex::new(())),
         runtime_retry_slots: RuntimeRetrySlots::default(),
         state_broadcast_senders: StateBroadcastSenders {

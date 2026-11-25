@@ -168,8 +168,8 @@ Make TermAl usable from a phone as a first-class remote companion, not just a sq
 
 ### User promise
 
-"I can check on long-running coding sessions, review diffs, approve or reject actions, and respond
-to review threads from my phone."
+"I can check on long-running coding sessions, review diffs, and approve or reject actions from my
+phone."
 
 ### Core architecture shift
 
@@ -227,7 +227,6 @@ access patterns from Phase 3.
 
 - Presence indicators for who is viewing or controlling a session
 - Shared cursor or selection equivalents where useful
-- Shared diff review threads
 - Multi-user approval and handoff flows
 - Per-user identity on comments, replies, and actions
 - Session-level activity feed for collaborative work

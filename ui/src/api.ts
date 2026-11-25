@@ -410,73 +410,6 @@ export type OpenPathOptions = {
   openInNewTab?: boolean;
 };
 
-export type ReviewCommentAuthor = "user" | "agent";
-export type ReviewThreadStatus = "open" | "resolved" | "applied" | "dismissed";
-
-export type ReviewAnchor =
-  | { kind: "changeSet" }
-  | { kind: "file"; filePath: string }
-  | { kind: "hunk"; filePath: string; hunkHeader: string }
-  | {
-      kind: "line";
-      filePath: string;
-      hunkHeader: string;
-      oldLine?: number | null;
-      newLine?: number | null;
-    };
-
-export type ReviewOrigin = {
-  sessionId: string;
-  messageId: string;
-  agent: string;
-  workdir: string;
-  createdAt: string;
-};
-
-export type ReviewFileEntry = {
-  filePath: string;
-  changeType: "edit" | "create";
-};
-
-export type ReviewComment = {
-  id: string;
-  author: ReviewCommentAuthor;
-  body: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type ReviewThread = {
-  id: string;
-  anchor: ReviewAnchor;
-  status: ReviewThreadStatus;
-  comments: ReviewComment[];
-};
-
-export type ReviewDocument = {
-  version: number;
-  revision: number;
-  changeSetId: string;
-  origin?: ReviewOrigin | null;
-  files?: ReviewFileEntry[];
-  threads?: ReviewThread[];
-};
-
-export type ReviewDocumentResponse = {
-  reviewFilePath: string;
-  review: ReviewDocument;
-};
-
-export type ReviewSummaryResponse = {
-  changeSetId: string;
-  reviewFilePath: string;
-  threadCount: number;
-  openThreadCount: number;
-  resolvedThreadCount: number;
-  commentCount: number;
-  hasThreads: boolean;
-};
-
 type RequestScope = {
   projectId?: string | null;
   sessionId?: string | null;
@@ -1539,51 +1472,6 @@ export function resumePausedQueues(dryRun: boolean, sessionIds?: string[]) {
     method: "POST",
     body: JSON.stringify(sessionIds ? { dryRun, sessionIds } : { dryRun }),
   });
-}
-
-export function fetchReviewDocument(changeSetId: string, scope?: RequestScope) {
-  return request<ReviewDocumentResponse>(
-    buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}`, scope),
-  );
-}
-
-export function saveReviewDocument(
-  changeSetId: string,
-  review: ReviewDocument,
-  scope?: RequestScope,
-) {
-  return request<ReviewDocumentResponse>(
-    buildScopedPath(`/api/reviews/${encodeURIComponent(changeSetId)}`, scope),
-    {
-      method: "PUT",
-      body: JSON.stringify(review),
-    },
-  );
-}
-
-export function fetchReviewSummary(changeSetId: string, scope?: RequestScope) {
-  return request<ReviewSummaryResponse>(
-    buildScopedPath(
-      `/api/reviews/${encodeURIComponent(changeSetId)}/summary`,
-      scope,
-    ),
-  );
-}
-
-function buildScopedPath(path: string, scope?: RequestScope) {
-  const query = new URLSearchParams();
-  const sessionId = scope?.sessionId?.trim();
-  if (sessionId) {
-    query.set("sessionId", sessionId);
-  }
-
-  const projectId = scope?.projectId?.trim();
-  if (projectId) {
-    query.set("projectId", projectId);
-  }
-
-  const queryString = query.toString();
-  return queryString ? `${path}?${queryString}` : path;
 }
 
 export function fetchFile(path: string, scope?: RequestScope) {

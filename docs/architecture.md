@@ -429,9 +429,6 @@ Local operator routes are under `/api`; pair-authenticated domain routes use a d
 | GET | `/api/instructions/search` | Search instruction files for a session/workdir |
 | GET | `/api/events` | SSE stream (state + delta events); `?stateDiff=1` opts into `stateDiff` events (see [SSE Event Stream](#sse-event-stream)) |
 | POST | `/api/events/full-state` | Ask for the next state cut as a marked full `state` (a `stateDiff` base), JSON body `{}`; or, with `{"mode":"cut"}`, for the current cut on the normal path (a `stateDiff` when newer than the base). Idempotent, 204, publishes the current cut at once without a revision bump |
-| GET | `/api/reviews/{change_set_id}` | Read a persisted diff review document |
-| PUT | `/api/reviews/{change_set_id}` | Save a persisted diff review document |
-| GET | `/api/reviews/{change_set_id}/summary` | Read review-thread summary counts |
 | POST | `/api/projects` | Create project |
 | DELETE | `/api/projects/{id}` | Remove the local project reference and return `StateResponse`. Existing sessions and orchestrator instances are detached from the project and remain visible outside project scope. Remote-backed projects are removed only from local state; this route does not delete project data on the remote backend. |
 | PATCH | `/api/projects/{id}/engram` | Enable or disable Engram for a repository-declared project (`enabled`), and turn its Execution Observability on or off (`executionObservability`, default on). No grant field is accepted. See [settings and verification](features/engram-host-adapter.md#settings-and-verification). |
@@ -1670,7 +1667,6 @@ termal/
 |   |-- api_git.rs           # git workflow routes (status/diff/file/commit/push/sync)
 |   |-- api_files.rs         # file read/write + directory list + agent command discovery
 |   |-- api_sse.rs           # state SSE stream + initial-snapshot + fallback payloads
-|   |-- api_review.rs        # review-document CRUD routes
 |   |-- runtime.rs           # shared runtime types + Claude/Codex/ACP command enums
 |   |
 |   |-- # Wire (DTOs)
@@ -1678,7 +1674,6 @@ termal/
 |   |-- wire_messages.rs     # Message enum + interaction request DTOs + parallel-agent types
 |   |-- wire_git.rs          # every Git DTO (request + response + GitDiff types)
 |   |-- wire_terminal.rs     # TerminalCommand DTOs + streaming types + tuning constants
-|   |-- wire_review.rs       # ReviewDocument + threaded-comment shapes
 |   |-- wire_project_digest.rs # project digest DTOs + status/progress text formatters
 |   |
 |   |-- # Remote
@@ -1701,7 +1696,6 @@ termal/
 |   |-- git.rs               # git diff loading, status parsing, worktree readers, repo sync
 |   |-- terminal.rs          # terminal run/stream, process-tree lifecycle, output buffer
 |   |-- windows_launch.rs    # typed native launch, retained handles and separate job lease
-|   |-- review.rs            # review-document persistence + change-set-id validation
 |   |-- workspace_queries.rs # workspace layout CRUD + agent command listing
 |   |-- workspace_watch.rs   # workspace file watcher threads
 |   |-- telegram_runtime.rs  # Telegram relay lifecycle and environment config
@@ -1723,7 +1717,7 @@ termal/
 |       |-- codex_protocol.rs, codex_threads.rs, cursor.rs, file_changes.rs,
 |       |-- git.rs, http_routes.rs, instruction_search.rs, json_rpc.rs,
 |       |-- orchestrator.rs, persist.rs, project_digest.rs, projects.rs,
-|       |-- remote.rs, review.rs, runtime_rpc.rs, session_lifecycle.rs,
+|       |-- remote.rs, runtime_rpc.rs, session_lifecycle.rs,
 |       |-- session_settings.rs, session_stop.rs, session_stop_runtime.rs,
 |       |-- shared_codex.rs, shared_codex_events.rs,
 |       |-- coordination_board_routes.rs, telegram.rs,

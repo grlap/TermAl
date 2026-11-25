@@ -27,7 +27,7 @@
 // Request / response DTOs: `ApprovalRequest`, `UserInputSubmissionRequest`,
 // `McpElicitationSubmissionRequest`, `CodexAppRequestSubmissionRequest`,
 // `CreateSessionRequest`, `CreateProjectRequest`, `UpdateAppSettingsRequest`,
-// `FileQuery`, `InstructionSearchQuery`, `ReviewQuery`,
+// `FileQuery`, `InstructionSearchQuery`,
 // `CodexThreadRollbackRequest`, `WriteFileRequest`, `FileResponse`,
 // `DirectoryEntry`+`DirectoryResponse`, and the full Git diff + status
 // response families.
@@ -37,11 +37,6 @@
 // `TerminalCommandStreamEvent`, `TerminalOutputStream` +
 // `TerminalOutputStreamPayload`, `TerminalStreamErrorPayload` + the
 // terminal limit constants.
-//
-// Review document schema: `ReviewDocument`, `ReviewOrigin`,
-// `ReviewFileEntry`, `ReviewThread`+`ReviewThreadComment`,
-// `ReviewAnchor`, `ReviewCommentAuthor`, `ReviewThreadStatus`,
-// `ReviewDocumentResponse`+`ReviewSummaryResponse`+`ReviewDocumentSummary`.
 //
 // Git operations: `GitFileActionRequest`, `GitCommitRequest`,
 // `GitRepoActionRequest`.
@@ -2761,14 +2756,6 @@ pub(crate) struct FileQuery {
 pub(crate) struct InstructionSearchQuery {
     pub(crate) q: String,
     pub(crate) session_id: String,
-}
-
-/// Represents review query.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ReviewQuery {
-    pub(crate) project_id: Option<String>,
-    pub(crate) session_id: Option<String>,
 }
 
 /// Represents the Codex thread rollback request payload.

@@ -14,8 +14,7 @@ The browser always talks to the local TermAl server. The local server owns the
 browser-facing API, persisted preferences, project list, workspace layouts, and
 event stream. Projects may be bound to the built-in local remote or to an SSH
 remote. Sessions, orchestrator instances, terminal commands, file operations,
-git operations, review documents, and instruction search route from that project
-ownership.
+git operations, and instruction search route from that project ownership.
 
 ## Core model
 
@@ -105,7 +104,6 @@ Project-scoped routes resolve the project first:
 - directory listing
 - git status/diff/file actions/commit/push/sync
 - terminal run and terminal stream
-- review document load/save
 - instruction search
 - orchestrator creation
 

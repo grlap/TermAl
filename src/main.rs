@@ -479,14 +479,6 @@ fn app_router_with_acceptance_policy_limiter(
         .route("/api/instructions/search", get(search_instructions))
         .route("/api/events", get(state_events))
         .route("/api/events/full-state", post(request_full_state))
-        .route(
-            "/api/reviews/{change_set_id}",
-            get(get_review).put(put_review),
-        )
-        .route(
-            "/api/reviews/{change_set_id}/summary",
-            get(get_review_summary),
-        )
         .route("/api/projects", post(create_project))
         .route("/api/projects/{id}", delete(delete_project))
         .route(
@@ -1862,8 +1854,6 @@ mod api_files;
 use api_files::*;
 mod api_sse;
 use api_sse::*;
-mod api_review;
-use api_review::*;
 mod wire;
 use wire::*;
 mod output_encoding;
@@ -1874,8 +1864,6 @@ mod wire_git;
 use wire_git::*;
 mod wire_terminal;
 use wire_terminal::*;
-mod wire_review;
-use wire_review::*;
 mod wire_project_digest;
 use wire_project_digest::*;
 mod wire_messages;
@@ -1886,8 +1874,6 @@ mod git;
 use git::*;
 mod terminal;
 use terminal::*;
-mod review;
-use review::*;
 mod paths;
 use paths::*;
 // Isolated module owns COM lifetimes, pub(super) entry point and platform tests.

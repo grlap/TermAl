@@ -1861,7 +1861,6 @@ export function SessionPaneView({
             <DiffPanel
               appearance={editorAppearance}
               changeType={activeDiffPreviewTab.changeType}
-              changeSetId={activeDiffPreviewTab.changeSetId ?? null}
               fontSizePx={editorFontSizePx}
               diff={activeDiffPreviewTab.diff}
               documentEnrichmentNote={
@@ -1878,12 +1877,6 @@ export function SessionPaneView({
               language={activeDiffPreviewTab.language ?? null}
               sessionId={activeDiffOriginSessionId}
               projectId={activeDiffOriginProjectId}
-              originAgentName={
-                activeDiffOriginSessionId
-                  ? (activeContextSessionLookup.get(activeDiffOriginSessionId)
-                      ?.agent ?? null)
-                  : null
-              }
               workspaceRoot={activeDiffWorkspaceRoot}
               workspaceFilesChangedEvent={workspaceFilesChangedEvent}
               onOpenPath={(path, options) =>
@@ -1894,16 +1887,6 @@ export function SessionPaneView({
                   activeDiffOriginProjectId,
                   options,
                 )
-              }
-              onInsertReviewIntoPrompt={
-                activeDiffOriginSessionId
-                  ? (_reviewFilePath, prompt) =>
-                      onInsertReviewIntoPrompt(
-                        activeDiffOriginSessionId,
-                        pane.id,
-                        prompt,
-                      )
-                  : undefined
               }
               onOpenConversation={
                 activeDiffOriginSessionId

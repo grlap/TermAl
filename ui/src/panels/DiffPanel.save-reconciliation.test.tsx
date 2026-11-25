@@ -3,7 +3,7 @@ import { forwardRef, useEffect, useImperativeHandle, type ForwardedRef } from "r
 import mermaid from "mermaid";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchFile, fetchReviewDocument, saveReviewDocument } from "../api";
+import { fetchFile } from "../api";
 import { copyTextToClipboard } from "../clipboard";
 import { DiffPanel } from "./DiffPanel";
 import { hasOverlappingMarkdownCommitRanges } from "./markdown-commit-ranges";
@@ -13,8 +13,6 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     fetchFile: vi.fn(),
-    fetchReviewDocument: vi.fn(),
-    saveReviewDocument: vi.fn(),
   };
 });
 
@@ -169,8 +167,6 @@ vi.mock("../MonacoCodeEditor", () => ({
 }));
 
 const fetchFileMock = vi.mocked(fetchFile);
-const fetchReviewDocumentMock = vi.mocked(fetchReviewDocument);
-const saveReviewDocumentMock = vi.mocked(saveReviewDocument);
 const copyTextToClipboardMock = vi.mocked(copyTextToClipboard);
 const hasOverlappingMarkdownCommitRangesMock = vi.mocked(
   hasOverlappingMarkdownCommitRanges,
@@ -258,8 +254,6 @@ function createDeferred<T>() {
 describe("DiffPanel", () => {
   beforeEach(() => {
     fetchFileMock.mockReset();
-    fetchReviewDocumentMock.mockReset();
-    saveReviewDocumentMock.mockReset();
     copyTextToClipboardMock.mockReset();
     copyTextToClipboardMock.mockResolvedValue(undefined);
     hasOverlappingMarkdownCommitRangesMock.mockClear();

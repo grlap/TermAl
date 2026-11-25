@@ -206,8 +206,8 @@ there are 29 such call sites in 9 files outside the `engram_*` fragments:
   abandonments and edits;
 - `turn_dispatch.rs` (5) and `session_lifecycle.rs` (1) report turn starts
   and the session's worktree;
-- `terminal.rs` (4), `api_git.rs` (6), `api_files.rs` (2) and
-  `api_review.rs` (2) report host writes;
+- `terminal.rs` (4), `api_git.rs` (6) and `api_files.rs` (2) report host
+  writes;
 - `workspace_watch.rs` (1) reports each watcher event;
 - `test_runs.rs` (1) polls carried runs on its tick.
 
@@ -1636,8 +1636,8 @@ After:
    authoritative, with its own tests.
 4. No stream consumer changes check state in this step.
 
-The host-write calls in `terminal.rs`, `api_git.rs`, `api_files.rs` and
-`api_review.rs`, the turn-start calls, the watcher call and the test-run
+The host-write calls in `terminal.rs`, `api_git.rs` and `api_files.rs`,
+the turn-start calls, the watcher call and the test-run
 tick's call become distinct facade operations for host facts in the same
 step, with their bodies unchanged. After it, no file outside the component
 names a function of the check machinery.

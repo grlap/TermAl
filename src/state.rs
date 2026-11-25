@@ -1288,9 +1288,6 @@ pub(crate) struct AppState {
     /// Must not be held at the same time as `self.inner`; template file I/O happens
     /// outside the main state mutex so we never invert lock ordering.
     pub(crate) orchestrator_templates_lock: Arc<Mutex<()>>,
-    /// Must not be held at the same time as `self.inner`; review file I/O stays
-    /// outside the main state mutex so disk writes do not stall unrelated state work.
-    pub(crate) review_documents_lock: Arc<Mutex<()>>,
     /// Serializes carried-run polls (`EngramHost::test_run_tick`), so a
     /// terminal read made off the state lock is stored before another poll,
     /// or a checkpoint's settlement after it, can read the same run.

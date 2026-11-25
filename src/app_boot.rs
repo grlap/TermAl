@@ -906,7 +906,6 @@ impl AppState {
             coordination_board_store,
             orchestrator_templates_path: Arc::new(orchestrator_templates_path),
             orchestrator_templates_lock: Arc::new(Mutex::new(())),
-            review_documents_lock: Arc::new(Mutex::new(())),
             engram_carried_poll_lock: Arc::new(Mutex::new(())),
             runtime_retry_slots: RuntimeRetrySlots::default(),
             state_broadcast_senders,

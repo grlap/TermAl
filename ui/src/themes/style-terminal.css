@@ -29,10 +29,7 @@
 [data-ui-style="terminal-style"] .pane-tab-context-menu,
 [data-ui-style="terminal-style"] .pane-tab-status-tooltip,
 [data-ui-style="terminal-style"] .session-kill-popover,
-[data-ui-style="terminal-style"] .session-rename-popover,
-[data-ui-style="terminal-style"] .diff-review-section,
-[data-ui-style="terminal-style"] .diff-review-composer,
-[data-ui-style="terminal-style"] .diff-review-thread {
+[data-ui-style="terminal-style"] .session-rename-popover {
   border-radius: var(--terminal-shell-radius);
 }
 
@@ -58,10 +55,7 @@
 [data-ui-style="terminal-style"] .session-rename-save,
 [data-ui-style="terminal-style"] .composer-attachment-remove,
 [data-ui-style="terminal-style"] .composer-input,
-[data-ui-style="terminal-style"] .composer-slash-option,
-[data-ui-style="terminal-style"] .structured-diff-comment-button,
-[data-ui-style="terminal-style"] .diff-review-action-button,
-[data-ui-style="terminal-style"] .diff-review-composer-label textarea {
+[data-ui-style="terminal-style"] .composer-slash-option {
   border-radius: var(--terminal-control-radius);
 }
 

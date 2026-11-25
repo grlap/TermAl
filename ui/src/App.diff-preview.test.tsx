@@ -556,6 +556,88 @@ describe("App diff preview", () => {
     });
   });
 
+  it("opens a project-scoped diff with a change set id without requesting a review document", async () => {
+    await withVerifiedNoReactActWarnings(async () => {
+      const originalEventSource = globalThis.EventSource;
+      const originalResizeObserver = globalThis.ResizeObserver;
+      const originalFetch = globalThis.fetch;
+      const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const fetchStateSpy = vi.spyOn(api, "fetchState").mockResolvedValue(makeStateResponse({
+        revision: 1,
+        projects: [],
+        orchestrators: [],
+        workspaces: [
+          {
+            id: "workspace-test",
+            revision: 1,
+            updatedAt: "2026-04-15 09:00:00",
+            controlPanelSide: "left",
+          },
+        ],
+        sessions: [],
+      }));
+      const fetchWorkspaceLayoutSpy = vi
+        .mocked(api.fetchWorkspaceLayout)
+        .mockResolvedValue(
+          makeWorkspaceLayoutResponse({
+            id: "workspace-test",
+            workspace: makeRestoredGitDiffWorkspace({
+              originProjectId: "project-diff-scope",
+            }),
+          }),
+        );
+      const fetchGitDiffSpy = vi
+        .spyOn(api, "fetchGitDiff")
+        .mockResolvedValue(makeRestoredGitDiffResponse());
+      const fetchMock = vi.fn(
+        async (_input: RequestInfo | URL, _init?: RequestInit) =>
+          new Response(JSON.stringify({ error: "not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "EventSource",
+        EventSourceMock as unknown as typeof EventSource,
+      );
+      vi.stubGlobal(
+        "ResizeObserver",
+        ResizeObserverMock as unknown as typeof ResizeObserver,
+      );
+      const scrollIntoViewSpy = stubScrollIntoView();
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        "/?workspace=workspace-test",
+      );
+
+      try {
+        await renderApp();
+
+        expect(
+          await screen.findByText("After restored body."),
+        ).toBeInTheDocument();
+        await settleAsyncUi();
+
+        const requestedUrls = fetchMock.mock.calls.map(([input]) =>
+          String(input instanceof Request ? input.url : input),
+        );
+        expect(requestedUrls.filter((url) => url.includes("/api/reviews"))).toEqual([]);
+      } finally {
+        window.history.replaceState(window.history.state, "", originalUrl);
+        scrollIntoViewSpy.mockRestore();
+        fetchStateSpy.mockRestore();
+        fetchWorkspaceLayoutSpy.mockRestore();
+        fetchGitDiffSpy.mockRestore();
+        restoreGlobal("fetch", originalFetch);
+        restoreGlobal("EventSource", originalEventSource);
+        restoreGlobal("ResizeObserver", originalResizeObserver);
+      }
+    });
+  });
+
   it("forwards diff preview save options through the App save adapter", async () => {
     await withVerifiedNoReactActWarnings(async () => {
       const originalEventSource = globalThis.EventSource;

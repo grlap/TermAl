@@ -3,7 +3,7 @@
 // Owns settings updates, queued prompts, approval decisions, structured
 // user input, MCP elicitation, and Codex app-request submission routes.
 // Does not own review-document persistence or protocol classifiers.
-// Split from: src/tests/review.rs.
+// Split from: src/tests/review.rs (since removed).
 
 use super::*;
 
