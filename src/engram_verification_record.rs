@@ -867,6 +867,8 @@ fn engram_verification_record_stage_name(stage: &Value) -> Result<&str, String> 
 
 /// Use the same stage classification for the named refusal and the body.
 fn engram_verification_record_classify_stage(
+    registration: &TestRunRegistration,
+    request: &Value,
     stage: &Value,
     planned: &HashMap<String, Vec<String>>,
     mode: EngramVerificationRecordMode,
@@ -898,6 +900,47 @@ fn engram_verification_record_classify_stage(
         } else {
             engram_verification_record_stage_argv(stage, planned)?.1
         };
+    if mode == EngramVerificationRecordMode::Focused
+        && name == "focused"
+        && let Some(plan) = planned
+            .get(name)
+            .filter(|plan| engram_is_focused_dart_sdk_test(plan))
+    {
+        let root = FsPath::new(
+            request
+                .get("root")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        );
+        // The committed request is already bound by registration identity.
+        // Match the named root directly before giving Dart Test credit.
+        if request.get("detached").and_then(Value::as_bool) == Some(true)
+            || !engram_supports_focused_dart_test(plan)
+            || !registration.named_root.as_ref().is_some_and(|named| {
+                engram_dart_worktree_matches(FsPath::new(&named.workspace_id), root)
+            })
+        {
+            return Ok((name.to_owned(), argv, None));
+        }
+        let command = if unrun {
+            Some(plan.clone())
+        } else {
+            engram_focused_dart_check_argv(
+                FsPath::new(&registration.run_directory),
+                root,
+                stage,
+                plan,
+            )
+        };
+        return Ok(match command {
+            Some(command) => (
+                name.to_owned(),
+                command,
+                Some(EngramVerificationRecordCheckKind::Test),
+            ),
+            None => (name.to_owned(), argv, None),
+        });
+    }
     let kind =
         engram_verification_record_classify_argv(mode, name, &argv, test_stages, admit_full_lint);
     Ok((name.to_owned(), argv, kind))
@@ -906,6 +949,7 @@ fn engram_verification_record_classify_stage(
 /// The stages of a run that are neither a test, build nor admitted lint check
 /// (`engram_verification_record_classify_argv`), in results order.
 pub(crate) fn engram_verification_record_unclassified_stages(
+    registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
 ) -> Vec<String> {
@@ -919,6 +963,8 @@ pub(crate) fn engram_verification_record_unclassified_stages(
         .flatten()
         .filter_map(|stage| {
             match engram_verification_record_classify_stage(
+                registration,
+                request,
                 stage,
                 &planned,
                 mode,
@@ -937,7 +983,7 @@ pub(crate) fn engram_verification_record_registration_unclassified_stages(
     request: &Value,
     results: &Value,
 ) -> Vec<String> {
-    let mut stages = engram_verification_record_unclassified_stages(request, results);
+    let mut stages = engram_verification_record_unclassified_stages(registration, request, results);
     if registration.declared_native.is_some() && registration.declared_terminal.is_some() {
         // The body builder separately checks the actual command against this
         // captured binding. Merely having a focused stage is insufficient.
@@ -1036,13 +1082,17 @@ fn engram_verification_record_run_command(
 /// build nor admitted lint check (`engram_verification_record_check_kind`)
 /// fails the build of the whole record rather than leaving it out.
 fn engram_verification_record_check(
+    registration: &TestRunRegistration,
+    request: &Value,
     stage: &Value,
     planned: &HashMap<String, Vec<String>>,
     mode: EngramVerificationRecordMode,
     test_stages: &[String],
     admit_full_lint: bool,
-) -> Result<EngramVerificationRecordCheck, String> {
+) -> Result<EngramVerificationRecordCheck, EngramVerificationRecordBuildError> {
     let (name, argv, kind) = engram_verification_record_classify_stage(
+        registration,
+        request,
         stage,
         planned,
         mode,
@@ -1056,12 +1106,23 @@ fn engram_verification_record_check(
         TestRunStageState::Running => EngramVerificationRecordCheckOutcome::Indeterminate,
     };
     let Some(kind) = kind else {
-        return Err(format!(
-            "stage {name} is neither a test, build nor admitted lint check"
-        ));
+        return Err(
+            format!("stage {name} is neither a test, build nor admitted lint check").into(),
+        );
     };
+    let dart = mode == EngramVerificationRecordMode::Focused
+        && name == "focused"
+        && engram_supports_focused_dart_test(&argv);
     let command = engram_verification_record_command_text(&argv);
     let exit = stage.get("code").and_then(Value::as_i64);
+    let mut refs = Vec::new();
+    let command_ref = format!("command:{command}");
+    if command_ref.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
+        refs.push(command_ref);
+    }
+    if let Some(code) = exit {
+        refs.push(format!("exit:{code}"));
+    }
     let outcome_word = match outcome {
         EngramVerificationRecordCheckOutcome::Passed => "passed",
         EngramVerificationRecordCheckOutcome::Failed => "failed",
@@ -1072,15 +1133,7 @@ fn engram_verification_record_check(
         Some(code) => format!("{name}: {outcome_word} (exit {code})"),
         None => format!("{name}: {outcome_word}"),
     };
-    let mut refs = Vec::new();
-    let command_ref = format!("command:{command}");
-    if command_ref.len() <= ENGRAM_CHECK_REF_MAX_BYTES {
-        refs.push(command_ref);
-    }
-    if let Some(code) = exit {
-        refs.push(format!("exit:{code}"));
-    }
-    Ok(EngramVerificationRecordCheck {
+    let mut check = EngramVerificationRecordCheck {
         stage: name,
         check_kind: kind,
         check_fingerprint: EngramHost::normalized_check_fingerprint(&command),
@@ -1091,7 +1144,15 @@ fn engram_verification_record_check(
         summary: Some(summary),
         refs,
         counts: engram_verification_record_counts(stage),
-    })
+    };
+    if dart {
+        engram_focused_dart_check_result(
+            FsPath::new(&registration.run_directory),
+            stage,
+            &mut check,
+        )?;
+    }
+    Ok(check)
 }
 
 pub(crate) fn engram_verification_record_declared_check(
@@ -1204,6 +1265,24 @@ pub(crate) fn engram_verification_record_results_are_terminal(
             .is_some_and(|bytes| file_content_hash(&bytes) == terminal.results_digest)
 }
 
+#[derive(Debug)]
+pub(crate) enum EngramVerificationRecordBuildError {
+    RetryDartReporter,
+    Invalid(String),
+}
+
+impl From<String> for EngramVerificationRecordBuildError {
+    fn from(detail: String) -> Self {
+        Self::Invalid(detail)
+    }
+}
+
+impl From<&str> for EngramVerificationRecordBuildError {
+    fn from(detail: &str) -> Self {
+        Self::Invalid(detail.to_owned())
+    }
+}
+
 /// The record of a bound committed-input run, from its registration and its
 /// own request and terminal results; why not, when the run cannot emit one.
 pub(crate) fn engram_verification_record_body(
@@ -1214,15 +1293,30 @@ pub(crate) fn engram_verification_record_body(
     engram_verification_record_build_body(registration, request, results, None)
 }
 
-// A retained body is checked in its original format, never converted during
-// replay. Only that historical reader can reconstruct a commit projection
-// from source-bearing artifacts; a fresh record keeps the complete identity.
 pub(crate) fn engram_verification_record_build_body(
     registration: &TestRunRegistration,
     request: &Value,
     results: &Value,
     retained_input: Option<&EngramVerificationRecordInput>,
 ) -> Result<EngramVerificationRecordBody, String> {
+    engram_verification_record_try_build_body(registration, request, results, retained_input)
+        .map_err(|error| match error {
+            EngramVerificationRecordBuildError::RetryDartReporter => {
+                "the captured Dart JSON reporter is temporarily unreadable".to_owned()
+            }
+            EngramVerificationRecordBuildError::Invalid(detail) => detail,
+        })
+}
+
+// A retained body is checked in its original format, never converted during
+// replay. Only that historical reader can reconstruct a commit projection
+// from source-bearing artifacts; a fresh record keeps the complete identity.
+fn engram_verification_record_try_build_body(
+    registration: &TestRunRegistration,
+    request: &Value,
+    results: &Value,
+    retained_input: Option<&EngramVerificationRecordInput>,
+) -> Result<EngramVerificationRecordBody, EngramVerificationRecordBuildError> {
     let body = engram_verification_record_build_with_stage_policy(
         registration,
         request,
@@ -1272,15 +1366,16 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
     results: &Value,
     retained_input: Option<&EngramVerificationRecordInput>,
     admit_full_lint: bool,
-) -> Result<EngramVerificationRecordBody, String> {
+) -> Result<EngramVerificationRecordBody, EngramVerificationRecordBuildError> {
     if let Some(start) = registration.declared_native.as_ref() {
-        return engram_verification_record_native_body(registration, request, results, start);
+        return engram_verification_record_native_body(registration, request, results, start)
+            .map_err(Into::into);
     }
     if !test_run_request_is_committed_input(request) {
-        return Err("the run is not a committed-input run".to_owned());
+        return Err("the run is not a committed-input run".into());
     }
     if !engram_verification_record_results_are_terminal(registration, results) {
-        return Err("the run has no terminal result".to_owned());
+        return Err("the run has no terminal result".into());
     }
     let input = TestRunCommittedInput::read(results)
         .ok_or_else(|| "the run records no committed input".to_owned())?;
@@ -1290,7 +1385,7 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
         .filter(|_| input.clean_before)
         .ok_or_else(|| "the run was refused before any stage ran".to_owned())?;
     let (Some(outcome), Some(after)) = (input.outcome, input.after.as_ref()) else {
-        return Err("the run records no post-run classification".to_owned());
+        return Err("the run records no post-run classification".into());
     };
     let mode = engram_verification_record_mode(request);
     let planned = engram_verification_record_planned_argv(request);
@@ -1302,18 +1397,25 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
         .into_iter()
         .flatten()
     {
-        let check =
-            engram_verification_record_check(stage, &planned, mode, &test_stages, admit_full_lint)?;
+        let check = engram_verification_record_check(
+            registration,
+            request,
+            stage,
+            &planned,
+            mode,
+            &test_stages,
+            admit_full_lint,
+        )?;
         if checks
             .iter()
             .any(|earlier: &EngramVerificationRecordCheck| earlier.stage == check.stage)
         {
-            return Err(format!("stage {} is recorded twice", check.stage));
+            return Err(format!("stage {} is recorded twice", check.stage).into());
         }
         checks.push(check);
     }
     if checks.is_empty() {
-        return Err("the run records no stage".to_owned());
+        return Err("the run records no stage".into());
     }
     let historical = retained_input
         .is_some_and(|input| matches!(input, EngramVerificationRecordInput::Commit { .. }));
@@ -1328,15 +1430,14 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
         match (admitted.compare(&before), before.compare(&after)) {
             (None, _) | (_, None) => {
                 return Err(
-                    "the owner source_id formats across the run boundaries are incomparable"
-                        .to_owned(),
+                    "the owner source_id formats across the run boundaries are incomparable".into(),
                 );
             }
             (Some(true), Some(true)) if before.commit == commit => {}
-            _ => return Err("the owner source_id differs across the run boundaries".to_owned()),
+            _ => return Err("the owner source_id differs across the run boundaries".into()),
         }
         if !before.is_clean() {
-            return Err("the owner source_id contradicts the clean committed input".to_owned());
+            return Err("the owner source_id contradicts the clean committed input".into());
         }
         Some((before, after))
     } else {
@@ -1347,7 +1448,7 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
         // ordinary committed-input policy even when rebuilding a held receipt.
         if outcome != TestRunCommittedInputOutcome::Clean || !after.clean || !after.paths.is_empty()
         {
-            return Err("the run's post-run committed input is not clean".to_owned());
+            return Err("the run's post-run committed input is not clean".into());
         }
         let (before, after) = endpoints.ok_or("the run records no complete owner source_id")?;
         (
@@ -2142,6 +2243,7 @@ fn engram_verification_record_prepare_noting(
     registration: &TestRunRegistration,
     no_record: &std::cell::Cell<bool>,
 ) -> EngramVerificationRecordPrepared {
+    use EngramVerificationRecordBuildError::{Invalid, RetryDartReporter};
     use EngramVerificationRecordPrepared as Prepared;
     if !engram_verification_record_registration_bound(registration) {
         return Prepared::NotEligible;
@@ -2212,13 +2314,16 @@ fn engram_verification_record_prepare_noting(
             return pending(EngramVerificationRecordPending::BodyUnreadable);
         };
         let rebuilt = match inputs() {
-            Ok((request, results)) => engram_verification_record_build_body(
+            Ok((request, results)) => match engram_verification_record_try_build_body(
                 registration,
                 &request,
                 &results,
                 Some(&frozen.body.input),
-            )
-            .ok(),
+            ) {
+                Ok(body) => Some(body),
+                Err(RetryDartReporter) => return Prepared::Waiting,
+                Err(Invalid(_)) => None,
+            },
             // Results that cannot be read just now are read again on a later
             // tick; only readable inputs can show the body is not the host's.
             Err(Prepared::Waiting) => return Prepared::Waiting,
@@ -2264,19 +2369,20 @@ fn engram_verification_record_prepare_noting(
             engram_verification_record_frozen_text(&run_dir, &registration.run_id, text)
         })
     });
-    let built = match retained.as_ref() {
-        Some(frozen) => engram_verification_record_build_body(
-            registration,
-            &request,
-            &results,
-            Some(&frozen.body.input),
-        ),
-        None => engram_verification_record_body(registration, &request, &results),
-    }
-    .and_then(|body| engram_verification_record_text(&body).map(|text| (body, text)));
+    let built = engram_verification_record_try_build_body(
+        registration,
+        &request,
+        &results,
+        retained.as_ref().map(|frozen| &frozen.body.input),
+    )
+    .and_then(|body| {
+        let text = engram_verification_record_text(&body)?;
+        Ok((body, text))
+    });
     let (rebuilt, rebuilt_text) = match built {
         Ok(built) => built,
-        Err(detail) => {
+        Err(RetryDartReporter) => return Prepared::Waiting,
+        Err(Invalid(detail)) => {
             let changes = registration
                 .declared_native
                 .as_ref()

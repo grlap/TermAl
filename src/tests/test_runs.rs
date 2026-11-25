@@ -66,7 +66,13 @@ impl RunFixture {
     fn runs_dir(&self) -> PathBuf {
         // Discovery enumerates the user-facing common directory. Native-byte
         // locator identity is canonicalized separately by the index.
-        normalize_user_facing_path(&self.root.join(".git").join("review-runs"))
+        let dot_git = self.root.join(".git");
+        let directory = if dot_git.is_file() {
+            engram_git_run_directory(&self.root).expect("a linked worktree's Git run directory")
+        } else {
+            dot_git.join("review-runs")
+        };
+        normalize_user_facing_path(&directory)
     }
 
     fn refresh(&self, alive: &[u32]) -> bool {

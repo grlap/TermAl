@@ -715,23 +715,40 @@ impl AppState {
                 binding,
             );
         }
-        let Some(command) = recognised
+        let observation_command = recognised
             .as_ref()
-            .or_else(|| declared.as_ref().map(|(command, _, _)| command))
-        else {
+            .or_else(|| declared.as_ref().map(|(command, _, _)| command));
+        let dart_observation = if observation_command.is_none() {
+            engram_observed_dart_launcher(ran, provenance)
+        } else {
+            None
+        };
+        let Some(command) = observation_command.or(dart_observation.as_ref()) else {
             return TestCommandOriginalStart::ThisTurn;
         };
         if command.kind != EngramVerificationKind::Test {
             return TestCommandOriginalStart::ThisTurn;
         }
-        let worktree = engram_check_worktree_from(
-            command,
-            FsPath::new(&pending.workdir),
-            places.as_deref(),
-            None,
-        )
-        .map(|target| test_run_display_path(&target.root))
-        .unwrap_or_default();
+        let workdir = FsPath::new(&pending.workdir);
+        let target = if dart_observation.is_some() {
+            // An explicit cwd at the start belongs to the original
+            // invocation. A late frame can supply a previously missing cwd.
+            let directories = match pending.directories.as_deref() {
+                Some(directories @ [Some(_)]) => Some(directories),
+                _ => places.as_deref(),
+            };
+            engram_dart_observation_worktree(
+                command,
+                workdir,
+                directories,
+                pending.origin.source_root.as_ref(),
+            )
+        } else {
+            engram_check_worktree_from(command, workdir, places.as_deref(), None)
+        };
+        let worktree = target
+            .map(|target| test_run_display_path(&target.root))
+            .unwrap_or_default();
         let id = pending.origin.execution_id();
         self.observe_test_command_start(
             pending.origin,
@@ -803,8 +820,12 @@ impl AppState {
         {
             return;
         }
-        let launch_only =
-            native.is_none() && EngramHost::is_launch_only(command, EngramCommandExit::Code(0));
+        let launch_only = native.is_none()
+            && (EngramHost::is_launch_only(command, EngramCommandExit::Code(0))
+                || command
+                    .argv
+                    .get(1..)
+                    .is_some_and(|args| engram_is_observed_dart_launcher(&command.program, args)));
         let observation = TestRunCommandObservation {
             execution_id: execution_id.clone(),
             runtime_identity,
