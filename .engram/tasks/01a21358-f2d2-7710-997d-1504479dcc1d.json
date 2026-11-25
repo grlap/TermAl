@@ -1,0 +1,28 @@
+{
+  "id": "01a21358-f2d2-7710-997d-1504479dcc1d",
+  "external_ref": null,
+  "title": "Auto-schedule acceptance evaluation for portable and bound verification records using the authoritative aggregate run outcome",
+  "outcome": "Auto-schedule acceptance evaluation for portable and bound verification records using the authoritative aggregate run outcome",
+  "acceptance": [
+    "Auto-schedule acceptance evaluation for portable and bound verification records using the authoritative aggregate run outcome is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "acceptance-needed",
+    "cross-project"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a21357-bd6b-7c72-8fe7-b9a7b040cc2b",
+  "external_ref": null,
+  "title": "Extract scheduled acceptance admission checks from the manual evaluation API",
+  "outcome": "Give the scheduled state machine a clear boundary around its canonical input, claim, obligation and supersession checks. Maintain the existing interactive evaluation pipeline and source/evidence ordering while reducing added scheduling branches in the large API module.",
+  "acceptance": [
+    "Extract scheduled acceptance admission checks from the manual evaluation API is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "acceptance",
+    "architecture",
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a2136b-795d-7d40-9809-43799fda16e7",
+  "external_ref": null,
+  "title": "Attach focused Dart receipts for PowerShell arguments ending in a literal backslash",
+  "outcome": "For a selector-free foreground launch with established PowerShell dialect, decode the source quoting correctly when a quoted option value ends in a backslash, and retain exact registered argv matching.",
+  "acceptance": [
+    "A foreground PowerShell fixture with a double-quoted --plain-name value ending in a literal backslash attaches its own matching receipt. A different decoded or registered argv, and shell composition, remain refused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

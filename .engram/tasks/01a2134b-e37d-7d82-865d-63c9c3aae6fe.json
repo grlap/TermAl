@@ -1,0 +1,29 @@
+{
+  "id": "01a2134b-e37d-7d82-865d-63c9c3aae6fe",
+  "external_ref": null,
+  "title": "Causal completion planning sweep: one row's refused pending write aborts the whole sweep and drops hinted plans",
+  "outcome": "A refused pending-state write for one row in the ordinary causal completion planning sweep is isolated to that row. It is counted, the row's retry position still advances, healthy rows are still planned, and plans already collected from hints are kept.",
+  "acceptance": [
+    "In MailboxStore::causal_test_completion_plans_without, a failed note_causal_pending (or rotate) for one row is counted with its stage and does not abort the shared transaction; the other rows of the scan are still planned and committed, and the refused row does not keep the front retry position forever.",
+    "In read_ready_causal_test_completions, a failed ordinary sweep keeps the plans already taken from completion-ready hints and still reads them.",
+    "A behavioural test refuses the pending write for one ordinary row next to a healthy row and asserts that the healthy row is delivered and the failure is counted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "pre-existing",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a21309-cf09-7e11-be13-32e1bfb37b06",
+  "external_ref": null,
+  "title": "Attach full-output Dart/Flutter test receipts when the request argv exceeds the launch display bounds",
+  "outcome": "Attach full-output Dart/Flutter test receipts when the request argv exceeds the launch display bounds",
+  "acceptance": [
+    "Attach full-output Dart/Flutter test receipts when the request argv exceeds the launch display bounds is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "flutter",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -13,12 +13,12 @@
   "labels": [],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "cancelled",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
-  "disposal_reason": null,
+  "disposal_reason": "Fixed inside w-e8c7db25b458, which landed as master 29ad6709 (seal 464c4ff4): docs/architecture.md lists POST /api/queues/resume-paused, linking to docs/features/agent-mailboxes.md.",
   "completion": null
 }

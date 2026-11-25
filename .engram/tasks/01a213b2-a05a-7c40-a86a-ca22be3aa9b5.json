@@ -1,0 +1,29 @@
+{
+  "id": "01a213b2-a05a-7c40-a86a-ca22be3aa9b5",
+  "external_ref": null,
+  "title": "The causal-completion planning sweep rewrites an unchanged pending reason, bumping attempts before the retry runs",
+  "outcome": "An ordinary planning tick no longer rewrites a pending reason that did not change, while retry-order rotation stays fair.",
+  "acceptance": [
+    "When CausalTestCompletionPlan::replaces returns None, the planning sweep keeps the stored pending reason and its lastAttemptAt; it does not rewrite them.",
+    "Retry-order rotation across pending rows stays fair, shown by an observable test of the order rows are pulled in over repeated planning ticks.",
+    "A test observes through diagnostics that a planning tick which changes no reason leaves the reason and its attempt metadata as they were."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "causal-completion",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

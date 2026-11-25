@@ -1,0 +1,30 @@
+{
+  "id": "01a21357-bd10-7151-a232-848a9380113d",
+  "external_ref": null,
+  "title": "Coalesce stale scheduled acceptance release prompts",
+  "outcome": "Each schedule exposes its newest one-shot release token to the configured scheduler without leaving older unsent notices queued. Requalification and returning an unused slot should preserve useful delivery, active prompt ownership, and the durable current token. Verify repeated updates while the scheduler queue is paused result in one current notice and no stale-token turns.",
+  "acceptance": [
+    "Coalesce stale scheduled acceptance release prompts is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported",
+    "scheduler"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

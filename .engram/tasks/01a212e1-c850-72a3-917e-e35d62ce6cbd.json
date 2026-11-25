@@ -1,0 +1,30 @@
+{
+  "id": "01a212e1-c850-72a3-917e-e35d62ce6cbd",
+  "external_ref": null,
+  "title": "Expose why a restart named-root refresh was refused",
+  "outcome": "A supported diagnostic distinguishes a refused prospective named-root recovery after restart while preserving the closed predecessor's refusal.",
+  "acceptance": [
+    "A supported diagnostic records a safe, actionable reason when an eligible restart named-root refresh is refused.",
+    "Behavioral coverage verifies the diagnostic excludes private payloads and does not change the already-closed turn's refusal or evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "engram-host-adapter",
+    "execution-observability",
+    "observability"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1c1ae-9b67-76a3-bf05-1d8a8991b237",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

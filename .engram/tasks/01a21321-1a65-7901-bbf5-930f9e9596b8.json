@@ -1,0 +1,28 @@
+{
+  "id": "01a21321-1a65-7901-bbf5-930f9e9596b8",
+  "external_ref": null,
+  "title": "Recognise literal % and ! in safe Unix path names for Dart/Flutter launcher runs",
+  "outcome": "Recognise literal % and ! in safe Unix path names for Dart/Flutter launcher runs",
+  "acceptance": [
+    "Recognise literal % and ! in safe Unix path names for Dart/Flutter launcher runs is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "flutter",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

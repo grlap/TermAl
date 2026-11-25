@@ -1,0 +1,29 @@
+{
+  "id": "01a213b2-b864-77a0-966a-7994ff4e436f",
+  "external_ref": null,
+  "title": "Add a ready-path regression test: a hinted pull over a saved incomplete settlement with a stale pull reason shows admission_pending",
+  "outcome": "The ready (hinted) path's saved-settlement branch is covered by an observable test, not only by its shared transition with the planning sweep.",
+  "acceptance": [
+    "A test saves an incomplete causal settlement and writes a stale pull reason (for example origin_timeout) over it. It queues a ready hint for that row and runs the ready read, or a recovery tick stopped before the worker's outcome write. It then asserts through diagnostics that the reason is admission_pending.",
+    "The test fails on a build whose ready path keeps the stale pull reason, and does not mirror the implementation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "causal-completion",
+    "review-low",
+    "test-gap"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

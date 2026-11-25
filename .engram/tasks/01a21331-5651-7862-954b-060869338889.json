@@ -1,0 +1,28 @@
+{
+  "id": "01a21331-5651-7862-954b-060869338889",
+  "external_ref": null,
+  "title": "Causal settlement replay leaves a stale settlement-failure reason when a later incomplete save succeeds before the worker's outcome write",
+  "outcome": "After a settlement read or save failure, the next successful incomplete settlement save publishes the admission phase in the same transaction. An interruption before the worker's separate outcome write then leaves the row naming the new per-target blocker, not the previous settlement failure.",
+  "acceptance": [
+    "save_causal_test_settlement refreshes the pending reason to admission_pending in the same transaction whenever it commits an incomplete settlement over a row whose reason is a settlement failure (settlement_read_failed, settlement_save_failed or admission_failed), not only for the first save.",
+    "A behavioural test replays a settlement after a recorded settlement_save_failed, interrupts before the worker's outcome write, and asserts that the row shows admission_pending with the saved per-target check."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

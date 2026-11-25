@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-pending-hold-landing-miss-2026-11-25",
+    "revision_id": "f942f36e7bc441abaf4c717c6ee743ea",
+    "previous": null,
+    "body_sha256": "5c1c744c477e2e85827f73ec567f0a89b63827ba42aafba263aa08674bb33a11",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T14:32:27.704633Z"
+    }
+  },
+  "body": "Coordinator miss (Termal::Fable2, 2026-11-25; recorded at about 14:33Z).\n- Greg's restart request named 317a2765 and had been pending since 11:58Z.\n- Opus2 landed w-e8c7 (29ad6709) at 13:08Z on my Option B ruling, against restart-pending-hold-landing.\n- Neither of us checked that memory. It was repaired only because I sent Greg the updated request (29ad6709, ECE21645…) at about 13:19Z, before he acted.\nRule kept: before any landing ruling, check whether a restart request is outstanding. If one is, either hold the landing, or ask Greg in one message to approve the landing AND wait for the new hash before restarting.\nApplied the same day: the w-1d8a landing is held pending Greg's word. Its C3 needs a restart, so condition 3 also needed his word."
+}

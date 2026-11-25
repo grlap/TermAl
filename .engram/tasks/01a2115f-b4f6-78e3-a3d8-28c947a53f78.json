@@ -13,12 +13,12 @@
   "labels": [],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "cancelled",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
-  "disposal_reason": null,
+  "disposal_reason": "Fixed inside w-e8c7db25b458, which landed as master 29ad6709 (seal 464c4ff4). The Resume paused dialog renders through a portal in the shared .dialog-backdrop; its list scrolls while the controls stay in view; Escape and a backdrop click dismiss it; focus moves in and is restored on close; Tab and Shift+Tab stay inside it. Behaviour tests were added. The remaining app-shortcut focus gap is tracked separately as w-9ae0ca2b44c5.",
   "completion": null
 }

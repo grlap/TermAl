@@ -1,0 +1,31 @@
+{
+  "id": "01a2136b-7a88-7822-9fef-4847fe597064",
+  "external_ref": null,
+  "title": "Retry transient sharing failures when the launcher captures the Dart reporter digest",
+  "outcome": "At stage close, give a digest-bearing capture a bounded chance to recover from a temporary Windows sharing error while retaining the run-owned file, size and digest fences.",
+  "acceptance": [
+    "A runner fixture that briefly holds the owned report at stage close yields its actual digest after release. A missing, changed, oversized or still unreadable report supplies no artifact evidence. Bound the retry and keep process exit precedence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "launcher",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

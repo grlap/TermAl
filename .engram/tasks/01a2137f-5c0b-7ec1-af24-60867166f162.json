@@ -1,0 +1,30 @@
+{
+  "id": "01a2137f-5c0b-7ec1-af24-60867166f162",
+  "external_ref": null,
+  "title": "Contain panics in the scheduled acceptance worker tick",
+  "outcome": "A failed scheduled-acceptance tick reports the failure and leaves the worker able to qualify other requests on subsequent ticks. Reuse the handoff watchdog's panic containment pattern and check that a later request is still processed.",
+  "acceptance": [
+    "Contain panics in the scheduled acceptance worker tick is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported",
+    "scheduler"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

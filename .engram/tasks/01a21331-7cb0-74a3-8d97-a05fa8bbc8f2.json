@@ -1,0 +1,29 @@
+{
+  "id": "01a21331-7cb0-74a3-8d97-a05fa8bbc8f2",
+  "external_ref": null,
+  "title": "Add behaviour tests for settlement_read_failed and the recovery worker-join and pending-write decisions",
+  "outcome": "The remaining typed causal recovery outcomes have behaviour tests through the real worker: settlement_read_failed on the original row, and the admission_worker_or_pending_write_failed and worker_join_failed counts in causalCompletionReady.decisions.",
+  "acceptance": [
+    "A test refuses the settlement read after a completion is delivered (for example with a disposable-store fault) and asserts that the original row shows settlement_read_failed with release condition original_settlement_read_succeeds.",
+    "A test refuses the worker's pending-state write after settlement and asserts decisions.admission_worker_or_pending_write_failed is 1.",
+    "A test makes the recovery worker fail to join and asserts decisions.worker_join_failed is 1; no test asserts log text or timing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-coverage"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

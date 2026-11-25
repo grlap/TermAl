@@ -1,0 +1,28 @@
+{
+  "id": "01a21321-18d6-7850-8448-9d9f764a498b",
+  "external_ref": null,
+  "title": "Credit Dart/Flutter launcher runs with file or directory selectors, under one native path-selector rule",
+  "outcome": "Credit Dart/Flutter launcher runs with file or directory selectors, under one native path-selector rule",
+  "acceptance": [
+    "Credit Dart/Flutter launcher runs with file or directory selectors, under one native path-selector rule is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "acceptance-needed",
+    "flutter",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

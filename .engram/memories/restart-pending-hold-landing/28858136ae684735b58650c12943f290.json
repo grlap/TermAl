@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "restart-pending-hold-landing",
+    "revision_id": "28858136ae684735b58650c12943f290",
+    "previous": "0cdb89bc344f4a44ae2f650304256c1e",
+    "body_sha256": "85c459cd20749010809b60627292bb3fc12e908376a43cb2d06e9fa3ede50801",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T14:32:33.533196700Z"
+    }
+  },
+  "body": "Rule (Fable2 #4133, 2026-11-03 21:18Z). While a TermAl restart is pending, NOTHING may be fast-forwarded on master: no landing, no push, no install.\n\nWhy: the host is `cargo run --release` from the master checkout (pid 3752). A restart rebuilds target/release from whatever master is at that moment, so a landing before the restart would make Greg start a build he wasn't told about. Holding only the install does not prevent this.\n\nThe procedure while a restart is pending:\n1. Gates may run, and a green FULL stays valid while master is still its parent.\n2. Hold the landing.\n3. After the restart, confirm the running build (sha of target/release/termal.exe, and the host process start time).\n4. Then land, push and install as usual.\n\nNever push without fast-forwarding the master checkout. On 2026-11-03 this applied to w-426d 7b153fc2 (land-7b15.sh) during restart #4, which was pending since 20:23Z.\n\nMISS, recorded (Opus2, 2026-11-25 ~14:33Z; Fable2 #7848). While Greg's restart onto 317a2765 was pending, Opus2 landed w-e8c7 at 13:08:56Z and moved master to 29ad6709. This broke this rule. It was repaired only because Fable2 updated Greg's pending request to 29ad6709 before he acted.\nCHECK BEFORE EVERY ff OF MASTER: is a restart request pending with Greg, through Fable2 or Asistant? If yes, HOLD the landing, push and install. Gates, measurements and evaluations may continue; a green FULL stays valid while master is still its parent. Land only after the restart is confirmed (running build sha and host process start time), or on Fable2's explicit word that updates Greg's request first.\n2026-11-25 ~14:32Z: w-1d8a b1091618 is HELD under this rule. Its C3 also needs a restart, so the landing needs Greg's explicit word, which Fable2 requested."
+}

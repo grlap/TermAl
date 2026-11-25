@@ -1,0 +1,30 @@
+{
+  "id": "01a2138f-2aa0-7270-b7b6-8251bab20c97",
+  "external_ref": null,
+  "title": "Causal completion relay read: post-reply link authority check can block the recovery worker on the link mutex without bound",
+  "outcome": "The causal completion pull's authority checks after a verified relay reply have bounded or fail-fast lock admission. Contention on the federation link mutex defers the read with a local post-read reason instead of holding the recovery worker indefinitely, and a verified reply is still kept when the check succeeds.",
+  "acceptance": [
+    "request_mailbox_relay_checked's post-response lease.with_current, and the in-RPC post-MAC authority checks that take the same federation link mutex, acquire it with a bound or fail fast; contention is reported to the causal pull as a typed local post-read deferral, not an origin failure and not an unbounded wait.",
+    "A verified, settled reply is still delivered when the bounded authority check succeeds, preserving the false-positive ruling about deadlines during that check.",
+    "A deterministic test holds the link mutex (for example through a native append settlement held at COMMIT) while a causal read's reply is verified, and asserts the read ends with the typed local deferral within the test's deadlock guard."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "liveness",
+    "pre-existing",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

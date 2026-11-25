@@ -1,0 +1,30 @@
+{
+  "id": "01a2132e-5f83-7990-b675-d8dcb60c0460",
+  "external_ref": null,
+  "title": "Back off unchanged scheduled-acceptance readiness reads",
+  "outcome": "A pending automatic evaluation whose evidence and refusal are unchanged does not repeatedly take the full interactive admission path. A new qualifying evidence basis or explicit scheduler release still drives promptly. Cover transient failures, restart, and the effect on competing manual requests.",
+  "acceptance": [
+    "Back off unchanged scheduled-acceptance readiness reads is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "coordination",
+    "cross-project",
+    "greg-reported",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

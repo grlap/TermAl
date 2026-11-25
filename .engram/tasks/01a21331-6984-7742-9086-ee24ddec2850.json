@@ -1,0 +1,28 @@
+{
+  "id": "01a21331-6984-7742-9086-ee24ddec2850",
+  "external_ref": null,
+  "title": "Causal completion pull reports local request build, size and header-encoding refusals as origin_read_failed",
+  "outcome": "A causal completion read that is refused locally while its request is built, size-checked or header-encoded, before anything is sent, names a local request check on the original row instead of origin_read_failed.",
+  "acceptance": [
+    "In FederationRpcClient::request_once_within, a builder.build() failure, the PAYLOAD_TOO_LARGE size refusal and an incarnation or authority header-encoding refusal are classified as local refusals before send, and the relay maps them to a typed pending reason with its own release condition; other request_once callers receive the same ApiError as before.",
+    "A behavioural test drives one such local refusal through the real causal read and asserts the typed reason, not origin_read_failed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "observability",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

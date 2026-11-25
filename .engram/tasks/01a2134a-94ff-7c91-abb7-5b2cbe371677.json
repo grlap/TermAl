@@ -1,0 +1,31 @@
+{
+  "id": "01a2134a-94ff-7c91-abb7-5b2cbe371677",
+  "external_ref": null,
+  "title": "Preserve uncredited Windows focused Flutter execution through an executable shim",
+  "outcome": "A Windows host whose Flutter on PATH is a flutter.exe shim can still execute the ordinary uncredited focused Flutter route. Document resolution and preserve credit admission rules.",
+  "acceptance": [
+    "With only a flutter.exe shim on PATH, an ordinary staged or plain focused Flutter invocation executes the shim and stays unclassified for committed-input Test verification. A Windows fixture covers observable execution."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "launcher",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

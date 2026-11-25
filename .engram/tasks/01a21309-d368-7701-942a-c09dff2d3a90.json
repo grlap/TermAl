@@ -1,0 +1,28 @@
+{
+  "id": "01a21309-d368-7701-942a-c09dff2d3a90",
+  "external_ref": null,
+  "title": "Give supported-form guidance for Dart/Flutter test commands that observation does not recognize",
+  "outcome": "Give supported-form guidance for Dart/Flutter test commands that observation does not recognize",
+  "acceptance": [
+    "Give supported-form guidance for Dart/Flutter test commands that observation does not recognize is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance-needed",
+    "flutter",
+    "test-recognition"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

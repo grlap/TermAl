@@ -17,12 +17,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "One operator action resumes every paused local root session queue at once, after a provider outage or a subscription change: the Sessions panel's \"Resume paused…\" modal, `termal sessions resume-paused` (with --dry-run), and POST /api/queues/resume-paused. It lists each paused session with its pause reason and whether it resumes or skips it (operator_paused, delete_pending, not_previewed), and counts the delegation children it leaves out. Each run goes through the shared per-session Resume, fenced so that an operator's Stop or a pending Delete arriving later wins. The outcomes are resumed, stillPaused, failed and notStarted, the last within a 120 s run budget, with a 300 s CLI wait. The request must be JSON with an explicit dryRun; a browser request from another origin is refused; the UI resumes only the sessions its preview showed. Landed as master 29ad6709 after: review E2m-1 (adopted as byte-identical; its Codex Medium was ruled pre-existing and filed as w-57640c643cff); the C7 Linux landing FULL test-41fa2f48; acceptance evaluation 61f3f35f on criteria rev3, with which Fable2 concurred.",
+    "completed_at": "2026-11-25T13:10:16.375027300Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -1,0 +1,31 @@
+{
+  "id": "01a2134a-95a7-7be3-b8dc-83de52ca4518",
+  "external_ref": null,
+  "title": "Explain Windows Dart batch argument refusals before SDK launch",
+  "outcome": "When a focused invocation resolves to a Windows Dart or Flutter SDK batch file, explain which supported direct command form fits if the option text cannot be passed through the batch bridge.",
+  "acceptance": [
+    "A focused SDK batch invocation whose option value contains an unsupported shell metacharacter receives the supported-form diagnostic and supplies no Test credit. Cover the diagnostic using a runner fixture."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "dart",
+    "greg-requested",
+    "launcher",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21130-a05a-7f40-8bd4-46d97be28546",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

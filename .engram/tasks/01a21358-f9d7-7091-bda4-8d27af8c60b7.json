@@ -1,0 +1,28 @@
+{
+  "id": "01a21358-f9d7-7091-bda4-8d27af8c60b7",
+  "external_ref": null,
+  "title": "Replace the SQLite pager cache-miss ratio assertions in the capped settlement-detail read test with a behavioural check",
+  "outcome": "capped_settlement_detail_read_skips_oversized_payload_pages proves that an oversized settlement value is not fetched through observable behaviour, not through fixed thresholds on SQLite's internal pager counters, so a bundled SQLite or configuration change cannot fail it while the product is unchanged.",
+  "acceptance": [
+    "The test no longer asserts on SQLITE_DBSTATUS_CACHE_MISS ratios or uses the unsafe sqlite3_db_status FFI call.",
+    "It still proves that an oversized settlement value is skipped without fetching its text: for example the capped detail query returns no text for a value above the bound, admissionDetailsLimited is true, and no admissionChecks are projected."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "review-follow-up",
+    "test-quality"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
