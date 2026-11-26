@@ -1,0 +1,30 @@
+{
+  "id": "01a218e5-883a-7663-b5f2-a46fe89d700e",
+  "external_ref": null,
+  "title": "Show a settled prompt-delivery row (e.g. \"Delivery outcome unknown\") as a compact one-line notice, not a tall card",
+  "outcome": "Show a settled prompt-delivery row (e.g. \"Delivery outcome unknown\") as a compact one-line notice, not a tall card",
+  "acceptance": [
+    "A historical prompt-delivery row (disposition ambiguous or accepted) renders in the conversation as one line: its label (e.g. \"Delivery outcome unknown\"), the delivery reason shortened to fit with the full reason available on hover or focus, and the Dismiss button on the same line; the queued prompt's body is not shown inline but can be expanded from that line.",
+    "On a narrow viewport the line stays one line: the reason truncates with an ellipsis while the label and Dismiss stay visible and usable by keyboard and screen reader (the row keeps an accessible name and Dismiss its explanatory title).",
+    "Delivery semantics are unchanged: which rows are historical, which are dismissible (handingOff has no Dismiss), what Dismiss calls, and the non-historical queued prompt cards render exactly as before; Vitest behaviour tests cover the one-line rendering, the expand action, Dismiss, and the handingOff case, and `npx tsc --noEmit` and `npx vitest run` pass."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "conversation",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": "Termal::UI2",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

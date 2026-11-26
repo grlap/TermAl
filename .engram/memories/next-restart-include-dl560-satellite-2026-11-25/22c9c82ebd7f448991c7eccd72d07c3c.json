@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-include-dl560-satellite-2026-11-25",
+    "revision_id": "22c9c82ebd7f448991c7eccd72d07c3c",
+    "previous": "92cbe6ed817347c3af870b58b37e7d11",
+    "body_sha256": "f8dcdca66e3f1956bcc4d6475801f5d33e9cd125a6c13bd314c1c21da7df7ac7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T07:21:52.820929800Z"
+    }
+  },
+  "body": "For the NEXT TermAl restart request to Greg (Fable2, 2026-11-25; revised ~18:24Z with Opus2 #7891): include the DL560 satellite host.\n\nThe facts, repo and product only, with no process checks:\n- DL560's TermAl checkout HEAD is 9c628bd01e0c967c25d49bdc87795a39b1a0459b (2026-11-23, \"w-2422bd1d69b0: rustfmt on six persist files…\"). Its status is clean. It is an ancestor of master, 14 commits behind 0ec823a6.\n- GET /api/test-runs/RUN?view=verification still returns 400.\n- The satellite restarted with Greg's 18:14Z restart, but stayed on that old checkout.\n\nRegistered DL560 runs and the cleanup rule's verification check depend on that host.\n\nIn the next restart request, ask Greg to `git pull` DL560's TermAl checkout to current master and restart it. Verify by federation status (authenticated) plus Greg's or the runner's \"done\" and the checkout HEAD, and ?view=verification returning 200. No process or mtime checks. Remove this note after that restart is verified.\n\nALSO in that next request to Greg, ask for a one-line approval: let Opus2 (the integration owner) delete the stale author-test ref refs/heads/author-test/w-7e4fde53a0e3-28210ca9 (commit 28210ca995242f7851368c79d005dcad073d0e81, pushed 2026-11-21 22:22:39Z by peer-83b788b7b40f663614e8c4db, w-7e4f push note 6556e8e4). w-7e4f is done (seal 54399284), and the pusher's session can't be mapped to a live session. Delete it with an explicit refspec, and record the deletion on w-7e4f.\n\nUPDATE 2026-11-26 04:18Z (Fable2): installed is master fd4974b3 (combo r3), SHA256 44D53639…F7F59B, backup termal.exe.pre-fd4974b3-20261126T041749Z.bak. It includes 2115d778 and 93653779, the relay 503 and typed-error fixes, and the MCP ack 404 id echo. It is NOT deployed yet.\n\nThe next restart request bundles fd4974b3 with Sol-a7bb's P0 w-27e5 evaluator fix, once that lands, and with w-14dd (Flutter project-root) if it is close. Agree the moment with Engram::Fable.\n\nBEFORE that restart, tell every claim holder to re-name their named root right after it, before any registered run. Restarts currently drop live claims' named roots (w-8f74354a73e2). Also keep the DL560 checkout update and the 28210ca9 ref-deletion approval in that request.\n\nUPDATE 2026-11-26 07:21Z (Fable2): the restart HAPPENED at about 07:00Z with 6c56dc17 (SHA FC6019B3…2EED0, carrying P0 w-27e5 and w-5818). Evidence: a new federation server instance 3befb43d, Mac and DL560 re-authenticated at 07:00:22–26Z, and master = 6c56dc17. Greg's explicit \"done\" was not received. The restart hold is lifted and Engram's queue released.\n\nStill to raise at the NEXT restart:\n- the DL560 checkout update (verify);\n- the 28210ca9 author-test ref deletion approval;\n- WinB was down at the time (driver reboot)."
+}

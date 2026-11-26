@@ -1,0 +1,27 @@
+{
+  "id": "01a217d9-5e09-7503-a9ba-b5563c6c7ffe",
+  "external_ref": null,
+  "title": "A forked Codex thread samples its account generation before its launch admission, so a concurrent account action can stamp it with the older generation",
+  "outcome": "A fork made under the current Codex account records that account's generation even when an account action completes around the fork.",
+  "acceptance": [
+    "fork_codex_thread reads the account generation while holding the Codex launch admission through the thread/fork request, so no account action can advance it in between, shown by a behaviour test.",
+    "A fork made before an account action still counts as older than that action."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

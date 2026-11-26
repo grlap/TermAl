@@ -1,0 +1,30 @@
+{
+  "id": "01a217d8-03a1-7dd3-a403-50c81fb66991",
+  "external_ref": null,
+  "title": "Codex account action: resume mailbox wakes held at a closed account fence (coalesced, acknowledged and post-restart)",
+  "outcome": "Codex account action: resume mailbox wakes held at a closed account fence (coalesced, acknowledged and post-restart)",
+  "acceptance": [
+    "A mailbox wake (direct, coalesced with a second wake, or rewritten by an acknowledgement) that reaches an idle local Codex session while an account action holds its fence is not lost and returns no error: it stays queued, and when the action ends with the account admitting work it is dispatched exactly once; behavioural tests cover the direct, coalesced and acknowledgement-rewrite cases.",
+    "A held mailbox-only queue survives a TermAl restart and is dispatched when the next account action ends (or at boot when no action is pending); a behavioural test drives the restart.",
+    "A non-human User dispatch to a fenced idle Codex session answers Queued, never 500, and its prompt is delivered after the action. The candidate receives the standard review pair and full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "account",
+    "codex-runtime",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

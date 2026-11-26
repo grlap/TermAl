@@ -1,0 +1,31 @@
+{
+  "id": "01a218b7-a405-7991-9464-05ec02c3d04f",
+  "external_ref": null,
+  "title": "WinB root \"Engram Runner (Codex)\" session-9 is listed on Central but a native send to it returns 404; Engram's WinB cleanup is blocked on it",
+  "outcome": "WinB root \"Engram Runner (Codex)\" session-9 is listed on Central but a native send to it returns 404; Engram's WinB cleanup is blocked on it",
+  "acceptance": [
+    "The cause of the 404 for a native send to host:932a546b-4ab2-49a7-a5cb-499cbfac2eab::session-9 while Central's session listing shows that session is identified with evidence (stale listing, wrong route, membership, or relay defect) and recorded here.",
+    "A native send from Central to the WinB Engram Runner (Codex) root is delivered and woken, shown by its receipt and the recipient's processed sequence, or a supported equivalent route to a Codex executor on WinB is in place and recorded.",
+    "If the cause is a product defect, it is fixed with a behaviour test, or filed as its own item with provenance (w-386def05f4a2)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "cleanup",
+    "cross-machine",
+    "federation",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

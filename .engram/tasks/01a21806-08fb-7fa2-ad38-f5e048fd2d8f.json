@@ -1,0 +1,29 @@
+{
+  "id": "01a21806-08fb-7fa2-ad38-f5e048fd2d8f",
+  "external_ref": null,
+  "title": "Race-window tests for Codex account admission held by delegation follow-up, fork and shutdown",
+  "outcome": "Tests fail if a delegation follow-up or a Codex fork releases its launch admission early, or if an account action can publish after shutdown starts.",
+  "acceptance": [
+    "A test starts an account action from inside a delegation follow-up while it holds its launch admission (for example via the existing TEST_REVIEW_BEFORE_FOLLOWUP_RESERVATION hook) and shows the action refused with the local-work conflict and the generation unchanged.",
+    "A test does the same from inside a Codex fork's thread/fork RPC.",
+    "A test triggers shutdown before begin_codex_account_operation and shows that no operation is published."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

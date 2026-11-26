@@ -1,0 +1,28 @@
+{
+  "id": "01a216cd-6b46-7332-9b8a-f2d72b15baf0",
+  "external_ref": null,
+  "title": "Document the termal-mailbox-outcome v1 MCP envelope beside the durability-pending contract",
+  "outcome": "A client can learn the termal-mailbox-outcome v1 envelope from the docs: its fields, that the same envelope is the tool text and structuredContent, and exactly when it is produced.",
+  "acceptance": [
+    "Document the termal-mailbox-outcome v1 MCP envelope beside the durability-pending contract is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "mailbox",
+    "mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -9,7 +9,7 @@
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 3,
+  "priority": 2,
   "labels": [
     "codex-runtime",
     "mcp",

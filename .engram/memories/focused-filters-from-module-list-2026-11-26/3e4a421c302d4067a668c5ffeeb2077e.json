@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "focused-filters-from-module-list-2026-11-26",
+    "revision_id": "3e4a421c302d4067a668c5ffeeb2077e",
+    "previous": null,
+    "body_sha256": "57961f1867f9c9e4d2c6455d9c28116a3db2ac043f66dad705c63abb4dbef980",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T16:43:25.125358200Z"
+    }
+  },
+  "body": "Focused-run filters: build each list from the module list of the criterion-bound tests (grep the #[path]/mod declarations for the exact cargo module path). Never copy a previous run's filter list. Source: Fable2, TermAl mailbox 03723eab #6215, 2026-11-26. Incident: on w-3bddbf73af2a, bound run test-c3b7da30 on combo 5dfa2ae6 reused test-d26c3bcd's filters, which had dropped tests::federation_native_binding_proof::relay::production_shape::. C2's bound admission_deadline test therefore had no bound record, and the evaluation returned insufficient_evidence. A later bound run of tests that already PASSED in a landing FULL on the same input falls under Greg's \"NIE!!!\" rule (nie-applies-to-unbound-passed-runs-2026-11-26), so the omission cannot be repaired by rerunning; the item lands OPEN instead. Before launching a bound run, list every test that each criterion binds and check that the filter covers it."
+}

@@ -19,7 +19,7 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
@@ -35,7 +35,7 @@
       "created_at": "2026-11-04T06:28:51.451683100Z"
     }
   ],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1db1a-def9-76c3-a798-794fbe2d6123",
+  "disposal_reason": "Termal::Fable2, 2026-11-26 ~17:07Z, on Greg's question via Engram::Asistant (TermAl mailbox 588693a8 #2847) about closing the mimalloc work on existing evidence. The allocator half of this item was carried and landed by w-794fbe2d6123 (mimalloc 0.1.48 v3 as TermAl's global allocator, completed). The NUMA and timing comparisons were stopped by Greg's explicit stop of 2026-11-04 06:23Z (memory greg-stop-timing-comparisons-2026-11-04), and this item has been parked on that ever since. Its criteria 1 and 3 require exactly the measurements Greg stopped, so no evaluation can pass it without rerunning them. It is superseded by the landed allocator change, with no new runs. The evidence stays recorded here.",
   "completion": null
 }

@@ -1,0 +1,27 @@
+{
+  "id": "01a216cd-5899-7051-8d57-9393334d115b",
+  "external_ref": null,
+  "title": "MCP mailbox acknowledgement drops a host-reported unknown outcome to plain text instead of the typed termal-mailbox-outcome result",
+  "outcome": "A mailbox acknowledgement whose outcome the host itself reports as unknown (a server error carrying the unknown-outcome clause) reaches the MCP client as the same typed result as send and read, while known refusals keep plain text.",
+  "acceptance": [
+    "MCP mailbox acknowledgement drops a host-reported unknown outcome to plain text instead of the typed termal-mailbox-outcome result is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "mailbox",
+    "mcp"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

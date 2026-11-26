@@ -1,0 +1,29 @@
+{
+  "id": "01a218c0-4a3a-7bd0-8a8f-a28faf8141a2",
+  "external_ref": null,
+  "title": "Codex delegation without a model argument defaults to a model the host's Codex account rejects (gpt-5.4 on WinB), and the failed spawn leaves its isolated worktree behind",
+  "outcome": "A Codex delegation spawned without a model argument uses a model the host's Codex account supports, or is refused at spawn with the supported model names before any worktree is created; and a spawn whose child fails at once leaves no orphaned isolated worktree, or records it for cleanup.",
+  "acceptance": [
+    "Codex delegation without a model argument defaults to a model the host's Codex account rejects (gpt-5.4 on WinB), and the failed spawn leaves its isolated worktree behind is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex",
+    "cross-machine",
+    "delegation",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

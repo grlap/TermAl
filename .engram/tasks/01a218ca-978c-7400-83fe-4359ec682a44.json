@@ -1,0 +1,31 @@
+{
+  "id": "01a218ca-978c-7400-83fe-4359ec682a44",
+  "external_ref": "Engram w-17be55703464",
+  "title": "Mirror Engram's portable engram-use skill (with its new task-data-sync section) into TermAl's .claude/skills, byte-identical",
+  "outcome": "Mirror Engram's portable task-data-sync skill into TermAl (.claude/skills), byte-identical",
+  "acceptance": [
+    "TermAl has .claude/skills/engram-use/SKILL.md byte-identical to Engram's docs/skills/engram-use/SKILL.md at the Engram commit that landed the task-data-sync section (Engram w-17be55703464), shown by a direct byte comparison of the two files, with that Engram commit recorded on this item; no other new skill file is added.",
+    "The mirrored skill adds no new approval, gate or authority beyond what CLAUDE.md's task-sync data branch bullet already grants.",
+    "The change lands under CLAUDE.md's rule for instruction files that grant or limit push authority: both coordinators' concurrence on the exact wording, Greg sent the wording before the landing, and the final-diff audit recorded as passed; plus the Markdown link check on the clean candidate and the review pair."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "docs",
+    "greg-directed",
+    "skills",
+    "task-sync"
+  ],
+  "assigned_to": "Termal::Sol-c593",
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

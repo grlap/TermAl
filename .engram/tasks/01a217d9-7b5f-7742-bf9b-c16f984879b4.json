@@ -1,0 +1,27 @@
+{
+  "id": "01a217d9-7b5f-7742-bf9b-c16f984879b4",
+  "external_ref": null,
+  "title": "A missing or behind Codex account setting does not move the account generation past the highest saved-thread stamp",
+  "outcome": "After the account setting file is lost or rolled back, no Codex thread saved under an earlier account is silently restarted after a lost rollout.",
+  "acceptance": [
+    "When termal.codex-account.json is missing, or records a generation below a saved thread's stamp, boot restore sets the generation past the highest stamp, as it already does for an unreadable file, shown by a behaviour test.",
+    "A setting whose generation is at or above every stamp keeps its own generation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

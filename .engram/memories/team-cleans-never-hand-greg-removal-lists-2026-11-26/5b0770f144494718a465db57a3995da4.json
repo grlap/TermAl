@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "team-cleans-never-hand-greg-removal-lists-2026-11-26",
+    "revision_id": "5b0770f144494718a465db57a3995da4",
+    "previous": null,
+    "body_sha256": "7168b6ead8c9252f8be37d3e4ba01c8e12f5c77ad3b9811d52f1c59892b98c49",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T16:35:16.980483600Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-26 ~16:40Z; my miss). I sent Greg an A/B removal list for DL560 .tmp. Greg answered, verbatim via Engram::Asistant (TermAl mailbox 588693a8 #2836): „ee ?? wyglada jakby dzieci narozrabialy a ja mam posprzatac / moja regula jest taka, ze macie posprzatac po zrobionych taskach / to bardzo proste i logiczne”.\n\nRULE: never hand Greg a removal list or ask him to delete anything.\n- The owner (the integration owner Opus2 for gate and runner roots) arranges the removal.\n- The Codex sessions on each host execute it under AGENTS.md \"Cleanup deletions\", in the non-forced forms.\n- Released build output whose retention need has ended needs no question to Greg, even if its item is still open.\n- If a policy or runtime refuses: stop that target, record the exact refusal text and its source, and the coordinator gets the supported route fixed, treated as a tooling problem. Never retry through another form or session, and never fall back to Greg doing it by hand.\nThis supersedes the \"leftovers batched for Greg\" practice (w-bafb)."
+}

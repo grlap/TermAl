@@ -1,0 +1,27 @@
+{
+  "id": "01a21805-f714-7110-8a51-7938046ac82b",
+  "external_ref": null,
+  "title": "Uniform Codex account admission on the origin-less dispatch_turn route",
+  "outcome": "Every Codex prompt intake route decides account admission the same way, through one helper, and the origin-less send route no longer queues a new ordinary prompt behind an existing queue while the Codex account is unusable, unless that is the intended behaviour recorded in the brief.",
+  "acceptance": [
+    "The origin-less POST messages route (dispatch_turn) and the human and delegation follow-up intakes use one shared account-admission helper for local Codex sessions; the duplicated block in src/delegations.rs and src/human_prompts.rs is folded into it.",
+    "A behaviour test sends an origin-less prompt to a local Codex session with a pre-existing queue while the account is unusable and shows the decided outcome (refused, or queued and held until a successful activation), and the brief in docs/features/codex-account-login.md states that outcome."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "codex-runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

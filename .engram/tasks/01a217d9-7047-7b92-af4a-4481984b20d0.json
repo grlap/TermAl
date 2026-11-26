@@ -1,0 +1,24 @@
+{
+  "id": "01a217d9-7047-7b92-af4a-4481984b20d0",
+  "external_ref": null,
+  "title": "Extract named source-root startup recovery from the large source-roots module",
+  "outcome": "Extract named source-root startup recovery from the large source-roots module",
+  "acceptance": [
+    "The startup recovery helper engram_restorable_source_roots lives in a focused module with a provenance header. Existing caller behavior and restart registration coverage are preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

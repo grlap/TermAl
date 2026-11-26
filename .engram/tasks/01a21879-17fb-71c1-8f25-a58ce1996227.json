@@ -1,0 +1,27 @@
+{
+  "id": "01a21879-17fb-71c1-8f25-a58ce1996227",
+  "external_ref": null,
+  "title": "Background launcher end: wrapped detached launch reports TerminalNotConfirmed instead of the wrapper refusal; D2 rival-contest path untested",
+  "outcome": "At a Claude Bash background task's end, a launch through a shell wrapper is refused with the wrapper refusal (ArtifactRequestMismatch, ObservationMatches=false) whether or not it is detached, and a sole registration whose start cannot be read is shown by a test to be contested by any rival launch row.",
+  "acceptance": [
+    "attach_claude_background_launcher_artifact checks for a direct launcher line before the detached check, so `bash -c \"node scripts/test-launcher.mjs full --input commit --detach\"` records ArtifactRequestMismatch with ObservationMatches=false while a direct detached line keeps TerminalNotConfirmed; and a behaviour test shows a sole uncarried registration with an unreadable start plus one uncarried rival launch row with a readable window records ArtifactLocatorAmbiguous and attaches nothing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

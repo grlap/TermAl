@@ -1,0 +1,28 @@
+{
+  "id": "01a2182c-72e7-7733-a5bb-3346253bfee2",
+  "external_ref": null,
+  "title": "Carried-check and recognition paths scan the whole launcher argv for --detach, including test-command words after --",
+  "outcome": "Carried-check and recognition paths scan the whole launcher argv for --detach, including test-command words after --",
+  "acceptance": [
+    "Every host path that decides whether a test-launcher run is detached reads --detach only from the launcher's own options: the words after the mode and before the first `--`, or to the end of the line when there is no `--`.",
+    "Behaviour tests show a full and a focused run whose test-command words after `--` contain `--detach` treated as non-detached, and a run with the launcher's own --detach still treated as detached."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

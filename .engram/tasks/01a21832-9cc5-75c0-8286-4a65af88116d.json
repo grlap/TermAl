@@ -1,0 +1,27 @@
+{
+  "id": "01a21832-9cc5-75c0-8286-4a65af88116d",
+  "external_ref": null,
+  "title": "Background launcher end misreads --detach when a launcher option consumes a bare -- as its value",
+  "outcome": "At a Claude Bash background task's end, the host decides whether a test-launcher command was detached exactly as scripts/test-launcher.mjs parses its options: a value-taking option (--notify, --engram-binary and the like) consumes the next word even when that word is `--` or `--detach`, and only an unconsumed `--` ends the launcher's options.",
+  "acceptance": [
+    "attach_claude_background_launcher_artifact classifies a launch as detached exactly when the launcher's own option parsing would enable --detach: launcher option values are consumed before the `--` separator is recognised, so `full --input commit --notify -- --notify coordinator --detach` is detached and records TerminalNotConfirmed, and `full --notify --detach` is not detached; shown by behaviour tests for both lines and for `focused --detach -- cargo test` (detached)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

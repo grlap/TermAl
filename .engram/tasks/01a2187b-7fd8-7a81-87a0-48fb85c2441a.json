@@ -1,0 +1,29 @@
+{
+  "id": "01a2187b-7fd8-7a81-87a0-48fb85c2441a",
+  "external_ref": null,
+  "title": "Explain incomplete held-claim reads in named launcher registration refusals",
+  "outcome": "A launcher blocked by an incomplete held-claim list receives a reason and next action that apply even when it owns no claim on the retained name.",
+  "acceptance": [
+    "A held-list truncation case with no matching claim identifies incomplete ownership evidence and advises obtaining a complete held read. The handler still refuses before stages start.",
+    "A complete unrelated held list still allows ordinary unbound registration, and an applicable retained name with a missing selection still gets the existing confirmation remedy."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

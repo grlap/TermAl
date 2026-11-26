@@ -1,0 +1,28 @@
+{
+  "id": "01a2180f-e013-7642-911f-80c58132f2cc",
+  "external_ref": null,
+  "title": "Codex account brief: word queue resumption by queue head, and scope prompt refusal to local sessions",
+  "outcome": "The Codex account brief describes exactly which queued prompts resume on their own after an account action and that the refusal of typed prompts applies to local Codex sessions.",
+  "acceptance": [
+    "docs/features/codex-account-login.md says that a queue whose next prompt is a mailbox or workflow prompt resumes on its own after an account action leaves a usable account, and that any other queue (including one paused independently, for example by Stop) runs with a later prompt or wake when the queue allows dispatch.",
+    "The same paragraph says that the refusal of prompts typed in TermAl applies to local Codex sessions, and its line wrapping is tidied."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "codex-runtime",
+    "docs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

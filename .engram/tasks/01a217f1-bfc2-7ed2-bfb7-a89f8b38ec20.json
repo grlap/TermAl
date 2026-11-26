@@ -1,0 +1,28 @@
+{
+  "id": "01a217f1-bfc2-7ed2-bfb7-a89f8b38ec20",
+  "external_ref": null,
+  "title": "The Codex /login dialog shows a stale cached browser challenge across tabs",
+  "outcome": "Every open TermAl tab shows the current /login browser challenge, or none, after another tab starts, finishes or cancels a login.",
+  "acceptance": [
+    "When a second tab's account state changes (a new login started, or the login ends), the first tab's CodexAccountDialog no longer shows the old challenge link or code, shown by a UI test.",
+    "The current tab's own challenge display is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "post-landing-closure-ownership-2026-11-26",
+    "revision_id": "c189e652dd234acdbb236aa9f05b8ca8",
+    "previous": null,
+    "body_sha256": "df14e7efe9f96471e8e88ae9fd10b6384c9cd636cbd049775dea9e02703d7fc0",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T17:16:45.457123700Z"
+    }
+  },
+  "body": "TermAl post-landing closure ownership rule (Termal::Fable2 is editor and owner). Recorded 2026-11-26 ~17:18Z, mirroring Engram rules-merger-role-2 rev6 at Kimi::Consultant's request (TermAl mailbox 852a55c9 #638), after Greg's question of whether completed work is actually closed (Asistant #509/#512). No new gate, artifact or test.\n1. Every landing report from the integration owner (Opus2) to the coordinator lists EVERY item the landing carried. For each: completed, or open with its exact reason and its named closure owner.\n2. The coordinator checks that list against the tracker on the same day as the landing, and chases each open entry with its owner the same day.\n3. A periodic sweep: the work refs in origin/master commit subjects of the last week, each lifecycle read with engram work show, and any landed-but-open item named with its reason and owner. Not a text search. The first run was 2026-11-26 17:10Z: 66 refs, 62 completed, 4 open with reasons (w-27e5, w-3bdd, w-46d9, w-2f9d)."
+}

@@ -1,0 +1,26 @@
+{
+  "id": "01a216f9-5cff-7171-8d4b-fb6384584a05",
+  "external_ref": null,
+  "title": "The outer decode of a bash -c wrapper does not apply bash double-quote escapes",
+  "outcome": "engram_unwrap_shell_command decodes a bash -c wrapper's outer words the way the outer bash does: inside double quotes, a backslash escapes only $, `, \", \\ and a newline. The script it returns is then the one bash runs.",
+  "acceptance": [
+    "The outer decode of a bash -c wrapper does not apply bash double-quote escapes is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "check-credit"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "cancelled",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": "Moot under Termal::Fable2's fallback ruling (TermAl mailbox d84e975b #125). From w-a702b21c18b1 R12 (70ea2fcd) on, a Claude Bash line that launches through a bash -c wrapper is refused with a recorded reason and is not decoded. Modelling the bash -c outer double-quote escapes, along with the other wrapper forms, is now part of w-b10f64109a9d.",
+  "completion": null
+}

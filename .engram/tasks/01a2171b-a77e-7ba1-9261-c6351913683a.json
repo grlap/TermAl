@@ -1,0 +1,30 @@
+{
+  "id": "01a2171b-a77e-7ba1-9261-c6351913683a",
+  "external_ref": null,
+  "title": "Keep writer overlap bookkeeping for an external Dart start without a Codex item ID",
+  "outcome": "An external Dart start that lacks a usable provider item ID still participates in ordinary writer overlap and command bookkeeping while remaining ineligible for external launch custody.",
+  "acceptance": [
+    "A production-path Codex command start carrying a supported external focused Dart command without a usable item ID still fences overlapping open checks and records the ordinary command lifecycle, but cannot take external Test receipt custody. A valid identified external launch still settles through its own original start and end."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "codex",
+    "flutter",
+    "greg-directed",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a213f3-5296-70f0-8cbb-14dd7ebdd1ec",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

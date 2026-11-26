@@ -1,0 +1,28 @@
+{
+  "id": "01a218e0-25e5-7473-b419-a0c8b5fc2cc6",
+  "external_ref": null,
+  "title": "Central scheduler queue loses waiting entries: a requested slot with no recent activity drops out of Opus2's queue across long waits and context compactions (w-eb8d lost twice)",
+  "outcome": "Every Central cargo, pair and evaluator slot request that the scheduler accepted stays in a durable pending-queue record until it is launched, withdrawn by its owner, or explicitly cancelled with a reason sent to the owner, so that no accepted entry disappears silently across long waits, scheduler context compaction or a scheduler restart.",
+  "acceptance": [
+    "Central scheduler queue loses waiting entries: a requested slot with no recent activity drops out of Opus2's queue across long waits and context compactions (w-eb8d lost twice) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "queue",
+    "scheduler"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

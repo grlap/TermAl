@@ -1,0 +1,28 @@
+{
+  "id": "01a217f0-6b01-7260-9931-602e27254eb8",
+  "external_ref": null,
+  "title": "A first Codex /login cannot replace an existing file-backed API-key sign-in in TermAl's default profile",
+  "outcome": "A user whose standalone Codex is signed in with an API key can enroll a TermAl-managed ChatGPT account with /login without first signing out in standalone Codex.",
+  "acceptance": [
+    "A first /login from a default profile holding a supported file-backed API-key sign-in starts the browser login instead of refusing it, shown by a behaviour test.",
+    "After completion the strict ChatGPT identity check still applies, and an unsupported provider or forced API login stays refused.",
+    "The known-limitation paragraph in docs/features/codex-account-login.md is removed or updated accordingly."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "codex-runtime"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

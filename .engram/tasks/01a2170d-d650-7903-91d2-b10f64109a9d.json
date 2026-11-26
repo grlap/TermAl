@@ -1,0 +1,27 @@
+{
+  "id": "01a2170d-d650-7903-91d2-b10f64109a9d",
+  "external_ref": null,
+  "title": "Attach a Claude Bash background focused launch run through a shell wrapper (bash -c, pwsh -Command, cmd /c)",
+  "outcome": "At its task end, a Claude Bash background focused launcher run inside a bash/sh/zsh -c, pwsh/powershell -Command or cmd /c wrapper attaches to its launch row whenever the run is the unique eligible registration. The planned argv is modelled exactly as the processes received it. Until then such a launch attaches nothing and records ArtifactRequestMismatch (ObservationMatches=false).",
+  "acceptance": [
+    "Attach a Claude Bash background focused launch run through a shell wrapper (bash -c, pwsh -Command, cmd /c) is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

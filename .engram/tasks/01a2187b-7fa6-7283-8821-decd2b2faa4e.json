@@ -1,0 +1,29 @@
+{
+  "id": "01a2187b-7fa6-7283-8821-decd2b2faa4e",
+  "external_ref": null,
+  "title": "Preserve named-root restart confirmation through a durability-pending launcher replay",
+  "outcome": "Once a pending first bound registration after restart commits and its exact replay publishes, that publication consumes the valid process-local confirmation for the same naming image.",
+  "acceptance": [
+    "A production registration regression reaches canonical confirmation, forces the first durability wait to time out, then publishes the late commit through identical-request replay and proves the next new name-bound registration does not perform another canonical read.",
+    "Replay consumes the confirmation only for the exact pending registration while the same live naming image owns it. Changed, ended and ambiguous authority still require the ordinary checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "host-recording",
+    "named-root",
+    "registration"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

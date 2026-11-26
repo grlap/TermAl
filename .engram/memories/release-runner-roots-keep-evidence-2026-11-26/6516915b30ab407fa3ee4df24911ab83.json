@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "release-runner-roots-keep-evidence-2026-11-26",
+    "revision_id": "6516915b30ab407fa3ee4df24911ab83",
+    "previous": null,
+    "body_sha256": "c82846b7f790cddb39e75b81d967db980b784dfe2f181a99fd62d3df62b55733",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T08:24:53.371766100Z"
+    }
+  },
+  "body": "Worker rule (Termal::Opus-Causal, 2026-11-26, my own miss on w-a702b21c18b1, caught by Opus2 TermAl mailbox aecfe5b2 #564).\n\nWhen I release a superseded candidate's runner paths for cleanup, I release ONLY the worktree root, for example DL560 .tmp/a702-<commit8>-c6. I never release the matching .evidence/<name> archive while its item is still open. Per Greg's rule, a run's archive stays in .evidence until every item it serves has closed, even when that run's candidate is superseded. Item notes cite those runs, so their originals must remain readable.\n\nMy miss: in relay #104 (R6) and #114 (R8) I named both the root and the archive. C6 removed .evidence/a702-47bdded3-c6 and .evidence/a702-bfb0e5fd-c6 while w-a702 was still open. Those originals now survive only as recorded on the item."
+}

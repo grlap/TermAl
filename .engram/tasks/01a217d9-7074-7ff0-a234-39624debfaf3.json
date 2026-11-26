@@ -1,0 +1,24 @@
+{
+  "id": "01a217d9-7074-7ff0-a234-39624debfaf3",
+  "external_ref": null,
+  "title": "Cover startup retention of named roots with absent namers, successor holders, and capacity limits",
+  "outcome": "Cover startup retention of named roots with absent namers, successor holders, and capacity limits",
+  "acceptance": [
+    "Persisted restart fixtures exercise a missing naming session, successor-held recovery and the named-root capacity limit through production registration, verifying the expected outcomes and unchanged prior registrations."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

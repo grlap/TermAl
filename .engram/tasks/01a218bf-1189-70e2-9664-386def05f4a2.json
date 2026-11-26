@@ -1,0 +1,32 @@
+{
+  "id": "01a218bf-1189-70e2-9664-386def05f4a2",
+  "external_ref": null,
+  "title": "Central's mailbox directory keeps a satellite root's principal after the root is gone on its home host, and offers it as a native send target",
+  "outcome": "A root session that no longer exists on its home host is not offered by termal_list_sessions as a usable native target, either because its directory principal is retired or because the row is marked unavailable. Nothing is disclosed beyond what the caller may already list, and native delivery semantics are unchanged.",
+  "acceptance": [
+    "A satellite root that is deleted on its home host disappears from the central's termal_list_sessions after one full discovery pass over that host's catalog.",
+    "A send to the retired host:<host>::<session> target saves no message.",
+    "A sibling live root on the same host stays listed and is still delivered to.",
+    "A link incarnation change during a pass retires nothing.",
+    "A root created during a pass is not retired.",
+    "A failed or partial pass retires nothing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

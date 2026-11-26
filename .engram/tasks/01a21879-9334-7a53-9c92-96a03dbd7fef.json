@@ -1,0 +1,28 @@
+{
+  "id": "01a21879-9334-7a53-9c92-96a03dbd7fef",
+  "external_ref": null,
+  "title": "A lingering uncarried registration with an unreadable start makes every later background end in its session/worktree/mode Ambiguous",
+  "outcome": "A lingering uncarried registration with an unreadable start makes every later background end in its session/worktree/mode Ambiguous",
+  "acceptance": [
+    "A registration whose start cannot be read stops contesting background-end attachment once it can no longer have been launched by a row in question (for example once its run directory shows it terminal, or it falls outside any open launch window by its other recorded times), so later rows in the same session, worktree and mode can attach again; until then it still refuses as Ambiguous.",
+    "A behaviour test shows the stale unreadable-start registration contesting one row and no longer contesting a later row once it is ruled out."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

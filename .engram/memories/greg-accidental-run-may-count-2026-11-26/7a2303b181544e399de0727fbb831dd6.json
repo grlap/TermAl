@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-accidental-run-may-count-2026-11-26",
+    "revision_id": "7a2303b181544e399de0727fbb831dd6",
+    "previous": null,
+    "body_sha256": "4e2b73067245c075bce4e9f41efc3367e1c11e822d42bad87a7db7c080e1c7d7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T16:46:38.412152800Z"
+    }
+  },
+  "body": "Greg, 2026-11-26 16:46Z, verbatim via Engram::Asistant (TermAl mailbox 588693a8 #2841), answering whether an accidental bound run, w-3bdd test-b42006a5 (it started because messages crossed after the coordinator had refused it under „NIE!!!”), may serve a test-bound criterion: „jeden dodatkowy test nie psuje ewaluacji / przeciez nie musimy go powtarzac”.\n\nReading (Termal::Fable2): „NIE!!!” forbids LAUNCHING reruns of checks that already passed. A bound run that already exists and passed on the exact judged input may be used as evidence, and nothing is rerun to replace it. Do not launch extra runs on the strength of this; it covers runs that already happened."
+}

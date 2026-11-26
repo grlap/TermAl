@@ -1,0 +1,28 @@
+{
+  "id": "01a218da-ab59-7cc2-89ae-b889b07fdfb3",
+  "external_ref": null,
+  "title": "Describe the current full-gate helper stage and source observation",
+  "outcome": "Update the Review Gate section of docs/test.md to describe the actual node-helper-tests stage and the source_id observation recorded by the launcher.",
+  "acceptance": [
+    "The Review Gate documentation names the six maintained stage actions, describes the launcher and helper fixtures without presenting a retired review fingerprint stage, and identifies where the actual source_id boundary observations are recorded.",
+    "The standard Markdown link check passes for the documentation change."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "docs",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a200d9-6d46-7c11-b40a-e12f9cdba686",
+  "disposal_reason": "Fable2 #3351 folded the audit Low into the active scope of w-e12f9cdba686 C2. The docs/test.md correction is in frozen R2 4c5f78ab8, evidence 61768cfdca454cf2b087f24a85edb12c. Review and validation remain on that replacement item.",
+  "completion": null
+}

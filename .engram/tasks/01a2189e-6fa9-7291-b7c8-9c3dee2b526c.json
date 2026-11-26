@@ -1,0 +1,27 @@
+{
+  "id": "01a2189e-6fa9-7291-b7c8-9c3dee2b526c",
+  "external_ref": null,
+  "title": "Dead-code warning: codex_account operation::load_account_mode is used only by tests",
+  "outcome": "The non-test cargo check of the termal binary carries no dead-code warning from the Codex account module.",
+  "acceptance": [
+    "cargo check --bin termal reports no 'never used' warning for src/codex_account/operation.rs, on Linux and Windows, with the codex_account tests still compiling and passing."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 4,
+  "labels": [
+    "codex-runtime",
+    "warnings"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

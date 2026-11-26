@@ -1,0 +1,29 @@
+{
+  "id": "01a218c6-b414-7c92-8835-68f8be74c40a",
+  "external_ref": null,
+  "title": "A worker delegation cannot write the parent clone's .git (git fetch, git worktree remove of a sibling) even when ownedPaths names .worktrees, so runner-side Codex cleanup cannot run as a TermAl worker; failed workers also leave their own delegation worktrees",
+  "outcome": "A worker delegation whose write policy names a path it must manage (such as .worktrees) either can perform the git operations that path needs on the parent clone (worktree remove, which writes .git/worktrees metadata), or is refused at spawn with a clear statement of what the policy cannot cover. A failed worker delegation does not leave its own delegation worktree behind unrecorded.",
+  "acceptance": [
+    "A worker delegation cannot write the parent clone's .git (git fetch, git worktree remove of a sibling) even when ownedPaths names .worktrees, so runner-side Codex cleanup cannot run as a TermAl worker; failed workers also leave their own delegation worktrees is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "delegation",
+    "winb",
+    "write-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
