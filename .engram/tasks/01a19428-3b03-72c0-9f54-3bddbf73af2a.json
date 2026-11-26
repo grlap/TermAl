@@ -4,7 +4,7 @@
   "title": "Relay mailbox send and read to a remote runner intermittently fail with a 503 / non-JSON reply although the operation succeeded",
   "outcome": "A relay mailbox send or read to or from a remote host returns a definite, parseable outcome. When the outcome is genuinely unknown, the response is structured (JSON with a typed code), not bare tool text that breaks clients' parsers.",
   "acceptance": [
-    "Every existing deadline and limit value is unchanged, including the 5 s receiver handler deadline, the sender request limit and the federated read wait. A relay or mailbox request that exceeds the existing deadline returns a truthful UNKNOWN outcome that the sender reconciles with its unchanged original request, never a false definite failure; the one exception is a native relay mailbox read (a page read, or an exact-message read of a remote message), which keeps its definite refusal by design (the page or message status is unavailable and is read again later), because repeating a read is its recovery and it leaves no uncertain effect to reconcile. Through the MCP bridge, every unknown outcome the host itself reports (a server error whose own message carries the host's unknown-outcome clause), including a send's, reaches the client as the typed result with code outcome_unknown, while known refusals and text that the bridge or a caller worded keep their plain error. Writer-admission refusals stay definite 'nothing committed, retry' refusals. When a relay or mailbox request's deadline expires, the home writes one bounded line naming its route, relay operation and request id, and the phase it was waiting in, with no payload.",
+    "Every existing deadline and limit value is unchanged, including the 5 s receiver handler deadline, the sender request limit and the federated read wait. A relay or mailbox request that exceeds the existing deadline returns a truthful UNKNOWN outcome that the sender reconciles with its unchanged original request, never a false definite failure; the one exception is a mailbox read whose home cannot answer (a native relay page read, a native relay mailbox listing, or an exact-message read of a message whose native relay or central-domain home is unavailable), which keeps its definite \"unavailable, read again later\" answer by design (a listing reports that home as an unavailable entry), because repeating a read is its recovery and it leaves no uncertain effect to reconcile. Through the MCP bridge, every unknown outcome the host itself reports (a server error whose own message carries the host's unknown-outcome clause), including a send's and an acknowledgement's, reaches the client as the typed result with code outcome_unknown, while known refusals and text that the bridge or a caller worded keep their plain error. Writer-admission refusals on the local and central-domain mailbox paths stay definite 'nothing committed, retry' refusals; over the native relay, a home's writer-admission refusal reaches the sender as UNKNOWN, which the sender reconciles by retrying its unchanged original request. When a relay or mailbox request's deadline expires, the home writes one bounded line naming its route, its relay operation and request id ('-' for a central-domain mailbox request, and for a request whose body expired before it was authenticated), and the phase it was waiting in, with no payload.",
     "For the relay and mailbox routes, the pre-handler and post-handler owner checks and the relay handler's origin lookup run on the blocking pool under the request deadline, with the same checks in the same order, so no StateInner wait in those paths runs on an async worker. A scripted-clock test over authenticated HTTP holds the relay request's admission owner check (the current_authority StateInner path) and shows that it runs on the blocking pool and that the unchanged deadline answers an UNKNOWN 503 while that check is still held; on the pre-change code the check runs on an async worker and the test fails.",
     "Each relay home failure record carries the phase still running (one of admission, handler, dispatch, origin, operation, connection, storeId, state, authority, postAuthority) and the elapsed milliseconds of the phases finished before it, names and numbers only; the state-hold test asserts the record names admission. Tests that waited the real 5 s deadline are moved to logical time with the same value, with no wall-clock waits.",
     "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the exact landed input."
@@ -27,12 +27,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Relay and mailbox deadlines now give truthful, parseable outcomes. Owner checks run on the blocking pool under the unchanged 5 s deadline, phase traces are frozen at expiry, and one bounded expiry line names the route, operation, request id and phase, including request-body and response-body expiry and mailbox admission. Home failure records name the running phase and only finished phases. Through the MCP bridge, every host-reported unknown outcome (send, read, acknowledgement) is the typed result code outcome_unknown, with known refusals kept plain. Landed in the combined commit 5dfa2ae6 (with w-c9fb) after a clean review pair, a clean delta pair and a clean combo union pair, and passing Linux (DL560 test-b1ae3600) and WinB (test-609c1f4d) full gates. The post-landing evaluation passed all four criteria on the final C1 (revision 7).",
+    "completed_at": "2026-11-26T17:42:35.907368800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

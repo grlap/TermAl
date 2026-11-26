@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Diagnosed the 404 on native sends to WinB host:932a546b…::session-9: Central's mailbox directory kept a stale principal for a root that no longer exists on WinB. WinB's own listing has no root summary for session-9 while session-8 resolves. The 404 is WinB correctly refusing, and the link, route and relay are fine. A supported Codex executor route on WinB is in place: session-12 \"Engram::Codex-WinB-Cleanup\" removed 19 worktrees (+18.23 GiB) and answers native sends from Central. The product defect (no retirement of remote directory principals) is filed with provenance as w-386def05f4a2, with a fix in progress. The evaluation passed all 3 criteria.",
+    "completed_at": "2026-11-26T17:59:11.475817Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

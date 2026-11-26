@@ -1,0 +1,31 @@
+{
+  "id": "01a218ee-ff40-7b62-aac5-d2f002382205",
+  "external_ref": null,
+  "title": "Acceptance admission refuses a landed item's exact-commit terminal pass recorded under an earlier claim (committed_input_no_eligible_run), forcing a rerun to close landed work",
+  "outcome": "Acceptance admission refuses a landed item's exact-commit terminal pass recorded under an earlier claim (committed_input_no_eligible_run), forcing a rerun to close landed work",
+  "acceptance": [
+    "The cause is identified from source (src/acceptance_committed_input.rs and the admission path): why an exact-commit terminal passing committed-input run of the item, recorded under an earlier claim of the same item, is not eligible for a later claim's evaluation at the same named-root HEAD, and whether that exclusion protects a real invariant.",
+    "Either admission accepts such a run for the same item at the same exact commit (same project, item and committed source identity), or an evidence-only route lets a landed item's evaluation use its recorded exact-commit pass without a fresh run; in both cases nothing is accepted from a different item, commit or tree.",
+    "Behaviour tests cover: an earlier-claim exact-commit pass admitted (or routed) for a later claim; a different-commit, different-item or non-terminal run still refused with committed_input_no_eligible_run; and the existing admission tests keep their outcomes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "cross-project",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

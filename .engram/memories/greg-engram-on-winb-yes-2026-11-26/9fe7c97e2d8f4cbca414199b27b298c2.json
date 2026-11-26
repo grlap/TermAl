@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-engram-on-winb-yes-2026-11-26",
+    "revision_id": "9fe7c97e2d8f4cbca414199b27b298c2",
+    "previous": null,
+    "body_sha256": "fcac61e5e2573c21ccd6715c03484885f75e5e6952ca798f7999ebbf307b6528",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T17:46:16.005131100Z"
+    }
+  },
+  "body": "Greg's word, 2026-11-26 ~17:46Z, verbatim via Engram::Asistant (TermAl mailbox 588693a8 #2865), answering the joint question (Engram::Fable #2122 / Termal::Fable2 #2864): „Tak dla Engram na Window B.”\n\nIt covers, on Windows B, for Codex sessions (Engram session-12 for the Engram project, TermAl session-5 for the TermAl project):\n(1) creating the local Engram store C:\\Users\\Greg\\.engram (engram init);\n(2) enabling task sync and importing tasks and memories from engram-data, by explicit export and import, not plain sync;\n(3) enabling the Engram MCP integration for the Engram and TermAl projects on WinB's TermAl, as a per-project setting.\n\nContext: Greg's earlier words „Chwila!! Powien byc engram” (#2859) and „Po to mamy sync engram. + Kimi. Dlatego robimy te toole.” (#2861). Earlier refusals that were NOT bypassed: session-8's Claude classifier (\"Destructive or Unwanted Actions\") and session-12's own AGENTS.md check. This word is what they asked for."
+}

@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus3-cleanup-pending-2026-11-26",
+  "head": {
+    "state": "active",
+    "chain": [
+      "bf92056e1b4140bdbbba89f51b503284",
+      "67512646ce414c7b93b32767d8d32615"
+    ]
+  }
+}

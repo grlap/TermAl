@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-cleanup-pending-2026-11-26",
+    "revision_id": "67512646ce414c7b93b32767d8d32615",
+    "previous": "bf92056e1b4140bdbbba89f51b503284",
+    "body_sha256": "f6dd0b83dc4fbd2851d75fc3bb94399071c02ebd61f71afc35fab67818856bc7",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a218bf-1189-70e2-9664-386def05f4a2",
+      "work_ref": "w-386def05f4a2"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T17:46:30.871168200Z"
+    }
+  },
+  "body": "Cleanup handed to Opus2 (TermAl mailbox f852105e) on 2026-11-26 after w-3bddbf73af2a closed. Executor: Termal::Codex session-8582, non-forced.\nSTOPPED 17:46Z (Opus2 #3225), correctly, under rule cleanup-keep-roots-with-unsettled-verif-records-2026-11-25:\n- Central .tmp/wt-3bdd-9474 holds 8 verification records the host reports RECEIVED, not settled: 1c2e119a, 54855267, b42006a5, c3b7da30, c42576de, c72cb233, d26c3bcd, ee40a71b.\n- Central .tmp/wt-ff2c-9474 holds 3: 06ebd78c, 7d6756ff, a0484951.\nBoth stay until those records settle, or until Fable2 rules them disposable for closed items; Opus2 re-releases the cleanup only on that word.\nDL560 .evidence/3bdd-* via C6 is not affected by that stop.\nKept until their items close: DL560 combo-full and combo-measure (w-c9fb); .evidence/386d-* and Central .tmp/wt-386d-9474 (w-386def05f4a2); the WinB combo FULL root (w-c9fb)."
+}

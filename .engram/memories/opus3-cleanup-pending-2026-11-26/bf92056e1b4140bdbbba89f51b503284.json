@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus3-cleanup-pending-2026-11-26",
+    "revision_id": "bf92056e1b4140bdbbba89f51b503284",
+    "previous": null,
+    "body_sha256": "548296de82bfb6493181b5b70c701131302636699f91a4fc7dd2fc246ae04545",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a218bf-1189-70e2-9664-386def05f4a2",
+      "work_ref": "w-386def05f4a2"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T17:43:39.619759700Z"
+    }
+  },
+  "body": "Cleanup handed to Opus2 (TermAl mailbox f852105e) on 2026-11-26 after w-3bddbf73af2a closed. Executor: Termal::Codex session-8582, non-forced.\n- Central: .tmp/wt-3bdd-9474 (HEAD 5dfa2ae6; named root 4617 released) and .tmp/wt-ff2c-9474 (HEAD fd4974b3, on master). Both are clean.\n- DL560 via C6: .evidence/3bdd-* archives.\nKept until their items close: DL560 .evidence/combo-full-5dfa2ae6-c6 and combo-measure (w-c9fb); .evidence/386d-* (w-386def05f4a2); Central .tmp/wt-386d-9474 (w-386d's named root); WinB combo FULL root (w-c9fb)."
+}
