@@ -1,0 +1,27 @@
+{
+  "id": "01a21a00-952b-78d1-99a8-7ab4fd1e7808",
+  "external_ref": null,
+  "title": "Cover negative native relay writer-admission classification cases",
+  "outcome": "Cover negative native relay writer-admission classification cases",
+  "acceptance": [
+    "Regression coverage shows a non-Send operation, an unexpected status, and an envelope that does not match the request cannot certify a relay writer-admission refusal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
