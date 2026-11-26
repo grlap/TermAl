@@ -891,6 +891,9 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
         terminal_remote_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
             TERMINAL_REMOTE_COMMAND_CONCURRENCY_LIMIT,
         )),
+        acceptance_evaluation_submit_permits: Arc::new(tokio::sync::Semaphore::new(
+            ACCEPTANCE_EVALUATION_SUBMIT_CONCURRENCY,
+        )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
         inner: Arc::new(StateMutex::new(reloaded_inner)),

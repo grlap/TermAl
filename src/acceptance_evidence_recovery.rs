@@ -142,8 +142,8 @@ pub(crate) struct AcceptanceEvidenceRecovery {
     pub(crate) stale_basis: Option<String>,
 }
 
-/// Engram refused to continue the captured notes window because a record was
-/// appended to the item after its cut. Judged on the structured refusal code:
+/// Engram refused to continue the captured notes window. Judged on the
+/// structured refusal code:
 /// a failed CLI call carries it as `refusal_code`, a control reply as `code`.
 fn acceptance_evidence_window_changed(error: &EngramTransportError) -> bool {
     error.refusal_code.as_deref().or_else(|| {
@@ -260,10 +260,22 @@ impl AcceptanceEvidenceRecovery {
                 self.stale_basis = Some(reason.clone());
                 Err(ApiError::conflict(reason).into())
             }
-            Err(_) => Err(ApiError::bad_gateway(
-                "the captured evidence read is unavailable or its cursor expired",
-            )
-            .into()),
+            Err(error) => {
+                let kind = match error.kind {
+                    EngramTransportErrorKind::LocalState => "local_state",
+                    EngramTransportErrorKind::Deadline => "deadline",
+                    EngramTransportErrorKind::Transport => "transport",
+                    EngramTransportErrorKind::Protocol => "protocol",
+                    EngramTransportErrorKind::Remote => "remote",
+                    #[cfg(test)]
+                    EngramTransportErrorKind::Backoff => "backoff",
+                };
+                Err(ApiError::bad_gateway(format!(
+                    "Engram evidence read failed ({kind}): {}",
+                    acceptance_brief_text(&error.message, 512),
+                ))
+                .into())
+            }
         }
     }
 
@@ -677,7 +689,8 @@ impl AppState {
                 "remedy":"The item's evidence changed after the captured cut, so this attempt cannot judge it. Finish and report this stale basis; the parent should request a fresh evaluation, which captures the current evidence."}));
         }
         Ok(
-            json!({"state":"unfinished", "recorded":false, "attemptKey":request.attempt_key,
+            json!({"state":"unfinished", "failureClass":"evaluator_infrastructure",
+            "recorded":false, "attemptKey":request.attempt_key,
             "readKey":request.read_key, "unfinishedEvidence":unfinished,
             "remedy":"No verdict was sent. Finish and report this reason; the parent may request a fresh evaluation."}),
         )
@@ -1064,7 +1077,7 @@ pub(crate) async fn read_session_acceptance_evidence(
 ) -> Result<Json<Value>, ApiError> {
     let Json(request) = request.map_err(|e| api_json_rejection("acceptance evidence read", e))?;
     let permit =
-        acquire_acceptance_evaluation_permit(ACCEPTANCE_EVALUATION_SUBMIT_PERMITS.clone())?;
+        acquire_acceptance_evaluation_permit(state.acceptance_evaluation_submit_permits.clone())?;
     run_blocking_api(move || {
         let _permit = permit;
         let cwd = state.engram_host_launch_workdir();

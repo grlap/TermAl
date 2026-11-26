@@ -468,6 +468,223 @@ fn a_reused_evaluators_stale_attempt_is_reported_beside_its_earlier_retired_writ
 }
 
 #[test]
+fn a_large_captured_catalog_recovers_every_older_record_while_notes_are_appended() {
+    const IN_BRIEF: u64 = 40;
+    const PAGE_SIZE: u64 = 10;
+    const PAGES: u64 = 13;
+    const OLDER: u64 = PAGES * PAGE_SIZE;
+    const CAPTURED: u64 = IN_BRIEF + OLDER;
+    let first_page = json!({
+        "notes": ((OLDER + 1)..=CAPTURED).map(catalog_note).collect::<Vec<_>>(),
+        "notes_window": canonical_notes_window(CAPTURED, 0, IN_BRIEF, 42, Some("page-1")),
+        "notes_omitted": OLDER,
+    });
+    let (state, _, id, child, key) = recovery_fixture_with_catalog(
+        "independent_session",
+        false,
+        first_page,
+        "entry_limit",
+        OLDER as usize,
+    );
+    let instant = std::time::Instant::now();
+    let mut cursor = None;
+    for number in 1..=PAGES {
+        let mut request = read_request(&key, &format!("catalog-{number}"), false);
+        request.cursor = cursor.take();
+        let remaining = OLDER - number * PAGE_SIZE;
+        let result = state
+            .read_acceptance_evidence_with_io(
+                &child,
+                request,
+                |_, args, _| {
+                    if let Some(i) = args.iter().position(|arg| arg == "--after") {
+                        assert_eq!(args[i + 1], format!("page-{number}"));
+                        let appended = number;
+                        let next = (remaining > 0).then(|| format!("page-{}", number + 1));
+                        Ok(json!({
+                            "work":{"short_ref":"w-task"},
+                            "acceptance_basis": 7,
+                            "evidence_basis": 42,
+                            "notes": ((remaining + 1)..=(remaining + PAGE_SIZE))
+                                .map(catalog_note).collect::<Vec<_>>(),
+                            "notes_window":canonical_notes_window(
+                                CAPTURED + appended,
+                                IN_BRIEF + (number - 1) * PAGE_SIZE + appended,
+                                PAGE_SIZE,
+                                42 + number as i64,
+                                next.as_deref(),
+                            ),
+                            "notes_omitted":remaining,
+                        }))
+                    } else {
+                        assert!(args.iter().any(|arg| arg == "inspect"), "{args:?}");
+                        Ok(evidence_selection::canonical_core_receipt())
+                    }
+                },
+                || instant,
+            )
+            .unwrap();
+        assert_eq!(result["state"], "complete", "page {number}: {result}");
+        assert_eq!(result["remainingUnread"], remaining, "page {number}");
+        let expected: Vec<_> = ((remaining + 1)..=(remaining + PAGE_SIZE))
+            .map(catalog_note)
+            .collect();
+        assert_eq!(result["catalog"], json!(expected), "page {number}");
+        cursor = result["cursor"].as_str().map(str::to_owned);
+        assert_eq!(cursor.is_some(), remaining > 0);
+    }
+    let inner = state.inner.lock().unwrap();
+    let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+        .acceptance_evaluation
+        .as_ref()
+        .unwrap();
+    assert!(acceptance_evidence_unfinished(target).is_none());
+}
+
+#[test]
+fn a_catalog_that_shrinks_after_an_append_is_refused_at_the_same_boundary() {
+    let first_page = json!({
+        "notes": (5..=44).map(catalog_note).collect::<Vec<_>>(),
+        "notes_window": canonical_notes_window(44, 0, 40, 42, Some("after-head")),
+        "notes_omitted": 4,
+    });
+    let (state, _, _, child, key) =
+        recovery_fixture_with_catalog("independent_session", false, first_page, "entry_limit", 4);
+    let instant = std::time::Instant::now();
+    let read = |connection: &EngramConnectionConfig, args: &[String], timeout: Duration| {
+        let Some(i) = args.iter().position(|arg| arg == "--after") else {
+            return recovery_reader(connection, args, timeout);
+        };
+        let (notes, window, older) = match args[i + 1].as_str() {
+            // One append increases total and newer equally. The requested
+            // prefix still ends at four, just below the captured first page.
+            "after-head" => (
+                [catalog_note(3), catalog_note(4)],
+                canonical_notes_window(45, 41, 2, 43, Some("after-append")),
+                2,
+            ),
+            // The prefix still ends at two. Both rows have valid and
+            // distinct locators, but the reported catalog shrank.
+            "after-append" => (
+                [catalog_note(1), catalog_note(2)],
+                canonical_notes_window(43, 41, 2, 44, None),
+                0,
+            ),
+            token => panic!("unexpected tracker cursor {token}"),
+        };
+        Ok(json!({"work":{"short_ref":"w-task"}, "notes":notes,
+            "notes_window":window, "notes_omitted":older}))
+    };
+    let first = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "after-append", false),
+            &read,
+            || instant,
+        )
+        .unwrap();
+    assert_eq!(first["state"], "complete", "{first}");
+    assert_eq!(first["catalog"], json!([catalog_note(3), catalog_note(4)]));
+    assert_eq!(first["remainingUnread"], 2);
+
+    let mut request = read_request(&key, "after-shrink", false);
+    request.cursor = Some(first["cursor"].as_str().unwrap().to_owned());
+    let result = state
+        .read_acceptance_evidence_with_io(&child, request, read, || instant)
+        .unwrap();
+    assert_eq!(result["state"], "unfinished", "{result}");
+    assert_eq!(result["failureClass"], "evaluator_infrastructure");
+    assert!(result.get("catalog").is_none(), "{result}");
+    assert!(
+        result["unfinishedEvidence"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("catalog cut, counts or cursor changed"),
+        "{result}",
+    );
+}
+
+#[test]
+fn moved_catalog_boundary_is_refused_without_revealing_a_page() {
+    let (state, _, _, child, key) = recovery_fixture();
+    let instant = std::time::Instant::now();
+    let result = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "moved-boundary", false),
+            |connection, args, timeout| {
+                let mut page = recovery_reader(connection, args, timeout)?;
+                if args.iter().any(|arg| arg == "--after") {
+                    // Valid page arithmetic, including a continuation, but a
+                    // different prefix end than the preceding page captured.
+                    page["notes_window"] = canonical_notes_window(6, 4, 1, 43, Some("other-page"));
+                    page["notes_omitted"] = json!(1);
+                }
+                Ok(page)
+            },
+            || instant,
+        )
+        .unwrap();
+    assert_eq!(result["state"], "unfinished");
+    assert_eq!(result["failureClass"], "evaluator_infrastructure");
+    assert!(result.get("catalog").is_none(), "{result}");
+    assert!(
+        result["unfinishedEvidence"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("catalog cut, counts or cursor changed"),
+        "{result}",
+    );
+}
+
+#[test]
+fn catalog_timeout_is_an_evaluator_infrastructure_failure_with_the_engram_reason() {
+    let (state, _, id, child, key) = recovery_fixture();
+    let instant = std::time::Instant::now();
+    let result = state
+        .read_acceptance_evidence_with_io(
+            &child,
+            read_request(&key, "catalog-timeout", false),
+            |connection, args, timeout| {
+                if args.iter().any(|arg| arg == "--after") {
+                    Err(EngramTransportError::deadline(
+                        "fixture tracker process timed out",
+                    ))
+                } else {
+                    recovery_reader(connection, args, timeout)
+                }
+            },
+            || instant,
+        )
+        .unwrap();
+    assert_eq!(result["state"], "unfinished");
+    assert_eq!(result["failureClass"], "evaluator_infrastructure");
+    assert_eq!(result["recorded"], false);
+    let reason = result["unfinishedEvidence"]["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("(deadline)") && reason.contains("fixture tracker process timed out"),
+        "{reason}"
+    );
+    let inner = state.inner.lock().unwrap();
+    let target = inner.delegations[inner.find_delegation_index(&id).unwrap()]
+        .acceptance_evaluation
+        .as_ref()
+        .unwrap();
+    assert!(matches!(
+        target.submission,
+        AcceptanceEvaluationSubmission::None
+    ));
+    let outcome = acceptance_evaluation_outcome_line(target);
+    for wording in [
+        "evaluator infrastructure failure",
+        "No criterion verdict was sent",
+        reason,
+    ] {
+        assert!(outcome.contains(wording), "{outcome}");
+    }
+}
+
+#[test]
 fn requester_proof_beyond_the_brief_and_discovery_exhaustion_allow_mixed_verdicts() {
     let first_page = json!({
         "notes": (402..=441).map(catalog_note).collect::<Vec<_>>(),

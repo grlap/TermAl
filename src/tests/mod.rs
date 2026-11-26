@@ -1076,6 +1076,9 @@ pub(crate) fn test_app_state() -> AppState {
         terminal_remote_command_semaphore: Arc::new(tokio::sync::Semaphore::new(
             TERMINAL_REMOTE_COMMAND_CONCURRENCY_LIMIT,
         )),
+        acceptance_evaluation_submit_permits: Arc::new(tokio::sync::Semaphore::new(
+            ACCEPTANCE_EVALUATION_SUBMIT_CONCURRENCY,
+        )),
         stopping_orchestrator_ids: Arc::new(Mutex::new(HashSet::new())),
         stopping_orchestrator_session_ids: Arc::new(Mutex::new(HashMap::new())),
         inner: Arc::new(timed_fixture_state_mutex(inner, &server_instance_id)),

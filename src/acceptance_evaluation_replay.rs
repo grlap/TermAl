@@ -320,7 +320,7 @@ pub(crate) async fn replay_session_acceptance_evaluation(
     let Json(request) =
         request.map_err(|e| api_json_rejection("acceptance evaluation replay", e))?;
     let permit =
-        acquire_acceptance_evaluation_permit(ACCEPTANCE_EVALUATION_SUBMIT_PERMITS.clone())?;
+        acquire_acceptance_evaluation_permit(state.acceptance_evaluation_submit_permits.clone())?;
     run_blocking_api(move || {
         let _permit = permit;
         state

@@ -279,8 +279,7 @@ pub(crate) fn acceptance_evaluation_submit_tool_definition() -> Value {
 
 static ACCEPTANCE_EVALUATION_REQUEST_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
-pub(crate) static ACCEPTANCE_EVALUATION_SUBMIT_PERMITS: LazyLock<Arc<tokio::sync::Semaphore>> =
-    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
+pub(crate) const ACCEPTANCE_EVALUATION_SUBMIT_CONCURRENCY: usize = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3543,11 +3542,12 @@ pub(crate) async fn submit_session_acceptance_evaluation(
     State(state): State<AppState>,
     request: Result<Json<SubmitAcceptanceEvaluationRequest>, JsonRejection>,
 ) -> Result<Json<AcceptanceEvaluationSubmitResponse>, ApiError> {
+    let permits = state.acceptance_evaluation_submit_permits.clone();
     run_acceptance_evaluation_submit_request(
         child,
         state,
         request,
-        ACCEPTANCE_EVALUATION_SUBMIT_PERMITS.clone(),
+        permits,
         |state, child, request| state.submit_acceptance_evaluation(child, request),
     )
     .await

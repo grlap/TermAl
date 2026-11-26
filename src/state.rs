@@ -1432,6 +1432,8 @@ pub(crate) struct AppState {
     pub(crate) remote_lifecycle_actions_in_flight: Arc<Mutex<HashSet<String>>>,
     pub(crate) terminal_local_command_semaphore: Arc<tokio::sync::Semaphore>,
     pub(crate) terminal_remote_command_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Shared by submission, replay and evidence reads for this server.
+    pub(crate) acceptance_evaluation_submit_permits: Arc<tokio::sync::Semaphore>,
     pub(crate) stopping_orchestrator_ids: Arc<Mutex<HashSet<String>>>,
     pub(crate) stopping_orchestrator_session_ids: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     pub(crate) inner: Arc<StateMutex<StateInner>>,

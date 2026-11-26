@@ -2,8 +2,8 @@
 // histories on a slow store.
 //
 // Owns: tests that a canonical notes+gates continuation accepts a project
-// read cut that advances between pages (Engram returns a fresh cut per call),
-// still refuses a total that changes between pages, and that a long history
+// read cut and appended records between pages (Engram counts those records
+// in both total and newer), refuses a moved boundary, and that a long history
 // read at a realistic per-read latency stops optional paging with a recorded
 // stop instead of failing the request.
 // Does not own: the other compact-carrier checks (identity, basis, counts,
@@ -56,10 +56,8 @@ fn page_number(args: &[String]) -> Option<u64> {
     token.strip_prefix("page-")?.parse().ok()
 }
 
-/// A history whose project read cut advances on every page, as it does while
-/// other items in the project are written between the pages.
 #[test]
-fn canonical_notes_pages_accept_a_read_cut_that_advances_between_pages() {
+fn canonical_notes_pages_keep_the_captured_prefix_when_records_are_appended() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let (show, full, binding) = history_show(6, 2, 120);
@@ -74,7 +72,16 @@ fn canonical_notes_pages_accept_a_read_cut_that_advances_between_pages() {
                     Ok(canonical_core_receipt())
                 } else if let Some(number) = page_number(args) {
                     pages.fetch_add(1, Ordering::SeqCst);
-                    Ok(history_page(6, 2, number, 120 + 9 * number as i64))
+                    let mut page = history_page(6, 2, number, 120 + 9 * number as i64);
+                    let newer = number * 2;
+                    page["notes_window"] = history_window(
+                        6 + number,
+                        newer + number,
+                        2,
+                        120 + 9 * number as i64,
+                        number + 1,
+                    );
+                    Ok(page)
                 } else if args.iter().any(|arg| arg == "--full") {
                     Ok(full.clone())
                 } else if args.iter().any(|arg| arg == "held") {
@@ -86,7 +93,7 @@ fn canonical_notes_pages_accept_a_read_cut_that_advances_between_pages() {
                 }
             },
         )
-        .expect("an advancing read cut between pages must not refuse the evaluation");
+        .expect("appends outside the captured window must not refuse the evaluation");
     assert_eq!(pages.load(Ordering::SeqCst), 2);
     let wire = serde_json::to_value(response).unwrap();
     let brief = wire["brief"].as_str().unwrap();
@@ -99,10 +106,8 @@ fn canonical_notes_pages_accept_a_read_cut_that_advances_between_pages() {
     assert_eq!(wire["evidenceOmissions"]["unread"]["count"], 0);
 }
 
-/// The selected index total is still the bracket: an advancing cut does not
-/// excuse a page that counts a different history.
 #[test]
-fn canonical_notes_pages_still_refuse_a_total_that_changes_between_pages() {
+fn canonical_notes_pages_refuse_a_moved_captured_boundary() {
     let (state, project, parent, root) = fixture();
     install_store(&state, &project, &root);
     let (show, full, binding) = history_show(6, 2, 120);
@@ -115,7 +120,8 @@ fn canonical_notes_pages_still_refuse_a_total_that_changes_between_pages() {
                 if args.iter().any(|arg| arg == "inspect") {
                     Ok(canonical_core_receipt())
                 } else if let Some(number) = page_number(args) {
-                    // A note was added to this item between the pages.
+                    // This row count moves the captured boundary. A genuine
+                    // append would increase both total and newer.
                     Ok(history_page(7, 2, number, 121))
                 } else if args.iter().any(|arg| arg == "--full") {
                     Ok(full.clone())
@@ -129,7 +135,7 @@ fn canonical_notes_pages_still_refuse_a_total_that_changes_between_pages() {
             },
         )
         .err()
-        .expect("a total that changes between pages must be refused");
+        .expect("a page that moves the captured boundary must be refused");
     assert_eq!(error.status, StatusCode::CONFLICT, "{error:?}");
     assert!(
         error

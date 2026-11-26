@@ -285,11 +285,15 @@ pub(crate) fn acceptance_compact_notes_carrier(
         }
     }
     let window = acceptance_notes_window(page)?;
-    // Engram takes a fresh project read cut on every page, so the project
-    // position may advance between pages while other items are written. The
-    // selected index total and the page boundary are what stay fixed.
-    if window.total != previous.total
-        || previous.newer.checked_add(previous.shown) != Some(window.newer)
+    // Engram counts newly appended records in both total and newer. Only
+    // the prefix through the preceding page's cursor belongs to this read.
+    let previous_oldest = previous
+        .total
+        .checked_sub(previous.newer)
+        .and_then(|end| end.checked_sub(previous.shown));
+    let boundary = window.total - window.newer;
+    if window.total < previous.total
+        || previous_oldest != Some(boundary)
         || window.shown == 0
         || window
             .after

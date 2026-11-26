@@ -332,6 +332,23 @@ fn replay_receipt_repairs_both_retained_host_unavailable_wordings() {
 
 #[tokio::test]
 async fn replay_refuses_a_changed_payload_without_invoking_engram() {
+    let (busy_state, busy_parent, busy_delegation, _, _) = retained_fixture();
+    let _busy_permits = busy_state
+        .acceptance_evaluation_submit_permits
+        .clone()
+        .try_acquire_many_owned(2)
+        .unwrap();
+    let busy_response = replay(&app_router(busy_state), &busy_parent, &busy_delegation).await;
+    assert_eq!(busy_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let busy_body = axum::body::to_bytes(busy_response.into_body(), 8192)
+        .await
+        .unwrap();
+    let busy_error: Value = serde_json::from_slice(&busy_body).unwrap();
+    assert_eq!(
+        busy_error["error"],
+        "acceptance evaluation busy; retry the same request"
+    );
+
     let (state, parent, delegation, root, _) = retained_fixture();
     update_evaluation_target(&state, &delegation, |target| {
         let AcceptanceEvaluationSubmission::Unconfirmed { original, .. } = &mut target.submission
@@ -341,12 +358,13 @@ async fn replay_refuses_a_changed_payload_without_invoking_engram() {
         original.args.push("altered".into());
     });
     let before = submission_of(&state, &delegation);
-    assert_eq!(
-        replay(&app_router(state.clone()), &parent, &delegation)
-            .await
-            .status(),
-        StatusCode::CONFLICT
-    );
+    let response = replay(&app_router(state.clone()), &parent, &delegation).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"], "acceptance_replay_payload_digest_mismatch");
     assert_eq!(submission_of(&state, &delegation), before);
     assert!(!root.join("replay-sends.txt").exists());
 }

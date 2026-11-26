@@ -3008,7 +3008,7 @@ pub(crate) fn acceptance_evaluation_outcome_line(
                 )
             } else {
                 format!(
-                    "{subject}: evidence recovery unfinished; no verdict was sent. {reason}. The parent may request a fresh evaluation."
+                    "{subject}: evaluator infrastructure failure. No criterion verdict was sent. {reason}. Request a fresh evaluation."
                 )
             }
         }
