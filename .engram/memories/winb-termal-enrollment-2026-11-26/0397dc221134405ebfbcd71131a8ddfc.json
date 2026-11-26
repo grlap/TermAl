@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-termal-enrollment-2026-11-26",
+    "revision_id": "0397dc221134405ebfbcd71131a8ddfc",
+    "previous": null,
+    "body_sha256": "f5b5826054854556c2e708a59415f94963d49ecd3cf56ad34f7a0a177c2c89cb",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "Greg",
+      "actor_kind": "agent",
+      "actor_context": null,
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T18:23:35.888248900Z"
+    }
+  },
+  "body": "Windows B (DESKTOP-9BFCGFI) TermAl Engram enrollment, 2026-11-26. A local Engram store for github.com/grlap/TermAl was initialised and filled by importing engram-data d2df8061 with --empty-basis --include-memories (5687 tasks, 1043 memory keys). The CRLF workaround is the repo-local .git/info/attributes line '.engram/** text eol=lf' plus a re-checkout (Engram bug w-b534c27ad852). The data worktree .engram-data is excluded through .git/info/exclude. Pushes use HTTPS with the existing Git Credential Manager; Greg signed GCM in to GitHub on 2026-11-26. Termal::Sol-WinB (WinB session-14, Codex gpt-6.2-sol high) works code-and-candidate with local claims. Exports from WinB stay frozen except under the explicit import-then-ordinary-export procedure, until Engram w-8b8b95107bd8 decides the second-host evidence route."
+}
