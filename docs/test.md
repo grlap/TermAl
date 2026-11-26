@@ -1199,8 +1199,23 @@ run that was registered and bound gets its record without a rerun. While the
 record's route is held (the initiating session is gone, the project has no
 Engram connection, or its store is not the registration's) or its send fails
 transiently or without a definite answer, it stays pending and the same
-frozen record is sent once the route is back, under the same key. A definite
-refusal is final, as below.
+frozen record is sent once the route is back, under the same key.
+
+A registered run also stays pending if the current Engram connection
+definitively refuses it with the structured field `claim_live` or
+`root_bound`. Before resending, TermAl checks that the original initiating
+session again holds the live claim for the same work and run and that
+the original workspace is bound at the registered generation or later.
+Engram adjudicates the claim's fence history, planning revision and naming
+history against the frozen source and result. No tests need to run again.
+The same pending run can resume after a host restart if its session,
+registration and artifacts survive. If Engram's reply to a resend is lost,
+TermAl can replay the unchanged request to recover an existing receipt.
+A resend stopped before dispatch returns to the binding wait after TermAl
+confirms that wait was saved. A crash or an unconfirmed rollback leaves
+delivery uncertain. TermAl confirms the durable replay state before sending
+the unchanged request again.
+Other definitive refusals and previously recorded terminal refusals stay final.
 
 A committed-input run that was not registered for credit at its start gets
 none, and its `summary` says why with the correction, register at start with
@@ -1287,9 +1302,10 @@ authoritative read-only route to a run's record ids and outcome is
 session. It answers `{ "runId", "verificationRecord" }` from the host's own
 record, live or retained, without reading the run's files, so it is right
 whatever the run directory holds or accepts. `verificationRecord` has
-`state` (`settled`, `received`, `rejected` or `refusedByHost`), `recordIds`,
-`runOutcome` and, for a refusal, `detail`; it is null while the host holds
-no answer for the run, and an unknown run is 404. The full detail
+`state` (`settled`, `received`, `pending`, `rejected` or `refusedByHost`),
+`recordIds`, `runOutcome` and `detail` for a refusal or retained binding
+retry. It is null while the host holds no answer for the run. An unknown
+run is 404. The full detail
 (`GET /api/test-runs/{id}`) also carries it as `detail.verificationRecord`
 when the run's files can be read.
 

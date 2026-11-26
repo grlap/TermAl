@@ -39,6 +39,9 @@
 
 use super::*;
 
+#[path = "engram_verification_binding_retry.rs"]
+mod binding_retry;
+
 /// The frozen body's file in the run directory: written once, never rebuilt.
 pub(crate) const ENGRAM_VERIFICATION_RECORD_BODY_FILE: &str = "engram-verification-record.json";
 
@@ -369,6 +372,10 @@ pub(crate) enum EngramVerificationRecordPending {
     /// unknown to this host); the same frozen body is sent again under the
     /// same key.
     RemoteDeferred { code: String },
+    /// The producer explicitly refused this body without recording it.
+    BindingDeferred {
+        field: EngramVerificationBindingRefusal,
+    },
     /// The project's authority store is no longer the registration's.
     StoreChanged,
     /// The frozen body beside the run cannot be read back exactly; it is
@@ -403,6 +410,22 @@ pub(crate) enum EngramVerificationRecordPending {
     TransportFailed { error_kind: String },
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum EngramVerificationBindingRefusal {
+    ClaimLive,
+    RootBound,
+}
+
+impl EngramVerificationBindingRefusal {
+    pub(crate) fn field(self) -> &'static str {
+        match self {
+            Self::ClaimLive => "claim_live",
+            Self::RootBound => "root_bound",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub(crate) enum EngramVerificationRecordProgress {
@@ -433,6 +456,13 @@ pub(crate) enum EngramVerificationRecordProgress {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub(crate) enum TestRunVerificationAck {
+    /// A typed, definitive refusal kept with the digest of the original body.
+    /// Once `wait` is cleared durably, its resend may have reached Engram.
+    /// Recover an uncertain delivery by exact replay without rechecking readiness.
+    BindingRetry {
+        wait: Option<EngramVerificationBindingRefusal>,
+        body_digest: String,
+    },
     /// Engram's receipt as the host received and checked it; not settled yet.
     Received {
         receipt: EngramVerificationRecordReceipt,
@@ -465,7 +495,16 @@ impl TestRunVerificationAck {
             Self::Received { body_digest, .. } | Self::Settled { body_digest, .. } => {
                 Some(body_digest)
             }
-            Self::Rejected { .. } | Self::LocalUnclassified { .. } => None,
+            Self::BindingRetry { .. } | Self::Rejected { .. } | Self::LocalUnclassified { .. } => {
+                None
+            }
+        }
+    }
+
+    pub(crate) fn frozen_body_digest(&self) -> Option<&str> {
+        match self {
+            Self::BindingRetry { body_digest, .. } => Some(body_digest),
+            _ => self.body_digest(),
         }
     }
 }
@@ -541,6 +580,10 @@ pub(crate) enum EngramVerificationRecordPrepared {
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) enum EngramVerificationRecordStep {
     Pending(EngramVerificationRecordPending),
+    BindingDeferred {
+        field: EngramVerificationBindingRefusal,
+        body_digest: String,
+    },
     Rejected(String),
     ProducerRejected {
         detail: String,
@@ -1912,7 +1955,8 @@ pub(crate) fn engram_verification_record_is_host_body(
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TestRunVerificationRecordView {
     /// `settled`, `received` (Engram answered; not yet settled here),
-    /// `rejected` (refused by Engram) or `refusedByHost` (before sending).
+    /// `pending` (retained binding retry), `rejected` (refused by Engram)
+    /// or `refusedByHost` (before sending).
     pub(crate) state: &'static str,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) record_ids: Vec<String>,
@@ -1956,12 +2000,27 @@ fn test_run_verification_record_view(
         detail: Some(detail.clone()),
     };
     match ack {
+        TestRunVerificationAck::BindingRetry { wait, .. } => {
+            refusal_view("pending", &verification_binding_retry_detail(*wait))
+        }
         TestRunVerificationAck::Settled { receipt, .. } => receipt_view("settled", receipt),
         TestRunVerificationAck::Received { receipt, .. } => receipt_view("received", receipt),
         TestRunVerificationAck::Rejected { detail, .. } => refusal_view("rejected", detail),
         TestRunVerificationAck::LocalUnclassified { detail } => {
             refusal_view("refusedByHost", detail)
         }
+    }
+}
+
+pub(crate) fn verification_binding_retry_detail(
+    wait: Option<EngramVerificationBindingRefusal>,
+) -> String {
+    match wait {
+        Some(field) => format!(
+            "Engram deferred the record (field: {}). Waiting for the original holder and workspace",
+            field.field()
+        ),
+        None => "replaying the original verification request after an uncertain reply".to_owned(),
     }
 }
 
@@ -2271,7 +2330,7 @@ fn engram_verification_record_prepare_noting(
             receipt,
             body_digest,
         }) => Some((receipt.clone(), body_digest.clone())),
-        None => None,
+        Some(TestRunVerificationAck::BindingRetry { .. }) | None => None,
     };
     // The run's own request and terminal results, as the record is built
     // from; `Err` is what the look comes to without them.
@@ -2364,6 +2423,13 @@ fn engram_verification_record_prepare_noting(
     let Ok(retained_text) = engram_verification_record_body_text(&run_dir) else {
         return Prepared::Waiting;
     };
+    if matches!(
+        registration.verification_record,
+        Some(TestRunVerificationAck::BindingRetry { .. })
+    ) && retained_text.is_none()
+    {
+        return pending(EngramVerificationRecordPending::BodyUnreadable);
+    }
     let retained = retained_text.as_ref().and_then(|text| {
         text.as_deref().and_then(|text| {
             engram_verification_record_frozen_text(&run_dir, &registration.run_id, text)
@@ -2419,6 +2485,12 @@ fn engram_verification_record_prepare_noting(
     if body != rebuilt {
         return pending(EngramVerificationRecordPending::BodyMismatch);
     }
+    if let Some(TestRunVerificationAck::BindingRetry { body_digest, .. }) =
+        &registration.verification_record
+        && !engram_verification_record_digest_answers(body_digest, &body)
+    {
+        return pending(EngramVerificationRecordPending::AcknowledgedBodyChanged);
+    }
     Prepared::Ready(EngramVerificationRecordFrozen {
         run_dir: run_dir.clone(),
         run_id: registration.run_id.clone(),
@@ -2455,9 +2527,18 @@ fn engram_verification_record_retire_legacy(
 
 /// Sends current input when its connection supports the operation. Retired
 /// input rejects locally; missing capability/link leaves current input pending.
+#[cfg(test)]
 pub(crate) fn engram_verification_record_send(
     frozen: EngramVerificationRecordFrozen,
     link: std::result::Result<EngramVerificationRecordLink<'_>, EngramVerificationRecordPending>,
+) -> EngramVerificationRecordStep {
+    engram_verification_record_send_reporting_dispatch(frozen, link, &mut false)
+}
+
+fn engram_verification_record_send_reporting_dispatch(
+    frozen: EngramVerificationRecordFrozen,
+    link: std::result::Result<EngramVerificationRecordLink<'_>, EngramVerificationRecordPending>,
+    may_have_dispatched: &mut bool,
 ) -> EngramVerificationRecordStep {
     if let Some(retired) = engram_verification_record_retire_legacy(&frozen) {
         return retired;
@@ -2529,6 +2610,9 @@ pub(crate) fn engram_verification_record_send(
     let reply = link
         .adapter
         .request(link.connection, &request, link.timeout);
+    *may_have_dispatched = !reply
+        .as_ref()
+        .is_err_and(|error| error.request_never_sent || error.process_never_started);
     match reply {
         Ok(value) => {
             let receipt = match parse_engram_result::<EngramVerificationRecordReceipt>(value) {
@@ -2568,13 +2652,30 @@ pub(crate) fn engram_verification_record_send(
                 support: EngramVerificationRecordSupport::NotRead,
             })
         }
-        // Only a definite refusal of the record itself is final.
+        // Only the producer's two typed binding refusals authorize a wait.
+        // They answer this body definitively and do not record it.
         Err(error)
             if error.kind == EngramTransportErrorKind::Remote
                 && error.code.as_deref().is_some_and(|code| {
                     ENGRAM_VERIFICATION_RECORD_DEFINITE_REFUSALS.contains(&code)
                 }) =>
         {
+            let field = match (error.code.as_deref(), error.refused_field.as_deref()) {
+                (Some("verification_record_refused"), Some("claim_live")) => {
+                    Some(EngramVerificationBindingRefusal::ClaimLive)
+                }
+                (Some("verification_record_refused"), Some("root_bound")) => {
+                    Some(EngramVerificationBindingRefusal::RootBound)
+                }
+                _ => None,
+            };
+            if let Some(field) = field {
+                pending(EngramVerificationRecordPending::BindingDeferred { field });
+                return EngramVerificationRecordStep::BindingDeferred {
+                    field,
+                    body_digest: engram_verification_record_body_digest(&frozen.body),
+                };
+            }
             rejected(
                 engram_verification_record_refusal_detail(
                     error.code.as_deref(),
@@ -2831,9 +2932,10 @@ impl AppState {
     /// connection and sent off the lock; a held receipt is settled with no
     /// send. The pass ends once `budget` is spent or `stopping` (the host's
     /// shutdown) says so, both looked at before each run, and each Engram call
-    /// and durability wait gets at most what is left of `budget`. Driven by a
-    /// thread of its own (src/engram_retry_schedule.rs). Returns how many runs
-    /// it looked at.
+    /// and forward durability wait uses what remains of `budget`. A proved
+    /// unsent binding resend has its own bounded rollback confirmation.
+    /// Driven by a thread of its own (src/engram_retry_schedule.rs). Returns
+    /// how many runs it looked at.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn engram_verification_records_tick_within(
         &self,
@@ -2918,17 +3020,26 @@ impl AppState {
                         {
                             retired
                         } else {
-                            let route = self
-                                .engram_verification_record_route_until(&registration, deadline);
-                            engram_verification_record_send(
+                            self.send_engram_verification_record_until(
+                                &registration,
                                 frozen,
-                                route
-                                    .as_ref()
-                                    .map(EngramVerificationRecordRoute::link)
-                                    .map_err(Clone::clone),
+                                deadline,
                             )
                         };
                         self.note_engram_verification_record_step(&registration, &step);
+                        if matches!(step, EngramVerificationRecordStep::BindingDeferred { .. })
+                            || matches!(
+                                registration.verification_record,
+                                Some(TestRunVerificationAck::BindingRetry { .. })
+                            )
+                        {
+                            let inner = self.inner.lock().expect("state mutex poisoned");
+                            if let Some(current) =
+                                inner.test_run_registrations.get(&registration.run_id)
+                            {
+                                attempted.verification_record = current.verification_record.clone();
+                            }
+                        }
                         match step {
                             EngramVerificationRecordStep::Received { body, receipt } => {
                                 settled(self.complete_engram_verification_record_until(
@@ -2940,7 +3051,8 @@ impl AppState {
                             }
                             EngramVerificationRecordStep::Rejected(_)
                             | EngramVerificationRecordStep::ProducerRejected { .. } => true,
-                            EngramVerificationRecordStep::Pending(_) => false,
+                            EngramVerificationRecordStep::BindingDeferred { .. }
+                            | EngramVerificationRecordStep::Pending(_) => false,
                         }
                     }
                     EngramVerificationRecordPrepared::ReceiptHeld { frozen, receipt } => {
@@ -3302,16 +3414,19 @@ impl AppState {
     /// `target` back from the committed store: the durable confirmation, not
     /// a queued write. A host without a running worker (its channel closed:
     /// shutdown, or a test state built without one) saves the whole state
-    /// synchronously instead, which is itself the durable write. Every
-    /// failure, the deadline included, is returned; the caller settles
-    /// nothing on it. Blocking: the caller holds no state lock.
+    /// synchronously instead. A replay-custody fence also checks its exact
+    /// registration in a committed SQLite snapshot after the fallback.
+    /// Every failure, including the deadline, leaves confirmation pending.
+    /// Blocking: the caller holds no state lock.
     fn confirm_engram_fence_target_until(
         &self,
         target: PersistFenceTarget,
         clock: EngramBudgetClock,
         deadline: std::time::Instant,
     ) -> std::result::Result<(), String> {
-        let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock);
+        let readback = matches!(&target, PersistFenceTarget::TestRunRegistrationReadback(_))
+            .then(|| target.clone());
+        let (fence, waiter) = PersistFence::new_with_clock(target, deadline, clock.clone());
         if self
             .persist_tx
             .send(PersistRequest::Fence(Box::new(fence)))
@@ -3319,15 +3434,34 @@ impl AppState {
         {
             return waiter.wait().map_err(|error| format!("{error:?}"));
         }
-        let inner = self.inner.lock().expect("state mutex poisoned");
-        self.persist_internal_locked(&inner)
-            .map_err(|error| format!("{error:#}"))
+        {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            self.persist_internal_locked(&inner)
+                .map_err(|error| format!("{error:#}"))?;
+        }
+        if let Some(target) = readback {
+            let timeout = deadline.saturating_duration_since(clock.now());
+            if timeout.is_zero() {
+                return Err("verification registration read-back deadline reached".to_owned());
+            }
+            let connection = open_sqlite_history_snapshot_with_busy_timeout(
+                self.persistence_path.as_path(),
+                timeout,
+            )
+            .map_err(|error| format!("{error:#}"))?;
+            let matched = target
+                .is_already_durable(&connection)
+                .map_err(|error| format!("{error:#}"))?;
+            if !matched || clock.now() >= deadline {
+                return Err("committed verification registration was not confirmed".to_owned());
+            }
+        }
+        Ok(())
     }
 
     /// Keeps what one send step observed on the run's registration: a
-    /// received receipt or a rejection; a pending step keeps only its reason
-    /// in memory (`test_run_record_pending`), and any other step that it
-    /// found no blocker.
+    /// received receipt, a rejection, or a definitive binding wait. Other
+    /// pending steps keep their reason in memory only.
     pub(crate) fn note_engram_verification_record_step(
         &self,
         registration: &TestRunRegistration,
@@ -3337,10 +3471,19 @@ impl AppState {
             &registration.run_id,
             match step {
                 EngramVerificationRecordStep::Pending(reason) => Some(reason.clone()),
+                EngramVerificationRecordStep::BindingDeferred { field, .. } => {
+                    Some(EngramVerificationRecordPending::BindingDeferred { field: *field })
+                }
                 _ => None,
             },
         );
         let ack = match step {
+            EngramVerificationRecordStep::BindingDeferred { field, body_digest } => {
+                TestRunVerificationAck::BindingRetry {
+                    wait: Some(*field),
+                    body_digest: body_digest.clone(),
+                }
+            }
             EngramVerificationRecordStep::Received { body, receipt } => {
                 TestRunVerificationAck::Received {
                     receipt: receipt.clone(),
@@ -3391,24 +3534,29 @@ impl AppState {
             row.request_identity == registration.request_identity
                 && row.run_directory == registration.run_directory
                 && row.verification_record.as_ref() != Some(&ack)
+                && (!matches!(ack, TestRunVerificationAck::BindingRetry { .. })
+                    || matches!(row.verification_record, None | Some(TestRunVerificationAck::BindingRetry { .. })))
                 && !(matches!(ack, TestRunVerificationAck::Received { .. })
                     && matches!(
                         row.verification_record,
                         Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. }
                             | TestRunVerificationAck::LocalUnclassified { .. })
                     ))
-                // A receipt held for one body is never rebound to another.
+                // A binding wait or receipt remains associated with its original body.
                 && !row
                     .verification_record
                     .as_ref()
-                    .and_then(TestRunVerificationAck::body_digest)
-                    .zip(ack.body_digest())
+                    .and_then(TestRunVerificationAck::frozen_body_digest)
+                    .zip(ack.frozen_body_digest())
                     .is_some_and(|(held, new)| held != new)
         });
         if !changes {
             return;
         }
-        if !matches!(ack, TestRunVerificationAck::Received { .. }) {
+        if !matches!(
+            ack,
+            TestRunVerificationAck::Received { .. } | TestRunVerificationAck::BindingRetry { .. }
+        ) {
             // When it became final, for a run wait on a run the index has not
             // listed (test_run_waits.rs).
             let generation = inner.test_run_scan_generation;

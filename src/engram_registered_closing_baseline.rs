@@ -83,7 +83,7 @@ fn registered_clean_input(
             | TestRunVerificationAck::LocalUnclassified { .. },
         ) => false,
         Some(ack) => {
-            ack.body_digest() == Some(engram_verification_record_body_digest(&body).as_str())
+            ack.frozen_body_digest() == Some(engram_verification_record_body_digest(&body).as_str())
         }
     }
 }

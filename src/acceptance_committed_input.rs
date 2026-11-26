@@ -562,6 +562,9 @@ pub(crate) fn acceptance_committed_input_record_acknowledged(
                 commit: commit.to_owned(),
             });
         }
+        Some(TestRunVerificationAck::BindingRetry { wait, .. }) => {
+            return Err(unacknowledged(verification_binding_retry_detail(*wait)));
+        }
         None => {
             let request = test_run_read_json(&run_dir.join("request.json"));
             let results = test_run_read_json(&run_dir.join("results.json"));

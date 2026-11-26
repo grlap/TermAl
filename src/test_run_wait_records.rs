@@ -107,7 +107,9 @@ pub(super) fn test_run_wait_record_verdict_locked(
         }),
         TestRunVerificationAck::Rejected { .. }
         | TestRunVerificationAck::LocalUnclassified { .. } => Some(unknown()),
-        TestRunVerificationAck::Received { .. } => None,
+        TestRunVerificationAck::BindingRetry { .. } | TestRunVerificationAck::Received { .. } => {
+            None
+        }
     }
 }
 
@@ -166,6 +168,9 @@ fn test_run_wait_record_state(registration: Option<&TestRunRegistration>) -> Str
             "refused by this host before sending: {}",
             test_run_wait_refusal_text(detail)
         ),
+        Some(TestRunVerificationAck::BindingRetry { wait, .. }) => {
+            verification_binding_retry_detail(*wait)
+        }
         None if registration.is_none() => {
             "unavailable; the run's registration was retired".to_owned()
         }
@@ -450,7 +455,7 @@ fn test_run_wait_record_may_be_in_flight(
 ) -> bool {
     matches!(
         registration.verification_record,
-        Some(TestRunVerificationAck::Received { .. })
+        Some(TestRunVerificationAck::Received { .. } | TestRunVerificationAck::BindingRetry { .. })
     ) || inner
         .test_run_record_bodies_built
         .contains(&registration.run_id)

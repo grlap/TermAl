@@ -215,6 +215,7 @@ fn test_run_compaction_eligible_with(
         // A record Engram received is still being settled, possibly after a
         // retry: its Settled ack and the owner's notice are written to the
         // live registration only.
+        // A binding wait can resume while its original initiating session exists.
         || inner
             .test_run_registrations
             .get(&run.run_id)
@@ -223,6 +224,10 @@ fn test_run_compaction_eligible_with(
                     registration.verification_record,
                     Some(TestRunVerificationAck::Received { .. })
                 )
+                    || (matches!(
+                        registration.verification_record,
+                        Some(TestRunVerificationAck::BindingRetry { .. })
+                    ) && inner.find_session_index(&registration.initiating_session_id).is_some())
             })
         // A settlement notice its owner has not yet received survives a
         // restart only on the live registration; a gone owner never will.

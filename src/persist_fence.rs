@@ -76,6 +76,8 @@ pub(crate) enum PersistFenceTarget {
     /// created (`test_run_cards.rs`).
     TestRunCardsEpoch(String),
     TestRunRegistration(TestRunRegistration),
+    /// Verification replay custody requires the registration in committed SQLite.
+    TestRunRegistrationReadback(TestRunRegistration),
     TestRunObservation(Box<TestRunCommandObservation>),
     // Later terminal fields may change while the immutable start is flushed.
     DeclaredRunReservation(Box<DeclaredRunReservation>),
@@ -175,6 +177,7 @@ impl PersistFenceTarget {
                 .test_run_registrations
                 .get(&expected.run_id)
                 .is_some_and(|actual| actual.matches_registration_snapshot(expected)),
+            Self::TestRunRegistrationReadback(_) => false,
             Self::TestRunObservation(expected) => {
                 delta
                     .metadata
@@ -396,16 +399,20 @@ impl PersistFenceTarget {
             // This eager root is present in every successful delta. Its
             // mismatch is conclusive; only omitted collections need read-back.
             Self::TestRunCardsEpoch(_) => Ok(false),
-            Self::TestRunRegistration(expected) => Ok(read_metadata_for_fence(
-                connection,
-                &["testRunRegistrations"],
-            )?
-            .is_some_and(|metadata| {
-                metadata
-                    .test_run_registrations
-                    .get(&expected.run_id)
-                    .is_some_and(|actual| actual.matches_registration_snapshot(expected))
-            })),
+            Self::TestRunRegistration(expected) | Self::TestRunRegistrationReadback(expected) => {
+                Ok(
+                    read_metadata_for_fence(connection, &["testRunRegistrations"])?.is_some_and(
+                        |metadata| {
+                            metadata
+                                .test_run_registrations
+                                .get(&expected.run_id)
+                                .is_some_and(|actual| {
+                                    actual.matches_registration_snapshot(expected)
+                                })
+                        },
+                    ),
+                )
+            }
             Self::TestRunObservation(expected) => Ok(read_metadata_for_fence(
                 connection,
                 &["testRunObservations"],

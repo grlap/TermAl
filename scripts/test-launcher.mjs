@@ -2070,6 +2070,11 @@ export async function summarize(runDir) {
     if (verification.state === "rejected") {
       const detail = typeof verification.detail === "string" ? verification.detail : "reason unavailable";
       lines.push(`verification: rejected: ${detail.replace(/[\r\n\x1b]/g, " ").slice(0, diagnosticLimit)}`);
+    } else if (verification.state === "pending" && verification.reason?.kind === "binding_deferred") {
+      const field = verification.reason.field;
+      if (field === "claim_live" || field === "root_bound") {
+        lines.push(`verification: pending (field: ${field}). Waiting for the original holder and workspace`);
+      }
     } else if (verification.state === "settled" || verification.state === "received") {
       lines.push(verificationReceiptLine(verification));
     }
