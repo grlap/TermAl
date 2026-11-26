@@ -1,0 +1,28 @@
+{
+  "id": "01a215c2-2a0e-7371-ad35-96eccd7bf683",
+  "external_ref": null,
+  "title": "Make installed federation proof terminal tests use controlled deadlines",
+  "outcome": "Make installed proof cancellation and I/O failure tests independent of the real attestation deadline, and cover the structured timeout result.",
+  "acceptance": [
+    "The installed satellite proof-cancellation and proof I/O failure behavior tests control the attestation I/O clock so that elapsed wall time cannot substitute a timeout for the intended result.",
+    "A deterministic installed proof-write timeout check verifies exact withdrawal, stage attest, reason tagWriteExpired, null I/O kind and the existing service-unavailable response, with the terminal reason kept after teardown."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

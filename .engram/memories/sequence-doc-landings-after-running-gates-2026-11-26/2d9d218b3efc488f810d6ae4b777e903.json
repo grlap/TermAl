@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "sequence-doc-landings-after-running-gates-2026-11-26",
+    "revision_id": "2d9d218b3efc488f810d6ae4b777e903",
+    "previous": null,
+    "body_sha256": "47f9c8e152b57968b6e57fa166f2b01a230a7ee9d7db3be8d734289268b58a03",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T00:23:16.657194200Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-26 00:23Z, my miss). I cleared the Markdown-only w-c969a2bea0d9 (93653779) for landing while Opus3's combo r2 4e8917ff (parent 2115d778) still had its Linux FULL landing gate running on C6. Opus2 landed 93653779 at 00:22Z (TermAl mailbox 4daa5b87 #7919). Master moved, so combo's FULL dropped to evidence only: a recut on 93653779 needs its own full gate, a whole extra FULL cycle.\n\nRULE: before I clear any landing, including a Markdown-only one, I ask Opus2 which candidates on the current master have a landing gate running or queued. If one does, the new landing waits until that candidate lands, or I take the trade-off explicitly in a note. Doc and procedure changes almost never need to beat a running code gate. Several ready changes on one master go as a batch, per batch-landing-default-2026-10-18."
+}

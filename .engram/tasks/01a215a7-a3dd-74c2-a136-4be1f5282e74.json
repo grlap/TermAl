@@ -1,0 +1,28 @@
+{
+  "id": "01a215a7-a3dd-74c2-a136-4be1f5282e74",
+  "external_ref": null,
+  "title": "Failing native declared run shows nativeCompletionRefusal provider_association_mismatch beside a settled failed verification record",
+  "outcome": "It is established whether the provider_association_mismatch refusal on a failing native declared run is expected (and then documented or not surfaced as a refusal) or a defect (and then filed with a fix).",
+  "acceptance": [
+    "The cause of the refusal on test-352a4012-474c-438f-901a-1b3ff6006a6c is recorded on this item from source or a reproduction, classified as expected behaviour or defect, and any defect is filed as its own item with the evidence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 3,
+  "labels": [
+    "declared-tests",
+    "diagnostics",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

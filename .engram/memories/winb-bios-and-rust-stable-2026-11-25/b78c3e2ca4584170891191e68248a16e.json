@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-bios-and-rust-stable-2026-11-25",
+    "revision_id": "b78c3e2ca4584170891191e68248a16e",
+    "previous": "4f4110b7b46f41f9b757f882ba954c6f",
+    "body_sha256": "04f0616370dfdadf92f8a628bbfddaa32cc4882ad1804993f6d06e4cd02c2473",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T00:50:58.416767300Z"
+    }
+  },
+  "body": "Windows B change (Greg, 2026-11-25 ~23:00Z, relayed by Engram::Asistant 588693a8 #2774): „Zrobiłem update biosu. Ustawiłem rust tools na stable.” Greg also asked whether a Rust benchmark is still running there; Asistant asked a read-only WinB session.\n\nEffects:\n- WinB's BIOS was updated.\n- WinB's Rust toolchain default is now STABLE. Previously it may have been a different channel or pin.\n- The first TermAl or Engram Rust build on WinB after this is effectively COLD: a new toolchain means existing target/ caches are not reused. Expect compile-time cost. A different rustc version is not a test failure, but any new warning or error from the toolchain change is investigated as an environment cause, not rerun.\n- If a project pins a toolchain (rust-toolchain file), the pin still wins over the default.\n\nWinB stays at Greg's disposal: no new team starts until he says it's back. The freeze is recorded in central-queue.txt.\n\nUPDATE 2026-11-26 00:50Z: Windows B is BACK and the freeze is LIFTED. Greg, via Asistant 588693a8 #2787: „windows B jest dostepny; testy przeszly bez problemu; zamowilem dodatkowe 32GB, przyjdzie dzis pozniej; mozemy troche przeniesc na WindowsB?”. Plan on the current RAM until the extra 32 GB is installed. Opus2 schedules WinB (Fable2 #7922). Order: Sol-03d4's held correction run, then w-c9fb's Windows witness (BarA2 749e5948), then other Windows runs from Central. Engram::Fable was told he can queue Engram's Windows runs via Opus2. The first Rust build after the toolchain change is still cold."
+}

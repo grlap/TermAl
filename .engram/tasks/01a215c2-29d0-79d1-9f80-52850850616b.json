@@ -1,0 +1,28 @@
+{
+  "id": "01a215c2-29d0-79d1-9f80-52850850616b",
+  "external_ref": null,
+  "title": "Keep federation proof failure completion independent of stderr",
+  "outcome": "Return the existing typed post-install satellite proof failure without waiting for synchronous stderr after the installed context is withdrawn.",
+  "acceptance": [
+    "When an installed satellite proof write fails or times out, the exact context is withdrawn and the existing bounded terminal observation and typed failure are available without waiting on terminal console I/O.",
+    "A focused behavior check exercises proof failure completion with diagnostic output delayed or omitted, while existing withdrawal and timeout behavior is preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a215a9-6cc1-7e43-9651-f9d4f8026f9e",
+  "external_ref": null,
+  "title": "Committed-input admission refuses evaluation when the item's own acceptance needs a deliberately failing run as the newest result",
+  "outcome": "An item whose acceptance requires a deliberately failing test run can be evaluated without having to bury that run under a later passing one, for example by letting its criteria name the intended fail run so admission does not treat it as the newest applicable result.",
+  "acceptance": [
+    "A design note on this item states how an item's criteria can name an intended failing run (or otherwise exempt it), and how committed-input admission then chooses the applicable terminal result, with the owner's or coordinator's concurrence recorded.",
+    "If implemented, a behavioral regression shows admission accepting an evaluation whose newest terminal result on the named root's HEAD is a named intended-fail run, and still refusing when an un-named failing run is newest."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "evaluation",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

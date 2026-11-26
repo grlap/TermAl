@@ -1,0 +1,29 @@
+{
+  "id": "01a215a5-33ce-78f0-9e36-0cadf9a4758a",
+  "external_ref": null,
+  "title": "Test commands Claude runs in a turn it started on a background-task wake get no host test observation",
+  "outcome": "A recognised test command (built-in or declared) that a Claude session runs in a turn Claude Code starts itself on a background-task completion is either observed and reported like one in a TermAl-prompted turn, or the host states plainly in the next turn that it was not observed and why.",
+  "acceptance": [
+    "A regression reproduces a Claude session that runs a recognised test command in a turn started by a background-task completion (not a TermAl prompt) and shows the host either records a hostObserved test run judged as in a prompted turn, or emits a named host line saying the command was not observed and why.",
+    "docs/features/declared-test-commands.md (or the test-runs brief) states which turn kinds are observed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "claude",
+    "recognition",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

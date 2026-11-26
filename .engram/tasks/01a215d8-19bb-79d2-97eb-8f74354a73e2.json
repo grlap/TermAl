@@ -1,0 +1,27 @@
+{
+  "id": "01a215d8-19bb-79d2-97eb-8f74354a73e2",
+  "external_ref": null,
+  "title": "A claim's named source root silently disappears from the TermAl host mid-claim, so its next registered run is bound to no claim",
+  "outcome": "A source root named for a live claim stays named on the host for the life of that claim, across host restarts, or the session is told it was lost before a run is started there; a registered run in a root Engram still binds to the claim is never silently unbound.",
+  "acceptance": [
+    "A claim's named source root silently disappears from the TermAl host mid-claim, so its next registered run is bound to no claim is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "credit",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

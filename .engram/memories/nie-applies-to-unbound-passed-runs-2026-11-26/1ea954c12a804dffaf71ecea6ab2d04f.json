@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "nie-applies-to-unbound-passed-runs-2026-11-26",
+    "revision_id": "1ea954c12a804dffaf71ecea6ab2d04f",
+    "previous": null,
+    "body_sha256": "b4dff66e9ceb78cefe19d5521f8120390a8432908c141a93c96478c05bd5db71",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T03:13:49.617461900Z"
+    }
+  },
+  "body": "Coordinator rule (Termal::Fable2, 2026-11-26 03:13Z; my near-miss, caught by Opus2 #7937). Greg's „NIE!!!” forbids rerunning a passed check because its record or credit failed. That INCLUDES a passed run that ended up registered \"bound\": false because the claim's named root lapsed, as with w-3bdd test-c5aa4962 at 188/0 on fd4974b3. A \"first bound run\" of the same command is still a rerun for credit. I wrongly allowed it in #6193 and superseded that in #6194 and #7938.\n\nAllowed routes:\n- land on the gate plus the evaluations that are admissible, leaving the item OPEN;\n- close later via record re-attestation once w-5818 lands;\n- or Greg's explicit word for that exact run.\nDistinguish this from a claim's genuinely first run on a commit where no run was tied to the claim at all; Opus2's #7933 case was such a first run."
+}

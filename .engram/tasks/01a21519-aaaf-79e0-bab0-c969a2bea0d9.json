@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Cleanup procedure fixed in AGENTS.md \"Cleanup deletions\", the \"Finishing work\" bullets of AGENTS.md and CLAUDE.md, and docs/features/shared-codex-app-server.md: cleanup of a worktree, build output or temporary file whose served items are all closed needs no approval from Greg (his verbatim word of 2026-11-25, TermAl mailbox 588693a8 #2781); when every served item is closed and the non-forced form fails only on hidden, read-only or partly removed content of the checked target, the removal is completed natively on Windows (single-force `git worktree remove`, a surviving registration left and reported; `Remove-Item -LiteralPath -Recurse -Force -Confirm:$false` for a plain directory); any other failure, lock, link escape, input request or policy refusal still stops; any other forced removal still needs Greg's per-case word. Landed as master 93653779f04d88121b0a58004fbe1632a0ae2e2b (fast-forward from 2115d778, pushed, verified) under conditions (a) both coordinators' verbatim concurrences, (b) wording sent to Greg (#2783-#2785, no objection), (c) final-diff audit passed (48d73ba6); Markdown-only link check test-55865fcc PASS; review pair round 3 clean; pre-landing evaluation 1a75af7c and post-landing evaluation 410f854f both 3/3. Engram mirrors the same text under w-f2e8f19fd212. Follow-ups filed: w-c53c8da3d8a9, w-2aa5d28431bb; w-8e1f4f285c3f superseded as covered.",
+    "completed_at": "2026-11-26T00:25:22.411922700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

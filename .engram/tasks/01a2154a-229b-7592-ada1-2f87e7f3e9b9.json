@@ -1,0 +1,28 @@
+{
+  "id": "01a2154a-229b-7592-ada1-2f87e7f3e9b9",
+  "external_ref": null,
+  "title": "Retain federation terminal diagnostics when the link-state lock is poisoned",
+  "outcome": "Retain redacted first-cause diagnostics after link-state lock poisoning while preserving recover-only exact withdrawal and fail-closed admission.",
+  "acceptance": [
+    "A deterministically poisoned link-state lock does not prevent the first bounded terminal diagnostic from being retained when a safe observation is available, and does not cause a second panic during unwind.",
+    "Exact owner withdrawal still occurs and the poisoned lock does not admit new link authority; focused regression and independent review cover the behavior."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

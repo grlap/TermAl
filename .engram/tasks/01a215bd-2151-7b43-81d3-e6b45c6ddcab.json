@@ -1,0 +1,28 @@
+{
+  "id": "01a215bd-2151-7b43-81d3-e6b45c6ddcab",
+  "external_ref": null,
+  "title": "Codex account controls refuse the Vite development UI origin (403 on /api/codex/account)",
+  "outcome": "The Codex /login and /logout account dialog works from the documented Vite development UI, or the docs name the backend-served UI as the supported route for account actions, without weakening the production loopback origin check.",
+  "acceptance": [
+    "Opening the account dialog from the documented Vite development UI either succeeds through an explicitly allowed development origin, or the development docs state that account actions need the backend-served UI.",
+    "The production origin check for /api/codex/account still refuses foreign origins, shown by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

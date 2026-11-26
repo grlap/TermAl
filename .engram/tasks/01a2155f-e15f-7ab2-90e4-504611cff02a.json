@@ -1,0 +1,28 @@
+{
+  "id": "01a2155f-e15f-7ab2-90e4-504611cff02a",
+  "external_ref": null,
+  "title": "A test-run wait on a hostless WinB run delivered UNKNOWN (process gone) although the run's own results.json says passed; the host clock was moved back one hour during the run",
+  "outcome": "A test-run wait delivers the run's real terminal outcome when its results.json is terminal, also when the host's wall clock moves during the run; if it cannot, it says why instead of UNKNOWN (process gone).",
+  "acceptance": [
+    "A test-run wait on a hostless WinB run delivered UNKNOWN (process gone) although the run's own results.json says passed; the host clock was moved back one hour during the run is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "native-wait",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

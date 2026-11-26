@@ -1,0 +1,29 @@
+{
+  "id": "01a215a7-720a-7891-9248-54c612d9db78",
+  "external_ref": null,
+  "title": "A passing native declared run stays unknown/noPid: its results.json has exitCode null, which the run index never treats as terminal",
+  "outcome": "A native declared run whose verification settled as passed is listed, carded and waited on as passed, even when the provider reported success without a numeric exit code.",
+  "acceptance": [
+    "A behavioral regression writes the native registration results the host produces for a Claude foreground declared success (state passed, ended set, exitCode null) and shows GET /api/test-runs and the run's wait settle it as passed, not unknown/noPid; a failing native run (exit 1) still settles as failed.",
+    "No launcher-run behaviour changes: a launcher results.json without an integer exitCode is still not terminal."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "declared-tests",
+    "test-runner",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

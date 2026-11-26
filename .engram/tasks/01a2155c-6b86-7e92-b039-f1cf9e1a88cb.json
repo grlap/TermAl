@@ -1,0 +1,37 @@
+{
+  "id": "01a2155c-6b86-7e92-b039-f1cf9e1a88cb",
+  "external_ref": null,
+  "title": "Validate an NUnit test project targeting .NET Framework 4.7.2 (net472) through the standard launcher, recognition and registration",
+  "outcome": "Validate an NUnit test project targeting .NET Framework 4.7.2 (net472) through the standard launcher, recognition and registration",
+  "acceptance": [
+    "A disposable NUnit test project targeting net472 under the main checkout's .tmp/ (or an existing representative one, named with its path) has a passing run and a deliberately failing run, each executed on a Windows host both as a plain agent test command (one-call form) and through `node scripts/test-launcher.mjs focused -- <command>`, and for each run the host's recognition (check kind and result as reported in the turn's host observation or the declared-command result) and the launcher's registration and terminal outcome are recorded on this item with run ids.",
+    "Each observed pass is reported as a pass and each observed failure as a failure, with the test count, from the run's result artifact (TRX or NUnit XML) rather than from console output; any misjudgment, missing recognition or launcher defect found is filed as its own item with the evidence, or fixed within this item with a behavioral regression.",
+    "The item records the exact commands, the .NET Framework targeting pack, SDK, test adapter and runner versions observed, and the host, so the check can be repeated."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 1,
+  "labels": [
+    "dotnet",
+    "greg-directed",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "completed",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": {
+    "summary": "An NUnit project targeting net472 was validated end to end on Central (285K, Windows 11 10.0.26200) with TermAl host build 43df144c107e. Environment:\n- .NET SDK 10.0.401, vstest.console 18.7.0 and testhost.net472.exe 18.7.0;\n- .NET Framework 4.8.09221 and the v4.7.2 targeting pack;\n- NUnit 4.4.0, NUnit3TestAdapter 5.0.0, Microsoft.NET.Test.Sdk 17.14.1.\nPass and deliberate-fail runs, each judged from its TRX:\n- plain declared one-call: observed-f3fbb6b5 passed, observed-a3f4c609 failed;\n- native declared on committed local 389873a2: records e92a371e, dcb1d0af, 4209b300 and a9c85b70;\n- launcher focused: test-4dcac9ad passed, test-b03f483e failed, test-0c4722f3 passed, test-debc52ab failed. The host reports these as unclassified_stages.\nThe independent evaluation, delegation-87449f08 (Codex), passed all 3 criteria. Defects filed with evidence:\n- w-0cadf9a4758a: background-wake turns not observed;\n- w-54c612d9db78: a native pass stays unknown/noPid;\n- w-4be1f5282e74: provider_association_mismatch refusal;\n- w-f9d4f8026f9e: admission versus required non-pass newest runs;\n- w-ba214db156fb: the launcher route ignores TRX and is unclassified.",
+    "completed_at": "2026-11-26T02:31:39.474280700Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
+}

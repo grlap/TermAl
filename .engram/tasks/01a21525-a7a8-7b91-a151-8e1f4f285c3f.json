@@ -18,12 +18,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a21519-aaaf-79e0-bab0-c969a2bea0d9",
+  "disposal_reason": "Covered and landed by w-c969a2bea0d9 candidate 93653779 (master since 2026-11-26 00:22Z): docs/features/shared-codex-app-server.md:382-384 and :398-408 now defer to AGENTS.md \"Cleanup deletions\" (closed-item targets need no approval; native completion for hidden, read-only or partly removed content) and note that Codex's fallback classifier may refuse `Remove-Item -Force`, which stops the removal. Reviewed clean by the round-3 pair (Codex delegation-acb1b6ed, Claude delegation-953d95ea), link check test-55865fcc PASS, evaluation 1a75af7c 3/3 on that candidate. Superseded by Termal::Architect1 on Fable2's direction (2a27fd51 #1015: \"Close w-8e1f4f285c3f with this candidate if it covers it\").",
   "completion": null
 }

@@ -1,0 +1,29 @@
+{
+  "id": "01a21560-16ff-7d32-ab3c-c922e0e91ef3",
+  "external_ref": null,
+  "title": "Own-run wait reports UNKNOWN (process gone) for a passed run after the host wall clock moves backwards",
+  "outcome": "Own-run wait reports UNKNOWN (process gone) for a passed run after the host wall clock moves backwards",
+  "acceptance": [
+    "A run whose host wall clock moves backwards (or forwards) while it runs is reported by its own-run wait with its real terminal outcome from the persisted result, not UNKNOWN/process-gone; liveness and deadline decisions use a monotonic clock or the persisted terminal result, and a deterministic regression drives a wall-clock jump through the wait path.",
+    "Recorded start and end timestamps that are out of order because of a clock change do not by themselves turn a terminal passed or failed result into UNKNOWN."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "launcher",
+    "test-runner",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "superseded",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": "01a2155f-e15f-7ab2-90e4-504611cff02a",
+  "disposal_reason": "Duplicate: Opus2 filed the same WinB wait-UNKNOWN-after-clock-jump defect (test-15b238f4) as w-504611cff02a (BarA2, TermAl mailbox df007e37 #1572).",
+  "completion": null
+}

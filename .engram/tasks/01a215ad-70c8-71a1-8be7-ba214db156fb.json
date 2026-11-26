@@ -1,0 +1,30 @@
+{
+  "id": "01a215ad-70c8-71a1-8be7-ba214db156fb",
+  "external_ref": null,
+  "title": "Launcher focused runs of a declared TRX test command judge pass/fail from exit code and record no TRX counts",
+  "outcome": "When `node scripts/test-launcher.mjs focused -- <command>` wraps a command that termal-tests.toml declares with a TRX artifact, the launcher's focused stage records the test counts (passed, failed, skipped) and the verdict from that artifact under the declared-artifact rules, not from the process exit code alone; or the host refuses the run with a named reason that points at the declared route.",
+  "acceptance": [
+    "A behavioral regression runs the launcher's focused mode over a declared command whose real TRX reports a pass and one whose TRX reports a failure (including a failing TRX with exit 0), and shows results.json records tests counts from the TRX and the verdict follows the TRX rules of docs/features/declared-test-commands.md; an undeclared command keeps today's behaviour.",
+    "docs/test.md describes how a focused run of a declared command is judged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "declared-tests",
+    "dotnet",
+    "launcher",
+    "test-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
