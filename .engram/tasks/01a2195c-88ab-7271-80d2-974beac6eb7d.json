@@ -1,0 +1,27 @@
+{
+  "id": "01a2195c-88ab-7271-80d2-974beac6eb7d",
+  "external_ref": null,
+  "title": "Use supported launcher argv in detach recognition fixtures where possible",
+  "outcome": "Use supported launcher argv in detach recognition fixtures where possible",
+  "acceptance": [
+    "The full-gate host tests use launcher-supported argv where they exercise successful foreground or detached launches, with a notification target for the detached case.",
+    "Host-only regressions that require launcher-rejected trailing argv explain that boundary and preserve coverage that inner --detach is ignored."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
