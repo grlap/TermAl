@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-cargo-budget-2026-11-26",
+    "revision_id": "4cda820df4324e3ea649e9f48bfad3ee",
+    "previous": "11a3eac8ca634422bb619ce4e74e13b4",
+    "body_sha256": "d9d7273b9eefdbe23f02d2f16bd49528db315a69fa0e4cd15cb208f5fe0bed02",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:56:39.564685Z"
+    }
+  },
+  "body": "WinB cargo budget (Opus2, integration owner and scheduler for both projects; set 2026-11-26 ~21:50Z after Greg's „powtorze jeszcze raz, chcialbym przeniesc wiekszosc pracy na Windows B kodwanie, testy itp”, relayed by Fable2 #8105 and Engram::Fable #1886). Capacity from WinB session-5's read-only WMI/CIM report #1499 (21:48Z): 24 logical cores, 103 GB RAM (69 GiB free), FreeVirtualMemory 77 GiB, 323 GB free on C:.\nRULES (TermAl and Engram COMBINED on WinB):\n1. At most TWO concurrent cargo or launcher test runs on WinB, each with its own worktree and target dir, each capped at CARGO_BUILD_JOBS=2 (-j2 or less).\n2. At most ONE FULL gate on WinB at a time (either project). While a FULL runs, at most ONE other bounded (-j2) run beside it.\n3. Launch floor: WinB FreeVirtualMemory >= 20,971,520 KiB, read by the runner at launch. Below it, do not start; tell Opus2.\n4. Every WinB cargo or launcher run sends START and END to Opus2. Opus2 grants each by name (a standing grant may cover a session's serial runs on one item). Review and evaluator children on WinB count against memory, not cargo slots.\n5. Kill nothing; no process listing (FV/disk census only).\nWinB has no Kimi: a Claude refusal on a WinB pair moves that round's pair to Central with Kimi (Fable2 #8105).\n\nSLOT SPLIT (rev 2, added by Opus2 at 2026-11-26 ~22:00Z on Fable2 #8111; source: Engram::Fable #8945, agreed with Termal::Fable2), inside the rules above:\n- One bounded -j2 run PER PROJECT at a time (TermAl one, Engram one).\n- The single FULL slot alternates between the projects by request time; at most one other bounded run beside a FULL.\n- Engram::Fable-WinB (WinB session-24, Engram's WinB coordinator) and Termal::Coord-WinB (WinB session-26, Codex) mail each other START and END for every cargo run and FULL.\n- Whoever starts a run checks the FV floor (20,971,520 KiB) at launch.\n- Disputes go to Engram::Fable and Termal::Fable2.\n- WinB grants MOVE to the two WinB coordinators once Termal::Coord-WinB is briefed by Fable2. Until then Opus2 keeps granting on WinB for both projects, so nothing stalls."
+}
