@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// How long an accepted connection may take to send the bytes that classify it
+/// as control or HTTP, on the channel's control clock.
+pub(crate) const FEDERATION_PREFACE_DEADLINE: Duration = Duration::from_secs(5);
+
 pub(crate) struct FederationSocketListener {
     pub(crate) listener: TcpListener,
     pub(crate) stop: tokio::sync::watch::Receiver<bool>,
@@ -42,15 +46,30 @@ impl axum::serve::Listener for FederationSocketListener {
                 .expect("connection semaphore stays open");
             match self.listener.accept().await {
                 Ok((mut stream, address)) => {
-                    let prefix = if self.control.is_some() {
-                        match tokio::time::timeout(
-                            Duration::from_secs(5),
-                            federation_classify_preface(&mut stream),
-                        )
-                        .await
-                        {
-                            Ok(Ok(prefix)) => prefix,
-                            _ => continue,
+                    let prefix = if let Some(channel) = self.control.as_ref() {
+                        // The deadline runs on the channel's control clock:
+                        // real time in production, and the scripted clock in a
+                        // fixture that installs one, so a stalled test process
+                        // cannot spend it.
+                        let clock = &channel.control.clock;
+                        let until = clock.now() + FEDERATION_PREFACE_DEADLINE;
+                        let classified = tokio::select! {
+                            biased;
+                            result = federation_classify_preface(&mut stream) => {
+                                result.map_err(|_| "prefaceReadFailed")
+                            },
+                            () = clock.deadline(until) => Err("prefaceTimeout"),
+                        };
+                        match classified {
+                            Ok(prefix) => prefix,
+                            Err(outcome) => {
+                                // The connection ends without a response, so
+                                // say why: the peer sees only a closed socket.
+                                eprintln!(
+                                    "federation listener dropped an accepted connection before its preface: outcome={outcome} peer={address}"
+                                );
+                                continue;
+                            }
                         }
                     } else {
                         Vec::new()

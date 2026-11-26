@@ -47,6 +47,87 @@ async fn federation_shutdown_cancels_four_incomplete_header_connections() {
     assert_eq!(connections.available_permits(), 4);
 }
 
+// Waits until the listener is waiting on the clock for the next connection's
+// preface: its deadline is then the only clock subscriber.
+async fn preface_waits_on(clock: &FederationControlClock) {
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, async {
+        while clock.changed.receiver_count() != 1 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn federation_preface_deadline_follows_the_scripted_control_clock() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut satellite = channel(FederationRole::Satellite, 'a');
+    satellite.control.clock = FederationControlClock::scripted();
+    let clock = satellite.control.clock.clone();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (stop, mut stop_rx) = tokio::sync::watch::channel(false);
+    let listener = FederationSocketListener {
+        control: Some(satellite.clone()),
+        listener,
+        connections: Arc::new(tokio::sync::Semaphore::new(4)),
+        stop: stop_rx.clone(),
+    };
+    let router = federation_router(satellite, allowed());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move { federation_wait_stop(&mut stop_rx).await })
+            .await
+    });
+
+    // An accepted connection that has sent nothing ends, without a response,
+    // once the scripted clock reaches the preface deadline.
+    let mut silent = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    preface_waits_on(&clock).await;
+    clock.advance(FEDERATION_PREFACE_DEADLINE);
+    let mut buffer = [0_u8; 64];
+    let ended = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, silent.read(&mut buffer))
+        .await
+        .unwrap();
+    assert!(
+        matches!(ended, Ok(0) | Err(_)),
+        "a connection past its preface deadline must end without a response: {ended:?}"
+    );
+
+    // A connection whose preface arrives before the scripted deadline is
+    // served: only the control clock's time counts against it.
+    let mut late = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    preface_waits_on(&clock).await;
+    clock.advance(FEDERATION_PREFACE_DEADLINE - Duration::from_millis(1));
+    late.write_all(
+        b"GET /federation/v1/health HTTP/1.1\r\nHost: satellite\r\nConnection: close\r\n\r\n",
+    )
+    .await
+    .unwrap();
+    let mut response = Vec::new();
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, late.read_to_end(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        response.starts_with(b"HTTP/1.1 "),
+        "a connection classified before its deadline must get an HTTP response: {:?}",
+        String::from_utf8_lossy(&response)
+    );
+
+    stop.send_replace(true);
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, server)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
 #[tokio::test]
 async fn federation_incomplete_authenticated_body_has_a_request_deadline() {
     let central = channel(FederationRole::Central, 'a');
