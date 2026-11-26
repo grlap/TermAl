@@ -1,0 +1,27 @@
+{
+  "id": "01a21646-144b-7371-8e48-fece61afe99d",
+  "external_ref": null,
+  "title": "Claude background-end attach binds no command for a full or live launcher row, so its launch provenance can be wrong",
+  "outcome": "A Claude background-end match for a full or live launcher row attaches only a registration it can tie to that launch, or refuses with a typed reason.",
+  "acceptance": [
+    "Claude background-end attach binds no command for a full or live launcher row, so its launch provenance can be wrong is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

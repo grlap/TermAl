@@ -1,0 +1,27 @@
+{
+  "id": "01a21646-2412-7e32-9493-1e2d35f14b64",
+  "external_ref": null,
+  "title": "A Claude background launcher end whose outstanding entry was evicted, or that came from a replaced runtime, attaches nothing and records no reason",
+  "outcome": "When Claude reports the end of a background task whose key has an uncarried launcher launch row, but the session holds no outstanding entry for it (evicted at the outstanding-work limit, or the frame is from a replaced runtime), the row records a typed reason why nothing was attached.",
+  "acceptance": [
+    "A Claude background launcher end whose outstanding entry was evicted, or that came from a replaced runtime, attaches nothing and records no reason is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

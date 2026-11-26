@@ -1,0 +1,26 @@
+{
+  "id": "01a21646-343f-7b92-b70a-79d8e0ede73a",
+  "external_ref": null,
+  "title": "Test that a Claude background-end registration whose run directory is a link or junction escaping the run root is refused before any read",
+  "outcome": "A behaviour test pins the background-end guard: a registration whose run directory resolves outside run root/run_id is refused and attaches nothing, and no file under the escaped target is read.",
+  "acceptance": [
+    "Test that a Claude background-end registration whose run directory is a link or junction escaping the run root is refused before any read is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

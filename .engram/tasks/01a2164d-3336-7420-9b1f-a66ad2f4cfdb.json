@@ -1,0 +1,27 @@
+{
+  "id": "01a2164d-3336-7420-9b1f-a66ad2f4cfdb",
+  "external_ref": null,
+  "title": "Claude background-end association does not revalidate its candidate and rival sets when it installs the artifact",
+  "outcome": "When a Claude background-end match installs its artifact, it rechecks under the lock that the candidate and rival sets it matched on are unchanged, and records ArtifactLocatorAmbiguous (or an equivalent reason) when a new same-window registration or rival appeared.",
+  "acceptance": [
+    "Claude background-end association does not revalidate its candidate and rival sets when it installs the artifact is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a2164d-dc42-75c3-bccd-49616c35eb92",
+  "external_ref": null,
+  "title": "Use the bash-aware argv for the Claude background-end registration comparison, and require a valid empty args array for an empty tail",
+  "outcome": "A Claude Bash background launcher whose focused command contains words bash rewrites (such as an unquoted backslash escape like `my\\ crate`) is matched against its registration by the argv bash actually passes. A registration whose recorded focused stage args are missing or malformed never compares equal to an empty planned tail.",
+  "acceptance": [
+    "Use the bash-aware argv for the Claude background-end registration comparison, and require a valid empty args array for an empty tail is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a2164d-2361-7730-8011-eb85bc4a1cbc",
+  "external_ref": null,
+  "title": "Claude background-end association checks terminality on one disk read and attaches from another that need not be terminal",
+  "outcome": "A Claude background-end match validates terminality, end time and request identity on the same guarded disk observation that the attachment uses, and refuses with a recorded reason if that observation is unavailable or not terminal.",
+  "acceptance": [
+    "Claude background-end association checks terminality on one disk read and attaches from another that need not be terminal is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
