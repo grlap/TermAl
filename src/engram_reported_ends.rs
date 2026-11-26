@@ -733,6 +733,7 @@ impl AppState {
         session_id: &str,
         key: &str,
         command: &str,
+        reported_cwd: Option<&str>,
         output: &str,
         exit: EngramCommandExit,
     ) -> bool {
@@ -740,6 +741,7 @@ impl AppState {
             session_id,
             key,
             command,
+            reported_cwd,
             output,
             exit,
             #[cfg(test)]
@@ -752,17 +754,26 @@ impl AppState {
         session_id: &str,
         key: &str,
         command: &str,
+        reported_cwd: Option<&str>,
         output: &str,
         exit: EngramCommandExit,
         #[cfg(test)] after_observation_end: impl FnOnce(),
     ) -> bool {
-        self.settle_reported_test_observation(
+        let ended = self.settle_reported_test_observation(
             session_id,
             key,
             command,
             exit,
             #[cfg(test)]
             after_observation_end,
+        );
+        self.observe_external_dart_artifact_from_end(
+            &ended,
+            &EngramObservationProvenance::Ambient,
+            Some(command),
+            reported_cwd,
+            output,
+            false,
         );
         self.observe_test_command_artifact(
             session_id,

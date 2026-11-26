@@ -42,6 +42,7 @@ function requestIdentity(request) {
   // Optional executable provenance is immutable too. Omitting it preserves
   // every legacy request's identity; this additive lane starts no owner call.
   if (request.sourceOwner !== undefined) immutable.sourceOwner = request.sourceOwner;
+  if (request.externalLauncher !== undefined) immutable.externalLauncher = request.externalLauncher;
   if (request.requestMessageId !== undefined) {
     immutable.requestMessageId = validateRequestMessageId(request.requestMessageId);
   }

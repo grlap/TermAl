@@ -1522,7 +1522,9 @@ pub(crate) fn take_shared_codex_late_command_end(
         return false;
     }
     let (Some(key), Some(command)) = (
-        item.get("id").and_then(Value::as_str),
+        item.get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty()),
         item.get("command").and_then(Value::as_str),
     ) else {
         return false;
@@ -1535,9 +1537,10 @@ pub(crate) fn take_shared_codex_late_command_end(
         .get("aggregatedOutput")
         .and_then(Value::as_str)
         .unwrap_or("");
+    let cwd = item.get("cwd").and_then(Value::as_str);
     state
         .engram_host()
-        .codex_reported_end(session_id, key, command, output, exit)
+        .codex_reported_end(session_id, key, command, cwd, output, exit)
 }
 
 /// Extracts the turn id from a Codex event by probing the several
@@ -1787,35 +1790,7 @@ pub(crate) fn handle_shared_codex_event_item_completed(
         // race typed deltas or replace their in-flight text.
         Some("AgentMessage") => {}
         Some("CommandExecution") => {
-            if let Some(command) = item.get("command").and_then(Value::as_str) {
-                let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
-                let output = item
-                    .get("aggregatedOutput")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let status = match item.get("status").and_then(Value::as_str) {
-                    Some("completed")
-                        if item.get("exitCode").and_then(Value::as_i64) == Some(0) =>
-                    {
-                        CommandStatus::Success
-                    }
-                    Some("completed") => CommandStatus::Error,
-                    Some("failed") | Some("declined") => CommandStatus::Error,
-                    _ => CommandStatus::Running,
-                };
-                if item.get("status").and_then(Value::as_str) == Some("declined") {
-                    // A declined command never ran: a test check it started
-                    // is dropped rather than reported as unknown.
-                    recorder.command_abandoned(key)?;
-                }
-                recorder.command_completed_with_exit(
-                    key,
-                    command,
-                    output,
-                    status,
-                    EngramHost::codex_command_exit(item),
-                )?;
-            }
+            record_codex_command_item_completed(item, recorder)?;
         }
         _ => {}
     }

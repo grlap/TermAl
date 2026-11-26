@@ -189,7 +189,7 @@ mod lifecycle_batch;
 mod batch_failure_deltas;
 
 #[path = "test_run_registration_named_root.rs"]
-mod named_root;
+pub(super) mod named_root;
 
 #[path = "engram_declared_native.rs"]
 mod declared_native;

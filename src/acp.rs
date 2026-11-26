@@ -1967,11 +1967,37 @@ pub(crate) fn handle_acp_session_update(
                     Some("completed") | Some("failed") | Some("error") => {
                         // What the call ran, or where, may be told only as
                         // it ends.
-                        recorder.command_described(&key, ran, cwd)?;
-                        recorder.command_completed_with_reported_command(
+                        //
+                        // An external one-call launcher already names its
+                        // target in pushd. Its completion cwd must corroborate
+                        // the original shell location, even when this frame
+                        // first supplies the command.
+                        let external_one_call = cwd.is_some()
+                            && ran
+                                .and_then(|line| {
+                                    engram_observed_dart_launcher(
+                                        line,
+                                        &EngramObservationProvenance::Ambient,
+                                    )
+                                })
+                                .is_some_and(|command| {
+                                    command.directory.is_some()
+                                        && engram_observed_dart_words(
+                                            &command.program,
+                                            &command.argv[1..],
+                                        )
+                                        .is_some_and(|words| words.external.is_some())
+                                });
+                        recorder.command_described(
+                            &key,
+                            ran,
+                            cwd.filter(|_| !external_one_call),
+                        )?;
+                        recorder.command_completed_with_reported_location(
                             &key,
                             &command,
                             ran,
+                            cwd,
                             &summarize_acp_tool_output(update, agent),
                             acp_tool_status(update),
                             EngramHost::acp_command_exit(agent, update),

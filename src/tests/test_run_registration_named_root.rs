@@ -119,7 +119,7 @@ fn common_dir_key(fixture: &RunFixture) -> String {
 
 /// `session`'s name of `root` for `binding`'s claim, with the work's naming
 /// history holding that run's canonical proof that the root is bound.
-pub(super) fn name_root(
+pub(in crate::tests::test_runs) fn name_root(
     fixture: &RunFixture,
     store: &EngramAuthorityStoreKey,
     binding: &EngramControlWorkBinding,

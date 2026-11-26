@@ -54,6 +54,7 @@ pub(crate) enum EngramRecorderObservation<'a> {
         command: &'a str,
         /// Actual command text supplied at completion, separate from its label.
         reported_command: Option<&'a str>,
+        reported_cwd: Option<&'a str>,
         output: &'a str,
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
@@ -102,6 +103,7 @@ impl EngramHost<'_> {
                 key,
                 command,
                 reported_command,
+                reported_cwd,
                 output,
                 exit,
                 runtime_output_cut,
@@ -112,6 +114,7 @@ impl EngramHost<'_> {
                     key,
                     command,
                     reported_command,
+                    reported_cwd,
                     output,
                     exit,
                     runtime_output_cut,
@@ -392,11 +395,12 @@ impl EngramHost<'_> {
         session_id: &str,
         key: &str,
         command: &str,
+        reported_cwd: Option<&str>,
         output: &str,
         exit: EngramCommandExit,
     ) -> bool {
         self.state
-            .note_engram_reported_end(session_id, key, command, output, exit)
+            .note_engram_reported_end(session_id, key, command, reported_cwd, output, exit)
     }
 
     /// The exit a Claude Bash tool result states.

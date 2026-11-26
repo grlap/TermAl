@@ -286,7 +286,10 @@ pub(super) fn test_run_wait_input_reads_locked(
             inner
                 .test_run_registrations
                 .get(&summary.run_id)
-                .is_some_and(engram_verification_record_registration_bound)
+                .is_some_and(|registration| {
+                    registration.external_launcher.is_none()
+                        && engram_verification_record_registration_bound(registration)
+                })
         })
         .filter_map(|summary| {
             let entry = inner.test_runs.find(&summary.run_id)?;
@@ -322,7 +325,8 @@ pub(super) fn test_run_wait_results_have_committed_input(run_dir: &FsPath) -> Op
 /// wait another run settled, is never marked: its record is named only when
 /// already final, and its later settlement reaches the run owner's next turn
 /// alone. A launcher run whose results carry no committed-input record is
-/// not marked: no record can be built from it.
+/// not marked: no record can be built from it. External launcher terminals
+/// still get a post-terminal look for the original launch association.
 /// `inputs` answers that question for the runs read off the lock; `None`
 /// asks the caller to wait for the next refresh.
 pub(super) fn test_run_wait_first_resume_records_locked(
@@ -396,7 +400,9 @@ pub(super) fn test_run_wait_first_resume_records_locked(
             // wait's other runs, nor dropped on that failed read: it is
             // followed, unless a look under way is waited for or the host's
             // latest look left its record pending for good.
-            let buildable = if registration.declared_native.is_some() {
+            let buildable = if registration.declared_native.is_some()
+                || registration.external_launcher.is_some()
+            {
                 true
             } else {
                 match *inputs.get(&label.run_id)? {
@@ -463,6 +469,10 @@ fn test_run_wait_record_may_be_in_flight(
             inner.test_run_record_pending.get(&registration.run_id),
             Some(EngramVerificationRecordLook::Pending(reason))
                 if !test_run_wait_pending_ends_wait(reason)
+        )
+        || matches!(
+            inner.test_run_record_pending.get(&registration.run_id),
+            Some(EngramVerificationRecordLook::ExternalLaunchCustodyMissing { .. })
         )
 }
 
@@ -570,6 +580,18 @@ fn test_run_wait_follow_up_state(
             _ => None,
         };
         return Some(test_run_wait_pending_text(reason, received));
+    }
+    if matches!(look,
+        Some(EngramVerificationRecordLook::ExternalLaunchCustodyMissing { begun })
+            if *begun >= marked_after)
+    {
+        return Some(
+            "not sent yet (external_launch_custody_missing); the host's latest look found no \
+            matching foreground command and RUN locator in complete output. The original \
+            command output can supply custody if the host has yet to process the first \
+            completion. Sending still requires an eligible run."
+                .to_owned(),
+        );
     }
     let no_record = matches!(
         look,
