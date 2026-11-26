@@ -53,6 +53,8 @@ pub(crate) struct TestRunCommandObservation {
     pub(crate) evidence: Vec<TestRunEvidenceAssociation>,
     #[serde(default)]
     pub(crate) artifact: Option<TestRunObservedArtifact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) external_dart_launch: Option<EngramExternalDartLaunchProof>,
     // Kept separately from start-placement diagnostics. Only the original
     // provider event's later artifact correlation may update this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -325,16 +327,19 @@ pub(crate) struct TestRunCommandOrigin {
     pub(crate) work_binding: Option<EngramControlWorkBinding>,
     pub(crate) source_root: Option<EngramWorkSourceRoot>,
     pub(crate) validated_unbound: bool,
+    pub(crate) external_dart_roots: Vec<EngramExternalDartLaunchRoot>,
 }
 
-// Only provider starts whose command text is not available yet. Process-local
-// attribution, cleared at description/end/runtime loss; never credit authority.
+// Provider starts waiting for command text or an external launch's cwd.
+// Process-local attribution, cleared on promotion, end or runtime loss.
 #[derive(Clone, Debug)]
 pub(crate) struct TestRunUnclassifiedCommand {
     pub(crate) origin: TestRunCommandOrigin,
     pub(crate) workdir: String,
     pub(crate) started_at: String,
     pub(crate) directories: Option<Vec<Option<String>>>,
+    pub(crate) external_command: Option<EngramCheckCommand>,
+    pub(crate) external_cwd: Option<String>,
     pub(crate) project_environment_present: BTreeSet<String>,
 }
 
@@ -428,6 +433,7 @@ impl TestRunCommandOrigin {
             validated_unbound: owns_current
                 && project.is_some_and(|project| project.engram.is_none())
                 && record.engram.work_binding.is_none(),
+            external_dart_roots: Vec::new(),
         }
     }
 }
@@ -581,6 +587,7 @@ impl AppState {
         workdir: String,
         started_at: String,
         directories: Option<Vec<Option<String>>>,
+        external_command: Option<EngramCheckCommand>,
     ) {
         if origin.runtime_identity.is_none() {
             return;
@@ -603,7 +610,12 @@ impl AppState {
                 origin,
                 workdir,
                 started_at,
+                external_cwd: match directories.as_deref() {
+                    Some([Some(directory)]) => Some(directory.clone()),
+                    _ => None,
+                },
                 directories,
+                external_command,
                 project_environment_present: present,
             });
     }
@@ -616,11 +628,16 @@ impl AppState {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) -> TestCommandOriginalStart {
-        let Some(ran) = ran else {
+        if ran.is_none() && cwd.is_none() {
             return TestCommandOriginalStart::None;
-        };
-        let pending = {
-            let inner = self.inner.lock().expect("state mutex poisoned");
+        }
+        let dart = ran.and_then(|line| engram_observed_dart_launcher(line, provenance));
+        let external = dart.as_ref().filter(|command| {
+            engram_observed_dart_words(&command.program, &command.argv[1..])
+                .is_some_and(|words| words.external.is_some())
+        });
+        let mut pending = {
+            let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return TestCommandOriginalStart::None;
             };
@@ -649,7 +666,10 @@ impl AppState {
                             EngramObservationProvenance::Ambient => true,
                         }
                 });
-            let Some(pending) = candidates.next().cloned() else {
+            let Some(original) = candidates.next() else {
+                if ran.is_none() {
+                    return TestCommandOriginalStart::None;
+                }
                 // Further ACP pending/in-progress frames may repeat a start
                 // after its original placeholder has already been consumed.
                 // An Ambient frame carries no turn, so it matches its
@@ -689,26 +709,61 @@ impl AppState {
             };
             if candidates.next().is_some() {
                 // Ambiguous original starts cannot acquire the current owner.
+                return if ran.is_some() {
+                    TestCommandOriginalStart::ThisTurn
+                } else {
+                    TestCommandOriginalStart::None
+                };
+            }
+            let id = original.origin.execution_id();
+            let pending = inner
+                .test_runs
+                .unclassified_commands
+                .get_mut(&id)
+                .expect("original start found under the same lock");
+            if let Some(original) = &pending.external_command
+                && ran.is_some()
+                && external != Some(original)
+            {
                 return TestCommandOriginalStart::ThisTurn;
             }
-            pending
+            // A description can fill the original invocation's missing
+            // fields independently. Keep the first explicitly reported cwd.
+            if pending.external_cwd.is_none() {
+                pending.external_cwd = cwd.map(str::to_owned);
+            }
+            if ran.is_none() && pending.external_command.is_none() {
+                return TestCommandOriginalStart::None;
+            }
+            if pending.external_command.is_none() {
+                pending.external_command = external.cloned();
+            }
+            pending.clone()
         };
         let places = cwd
             .map(|directory| vec![Some(directory.to_owned())])
             .or(pending.directories.clone());
-        let recognised = EngramHost::recognized_check(ran);
-        let mut declared = recognised
-            .is_none()
-            .then(|| {
+        if pending
+            .external_command
+            .as_ref()
+            .is_some_and(|command| command.directory.is_none() && pending.external_cwd.is_none())
+        {
+            return TestCommandOriginalStart::ThisTurn;
+        }
+        let recognised = ran.and_then(EngramHost::recognized_check);
+        let mut declared = if recognised.is_none() && pending.external_command.is_none() {
+            ran.and_then(|line| {
                 engram_declared_start(
-                    Some(ran),
+                    Some(line),
                     FsPath::new(&pending.workdir),
                     places.as_deref(),
                     None,
                 )
                 .0
             })
-            .flatten();
+        } else {
+            None
+        };
         if let Some((_, _, binding)) = &mut declared {
             AppliedProjectEnvironment::bind_present_names(
                 &pending.project_environment_present,
@@ -719,11 +774,11 @@ impl AppState {
             .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command));
         let dart_observation = if observation_command.is_none() {
-            engram_observed_dart_launcher(ran, provenance)
+            pending.external_command.as_ref().or(dart.as_ref())
         } else {
             None
         };
-        let Some(command) = observation_command.or(dart_observation.as_ref()) else {
+        let Some(command) = observation_command.or(dart_observation) else {
             return TestCommandOriginalStart::ThisTurn;
         };
         if command.kind != EngramVerificationKind::Test {
@@ -731,11 +786,16 @@ impl AppState {
         }
         let workdir = FsPath::new(&pending.workdir);
         let target = if dart_observation.is_some() {
+            engram_bind_external_dart_launch_root(&mut pending.origin, command);
             // An explicit cwd at the start belongs to the original
             // invocation. A late frame can supply a previously missing cwd.
-            let directories = match pending.directories.as_deref() {
-                Some(directories @ [Some(_)]) => Some(directories),
-                _ => places.as_deref(),
+            let directories = if pending.external_command.is_some() {
+                Some(std::slice::from_ref(&pending.external_cwd))
+            } else {
+                match pending.directories.as_deref() {
+                    Some(directories @ [Some(_)]) => Some(directories),
+                    _ => places.as_deref(),
+                }
             };
             engram_dart_observation_worktree(
                 command,
@@ -756,6 +816,7 @@ impl AppState {
             &worktree,
             &pending.started_at,
             declared.as_ref().map(|(_, _, binding)| binding),
+            (&pending.workdir, pending.external_cwd.as_deref()),
         );
         self.inner
             .lock()
@@ -773,9 +834,16 @@ impl AppState {
         worktree: &str,
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
+        provider_directory: (&str, Option<&str>),
     ) {
         self.observe_test_command_start_with_native(
-            origin, command, worktree, started_at, declared, None,
+            origin,
+            command,
+            worktree,
+            started_at,
+            declared,
+            None,
+            Some(provider_directory),
         );
     }
 
@@ -787,10 +855,31 @@ impl AppState {
         started_at: &str,
         declared: Option<&EngramDeclaredBinding>,
         native: Option<DeclaredRunReservation>,
+        provider_directory: Option<(&str, Option<&str>)>,
     ) {
         if command.kind != EngramVerificationKind::Test {
             return;
         }
+        let external_dart_launch =
+            if native.is_none() && !worktree.is_empty() && origin.runtime_identity.is_some() {
+                engram_observed_dart_words(&command.program, &command.argv[1..]).and_then(|words| {
+                    let external = words.external?;
+                    let command_digest =
+                        engram_external_dart_command_digest(external.script, words.sdk)?;
+                    let (session_workdir, cwd) = provider_directory?;
+                    let provider_location = EngramExternalDartProviderLocation::capture(
+                        session_workdir,
+                        cwd.unwrap_or(worktree),
+                    )?;
+                    Some(EngramExternalDartLaunchProof {
+                        command_digest,
+                        provider_location: Some(provider_location),
+                        provider_ended: false,
+                    })
+                })
+            } else {
+                None
+            };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let TestRunCommandOrigin {
             session_id,
@@ -802,6 +891,7 @@ impl AppState {
             work_binding,
             source_root,
             validated_unbound,
+            external_dart_roots: _,
         } = origin;
         let execution_id = format!(
             "observed-{}",
@@ -848,6 +938,7 @@ impl AppState {
                 request_identity: Some(start.request_identity.clone()),
                 terminal_digest: None,
             }),
+            external_dart_launch,
             declared_native: native,
             declared_binding: declared.cloned(),
             declared_artifact: declared
@@ -890,10 +981,10 @@ impl AppState {
         self.persist_test_command_observation_locked(&mut inner, observation);
     }
 
-    /// Ends the session's open rows for `key` with the runtime's exit and
-    /// returns the execution ids this call actually ended: rows still open
-    /// when selected that it marked ended, never a background launch or a
-    /// launch-only row it only noted, nor a row an earlier end already closed.
+    /// Returns the execution ids completed by this provider result. An
+    /// external Dart launch-only row is included on its first provider end
+    /// to allow artifact attachment, even though its run verdict is pending.
+    /// Ordinary launch-only rows and nonterminal background replies are omitted.
     pub(crate) fn observe_test_command_end(
         &self,
         session_id: &str,
@@ -990,6 +1081,12 @@ impl AppState {
                     return None;
                 }
                 if row.launch_only {
+                    if let Some(launch) = &mut row.external_dart_launch
+                        && !launch.provider_ended
+                    {
+                        launch.provider_ended = true;
+                        transitioned = matches.len() == 1;
+                    }
                     // The launcher returning (even with exit 0) is not the
                     // run's terminal outcome. Only its exact artifact may
                     // supply that.

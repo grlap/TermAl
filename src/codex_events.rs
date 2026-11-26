@@ -1535,9 +1535,10 @@ pub(crate) fn take_shared_codex_late_command_end(
         .get("aggregatedOutput")
         .and_then(Value::as_str)
         .unwrap_or("");
+    let cwd = item.get("cwd").and_then(Value::as_str);
     state
         .engram_host()
-        .codex_reported_end(session_id, key, command, output, exit)
+        .codex_reported_end(session_id, key, command, cwd, output, exit)
 }
 
 /// Extracts the turn id from a Codex event by probing the several

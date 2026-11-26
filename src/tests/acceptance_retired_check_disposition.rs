@@ -982,6 +982,7 @@ fn retain_rejected_check_terminal(state: &AppState, registration: &TestRunRegist
             request_identity: Some(registration.request_identity.clone()),
             terminal_digest: Some(terminal_digest),
         }),
+        external_dart_launch: None,
         native_completion_refusal: None,
         declared_artifact: None,
         declared_binding: None,

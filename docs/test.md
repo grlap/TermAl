@@ -482,6 +482,44 @@ or all-skipped report gives UNKNOWN. The host retries a temporary file
 sharing or lock error before recording a verdict. Editing or supplying a report
 after the run cannot supply verification evidence for it.
 
+**Testing another repository.** From the exact named worktree top level
+in the target project's local TermAl session, use the standard launcher
+and its helper files from a TermAl checkout:
+
+```sh
+node "/absolute/TermAl/scripts/test-launcher.mjs" focused --input commit --project-root "/absolute/target-worktree" -- flutter test
+node "/absolute/TermAl/scripts/test-launcher.mjs" focused --input commit --project-root "/absolute/target-worktree" -- dart test
+```
+
+Use native absolute paths. `--project-root` must resolve to both the Git
+worktree top level and the command's actual working directory. This flag
+supports the foreground committed-input Flutter and Dart forms above.
+The SDK inherits the project's environment, and the run directory and owned
+report are in the target worktree's Git admin directory. The external form
+does not accept `--request-message-id`. `request.json` records the separate
+launcher checkout commit, entry path and observed cleanliness. The host
+requires a measured clean launcher for external Test credit and includes
+the observed commit and clean flag in the record's check references. The
+launcher measures the checkout containing its tracked entry script and checks
+the entry against that commit after Git's checkout conversions. A dirty
+or unmeasurable launcher is refused with
+`external_launcher_provenance_unverified`. For live proof, use the launcher
+checkout at the running host build's revision.
+
+The host sends the external run's ordinary registered Test verification
+after it associates the original foreground command and exact `RUN`
+locator. Use a tool that reports its working directory and retains the
+complete foreground output. The host binds the record to the terminal
+result it read when it associated that launch, with one focused SDK stage.
+Command text or a working directory supplied at completion must agree
+with the original invocation.
+The same argument and observed shell limits apply. A post-terminal look
+without this association ends a record wait with
+`external_launch_custody_missing`. The registration and test result remain
+available for inspection. Late original command output can supply the
+association. The host sends the record only when the run also meets the
+remaining verification requirements.
+
 A direct `focused -- cargo test` skips `scripts/test-rust.sh`, so unless something
 sets a count libtest runs one test thread per available core, where `full` defaults
 to `RUST_TEST_THREADS=4`. On a many-core host a direct run is far harsher than a

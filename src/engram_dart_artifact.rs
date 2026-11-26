@@ -8,6 +8,300 @@ use crate::delegations::delegation_git_boundary::open_metadata_entry;
 
 pub(crate) const ENGRAM_LAUNCHER_DART_REPORT: &str = "focused.dart.json";
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ExternalDartLauncher {
+    pub(crate) script: String,
+    pub(crate) commit: String,
+    pub(crate) clean: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct EngramExternalDartLaunchProof {
+    pub(crate) command_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provider_location: Option<EngramExternalDartProviderLocation>,
+    pub(crate) provider_ended: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct EngramExternalDartProviderLocation {
+    // Relative runtime directories resolve from the session workdir that
+    // belonged to the original launch. Retain only a digest of the cwd.
+    session_workdir: String,
+    cwd_digest: String,
+}
+
+impl EngramExternalDartProviderLocation {
+    pub(crate) fn capture(session_workdir: &str, cwd: &str) -> Option<Self> {
+        Some(Self {
+            session_workdir: session_workdir.to_owned(),
+            cwd_digest: Self::cwd_digest(session_workdir, cwd)?,
+        })
+    }
+
+    pub(crate) fn matches(&self, cwd: &str) -> bool {
+        Self::cwd_digest(&self.session_workdir, cwd).as_deref() == Some(self.cwd_digest.as_str())
+    }
+
+    fn cwd_digest(session_workdir: &str, cwd: &str) -> Option<String> {
+        let workdir = FsPath::new(session_workdir);
+        let directory = workdir.join(cwd);
+        if cwd.is_empty()
+            || !workdir.is_absolute()
+            || !directory.is_absolute()
+            || engram_network_path(session_workdir)
+            || engram_network_path(&directory.to_string_lossy())
+        {
+            return None;
+        }
+        let directory = fs::canonicalize(directory).ok()?;
+        let path = directory.to_str()?;
+        (!engram_network_path(path) && directory.is_dir()).then(|| sha256_hex(path.as_bytes()))
+    }
+}
+
+/// Bind only the canonical entry script and exact SDK words. No text or
+/// option values from the provider command enter the observation store.
+pub(crate) fn engram_external_dart_command_digest(script: &str, sdk: &[String]) -> Option<String> {
+    let script = fs::canonicalize(script).ok()?;
+    let bytes = serde_json::to_vec(&(script.to_str()?, sdk)).ok()?;
+    Some(sha256_hex(&bytes))
+}
+
+impl ExternalDartLauncher {
+    fn measured_commit(&self) -> bool {
+        matches!(self.commit.len(), 40 | 64)
+            && self
+                .commit
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    }
+
+    pub(crate) fn clean_checkout(&self) -> bool {
+        self.measured_commit() && self.clean == Some(true)
+    }
+}
+
+pub(crate) fn engram_external_launcher_local_path(path: &str) -> bool {
+    FsPath::new(path).is_absolute()
+        && path.len() <= TEST_RUN_PATH_MAX_BYTES
+        && !path.chars().any(char::is_control)
+        && !engram_network_path(path)
+}
+
+pub(crate) fn engram_external_launcher_script(path: &str) -> bool {
+    engram_external_launcher_local_path(path)
+        && FsPath::new(path).ends_with("scripts/test-launcher.mjs")
+}
+
+pub(crate) fn engram_external_launcher_run_parent(root: &FsPath) -> Option<PathBuf> {
+    let parent = EngramHost::run_artifact_directory(root)?;
+    // Canonicalize the Git admin directory, keeping review-runs itself
+    // literal so a redirected directory cannot adopt a sibling's runs.
+    Some(fs::canonicalize(parent.parent()?).ok()?.join("review-runs"))
+}
+
+pub(crate) fn engram_external_launcher_request(
+    request: &Value,
+) -> Result<Option<ExternalDartLauncher>, ApiError> {
+    request
+        .get("externalLauncher")
+        .map(|value| {
+            let invalid = || ApiError::bad_request("invalid external Dart launcher request");
+            let unverified = || ApiError::bad_request(
+                "external_launcher_provenance_unverified: the external launcher commit is unavailable",
+            );
+            if request.get("requestMessageId").is_some() {
+                return Err(ApiError::bad_request(
+                    "--request-message-id cannot be combined with --project-root",
+                ));
+            }
+            if value.get("commit").and_then(Value::as_str).is_none() {
+                return Err(unverified());
+            }
+            let launcher: ExternalDartLauncher =
+                serde_json::from_value(value.clone()).map_err(|_| invalid())?;
+            if !launcher.measured_commit() {
+                return Err(unverified());
+            }
+            let Some([stage]) = request
+                .get("stages")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+            else {
+                return Err(invalid());
+            };
+            let program = test_run_str(stage, "command").ok_or_else(&invalid)?;
+            let mut argv = vec![program];
+            argv.extend(test_run_argv(stage.get("args")).ok_or_else(&invalid)?);
+            if !engram_external_launcher_script(&launcher.script)
+                || !request
+                    .get("root")
+                    .and_then(Value::as_str)
+                    .is_some_and(engram_external_launcher_local_path)
+                || !test_run_request_is_committed_input(request)
+                || request.get("full").and_then(Value::as_bool) != Some(false)
+                || request.get("detached").and_then(Value::as_bool) != Some(false)
+                || request.get("scope").is_some_and(|scope| !scope.is_null())
+                || request
+                    .get("liveEngram")
+                    .is_some_and(|live| !live.is_null())
+                || request.get("nativeExecution").is_some()
+                || stage.get("name").and_then(Value::as_str) != Some("focused")
+                || !engram_supports_focused_dart_test(&argv)
+            {
+                return Err(invalid());
+            }
+            Ok(launcher)
+        })
+        .transpose()
+}
+
+pub(crate) fn engram_external_dart_verification_shape(
+    launcher: &ExternalDartLauncher,
+    request: &Value,
+    results: &Value,
+) -> Result<(), &'static str> {
+    if !launcher.clean_checkout() {
+        return Err(
+            "external_launcher_provenance_unverified: expected a measured clean launcher checkout",
+        );
+    }
+    if !matches!(engram_external_launcher_request(request), Ok(Some(observed)) if observed == *launcher)
+        || !matches!(
+            results.get("stages").and_then(Value::as_array).map(Vec::as_slice),
+            Some([stage]) if stage.get("name").and_then(Value::as_str) == Some("focused")
+        )
+    {
+        return Err("the external launcher must record exactly its registered focused Dart stage");
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EngramExternalDartLaunchRoot {
+    name: EngramWorkSourceRoot,
+    binding: Option<EngramControlWorkBinding>,
+}
+
+/// Snapshot the invocation's own names in its local registration store.
+/// A late description can choose among these names but cannot borrow one
+/// that arrived in a later turn. Registration still verifies the held claim.
+pub(crate) fn engram_external_dart_launch_roots(
+    inner: &StateInner,
+    origin: &TestRunCommandOrigin,
+) -> Vec<EngramExternalDartLaunchRoot> {
+    let Some(store) = origin
+        .project_id
+        .as_deref()
+        .and_then(|id| inner.projects.iter().find(|project| project.id == id))
+        .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
+        .and_then(|project| project.engram.as_ref())
+        .and_then(|settings| settings.authority_store_key.as_ref())
+    else {
+        return Vec::new();
+    };
+    inner
+        .engram_work_source_roots
+        .iter()
+        .filter(|name| {
+            &name.store == store
+                && (name.named_by_session == origin.session_id
+                    || origin
+                        .source_root
+                        .as_ref()
+                        .is_some_and(|active| active.same_name(name)))
+        })
+        .map(|name| {
+            let binding = origin
+                .source_root
+                .as_ref()
+                .filter(|active| active.same_name(name))
+                .and(origin.work_binding.as_ref())
+                .cloned()
+                .or_else(|| {
+                    engram_named_root_claim_binding(&inner.engram_work_naming_history, name)
+                });
+            EngramExternalDartLaunchRoot {
+                name: name.clone(),
+                binding,
+            }
+        })
+        .collect()
+}
+
+/// Select the exact native named root for the typed external launch. A
+/// different active turn binding does not name this command's workspace.
+pub(crate) fn engram_bind_external_dart_launch_root(
+    origin: &mut TestRunCommandOrigin,
+    command: &EngramCheckCommand,
+) {
+    let Some(external) = engram_observed_dart_words(&command.program, &command.argv[1..])
+        .and_then(|words| words.external)
+    else {
+        return;
+    };
+    origin.source_root = None;
+    origin.work_binding = None;
+    origin.validated_unbound = false;
+    let Ok(requested) = fs::canonicalize(external.root) else {
+        return;
+    };
+    let mut matches = std::mem::take(&mut origin.external_dart_roots)
+        .into_iter()
+        .filter(|root| FsPath::new(&root.name.root) == requested.as_path());
+    if let Some(root) = matches.next()
+        && matches.next().is_none()
+        && root.binding.is_some()
+    {
+        origin.source_root = Some(root.name);
+        origin.work_binding = root.binding;
+    }
+}
+
+pub(crate) fn engram_external_launch_terminal_digest<'a>(
+    inner: &'a StateInner,
+    registration: &TestRunRegistration,
+) -> Option<&'a str> {
+    registration.external_launcher.as_ref()?;
+    let (Some(named), Some(binding), Some(store)) = (
+        registration.named_root.as_ref(),
+        registration.work_binding.as_ref(),
+        registration.authority_store.as_ref(),
+    ) else {
+        return None;
+    };
+    let mut rows = inner
+        .test_run_observations
+        .index()
+        .artifact_run(&registration.run_id);
+    let key = rows.next()?;
+    if rows.next().is_some() {
+        return None;
+    }
+    let row = inner.test_run_observations.get(key).filter(|row| {
+        row.declared_native.is_none()
+            && row.launch_only
+            && row.runtime_identity.is_some()
+            && row.summary.project_id == registration.project_id
+            && row.summary.worktree == registration.worktree
+            && engram_verification_record_row_matches(row, registration)
+            && row
+                .artifact
+                .as_ref()
+                .is_some_and(|artifact| artifact.run_directory == registration.run_directory)
+            && row.source_root.as_ref().is_some_and(|root| {
+                root.root == named.workspace_id
+                    && root.generation == named.generation
+                    && root.work_id == binding.work_id
+                    && root.claim_id == binding.claim_id
+                    && &root.store == store
+            })
+    })?;
+    row.artifact.as_ref()?.terminal_digest.as_deref()
+}
+
 enum EngramDartReportError {
     Retry,
     Unusable(&'static str),

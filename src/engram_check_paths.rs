@@ -771,6 +771,25 @@ pub(crate) fn engram_dart_observation_worktree(
     directories: Option<&[Option<String>]>,
     source_root: Option<&EngramWorkSourceRoot>,
 ) -> Option<EngramCheckTarget> {
+    let words = engram_observed_dart_words(&check.program, check.argv.get(1..)?)?;
+    if let Some(external) = words.external {
+        let named = source_root?;
+        let root = FsPath::new(external.root);
+        if (check.directory.is_none() && !matches!(directories, Some([Some(_)])))
+            || !engram_dart_worktree_matches(root, FsPath::new(&named.root))
+        {
+            return None;
+        }
+        return engram_check_target_from(check, directories, |cwd| {
+            let target = engram_check_directory_target(
+                workdir,
+                cwd,
+                Some((FsPath::new(&named.root), &named.common_dir_key)),
+                true,
+            )?;
+            engram_dart_worktree_matches(root, &target.directory).then_some(target)
+        });
+    }
     let credit_root =
         source_root.map(|root| (FsPath::new(&root.root), root.common_dir_key.as_str()));
     engram_check_target_from(check, directories, |cwd| {

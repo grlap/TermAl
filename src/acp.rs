@@ -1968,10 +1968,11 @@ pub(crate) fn handle_acp_session_update(
                         // What the call ran, or where, may be told only as
                         // it ends.
                         recorder.command_described(&key, ran, cwd)?;
-                        recorder.command_completed_with_reported_command(
+                        recorder.command_completed_with_reported_location(
                             &key,
                             &command,
                             ran,
+                            cwd,
                             &summarize_acp_tool_output(update, agent),
                             acp_tool_status(update),
                             EngramHost::acp_command_exit(agent, update),

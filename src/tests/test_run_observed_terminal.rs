@@ -408,6 +408,7 @@ async fn observed_terminal_late_provider_end_uses_its_exact_returned_launcher_lo
         &session,
         "late-key",
         LAUNCH,
+        None,
         &format!("RUN {}", test_run_display_path(&directory)),
         EngramCommandExit::Code(0),
     );

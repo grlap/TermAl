@@ -274,13 +274,13 @@ pub(crate) struct SessionRecorder {
 }
 
 impl SessionRecorder {
-    /// ACP may end a tool call with only a display title. Keep the actual
-    /// command's presence separate so a title is never execution identity.
-    pub(crate) fn command_completed_with_reported_command(
+    /// Keep ACP's actual completion description separate from its title.
+    pub(crate) fn command_completed_with_reported_location(
         &mut self,
         key: &str,
         command: &str,
         reported_command: Option<&str>,
+        reported_cwd: Option<&str>,
         output: &str,
         status: CommandStatus,
         exit: EngramCommandExit,
@@ -290,6 +290,7 @@ impl SessionRecorder {
             key,
             command,
             reported_command,
+            reported_cwd,
             output,
             status,
             Some(exit),
@@ -1016,6 +1017,7 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
         key,
         command,
         Some(command),
+        None,
         output,
         status,
         exit,
@@ -1030,6 +1032,7 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     key: &str,
     command: &str,
     reported_command: Option<&str>,
+    reported_cwd: Option<&str>,
     output: &str,
     status: CommandStatus,
     exit: Option<EngramCommandExit>,
@@ -1062,6 +1065,7 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
             key,
             command,
             reported_command,
+            reported_cwd,
             output,
             exit,
             runtime_output_cut,

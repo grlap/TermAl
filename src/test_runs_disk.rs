@@ -551,6 +551,7 @@ impl TestRunRead {
 pub(crate) struct TestRunDisk {
     pub(crate) run_id: String,
     pub(crate) request_identity: Option<String>,
+    pub(crate) external_launcher: Option<ExternalDartLauncher>,
     pub(crate) locator_identity: Option<String>,
     pub(crate) run_dir: PathBuf,
     pub(crate) request_stamp: TestRunFileStamp,
@@ -796,6 +797,7 @@ impl TestRunDisk {
         TestRunRead::Run(Self {
             run_id,
             request_identity: test_run_registration_identity(&request).ok(),
+            external_launcher: engram_external_launcher_request(&request).ok().flatten(),
             locator_identity: test_run_locator_identity(run_dir),
             run_dir: run_dir.to_path_buf(),
             request_stamp,

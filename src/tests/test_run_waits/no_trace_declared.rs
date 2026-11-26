@@ -335,6 +335,7 @@ fn no_trace_production_end_persists_settlement_before_a_wait_can_consume_it() {
                 "foreground",
                 COMMAND,
                 Some(COMMAND),
+                None,
                 "",
                 Some(EngramCommandExit::Code(0)),
                 false,

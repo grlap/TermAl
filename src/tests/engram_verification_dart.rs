@@ -113,6 +113,894 @@ fn dart_named_root(main: &FsPath, linked: &FsPath, session: &str) -> EngramWorkS
     }
 }
 
+fn mark_external_dart_run(run: &mut RecordRun, script: &FsPath, clean: Option<bool>) {
+    let path = run.run_dir.join("request.json");
+    let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    request["detached"] = json!(false);
+    request["externalLauncher"] = json!({
+        "script": test_run_display_path(script), "commit": "a".repeat(40), "clean": clean,
+    });
+    fs::write(path, request.to_string()).unwrap();
+    run.registration.external_launcher = engram_external_launcher_request(&request).unwrap();
+    assert!(run.registration.external_launcher.is_some());
+    run.registration.request_identity = test_run_registration_identity(&request).unwrap();
+    run.registration.locator_identity = test_run_locator_identity(&run.run_dir);
+}
+
+#[test]
+fn external_dart_producer_requires_the_original_launch_and_terminal() {
+    for (style, should_send) in [
+        ("immediate", true),
+        ("late", true),
+        ("command then cwd", true),
+        ("cwd then command", true),
+        ("wrong cwd", false),
+        ("wrong original cwd", false),
+        ("wrong description key", false),
+        ("wrong project root", false),
+        ("different launcher script", false),
+        ("summary only", false),
+        ("started only", false),
+        ("rewritten terminal", false),
+        ("rewritten before resend", false),
+        ("rewritten with held receipt", false),
+        ("extra result stage", false),
+        ("changed request", false),
+        ("changed stage argv", false),
+        ("changed reporter", false),
+        ("dirty launcher", false),
+        ("unknown launcher cleanliness", false),
+    ] {
+        let fixture = RunFixture::new("external-dart-custody");
+        let (session, transport) = engram_session(&fixture, false);
+        let (runtime, _rx) = test_codex_runtime_handle("external-dart-runtime");
+        let named = dart_named_root(&fixture.root, &fixture.root, &session);
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+            inner.sessions[index].engram.work_binding = Some(binding());
+            inner.engram_work_source_roots.push(named.clone());
+        }
+        let launcher = fixture
+            .root
+            .with_file_name("launcher package")
+            .join("scripts/test-launcher.mjs");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        fs::write(&launcher, "").unwrap();
+        let root = test_run_display_path(&fixture.root);
+        let other = fixture.root.join("nested cwd");
+        fs::create_dir(&other).unwrap();
+        let wrong_cwd = test_run_display_path(&other);
+        let selected = if style == "wrong project root" {
+            let other_project = fixture.root.with_file_name("other project");
+            fs::create_dir(&other_project).unwrap();
+            run_git_test_command(&other_project, &["init"]);
+            test_run_display_path(&other_project)
+        } else {
+            root.clone()
+        };
+        let command = format!(
+            r#"node "{}" focused --input commit --project-root "{selected}" -- dart test"#,
+            test_run_display_path(&launcher)
+        );
+        let provenance = EngramObservationProvenance::Ambient;
+        let key = "external-dart-launch";
+        let commandless = matches!(
+            style,
+            "command then cwd" | "cwd then command" | "wrong original cwd"
+        );
+        fixture.state.note_engram_command_started(
+            &session,
+            &provenance,
+            key,
+            (!commandless).then_some(command.as_str()),
+            match style {
+                "late" | "command then cwd" | "cwd then command" | "wrong description key" => None,
+                "wrong cwd" | "wrong original cwd" => Some(wrong_cwd.as_str()),
+                _ => Some(root.as_str()),
+            },
+        );
+        if style == "late" {
+            fixture.state.note_engram_command_started(
+                &session,
+                &provenance,
+                key,
+                Some(&command),
+                Some(&root),
+            );
+        }
+        let describe = |description_key, line, cwd| {
+            fixture.state.note_engram_command_described(
+                &session,
+                &provenance,
+                description_key,
+                line,
+                cwd,
+            );
+        };
+        match style {
+            "command then cwd" => {
+                describe(key, Some(command.as_str()), None);
+                describe(key, None, Some(root.as_str()));
+            }
+            "cwd then command" => {
+                describe(key, None, Some(root.as_str()));
+                describe(key, Some(command.as_str()), None);
+            }
+            "wrong original cwd" => describe(key, Some(command.as_str()), Some(root.as_str())),
+            "wrong description key" => describe("different invocation", None, Some(root.as_str())),
+            _ => {}
+        }
+        let mut run = dart_run_for_session(
+            &fixture,
+            &session,
+            &["dart", "test"],
+            &["dart", "test", "--file-reporter", OWNED_REPORT_ARG],
+            Some(include_bytes!("fixtures/declared-dart/dart-pass.jsonl")),
+            0,
+        );
+        run.registration.named_root.as_mut().unwrap().workspace_id = named.root.clone();
+        let registered_launcher = if style == "different launcher script" {
+            let other_launcher = fixture
+                .root
+                .with_file_name("other launcher")
+                .join("scripts/test-launcher.mjs");
+            fs::create_dir_all(other_launcher.parent().unwrap()).unwrap();
+            fs::write(&other_launcher, "").unwrap();
+            other_launcher
+        } else {
+            launcher
+        };
+        let clean = match style {
+            "dirty launcher" => Some(false),
+            "unknown launcher cleanliness" => None,
+            _ => Some(true),
+        };
+        mark_external_dart_run(&mut run, &registered_launcher, clean);
+        register(&fixture, &[&run]);
+        fixture.state.engram_verification_records_tick();
+        assert!(transport.sent_records().is_empty());
+        assert_eq!(
+            engram_verification_record_progress(&run.run_dir),
+            Some(EngramVerificationRecordProgress::Pending {
+                reason: EngramVerificationRecordPending::ExternalLaunchCustodyMissing,
+            })
+        );
+        let results_path = run.run_dir.join("results.json");
+        let terminal = fs::read(&results_path).unwrap();
+        let write_results = |edit: fn(&mut Value)| {
+            let mut results: Value = serde_json::from_slice(&terminal).unwrap();
+            edit(&mut results);
+            fs::write(&results_path, results.to_string()).unwrap();
+        };
+        if style == "extra result stage" {
+            write_results(|results| {
+                let mut extra = stage("extra", "passed", 0, &["cargo", "check"], 1);
+                extra["started"] = results["stages"][0]["started"].clone();
+                extra["ended"] = results["stages"][0]["ended"].clone();
+                results["stages"].as_array_mut().unwrap().push(extra);
+            });
+        }
+        if style == "changed stage argv" {
+            write_results(|results| {
+                results["stages"][0]["command"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!("--run-skipped"));
+            });
+        }
+        let directory = test_run_display_path(&run.run_dir);
+        let output = match style {
+            "summary only" => format!("results: {directory}/results.json"),
+            "started only" => format!("STARTED {directory}"),
+            _ => format!("RUN {directory}\nresults: {directory}/results.json"),
+        };
+        fixture.state.note_engram_command_finished(
+            &session,
+            &provenance,
+            key,
+            &command,
+            &output,
+            Some(EngramCommandExit::Code(0)),
+        );
+        let response = json!({"operation": PRODUCER, "producer": PRODUCER,
+            "verifications": [{ "stage": "focused", "record_id": record_id(0) }], "run_outcome": "passed"});
+        if style == "extra result stage" {
+            assert!(matches!(
+                fixture.state.prepare_engram_verification_record(&current(&fixture, &run)),
+                EngramVerificationRecordPrepared::Pending(EngramVerificationRecordPending::BodyNotBuilt { detail })
+                    if detail.contains("exactly its registered focused Dart stage")
+            ));
+        }
+        if style == "changed reporter" {
+            fs::write(
+                run.run_dir.join(ENGRAM_LAUNCHER_DART_REPORT),
+                include_bytes!("fixtures/declared-dart/dart-fail.jsonl"),
+            )
+            .unwrap();
+            let EngramVerificationRecordPrepared::Ready(frozen) = fixture
+                .state
+                .prepare_engram_verification_record(&current(&fixture, &run))
+            else {
+                panic!("the original terminal is still readable after the reporter changed");
+            };
+            assert_eq!(
+                frozen.body.checks[0].outcome,
+                EngramVerificationRecordCheckOutcome::Indeterminate
+            );
+            assert!(transport.sent_records().is_empty());
+            continue;
+        }
+        if style.starts_with("rewritten") {
+            assert!(
+                fixture
+                    .state
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .test_run_observations
+                    .values()
+                    .any(|row| row
+                        .artifact
+                        .as_ref()
+                        .is_some_and(|artifact| artifact.run_id == run.registration.run_id
+                            && artifact.terminal_digest.is_some()))
+            );
+            if style != "rewritten terminal" {
+                let EngramVerificationRecordPrepared::Ready(frozen) = fixture
+                    .state
+                    .prepare_engram_verification_record(&current(&fixture, &run))
+                else {
+                    panic!("the original terminal prepares a passing body");
+                };
+                if style == "rewritten with held receipt" {
+                    fixture.state.note_engram_verification_record_ack(
+                        &run.registration,
+                        TestRunVerificationAck::Received {
+                            receipt: serde_json::from_value(response.clone()).unwrap(),
+                            body_digest: engram_verification_record_body_digest(&frozen.body),
+                        },
+                    );
+                    assert!(matches!(
+                        fixture
+                            .state
+                            .prepare_engram_verification_record(&current(&fixture, &run)),
+                        EngramVerificationRecordPrepared::ReceiptHeld { .. }
+                    ));
+                }
+            }
+            // Body equality alone cannot detect a change to an unrelated
+            // result field. The original terminal digest still must match.
+            write_results(|results| results["replacementFixtureField"] = json!(true));
+            assert!(
+                matches!(
+                    fixture
+                        .state
+                        .prepare_engram_verification_record(&current(&fixture, &run)),
+                    EngramVerificationRecordPrepared::Pending(
+                        EngramVerificationRecordPending::BodyMismatch
+                    )
+                ),
+                "{style}"
+            );
+        }
+        if style == "changed request" {
+            let path = run.run_dir.join("request.json");
+            let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            request["externalLauncher"]["commit"] = json!("b".repeat(40));
+            fs::write(path, request.to_string()).unwrap();
+        }
+        transport.script(Ok(work_supported(&session)));
+        transport.script(Ok(response));
+        fixture.state.engram_verification_records_tick();
+        assert_eq!(
+            transport.sent_records().len(),
+            usize::from(should_send),
+            "{style}"
+        );
+        if should_send {
+            let records = transport.sent_records();
+            let refs = records[0]["checks"][0]["refs"].as_array().unwrap();
+            assert!(refs.contains(&json!(format!("launcher_commit:{}", "a".repeat(40)))));
+            assert!(refs.contains(&json!("launcher_clean:true")));
+            assert!(matches!(
+                current(&fixture, &run).verification_record,
+                Some(TestRunVerificationAck::Settled { .. })
+            ));
+        } else if style == "rewritten with held receipt" {
+            assert!(matches!(
+                current(&fixture, &run).verification_record,
+                Some(TestRunVerificationAck::Received { .. })
+            ));
+        } else if style == "changed stage argv" {
+            assert!(matches!(
+                current(&fixture, &run).verification_record,
+                Some(TestRunVerificationAck::LocalUnclassified { detail })
+                    if detail.contains("focused")
+            ));
+        } else {
+            if clean != Some(true) {
+                assert_eq!(
+                    engram_verification_record_progress(&run.run_dir),
+                    Some(EngramVerificationRecordProgress::Pending {
+                        reason:
+                            EngramVerificationRecordPending::ExternalLauncherProvenanceUnverified,
+                    }),
+                    "{style}"
+                );
+            }
+            assert!(
+                !matches!(
+                    current(&fixture, &run).verification_record,
+                    Some(
+                        TestRunVerificationAck::Received { .. }
+                            | TestRunVerificationAck::Settled { .. }
+                    )
+                ),
+                "{style}"
+            );
+            assert_eq!(
+                engram_verification_record_frozen(&run.run_dir, &run.registration.run_id).is_some(),
+                style == "rewritten before resend",
+                "{style}"
+            );
+        }
+    }
+}
+
+#[test]
+fn external_dart_acp_completion_uses_original_command_only_when_omitted() {
+    for scenario in [
+        "omitted",
+        "same pushd directory",
+        "different pushd directory",
+        "matching cwd without command",
+        "different cwd without command",
+        "matching cwd with command",
+        "different cwd with command",
+        "matching shell echo",
+        "different shell echo",
+        "different reported command",
+        "different request argv",
+        "repeated end",
+    ] {
+        let fixture = RunFixture::new("external-dart-acp-completion");
+        let (session, transport) = engram_session(&fixture, false);
+        let (runtime, _rx) = test_acp_runtime_handle(AcpAgent::Cursor, "external-dart-acp-runtime");
+        let named = dart_named_root(&fixture.root, &fixture.root, &session);
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Acp(runtime);
+            inner.sessions[index].engram.work_binding = Some(binding());
+            inner.engram_work_source_roots.push(named.clone());
+        }
+        let launcher = fixture
+            .root
+            .with_file_name("launcher package")
+            .join("scripts/test-launcher.mjs");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        fs::write(&launcher, "").unwrap();
+        let cwd = test_run_display_path(&fixture.root);
+        let other_directory = fixture.root.join("other directory");
+        fs::create_dir(&other_directory).unwrap();
+        let command = format!(
+            r#"node "{}" focused --input commit --project-root "{cwd}" -- dart test"#,
+            test_run_display_path(&launcher),
+        );
+        let shell_echo = scenario.ends_with("shell echo");
+        let command = if shell_echo {
+            format!(r#"{command} --plain-name "group\\case""#)
+        } else {
+            command
+        };
+        let one_call = scenario.ends_with("pushd directory");
+        let started = if one_call {
+            format!(r#"pushd "{cwd}" && {command}"#)
+        } else if shell_echo {
+            format!("bash -lc '{command}'")
+        } else {
+            command.clone()
+        };
+        let key = "external-acp-execution";
+        let mut recorder = SessionRecorder::new(fixture.state.clone(), session.clone());
+        let mut turn = AcpTurnState::default();
+        let (input_tx, _input_rx) = std::sync::mpsc::channel();
+        let mut apply = |update: Value| {
+            handle_acp_session_update(
+                &update,
+                &fixture.state,
+                &session,
+                &input_tx,
+                &mut turn,
+                &mut recorder,
+                AcpAgent::Cursor,
+            )
+            .unwrap();
+        };
+        apply(json!({"sessionUpdate":"tool_call", "toolCallId":key, "title":"Run test"}));
+        let mut start_description = json!({"command":started});
+        if one_call {
+            start_description["cwd"] = json!("other directory");
+        }
+        apply(json!({"sessionUpdate":"tool_call_update", "toolCallId":key,
+            "status":"in_progress", "rawInput":start_description}));
+        if !one_call {
+            apply(json!({"sessionUpdate":"tool_call_update", "toolCallId":key,
+                "status":"in_progress", "rawInput":{"cwd":"."}}));
+        }
+
+        let different_argv = scenario == "different request argv";
+        let planned: &[&str] = if shell_echo {
+            &["dart", "test", "--plain-name", r"group\case"]
+        } else if different_argv {
+            &["dart", "test", "--run-skipped"]
+        } else {
+            &["dart", "test"]
+        };
+        let observed: Vec<_> = planned
+            .iter()
+            .copied()
+            .chain(["--file-reporter", OWNED_REPORT_ARG])
+            .collect();
+        let mut run = dart_run_for_session(
+            &fixture,
+            &session,
+            planned,
+            &observed,
+            Some(include_bytes!("fixtures/declared-dart/dart-pass.jsonl")),
+            0,
+        );
+        run.registration.named_root.as_mut().unwrap().workspace_id = named.root;
+        mark_external_dart_run(&mut run, &launcher, Some(true));
+        register(&fixture, &[&run]);
+
+        let directory = test_run_display_path(&run.run_dir);
+        let mut end = json!({"sessionUpdate":"tool_call_update", "toolCallId":key,
+        "status":"completed", "title":"Run test", "rawOutput":{
+            "exitCode":0, "stdout":format!("RUN {directory}\nresults: {directory}/results.json")
+        }});
+        if one_call {
+            let directory = if scenario == "different pushd directory" {
+                test_run_display_path(&other_directory)
+            } else {
+                cwd.clone()
+            };
+            end["rawInput"] = json!({
+                "command":format!(r#"pushd "{directory}" && {command}"#),
+                "cwd":test_run_display_path(&other_directory),
+            });
+        } else if scenario.contains(" cwd ") {
+            let end_cwd = if scenario.starts_with("different") {
+                test_run_display_path(&other_directory)
+            } else {
+                cwd.clone()
+            };
+            end["rawInput"] = json!({"cwd":end_cwd});
+            if scenario.ends_with("with command") {
+                end["rawInput"]["command"] = json!(command);
+            }
+        } else if shell_echo {
+            let echo = if scenario == "different shell echo" {
+                format!("pwsh -Command {command}")
+            } else {
+                started.clone()
+            };
+            let provenance = EngramObservationProvenance::Ambient;
+            let parsed_start = engram_observed_dart_launcher(&started, &provenance).unwrap();
+            let parsed_end = engram_observed_dart_launcher(&echo, &provenance).unwrap();
+            assert_eq!(
+                EngramHost::check_fingerprint(&parsed_start),
+                EngramHost::check_fingerprint(&parsed_end)
+            );
+            assert_eq!(
+                parsed_start.argv == parsed_end.argv,
+                scenario == "matching shell echo"
+            );
+            end["rawInput"] = json!({"command":echo});
+        } else if scenario == "different reported command" {
+            end["rawInput"] = json!({"command":format!("{command} --run-skipped")});
+        } else if scenario == "repeated end" {
+            let mut first = end.clone();
+            first["rawOutput"]["stdout"] = json!("completed without a locator");
+            apply(first);
+        }
+        apply(end);
+        transport.script(Ok(work_supported(&session)));
+        transport.script(Ok(json!({"operation": PRODUCER, "producer": PRODUCER,
+            "verifications": [{ "stage": "focused", "record_id": record_id(0) }],
+            "run_outcome": "passed"})));
+        fixture.state.engram_verification_records_tick();
+        let should_settle = matches!(scenario, "omitted" | "same pushd directory")
+            || scenario.starts_with("matching");
+        assert_eq!(
+            transport.sent_records().len(),
+            usize::from(should_settle),
+            "{scenario}"
+        );
+        assert_eq!(
+            matches!(
+                current(&fixture, &run).verification_record,
+                Some(TestRunVerificationAck::Settled { .. })
+            ),
+            should_settle,
+            "{scenario}"
+        );
+    }
+}
+
+#[test]
+fn external_dart_codex_typed_and_legacy_routes_only_attach_the_first_end() {
+    use crate::codex_events::take_shared_codex_late_command_end;
+
+    for (legacy_first, first_has_locator, cwd_matches) in [
+        (false, false, true),
+        (true, false, true),
+        (false, true, true),
+        (true, true, true),
+        (false, true, false),
+        (true, true, false),
+    ] {
+        let fixture = RunFixture::new("external-dart-codex-completion");
+        let (session, _) = engram_session(&fixture, false);
+        let (runtime, _rx) = test_codex_runtime_handle("external-dart-codex-runtime");
+        let named = dart_named_root(&fixture.root, &fixture.root, &session);
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+            inner.sessions[index].engram.work_binding = Some(binding());
+            inner.engram_work_source_roots.push(named.clone());
+        }
+        let launcher = fixture
+            .root
+            .with_file_name("launcher package")
+            .join("scripts/test-launcher.mjs");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        fs::write(&launcher, "").unwrap();
+        let cwd = test_run_display_path(&fixture.root);
+        let command = format!(
+            r#"node "{}" focused --input commit --project-root "{cwd}" -- dart test"#,
+            test_run_display_path(&launcher),
+        );
+        let key = "external-codex-execution";
+        let mut recorder = SessionRecorder::new(fixture.state.clone(), session.clone());
+        recorder
+            .command_started_in(key, &command, Some(&command), Some(&cwd))
+            .unwrap();
+
+        let mut run = dart_run_for_session(
+            &fixture,
+            &session,
+            &["dart", "test"],
+            &["dart", "test", "--file-reporter", OWNED_REPORT_ARG],
+            Some(include_bytes!("fixtures/declared-dart/dart-pass.jsonl")),
+            0,
+        );
+        run.registration.named_root.as_mut().unwrap().workspace_id = named.root;
+        mark_external_dart_run(&mut run, &launcher, Some(true));
+        register(&fixture, &[&run]);
+
+        let directory = test_run_display_path(&run.run_dir);
+        let locator = format!("RUN {directory}\nresults: {directory}/results.json");
+        let other_directory = fixture.root.join("other directory");
+        fs::create_dir(&other_directory).unwrap();
+        let other_cwd = test_run_display_path(&other_directory);
+        let terminal = |legacy, output: &str, reported_cwd: &str| {
+            let thread = "external-codex-thread";
+            let item = json!({
+                "type": if legacy { "CommandExecution" } else { "commandExecution" },
+                "id": key, "command": command, "status": "completed", "exitCode": 0,
+                "aggregatedOutput": output, "cwd": reported_cwd,
+            });
+            let frame = if legacy {
+                json!({"method":"codex/event/item_completed", "params":{"msg":{"thread_id":thread, "item":item}}})
+            } else {
+                json!({"method":"item/completed", "params":{"threadId":thread, "item":item}})
+            };
+            take_shared_codex_late_command_end(
+                &fixture.state,
+                &session,
+                Some(thread),
+                &frame,
+                &item,
+            );
+        };
+        let attached = || {
+            let inner = fixture.state.inner.lock().unwrap();
+            let mut rows = inner
+                .test_run_observations
+                .values()
+                .filter(|row| row.summary.owner_session_id.as_deref() == Some(session.as_str()));
+            let row = rows.next().expect("original external launch is observed");
+            assert!(rows.next().is_none());
+            assert!(row.external_dart_launch.as_ref().unwrap().provider_ended);
+            row.artifact.as_ref().is_some_and(|artifact| {
+                artifact.run_id == run.registration.run_id && artifact.terminal_digest.is_some()
+            })
+        };
+        terminal(
+            legacy_first,
+            if first_has_locator {
+                &locator
+            } else {
+                "finished"
+            },
+            if cwd_matches { &cwd } else { &other_cwd },
+        );
+        let should_attach = first_has_locator && cwd_matches;
+        assert_eq!(attached(), should_attach, "first end legacy={legacy_first}");
+        terminal(!legacy_first, &locator, &cwd);
+        assert_eq!(
+            attached(),
+            should_attach,
+            "duplicate end legacy={}",
+            !legacy_first
+        );
+    }
+}
+
+#[test]
+fn external_dart_registration_and_original_launch_select_the_same_target_claim() {
+    use super::super::test_run_registration::named_root::name_root;
+
+    for (late_description, name_after_start, should_send) in [
+        (false, false, true),
+        (true, false, true),
+        (true, true, false),
+    ] {
+        let fixture = RunFixture::new("external-dart-target-claim");
+        let (session, transport) = engram_session(&fixture, false);
+        commit_dart_worktree_fixture(&fixture.root);
+        let active_root = fixture.root.with_file_name("active worktree");
+        run_git_test_command(
+            &fixture.root,
+            &["worktree", "add", "--detach", active_root.to_str().unwrap()],
+        );
+        let target = binding();
+        let active = EngramControlWorkBinding {
+            work_id: "active-work".to_owned(),
+            claim_id: "active-claim".to_owned(),
+            run_id: "active-run".to_owned(),
+            root_execution_id: "active-execution".to_owned(),
+            ..target.clone()
+        };
+        name_root(
+            &fixture,
+            &store(),
+            &active,
+            &session,
+            &fs::canonicalize(active_root).unwrap(),
+            2,
+        );
+        let name_target = || {
+            name_root(
+                &fixture,
+                &store(),
+                &target,
+                &session,
+                &fs::canonicalize(&fixture.root).unwrap(),
+                3,
+            )
+        };
+        let original_name = if name_after_start {
+            None
+        } else {
+            Some(name_target())
+        };
+        let (runtime, _rx) = test_codex_runtime_handle("external-dart-target-claim-runtime");
+        {
+            let mut inner = fixture.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&session).unwrap();
+            inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+            inner.sessions[index].engram.work_binding = Some(active.clone());
+        }
+        let launcher = fixture
+            .root
+            .with_file_name("launcher package")
+            .join("scripts/test-launcher.mjs");
+        fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+        fs::write(&launcher, "").unwrap();
+        let root = test_run_display_path(&fixture.root);
+        let command = format!(
+            r#"node "{}" focused --input commit --project-root "{root}" -- dart test"#,
+            test_run_display_path(&launcher)
+        );
+        let key = "external-dart-target-claim";
+        let provenance = EngramObservationProvenance::Ambient;
+        fixture.state.note_engram_command_started(
+            &session,
+            &provenance,
+            key,
+            (!late_description).then_some(command.as_str()),
+            (!late_description).then_some(root.as_str()),
+        );
+        let named = original_name.unwrap_or_else(name_target);
+        if late_description {
+            fixture.state.note_engram_command_described(
+                &session,
+                &provenance,
+                key,
+                Some(&command),
+                Some(&root),
+            );
+        }
+        let mut run = dart_run_for_session(
+            &fixture,
+            &session,
+            &["dart", "test"],
+            &["dart", "test", "--file-reporter", OWNED_REPORT_ARG],
+            Some(include_bytes!("fixtures/declared-dart/dart-pass.jsonl")),
+            0,
+        );
+        mark_external_dart_run(&mut run, &launcher, Some(true));
+        let path = run.run_dir.join("results.json");
+        let mut results: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        fs::write(
+            &path,
+            json!({"runId": run.registration.run_id, "state":"running"}).to_string(),
+        )
+        .unwrap();
+        fixture
+            .state
+            .register_test_run(
+                &session,
+                RegisterTestRunRequest {
+                    run_id: run.registration.run_id.clone(),
+                    run_directory: test_run_display_path(&run.run_dir),
+                },
+            )
+            .unwrap();
+        let registered = current(&fixture, &run);
+        assert_eq!(registered.work_binding.as_ref(), Some(&target));
+        assert_eq!(
+            registered.named_root.as_ref().unwrap().workspace_id,
+            named.root
+        );
+        assert_eq!(registered.authority_store.as_ref(), Some(&store()));
+        let completed = test_run_timestamp();
+        results["ended"] = json!(completed);
+        results["stages"][0]["started"] = json!(registered.registered_at);
+        results["stages"][0]["ended"] = json!(completed);
+        fs::write(&path, results.to_string()).unwrap();
+        fixture.state.note_engram_command_finished(
+            &session,
+            &provenance,
+            key,
+            &command,
+            &format!("RUN {}", test_run_display_path(&run.run_dir)),
+            Some(EngramCommandExit::Code(0)),
+        );
+        fixture
+            .state
+            .install_test_engram_transport(transport.clone());
+        transport.script(Ok(work_supported(&session)));
+        transport.script(Ok(json!({"operation": PRODUCER, "producer": PRODUCER,
+            "verifications": [{ "stage": "focused", "record_id": record_id(0) }],
+            "run_outcome": "passed"})));
+        fixture.state.engram_verification_records_tick();
+        assert_eq!(transport.sent_records().len(), usize::from(should_send));
+        if should_send {
+            assert!(matches!(
+                current(&fixture, &run).verification_record,
+                Some(TestRunVerificationAck::Settled { .. })
+            ));
+        } else {
+            assert_eq!(
+                engram_verification_record_progress(&run.run_dir),
+                Some(EngramVerificationRecordProgress::Pending {
+                    reason: EngramVerificationRecordPending::ExternalLaunchCustodyMissing,
+                })
+            );
+        }
+    }
+}
+
+#[test]
+fn external_dart_registration_refuses_a_sibling_worktree_admin_locator() {
+    let fixture = RunFixture::new("external-dart-sibling");
+    let (session, transport) = engram_session(&fixture, false);
+    commit_dart_worktree_fixture(&fixture.root);
+    let sibling = fixture.root.with_file_name("sibling worktree");
+    run_git_test_command(
+        &fixture.root,
+        &["worktree", "add", "--detach", sibling.to_str().unwrap()],
+    );
+    let mut run = dart_run_for_session(
+        &fixture,
+        &session,
+        &["dart", "test"],
+        &["dart", "test", "--file-reporter", OWNED_REPORT_ARG],
+        Some(include_bytes!("fixtures/declared-dart/dart-pass.jsonl")),
+        0,
+    );
+    let launcher = fixture
+        .root
+        .with_file_name("launcher package")
+        .join("scripts/test-launcher.mjs");
+    mark_external_dart_run(&mut run, &launcher, Some(true));
+    let request_path = run.run_dir.join("request.json");
+    let original = fs::read(&request_path).unwrap();
+    let request: Value = serde_json::from_slice(&original).unwrap();
+    let mut selected = request.clone();
+    selected["requestMessageId"] = json!("mailbox-message-81710daa-a221-4111-921b-9d11f4bfd3b6");
+    let selected_command = format!(
+        r#"node "{}" focused --input commit --project-root "{}" --request-message-id {} -- dart test"#,
+        test_run_display_path(&launcher),
+        test_run_display_path(&fixture.root),
+        selected["requestMessageId"].as_str().unwrap(),
+    );
+    assert!(
+        engram_observed_dart_launcher(&selected_command, &EngramObservationProvenance::Ambient,)
+            .is_none()
+    );
+    let mut unmeasured = request;
+    unmeasured["externalLauncher"]["commit"] = Value::Null;
+    for (invalid, reason) in [
+        (
+            selected,
+            "--request-message-id cannot be combined with --project-root",
+        ),
+        (unmeasured, "external_launcher_provenance_unverified"),
+    ] {
+        fs::write(&request_path, invalid.to_string()).unwrap();
+        let error = fixture
+            .state
+            .register_test_run(
+                &session,
+                RegisterTestRunRequest {
+                    run_id: run.registration.run_id.clone(),
+                    run_directory: test_run_display_path(&run.run_dir),
+                },
+            )
+            .err()
+            .expect("unsupported external request must be refused");
+        assert!(error.message.contains(reason), "{error:?}");
+    }
+    fs::write(request_path, original).unwrap();
+    let directory = engram_external_launcher_run_parent(&sibling)
+        .unwrap()
+        .join(&run.registration.run_id);
+    fs::create_dir_all(&directory).unwrap();
+    fs::copy(
+        run.run_dir.join("request.json"),
+        directory.join("request.json"),
+    )
+    .unwrap();
+    fs::copy(
+        run.run_dir.join(ENGRAM_LAUNCHER_DART_REPORT),
+        directory.join(ENGRAM_LAUNCHER_DART_REPORT),
+    )
+    .unwrap();
+    let mut results: Value =
+        serde_json::from_slice(&fs::read(run.run_dir.join("results.json")).unwrap()).unwrap();
+    results["stages"][0]["command"][3] = json!(format!(
+        "json:{}",
+        test_run_display_path(&directory.join(ENGRAM_LAUNCHER_DART_REPORT))
+    ));
+    fs::write(directory.join("results.json"), results.to_string()).unwrap();
+    let error = fixture
+        .state
+        .register_test_run(
+            &session,
+            RegisterTestRunRequest {
+                run_id: run.registration.run_id.clone(),
+                run_directory: test_run_display_path(&directory),
+            },
+        )
+        .err()
+        .expect("the sibling run directory must be refused");
+    assert!(
+        error
+            .message
+            .contains("selected worktree's Git admin directory"),
+        "{error:?}"
+    );
+    fixture.state.engram_verification_records_tick();
+    assert!(transport.sent_records().is_empty());
+}
+
 #[test]
 fn focused_dart_receipt_settlement_respects_original_worktree_and_shell_boundaries() {
     let tags = "smoke && io";

@@ -2624,6 +2624,45 @@ fn a_cd_through_a_link_and_back_up_is_not_followed_physically() {
 }
 
 #[test]
+fn an_acp_cwd_only_start_registers_the_running_key_and_overlaps_an_open_check() {
+    let turn = EOCheckedTurn::start("acp-cwd-only-start", true);
+    let (input_tx, _input_rx) = std::sync::mpsc::channel();
+    let mut turn_state = AcpTurnState::default();
+    let mut recorder = turn.recorder();
+    let cwd = turn.record(|record| record.session.workdir.clone());
+    for update in [
+        json!({"sessionUpdate":"tool_call", "toolCallId":"acp-check",
+            "rawInput":{"command":SIZE_TEST}}),
+        json!({"sessionUpdate":"tool_call", "toolCallId":"acp-unknown",
+            "rawInput":{"cwd":cwd}}),
+    ] {
+        handle_acp_session_update(
+            &update,
+            &turn.state,
+            &turn.session_id,
+            &input_tx,
+            &mut turn_state,
+            &mut recorder,
+            AcpAgent::Cursor,
+        )
+        .unwrap();
+    }
+    turn.record(|record| {
+        assert_eq!(
+            record.engram.running_command_keys.get("acp-unknown"),
+            Some(&Some(cwd))
+        );
+        let check = record
+            .engram
+            .active_turn_checks
+            .iter()
+            .find(|check| check.key == "acp-check")
+            .unwrap();
+        assert!(check.overlapped);
+    });
+}
+
+#[test]
 fn an_acp_tool_call_ends_its_check_with_the_exit_code_it_reported() {
     // The ACP handler hands the recorder the exit code from `rawOutput`,
     // which a check needs to claim an outcome.

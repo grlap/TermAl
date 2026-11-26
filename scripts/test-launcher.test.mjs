@@ -1,6 +1,6 @@
 // Exercises the shared test-launcher contract without running product gates.
 import assert from "node:assert/strict";
-import childProcess, { execFileSync, spawn } from "node:child_process";
+import childProcess, { execFile, execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs, {
   chmodSync,
@@ -25,6 +25,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:p
 import { syncBuiltinESMExports } from "node:module";
 import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import {
   categoryRequiredFiles,
   categoryStage,
@@ -56,6 +57,7 @@ import {
   summarize,
 } from "./test-launcher.mjs";
 import { sourceIdsEqual, RUN_RECORD_JSON_BYTES } from "./test-launcher-input.mjs";
+import { externalLauncherProject } from "./test-launcher-source.mjs";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
 import { removeFixture, removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
@@ -129,6 +131,8 @@ function dartSdkFixture(root, env) {
     "  const report = reporterIndex === -1 ? undefined : args[reporterIndex + 1];",
     "  const { DART_FIXTURE_RELEASE, DART_FIXTURE_ARGV, DART_FIXTURE_EXIT } = process.env;",
     "  fs.writeFileSync(DART_FIXTURE_ARGV, JSON.stringify(args));",
+    "  if (process.env.DART_FIXTURE_CONTEXT) fs.writeFileSync(process.env.DART_FIXTURE_CONTEXT,",
+    "      JSON.stringify({ cwd: process.cwd(), sentinel: process.env.DART_FIXTURE_SENTINEL }));",
     "  if (DART_FIXTURE_RELEASE) {",
     "    await new Promise((resolve, reject) => {",
     "      const timer = setTimeout(() => { watcher.close(); reject(new Error('fixture release timed out')); }, 20000);",
@@ -209,6 +213,111 @@ test("focused Dart SDK forwards native argv and retains its own reporter", async
       assert.deepEqual(json(join(runDir, "request.json")).stages[0].args, ["test", ...options]);
     }
   });
+});
+
+test("external focused Dart CLI owns its report in the named target checkout", async (t) => {
+  const directory = mkdtempSync(join(testTempDirectory(), "dart targets "));
+  removeFixtureOnPass(t, directory);
+  await repository(t, async (root, env) => {
+    const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trimEnd();
+    const commit = (cwd, message) => git(cwd, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+      "commit", "--quiet", "--no-gpg-sign", "-m", message);
+    const launcherRoot = join(directory, "launcher package");
+    const scripts = join(launcherRoot, "scripts");
+    mkdirSync(scripts, { recursive: true });
+    git(launcherRoot, "init", "--quiet", "--template=");
+    git(launcherRoot, "config", "--local", "core.autocrlf", "false");
+    for (const file of copiedLauncherFiles) copyFileSync(join(dirname(launcherScript), file), join(scripts, file));
+    writeFileSync(join(launcherRoot, ".gitattributes"), "scripts/test-launcher.mjs text\n");
+    git(launcherRoot, "add", "--", ".gitattributes", "scripts");
+    commit(launcherRoot, "launcher delivery");
+    const launcher = join(scripts, "test-launcher.mjs");
+    writeFileSync(launcher, readFileSync(launcher, "utf8").replace(/\r?\n/gu, "\r\n"));
+    const childRepo = join(directory, "pinned child");
+    mkdirSync(childRepo);
+    git(childRepo, "init", "--quiet", "--template=");
+    writeFileSync(join(childRepo, "value.txt"), "pinned child\n");
+    git(childRepo, "add", "--", "value.txt");
+    commit(childRepo, "pinned child");
+    git(root, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", "--", childRepo, "pinned");
+    commit(root, "target with initialized gitlink");
+    assert.equal(git(join(root, "pinned"), "rev-parse", "HEAD"), git(childRepo, "rev-parse", "HEAD"));
+    assert.equal(existsSync(join(root, "scripts/test-launcher.mjs")), false);
+    const { sdk, childEnv, bytes } = dartSdkFixture(launcherRoot, env);
+    const context = join(sdk, "context.json");
+    const execute = (cwd, args, entry = launcher) => promisify(execFile)(process.execPath, [entry, ...args], {
+      cwd, env: { ...childEnv, DART_FIXTURE_ARGV: join(sdk, "argv.json"),
+        DART_FIXTURE_CONTEXT: context, DART_FIXTURE_SENTINEL: "fixture-project-env" },
+      windowsHide: true, timeout: 45000,
+    });
+    const suppliedRoot = process.platform === "win32" ? root.replace(/^[A-Z]:/u, (drive) => drive.toLowerCase()) : root;
+    const outer = ["focused", "--input", "commit", "--project-root", suppliedRoot, "--"];
+    await assert.rejects(execute(join(root, "pinned"), [...outer, "flutter", "test"]), /invocation cwd/u);
+    await assert.rejects(execute(root, [...outer, "flutter", "test", "pinned"]), /supported form/u);
+    await assert.rejects(execute(root, [
+      ...outer.slice(0, -1), "--request-message-id", "mailbox-message-81710daa-a221-4111-921b-9d11f4bfd3b6", "--", "flutter", "test",
+    ]), /--request-message-id cannot be combined with --project-root/u);
+
+    const ignoredScripts = join(launcherRoot, "ignored copy", "scripts");
+    const gitInfo = join(launcherRoot, ".git", "info");
+    mkdirSync(ignoredScripts, { recursive: true });
+    mkdirSync(gitInfo, { recursive: true });
+    writeFileSync(join(gitInfo, "exclude"), "\n/ignored copy/\n", { flag: "a" });
+    for (const file of copiedLauncherFiles) copyFileSync(join(scripts, file), join(ignoredScripts, file));
+    assert.equal(git(launcherRoot, "status", "--porcelain", "--untracked-files=all"), "");
+    await assert.rejects(execute(root, [...outer, "flutter", "test"], join(ignoredScripts, "test-launcher.mjs")),
+      /external_launcher_provenance_unverified/u);
+    assert.equal(existsSync(context), false);
+
+    const spawnGit = childProcess.spawnSync;
+    const statusWarning = t.mock.method(childProcess, "spawnSync", (command, args, options) => {
+      const result = spawnGit(command, args, options);
+      if (command === "git" && args[0] === "status") {
+        assert.equal(result.status, 0);
+        assert.equal(result.stdout, "");
+        result.stderr = "warning: could not open directory 'unreadable/': Permission denied\n";
+      }
+      return result;
+    });
+    syncBuiltinESMExports();
+    try {
+      const unverified = externalLauncherProject(root, root, launcher, launcherRoot, env);
+      assert.equal(unverified.externalLauncher.clean, null);
+    } finally {
+      statusWarning.mock.restore();
+      syncBuiltinESMExports();
+    }
+    for (const runner of ["flutter", "dart"]) {
+      if (runner === "dart") writeFileSync(launcher, readFileSync(launcher, "utf8") + "\n// local fixture edit\n");
+      const program = runner === "flutter" ? join(sdk, "flutter") : runner;
+      const { stdout } = await execute(root, [...outer, program, "test"]);
+      const run = stdout.match(/^RUN (.+)$/mu)?.[1]?.trimEnd();
+      assert.ok(run, stdout);
+      assert.equal(dirname(run), join(realpathSync.native(join(root, ".git")), "review-runs"));
+      const request = json(join(run, "request.json"));
+      const results = json(join(run, "results.json"));
+      assert.deepEqual(request.externalLauncher, {
+        script: realpathSync.native(launcher), commit: git(launcherRoot, "rev-parse", "HEAD"),
+        clean: runner === "flutter",
+      });
+      assert.equal(request.sourceId.commit, git(root, "rev-parse", "HEAD"));
+      assert.deepEqual(request.sourceId, results.sourceIdBefore);
+      assert.deepEqual(results.sourceIdBefore, results.sourceIdAfter);
+      assert.equal(results.source.launcherVersion, null);
+      assert.equal(results.state, "passed");
+      if (runner === "flutter") {
+        const expected = process.platform === "win32" ? `${program}.bat` : program;
+        assert.equal(realpathSync.native(results.stages[0].command[0]), realpathSync.native(expected));
+      }
+      assert.equal(realpathSync.native(json(context).cwd), realpathSync.native(root));
+      assert.equal(json(context).sentinel, "fixture-project-env");
+      assert.deepEqual(readFileSync(join(run, "focused.dart.json")), bytes);
+    }
+    git(launcherRoot, "update-index", "--assume-unchanged", "--", "scripts/test-launcher.mjs");
+    assert.equal(git(launcherRoot, "status", "--porcelain", "--untracked-files=all"), "");
+    assert.equal(externalLauncherProject(root, root, launcher, launcherRoot, env).externalLauncher.clean, null);
+    assert.equal(git(root, "status", "--porcelain", "--untracked-files=all"), "");
+  }, fixtureEnv, directory);
 });
 
 test("focused Dart SDK overlapping runs cannot adopt another run's reporter", async (t) => {
