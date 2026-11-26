@@ -1,0 +1,30 @@
+{
+  "id": "01a21694-d8e7-7f73-b9fd-0cd19b716d7b",
+  "external_ref": null,
+  "title": "Claude read-only Bash refusal names the `;`/line-break rule for a command reported to contain neither",
+  "outcome": "Claude read-only Bash refusal names the `;`/line-break rule for a command reported to contain neither",
+  "acceptance": [
+    "The exact bytes of the refused command from delegation-c89e8791 (or a faithful reproduction) are recorded, and the cause of the `;`/line-break reason is identified from source.",
+    "A refused read-only Bash command's stated reason names the rule that actually matched; a behavioral test drives the reported command shape (`cd <cwd> && grep -n \"a\\|b\" <file> | head`) through the production policy and checks the refusal reason or the acceptance it now gets, with no text pinning beyond the rule identity.",
+    "If quoted `|` inside a grep pattern is misread as a pipe separator, the policy either handles it as quoted text or refuses it with a reason naming that rule; covered by a behavioral test. The candidate receives the standard review pair and full gate."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "claude-runtime",
+    "diagnostics",
+    "read-only-policy"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

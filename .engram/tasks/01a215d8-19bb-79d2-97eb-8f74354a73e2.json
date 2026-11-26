@@ -4,7 +4,10 @@
   "title": "A claim's named source root silently disappears from the TermAl host mid-claim, so its next registered run is bound to no claim",
   "outcome": "A source root named for a live claim stays named on the host for the life of that claim, across host restarts, or the session is told it was lost before a run is started there; a registered run in a root Engram still binds to the claim is never silently unbound.",
   "acceptance": [
-    "A claim's named source root silently disappears from the TermAl host mid-claim, so its next registered run is bound to no claim is done"
+    "For a live claim with an acknowledged named worktree, after a TermAl host restart the first committed-input launcher registration from that worktree by the current authorized holder binds to the same canonical store, work, run, claim, workspace and naming generation. No manual rename, prior turn close or test rerun is required.",
+    "Recovery uses the current canonical claim and named-root proof. If a previously named worktree cannot be reconciled safely, registration reports the reason and what the holder can do before starting the launcher. It does not silently register that run unbound. A worktree with no named association still supports ordinary unbound runs, and previously registered runs and receipts remain immutable.",
+    "Behavioral coverage drives the production registration path from persisted restart state. It proves the first registration binds for the surviving live claim and exercises refusal or safe reconciliation when the local name is absent or the canonical proof is stale, ambiguous or belongs to another holder or store. It also verifies the ordinary unbound path for an unnamed worktree.",
+    "The candidate receives the standard independent review pair with no outstanding Medium-or-higher finding, and the full gate passes on its exact committed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

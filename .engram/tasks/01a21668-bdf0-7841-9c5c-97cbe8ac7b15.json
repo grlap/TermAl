@@ -1,0 +1,28 @@
+{
+  "id": "01a21668-bdf0-7841-9c5c-97cbe8ac7b15",
+  "external_ref": null,
+  "title": "Keep browser Stop available for a queued scheduled acceptance result",
+  "outcome": "The idle requester's existing Stop control remains available after a scheduled wait becomes an unsent result in its queue. Verify the transition through live state and that Stop removes the scheduled result.",
+  "acceptance": [
+    "Keep browser Stop available for a queued scheduled acceptance result is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
