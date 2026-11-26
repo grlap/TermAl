@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "codex-content-flag-federation-security-code-2026-11-25",
+    "revision_id": "b807d9e78896442a859f26336032004f",
+    "previous": null,
+    "body_sha256": "98eb8a0d49c382956e729b741ec8d276f95efc3cece35b5878c1eab40ac65cbd",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-25T23:06:51.250708100Z"
+    }
+  },
+  "body": "Observed 2026-11-25 (Termal::Fable2): TWO Codex sessions working on TermAl w-e42f6b850a2d (federation attestation terminal records: link MAC, proof writes, withdrawal fences) were stopped by Codex's content filter: \"This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request\".\n- Termal::Sol-license (session-12415): stuck since 2026-11-22. Greg was asked whether to delete it.\n- Termal::Sol-edfd (session-12328): turn_failed / provider_other at 2026-11-25 20:18:17Z, queue paused, during w-e42f R5.\nRule: assign federation-security and auth code (attestation, link MAC, credential or proof handling) to a CLAUDE session, not Codex. Cleanup and other Codex-only executor tasks go to a different Codex session."
+}

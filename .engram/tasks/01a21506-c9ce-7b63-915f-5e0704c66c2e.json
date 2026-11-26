@@ -1,0 +1,29 @@
+{
+  "id": "01a21506-c9ce-7b63-915f-5e0704c66c2e",
+  "external_ref": null,
+  "title": "Relay expiry diagnostics: a phase entered after the deadline can be named, and causal-completion operations show as unavailable",
+  "outcome": "A relay request's expiry line and home failure record name the phase that was running when its deadline passed, and name the causal-completion relay operations instead of \"unavailable\".",
+  "acceptance": [
+    "When the worker enters a new relay phase after the request deadline has passed but before the middleware freezes the trace, the expiry line and the home failure record still name the phase that was running at the deadline, shown by a behaviour test with a scripted clock.",
+    "An expired causalTestCompletionReady or readCausalTestCompletion relay request reports its operation by name in the expiry line and failure record; unknown or malformed operations still report unavailable. Shown by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,28 @@
+{
+  "id": "01a21534-9d34-7283-b351-27f66a23a3e5",
+  "external_ref": null,
+  "title": "A passed registered focused committed-input run of an Engram-project session settles with \"current input confirmation is unavailable\" and earns no credit, though a quiet source sighting of the same clean commit exists",
+  "outcome": "A registered committed-input launcher run that passes on a clean named root at the exact committed input receives its current-input credit, or a settlement that names the specific missing confirmation and how to obtain it.",
+  "acceptance": [
+    "A passed registered focused committed-input run of an Engram-project session settles with \"current input confirmation is unavailable\" and earns no credit, though a quiet source sighting of the same clean commit exists is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "host-recording"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

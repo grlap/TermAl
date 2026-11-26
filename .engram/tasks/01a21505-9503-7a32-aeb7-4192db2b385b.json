@@ -1,0 +1,27 @@
+{
+  "id": "01a21505-9503-7a32-aeb7-4192db2b385b",
+  "external_ref": null,
+  "title": "Offer a Codex account recheck after transient managed startup failures",
+  "outcome": "An operator can retry managed account verification after a transient startup failure without a new browser authorization or restarting TermAl.",
+  "acceptance": [
+    "A loopback operator can request read-only verification after a transient reconciliation failure. The request observes the current managed grant without mutating the provider or standalone store, opens dispatch on complete successful verification, and keeps dispatch fenced on a failed or inconsistent read. A disposable fixture observes both outcomes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "codex-runtime",
+    "greg-directed"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a213f1-c74e-7f82-94e2-c9fb071946b6",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

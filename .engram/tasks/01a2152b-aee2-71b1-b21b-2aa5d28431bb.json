@@ -1,0 +1,28 @@
+{
+  "id": "01a2152b-aee2-71b1-b21b-2aa5d28431bb",
+  "external_ref": null,
+  "title": "\"Cleanup deletions\": finish a registered worktree whose .git file is already gone (plain-directory form plus guarded prune)",
+  "outcome": "AGENTS.md \"Cleanup deletions\" names how a registered worktree whose `.git` file is already gone (an earlier non-forced removal stopped partway) is finished for a closed-item target: `git worktree remove --force` cannot (validate_worktree fails on the missing .git), so the plain-directory form `Remove-Item -LiteralPath <checked path> -Recurse -Force -Confirm:$false` applies to the checked path, followed by `git worktree prune` only when `git worktree prune --dry-run --verbose` names that worktree alone. Until then that case fails closed and goes to the coordinator.",
+  "acceptance": [
+    "AGENTS.md \"Cleanup deletions\" states, for a closed-item registered worktree whose .git file is already gone, that the plain-directory forced form applies to the checked path followed by the dry-run-guarded `git worktree prune`, with wording concurred by both coordinators, sent to Greg and audited under CLAUDE.md's instruction-change conditions (a), (b) and (c).",
+    "The Markdown-only link check passes on the clean candidate commit and the review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "procedure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

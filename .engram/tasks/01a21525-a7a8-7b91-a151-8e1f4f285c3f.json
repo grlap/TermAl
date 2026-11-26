@@ -1,0 +1,29 @@
+{
+  "id": "01a21525-a7a8-7b91-a151-8e1f4f285c3f",
+  "external_ref": null,
+  "title": "Cleanup docs: shared-codex-app-server.md cleanup paragraph defers to the native completion in \"Cleanup deletions\"; note Codex's -Force classifier refusal",
+  "outcome": "docs/features/shared-codex-app-server.md lines 398-402 no longer tell the Codex executor to stop and report a non-forced failure on hidden or read-only content of a checked target whose served items are all closed; the paragraph defers to AGENTS.md \"Cleanup deletions\" (native completion for hidden, read-only or partly removed content), and notes that Codex's built-in fallback classifier may refuse PowerShell `Remove-Item -Force` (lines 366-370), which under the policy-refusal rule stops the removal and fails closed.",
+  "acceptance": [
+    "docs/features/shared-codex-app-server.md lines 398-402 defer to the native-completion paragraph of AGENTS.md \"Cleanup deletions\" instead of requiring Greg's per-case word for a non-forced failure on hidden or read-only content of a closed-item target, and state that Codex's fallback classifier may refuse `Remove-Item -Force`, which stops the removal under the policy-refusal rule.",
+    "The Markdown-only link check passes on the clean candidate commit and the review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 2,
+  "labels": [
+    "cleanup",
+    "docs",
+    "procedure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

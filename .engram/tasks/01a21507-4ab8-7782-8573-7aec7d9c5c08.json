@@ -1,0 +1,30 @@
+{
+  "id": "01a21507-4ab8-7782-8573-7aec7d9c5c08",
+  "external_ref": null,
+  "title": "Make scheduled acceptance tests independent of the host scheduler environment",
+  "outcome": "Scheduled acceptance tests that leave the thread-local override unset can pick up TERMAL_ACCEPTANCE_SCHEDULER_SESSION_ID from the host. Claim-loss and first-intake cases can fail with the invalid configuration error before reaching their assertions. Make no scheduler the explicit test default and preserve intentional configured-scheduler cases.",
+  "acceptance": [
+    "Scheduled acceptance test fixtures have deterministic scheduler behavior even when the surrounding host sets an invalid scheduler value, and explicitly configured fixture cases still exercise release."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

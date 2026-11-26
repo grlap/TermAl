@@ -1,0 +1,28 @@
+{
+  "id": "01a21513-5437-7bb3-a506-c266cdc96d07",
+  "external_ref": null,
+  "title": "Settled-record notice reads as a credit refusal for a valid registered run",
+  "outcome": "Settled-record notice reads as a credit refusal for a valid registered run",
+  "acceptance": [
+    "A settled registered committed-input run whose inner command is not a recognized test runner produces host lines from which a reader can tell that its verification record is settled and counts as registered verification evidence, and that only the optional ordinary-check or current-input confirmation is missing. A behavioral test drives such a run through the product path and checks the resulting notice semantics, without pinning text.",
+    "GET /api/test-runs/<id> no longer reports an empty run.verificationRecordIds for a run whose detail.verificationRecord is settled with record ids, or the index field is renamed or documented so that it cannot be read as the absence of a record."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "ux-wording",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

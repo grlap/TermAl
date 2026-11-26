@@ -1,0 +1,28 @@
+{
+  "id": "01a21525-c4c0-75f2-9ef7-c53c8da3d8a9",
+  "external_ref": null,
+  "title": "\"Cleanup deletions\": state that the pre-removal check covers uncommitted and untracked worktree content before any forced form",
+  "outcome": "AGENTS.md \"Cleanup deletions\" says explicitly that the pre-removal check (\"no live work, frozen input, shared resource or unique unpushed change needs it\") covers the worktree's uncommitted and untracked content, so that the single `--force` of the native completion only ever discards content already judged disposable; a non-forced `git worktree remove` fails with the same message for partial-removal residue and for real edits.",
+  "acceptance": [
+    "AGENTS.md \"Cleanup deletions\" states that the pre-removal check covers the target worktree's uncommitted and untracked content, with wording concurred by both coordinators, sent to Greg and audited under CLAUDE.md's instruction-change conditions (a), (b) and (c).",
+    "The Markdown-only link check passes on the clean candidate commit and the review pair has no outstanding Medium-or-higher finding."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "procedure"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

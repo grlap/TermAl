@@ -1,0 +1,29 @@
+{
+  "id": "01a21528-34a9-7bd0-bb45-b81923e2f5d7",
+  "external_ref": null,
+  "title": "Bind a Claude background-end registration match to the row's focused launcher command when the run records it",
+  "outcome": "A background-end match never attaches a different focused invocation's run to a launch row: when the run's request records its focused command untruncated, it must equal the row's planned command.",
+  "acceptance": [
+    "When a Claude background end's single candidate registration is for an ordinary focused launcher row, and that run's request records its focused command untruncated, the run is attached only if the command equals the row's planned focused argv; otherwise nothing is attached and a typed refusal is recorded.",
+    "A behaviour test shows a background row for one focused invocation refusing a lone registration of a different focused invocation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "review-low",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

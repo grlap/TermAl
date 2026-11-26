@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-closed-task-cleanup-no-ask-2026-11-25",
+    "revision_id": "2456553dc46148e0a3c7431ee917c4b3",
+    "previous": "d685553ffb1944138dbdac343f94de2d",
+    "body_sha256": "9502e0559711f915c8c93cbc7706568e05aa45bcb2a09006e3ae1d285b069188",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T00:10:39.499409700Z"
+    }
+  },
+  "body": "Greg's word, 2026-11-25 23:44Z, relayed by Engram::Asistant in TermAl mailbox 588693a8 #2781, verbatim: „Jezeli zadanie jest zamkniete to trzeba posprzatac bez pytania sie mnie o zgode”. Asistant's relay adds that it also covers the current cleanup of .tmp\\wt-6a1d-11466 and .tmp\\wt-ac230-11466, which may be finished together with git worktree prune: „Proszę zweryfikować dokładne ścieżki, zakres i że nie ma niezachowanych zmian; użyć bezpiecznego natywnego sposobu na Windows oraz poprawić procedurę, która wymusza takie pytania.”\n\nMeaning for coordinators and executors:\n- When every item a worktree, build output or temp file served is CLOSED, its cleanup needs no approval round trip to Greg.\n- The checks in \"Cleanup deletions\" still apply: exact absolute path inside the repo, no link escape, runs terminal, no live work, frozen input or unique unpushed change.\n- If the non-forced form fails only on hidden, read-only or partly removed content, use a safe native Windows completion: `git worktree remove --force` for a registered worktree, then `git worktree prune`.\n- Any other failure (a lock, a link escape, a prompt) still stops and is reported.\n\nTrigger: Termal::Codex stopped on 6a1d after PowerShell Remove-Item without -Force skipped a hidden .git file (#3166-#3170), and I escalated to Greg. That round trip is exactly what he says must not happen for closed tasks. The AGENTS.md/CLAUDE.md procedure fix is tracked separately.\n\nUPDATE 2026-11-26 ~00:12Z (Fable2): the shared procedure text is [2 v3] (TermAl w-c969a2bea0d9, Engram w-f2e8f19fd212), and it has NO automatic `git worktree prune`. After `git worktree remove --force` with a single --force, a registration that remains is left in place and reported. Do not prune as part of a forced completion. The 6a1d/ac230 prune on 2026-11-25 ran under Greg's case-specific word in #2781."
+}

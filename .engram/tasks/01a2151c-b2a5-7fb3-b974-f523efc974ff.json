@@ -1,0 +1,30 @@
+{
+  "id": "01a2151c-b2a5-7fb3-b974-f523efc974ff",
+  "external_ref": null,
+  "title": "Federation terminal attestation: exact first-event ordering and withdrawn-context retention under concurrent events and reconnect overlap",
+  "outcome": "Federation terminal attestation: exact first-event ordering and withdrawn-context retention under concurrent events and reconnect overlap",
+  "acceptance": [
+    "Under concurrent terminal events for the same link, and under an authenticated context replacement within one transport generation, the attestation projection retains the first terminal event of the affected context; deterministic regressions drive each interleaving from the grouped review-finding corpus.",
+    "When a context is withdrawn and a reconnect advances the transport generation before its terminal observation is published, the withdrawn context's terminal event remains observable (bounded, read-only) and is not attributed to the new context; a deterministic regression drives that overlap.",
+    "Existing owner/context fences, authority decisions, timers and routing behaviour remain unchanged; the candidate receives the standard independent review pair and exact-input validation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "test-corpus"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

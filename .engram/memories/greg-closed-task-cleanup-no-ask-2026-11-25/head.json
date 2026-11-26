@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-closed-task-cleanup-no-ask-2026-11-25",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d685553ffb1944138dbdac343f94de2d",
+      "2456553dc46148e0a3c7431ee917c4b3"
+    ]
+  }
+}

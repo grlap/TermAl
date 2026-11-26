@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Removed the manual diff-review conversations feature, as Greg directed. That covers the review threads and comments on a diff, the review documents under <project>/.termal/reviews, Copy review path, Insert review into prompt, the /api/reviews routes and their remote proxying, the review wire types and lock, and the dead remote PUT helper. Every diff view, comparison and navigation feature stays, as do the changeSetId tab identity, the generic insert-into-prompt callback that agent delegations use, and agent review delegations. A new App test proves that opening a project-scoped diff makes no review request; it fails on the old master. Landed as 2115d778e7d7d89bfe73e40d77c6d46993aa9eeb (tree 8108b161), a fast-forward from 33a0977c pushed at 23:01:48Z. Review pair: Codex eb4044e8 and Claude 5a5fb7a1, nothing at Medium or higher; the doc Lows are filed as w-cca3e03df240. FULL gate test-b84afd81 passed on DL560, its source trio equal to the recorded (D') value. The post-landing evaluation 54ee2d04 passed all three criteria.",
+    "completed_at": "2026-11-25T23:05:43.719176800Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

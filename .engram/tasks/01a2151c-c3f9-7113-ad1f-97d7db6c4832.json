@@ -1,0 +1,28 @@
+{
+  "id": "01a2151c-c3f9-7113-ad1f-97d7db6c4832",
+  "external_ref": null,
+  "title": "Federation link writes terminal stderr before the control/monitor guard or stop fences it",
+  "outcome": "Federation link writes terminal stderr before the control/monitor guard or stop fences it",
+  "acceptance": [
+    "Terminal stderr for a federation link context is written only after the control/monitor guard or stop has fenced that context, or is suppressed for a fenced context; a deterministic regression shows no terminal output from a context fenced before the write.",
+    "Teardown timing, authority decisions and routing are otherwise unchanged; the candidate receives the standard independent review pair and exact-input validation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "pre-existing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
