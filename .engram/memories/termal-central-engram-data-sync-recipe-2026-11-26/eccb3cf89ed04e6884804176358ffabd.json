@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-central-engram-data-sync-recipe-2026-11-26",
+    "revision_id": "eccb3cf89ed04e6884804176358ffabd",
+    "previous": null,
+    "body_sha256": "e95ba5a731fa9dc0285567a22ee15c32d2684dcb7feb104ff2831fee3868f190",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T18:30:16.498034400Z"
+    }
+  },
+  "body": "TermAl Central engram-data sync recipe, corrected 2026-11-26 by Opus2 (integration owner) on Fable2 #8059, citing Engram's task-sync implementer Sol 11330 (#1609, #1615, source at bc0628b6) and Engram::Fable #1874. It supersedes the old routine, which ran export --rebuild with no confirm-import.\n\nWHY: a routine `--rebuild` export is recorded as Unbound and leaves NO admitted comparison basis (src/work_service/task_sync_folder_export.rs:985-997; docs/features/task-planning-text.md:144-157). On 2026-11-26 that made Central refuse WinB's memory commit 3aeae190 (task_sync_commit_context_required, then task_sync_divergent_planning with --basis d2df8061). Engram's own Central uses an ordinary export and keeps an incremental basis.\n\nROUTINE (in .engram-data on Central):\n1. Require a clean worktree. Fetch and `merge --ff-only origin/engram-data`.\n2. If the fetch brought a peer's commit, IMPORT it before exporting: `engram task-sync import .engram --include-memories --json` (ordinary). A held, refused or partial result STOPS the leg.\n3. Ordinary export: `engram task-sync export .engram --include-memories --json`. NO --rebuild; that is for recovery only. If nothing changed, skip the commit.\n4. `git add -- .engram`, then the disclosure scan of added lines. An envelope-only change to .engram/project.json (position, object_kind, object_id: the exporter's local feed cut, src/task_sync/directory.rs:83-94) is expected. Require ZERO deleted task or memory files, and every task or memory change explainable.\n5. Commit, then CONFIRM by an ordinary `engram task-sync import .engram --include-memories --json` while that commit is still HEAD.\n6. Push fast-forward only (`git push origin <C>:refs/heads/engram-data`), check with ls-remote, then record the commit in target/task-sync/central-imported-commit.txt.\nOn divergence: keep both parents. If only project.json conflicts and both envelopes agree on project, notes and memory capability, keep the local envelope (task_sync_sync.rs:351-363). Resolve task and memory conflicts explicitly. Never take max of, or merge, anchor numbers.\nRECOVERY from an Unbound rebuild (used once on 2026-11-26): check that the peer delta is memory-only; export --rebuild on top of the peer tip; save the new .engram/project.json outside the worktree; check the peer's memory paths are byte-identical; commit; run `import .engram --rebuild --basis <saved project.json> --include-memories` (dry-run, then real); verify the key with a full memory read; then push. Result: 28f404f6 (child of 3aeae190), WinB key applied.\nNotes profile stays notes-less on every host (no unilateral switch; git-task-sync.md:1029-1030). The one-command `task-sync sync` still refuses memory-capable branches until Engram w-bd4bfba779a7 lands."
+}
