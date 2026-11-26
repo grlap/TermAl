@@ -42,6 +42,8 @@ mod relay;
 mod requests;
 #[path = "federation_security_rpc_ready.rs"]
 mod rpc_ready;
+#[path = "federation_terminal_details.rs"]
+mod terminal_details;
 
 use fixture::{Control, Satellite, established};
 use pair::Pair;

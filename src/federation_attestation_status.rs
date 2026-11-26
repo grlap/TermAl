@@ -2,6 +2,7 @@
 // Does not persist keys or change membership. New projection beside federation_views.rs.
 
 use super::*;
+use std::io::Write;
 
 #[derive(Default)]
 pub(crate) struct FederationAttestationObservation {
@@ -14,7 +15,21 @@ pub(crate) struct FederationAttestationObservation {
     pub(crate) enrollment_generation: u64,
     attempt_owner: u64,
     attempt_channel: Option<String>,
+    last_terminal: Option<FederationTerminalObservation>,
     pub(crate) worker: Option<FederationWorkerObservation>,
+}
+
+struct FederationTerminalObservation {
+    role: FederationRole,
+    stage: &'static str,
+    reason: &'static str,
+    io_kind: Option<&'static str>,
+    incarnation: String,
+    owner_generation: u64,
+    enrollment_generation: u64,
+    transport_generation: u64,
+    last_accepted_sequence: Option<u64>,
+    last_accepted_age_ms_at_terminal: Option<u64>,
 }
 
 impl FederationAttestationObservation {
@@ -27,6 +42,24 @@ impl FederationAttestationObservation {
         if !current && self.last_stage.is_some() {
             value["state"] = json!("historical");
         }
+        value["lastTerminal"] = self.last_terminal.as_ref().map_or(Value::Null, |terminal| {
+            let current = terminal.enrollment_generation == peer.enrollment_generation
+                && terminal.transport_generation == peer.transport_generation
+                && terminal.owner_generation == self.owner;
+            json!({
+                "role": terminal.role,
+                "stage": terminal.stage,
+                "reason": terminal.reason,
+                "ioKind": terminal.io_kind,
+                "incarnation": terminal.incarnation,
+                "ownerGeneration": terminal.owner_generation,
+                "enrollmentGeneration": terminal.enrollment_generation,
+                "transportGeneration": terminal.transport_generation,
+                "lastAcceptedSequence": terminal.last_accepted_sequence,
+                "lastAcceptedAgeMsAtTerminal": terminal.last_accepted_age_ms_at_terminal,
+                "currentBasis": current,
+            })
+        });
         value["worker"] = self
             .worker
             .as_ref()
@@ -60,14 +93,10 @@ impl FederationChannel {
         reason: &'static str,
         io_kind: Option<&'static str>,
     ) {
-        self.observe_terminal_event(context, stage, reason, io_kind, None);
+        self.fence_terminal_event(context, stage, reason, io_kind, None, |_| {});
     }
 
-    /// Fences the exact incarnation after an RPC security failure. Before the
-    /// fence it only claims this context's one terminal record, with an
-    /// atomic: no lock and no I/O, so nothing can delay or skip the fence, and
-    /// a later teardown observer of this context cannot record a different
-    /// first cause. The record in shared state and the console line follow.
+    /// Fences the exact incarnation after an RPC security failure.
     pub(crate) fn fence_rpc_security_failure(
         &self,
         context: &FederationSecurityContext,
@@ -76,21 +105,131 @@ impl FederationChannel {
         rpc_stage: &'static str,
         status: Option<u16>,
     ) {
-        let claimed = !context.terminal_logged.swap(true, Ordering::SeqCst);
-        self.fence_security(context.owner, &context.incarnation);
-        if claimed {
-            let line = self.publish_terminal_event(
-                context,
-                "rpc",
-                reason,
-                None,
-                Some((path, rpc_stage, status)),
-            );
-            eprintln!("{line}");
+        self.fence_terminal_event(
+            context,
+            "rpc",
+            reason,
+            None,
+            Some((path, rpc_stage, status)),
+            |state| self.fence_security_locked(state, context.owner, &context.incarnation),
+        );
+    }
+
+    pub(crate) fn fence_terminal_event(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+        rpc: Option<(&str, &'static str, Option<u16>)>,
+        fence: impl FnOnce(&mut FederationLinkState),
+    ) {
+        if self.record_terminal_event(context, stage, reason, io_kind, fence) {
+            self.write_terminal_diagnostic(context, stage, reason, io_kind, rpc);
         }
     }
 
-    fn observe_terminal_event(
+    // Cancellation can record the event without introducing console I/O.
+    pub(crate) fn record_terminal_event(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+        fence: impl FnOnce(&mut FederationLinkState),
+    ) -> bool {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => {
+                // An exact withdrawal still has to run during recovery.
+                fence(&mut poisoned.into_inner());
+                return false;
+            }
+        };
+        // The first claim, withdrawal and structured publication all use the
+        // same owner as installation. Console I/O stays outside that lock.
+        let first = !context.terminal_logged.swap(true, Ordering::SeqCst);
+        let terminal_at = first.then(|| self.control.clock.now());
+        fence(&mut state);
+        let Some(terminal_at) = terminal_at else {
+            return false;
+        };
+        self.retain_terminal_observation(
+            context,
+            stage,
+            reason,
+            io_kind,
+            terminal_at,
+            state.installed_owner,
+        );
+        true
+    }
+
+    fn retain_terminal_observation(
+        &self,
+        context: &FederationSecurityContext,
+        stage: &'static str,
+        reason: &'static str,
+        io_kind: Option<&'static str>,
+        terminal_at: std::time::Instant,
+        installed_owner: u64,
+    ) {
+        let terminal = context
+            .diagnostic_basis
+            .get()
+            .filter(|_| context.installed_at.get().is_some() && context.owner == installed_owner)
+            .map(|&(enrollment_generation, transport_generation)| {
+                let heartbeat = context.last_accepted_heartbeat();
+                FederationTerminalObservation {
+                    role: self.snapshot.local_role,
+                    stage,
+                    reason,
+                    io_kind,
+                    incarnation: context.incarnation.clone(),
+                    owner_generation: context.owner,
+                    enrollment_generation,
+                    transport_generation,
+                    last_accepted_sequence: heartbeat.map(|(sequence, _)| sequence),
+                    last_accepted_age_ms_at_terminal: heartbeat.map(|(_, at)| {
+                        terminal_at
+                            .saturating_duration_since(at)
+                            .as_millis()
+                            .min(u128::from(u64::MAX)) as u64
+                    }),
+                }
+            });
+        self.update_attestation(|observation, basis| {
+            if let Some(terminal) = terminal.filter(|terminal| {
+                terminal.enrollment_generation == basis.enrollment_generation
+                    && terminal.transport_generation == basis.transport_generation
+            }) {
+                if observation.last_terminal.as_ref().is_none_or(|last| {
+                    (
+                        last.enrollment_generation,
+                        last.transport_generation,
+                        last.owner_generation,
+                    ) < (
+                        terminal.enrollment_generation,
+                        terminal.transport_generation,
+                        terminal.owner_generation,
+                    )
+                }) {
+                    observation.last_terminal = Some(terminal);
+                }
+            }
+
+            // The legacy fields still describe the latest attestation attempt.
+            if observation.attempt_owner == context.owner
+                && observation.attempt_channel.as_deref() == Some(self.server_instance_id.as_str())
+                && !matches!(observation.last_stage, Some("control" | "monitor" | "rpc"))
+            {
+                observation.last_stage = Some(stage);
+                observation.last_reason = Some(reason);
+            }
+        });
+    }
+
+    fn write_terminal_diagnostic(
         &self,
         context: &FederationSecurityContext,
         stage: &'static str,
@@ -98,39 +237,7 @@ impl FederationChannel {
         io_kind: Option<&'static str>,
         rpc: Option<(&str, &'static str, Option<u16>)>,
     ) {
-        // This context owns its one console line even if a newer context owns
-        // the current status. Neither diagnostic fact changes link authority.
-        if context.terminal_logged.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let line = self.publish_terminal_event(context, stage, reason, io_kind, rpc);
-        eprintln!("{line}");
-    }
-
-    /// Records a context's claimed terminal diagnostic and returns its
-    /// console line.
-    fn publish_terminal_event(
-        &self,
-        context: &FederationSecurityContext,
-        stage: &'static str,
-        reason: &'static str,
-        io_kind: Option<&'static str>,
-        rpc: Option<(&str, &'static str, Option<u16>)>,
-    ) -> String {
         self.retain_terminal_diagnostic(context, stage, reason, io_kind, rpc);
-        self.update_attestation(|observation, _| {
-            // The context's claim already made this its first cause. A delayed
-            // old task cannot replace a successor attempt's observation, and a
-            // later cause cannot replace the first one.
-            if observation.attempt_owner != context.owner
-                || observation.attempt_channel.as_deref() != Some(self.server_instance_id.as_str())
-                || matches!(observation.last_stage, Some("control" | "monitor" | "rpc"))
-            {
-                return;
-            }
-            observation.last_stage = Some(stage);
-            observation.last_reason = Some(reason);
-        });
         let role = match self.snapshot.local_role {
             FederationRole::Central => "central",
             FederationRole::Satellite => "satellite",
@@ -152,12 +259,14 @@ impl FederationChannel {
         // Zero means no HTTP response was received; never log peer body text.
         let (rpc_path, rpc_stage, status) = rpc.unwrap_or(("none", "none", None));
         let status = status.unwrap_or(0);
-        format!(
+        // A closed console must not replace the caller's typed terminal error.
+        let _ = writeln!(
+            std::io::stderr().lock(),
             "federation link ended peer={} role={role} stage={stage} reason={reason} ioKind={} incarnation={} elapsedMs={elapsed_ms} lastSequence={sequence} rpcPath={rpc_path} rpcStage={rpc_stage} httpStatus={status}",
             self.snapshot.peer.host_id,
             io_kind.unwrap_or("none"),
             context.incarnation
-        )
+        );
     }
 
     pub(crate) fn observe_attestation(&self, success: Option<u64>) {
@@ -223,10 +332,12 @@ impl FederationChannel {
         update: impl FnOnce(&mut FederationAttestationObservation, &FederationPeerSnapshot),
     ) {
         if let Some(app) = &self.app {
-            let basis = self.transport_basis();
-            let mut inner = app.inner.lock().expect("state mutex poisoned");
-            // A delayed old worker cannot overwrite the observation of a
-            // successor enrollment/transport. Bookkeeping-only changes pass.
+            let Ok(basis) = self.basis.read().map(|basis| basis.clone()) else {
+                return;
+            };
+            let Ok(mut inner) = app.inner.lock() else {
+                return;
+            };
             if !inner
                 .federation
                 .peers

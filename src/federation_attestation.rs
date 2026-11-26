@@ -83,6 +83,28 @@ pub(crate) async fn federation_prove_central(
     Ok(context)
 }
 
+struct PendingSatelliteProof<'a> {
+    channel: &'a FederationChannel,
+    context: &'a FederationSecurityContext,
+    guard: Option<FederationControlGuard>,
+}
+
+impl Drop for PendingSatelliteProof<'_> {
+    fn drop(&mut self) {
+        if !std::thread::panicking()
+            && let Some(guard) = &self.guard
+        {
+            self.channel.record_terminal_event(
+                self.context,
+                "attest",
+                "tagWriteCancelled",
+                None,
+                |state| guard.fence_locked(state),
+            );
+        }
+    }
+}
+
 pub(crate) async fn federation_attest_satellite(
     channel: &FederationChannel,
     io: &mut FederationControlIo,
@@ -148,35 +170,43 @@ pub(crate) async fn federation_attest_satellite(
                 false,
             )
         })?;
-    channel
+    let mut pending = PendingSatelliteProof {
+        channel,
+        context: &context,
+        guard: Some(guard),
+    };
+    let proof = channel
         .control
         .clock
         .timeout(
             channel.control.attest_timeout,
-            federation_write_frame(io, &federation_encode(b"termal-hello-proof-v1", &[&tag])),
+            federation_control_write_frame(
+                io,
+                &federation_encode(b"termal-hello-proof-v1", &[&tag]),
+            ),
         )
-        .await
-        .map_err(|_| {
-            federation_attestation_error(
-                channel,
-                Some(owner),
-                "attest",
-                "tagWriteExpired",
-                federation_transport_unavailable(),
-                false,
-            )
-        })?
-        .map_err(|error| {
-            federation_attestation_error(
-                channel,
-                Some(owner),
-                "attest",
-                "linkDownBeforeTag",
-                error,
-                false,
-            )
-        })?;
-    Ok((context, guard))
+        .await;
+    let guard = pending
+        .guard
+        .take()
+        .expect("installed satellite proof guard");
+    drop(pending);
+    let (reason, io_kind, error) = match proof {
+        Ok(Ok(())) => return Ok((context, guard)),
+        Ok(Err(failure)) => ("linkDownBeforeTag", failure.io_kind, failure.error),
+        Err(_) => ("tagWriteExpired", None, federation_transport_unavailable()),
+    };
+    channel.fence_terminal_event(&context, "attest", reason, io_kind, None, |state| {
+        guard.fence_locked(state);
+    });
+    Err(federation_attestation_error(
+        channel,
+        Some(owner),
+        "attest",
+        reason,
+        error,
+        false,
+    ))
 }
 
 async fn federation_prove_satellite(

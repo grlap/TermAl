@@ -111,6 +111,7 @@ pub(crate) async fn federation_control_satellite_established(
         }
         // Central sends this authenticated challenge only after its durable
         // install. Keep incoming control live while ordinary RPCs await it.
+        context.record_accepted_heartbeat(sequence, settings.clock.now());
         context.outgoing_rpc_ready.store(true, Ordering::SeqCst);
         settings.observe("requestAccepted", sequence);
     }
@@ -219,8 +220,10 @@ pub(crate) async fn federation_control_central(
             error
         })?;
         outstanding = None;
-        deadline = settings.clock.now() + settings.timeout;
+        let accepted_at = settings.clock.now();
+        deadline = accepted_at + settings.timeout;
         next_send = settings.clock.now() + settings.interval;
+        context.record_accepted_heartbeat(received, accepted_at);
         if let Some(ready) = ready.take() {
             let _ = ready.send(());
         }

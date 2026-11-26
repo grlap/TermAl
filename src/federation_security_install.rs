@@ -10,10 +10,24 @@ pub(crate) struct FederationControlGuard {
     pub(crate) cancelled: Arc<AtomicBool>,
 }
 
+impl FederationControlGuard {
+    fn cancel(&self) -> bool {
+        !self.cancelled.swap(true, Ordering::SeqCst)
+    }
+
+    pub(crate) fn fence_locked(&self, state: &mut FederationLinkState) {
+        if self.cancel() {
+            self.channel
+                .fence_security_locked(state, self.owner, &self.incarnation);
+        }
+    }
+}
+
 impl Drop for FederationControlGuard {
     fn drop(&mut self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        self.channel.fence_security(self.owner, &self.incarnation);
+        if self.cancel() {
+            self.channel.fence_security(self.owner, &self.incarnation);
+        }
     }
 }
 
@@ -159,8 +173,8 @@ impl FederationChannel {
                 state.recorded_incarnation = Some(context.incarnation.clone());
                 state.security = Some(context.clone());
                 let _ = context.installed_at.set(channel.control.clock.now());
-                drop(state);
                 channel.observe_attestation(Some(context.owner));
+                drop(state);
                 Ok(())
             }
             .await;

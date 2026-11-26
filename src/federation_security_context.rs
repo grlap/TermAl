@@ -100,6 +100,7 @@ pub(crate) struct FederationSecurityContext {
     pub(crate) diagnostic_attempt_basis: std::sync::OnceLock<(u64, u64)>,
     pub(crate) terminal_logged: AtomicBool,
     pub(crate) last_control_sequence: std::sync::atomic::AtomicU64,
+    last_accepted_heartbeat: Mutex<Option<(u64, std::time::Instant)>>,
     pub(crate) retired: tokio::sync::watch::Sender<bool>,
     #[cfg(test)]
     pub(crate) sender_events: Mutex<Vec<FederationSenderEvent>>,
@@ -147,10 +148,28 @@ impl FederationSecurityContext {
             diagnostic_attempt_basis: std::sync::OnceLock::new(),
             terminal_logged: AtomicBool::new(false),
             last_control_sequence: std::sync::atomic::AtomicU64::new(0),
+            last_accepted_heartbeat: Mutex::default(),
             retired: tokio::sync::watch::channel(false).0,
             #[cfg(test)]
             sender_events: Mutex::default(),
         })
+    }
+
+    pub(crate) fn record_accepted_heartbeat(&self, sequence: u64, at: std::time::Instant) {
+        let mut heartbeat = self
+            .last_accepted_heartbeat
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !self.terminal_logged.load(Ordering::SeqCst) {
+            *heartbeat = Some((sequence, at));
+        }
+    }
+
+    pub(crate) fn last_accepted_heartbeat(&self) -> Option<(u64, std::time::Instant)> {
+        *self
+            .last_accepted_heartbeat
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Settles a counter by its verified reply. Returns false if it was no
@@ -266,6 +285,15 @@ impl FederationChannel {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.fence_security_locked(&mut state, owner, incarnation);
+    }
+
+    pub(crate) fn fence_security_locked(
+        &self,
+        state: &mut FederationLinkState,
+        owner: u64,
+        incarnation: &str,
+    ) {
         if state
             .security
             .as_ref()
@@ -275,7 +303,7 @@ impl FederationChannel {
             if let Some(context) = state.security.take() {
                 context.retire();
             }
-            self.retire_recorded(&mut state);
+            self.retire_recorded(state);
         }
     }
 }
