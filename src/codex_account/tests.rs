@@ -558,6 +558,90 @@ async fn codex_account_login_mirrors_profiles_and_logout_survives_restore() {
     );
 }
 
+/// The browser challenge reaches only the client that started /login: never
+/// the shared state stream, a diagnostics route or anything TermAl saves.
+#[tokio::test]
+async fn codex_account_login_keeps_the_challenge_out_of_shared_state_and_diagnostics() {
+    let fixture = Fixture::new("complete");
+    let mut stream = fixture.state.subscribe_stream_events();
+    let (status, body) = fixture.request(json!({"action":"login"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["challenge"]["authorizationUrl"]
+            .as_str()
+            .unwrap()
+            .contains(SECRET_SENTINEL)
+    );
+    assert_eq!(fixture.settled().await["status"]["phase"], "signedIn");
+    {
+        let inner = fixture.state.inner.lock().expect("state mutex poisoned");
+        fixture.state.publish_state_locked(&inner);
+    }
+
+    let mut published_states = 0;
+    loop {
+        match stream.try_recv() {
+            Ok(event) => {
+                published_states += usize::from(matches!(event, SseStreamEvent::State(_)));
+                assert!(!format!("{event:?}").contains(SECRET_SENTINEL));
+            }
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+            Err(error) => panic!("state stream was not fully observed: {error}"),
+        }
+    }
+    assert!(published_states > 0, "a state snapshot should be published");
+
+    for route in ["/api/state", "/api/diagnostics/persistence"] {
+        let response = app_router(fixture.state.clone())
+            .oneshot(
+                Request::get(route)
+                    .header("host", "127.0.0.1:8787")
+                    .header("origin", "http://127.0.0.1:8787")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{route}");
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains(SECRET_SENTINEL),
+            "{route}"
+        );
+    }
+
+    // The state database, the saved account setting and every profile home
+    // live under the fixture's own state directory.
+    let persistence_path = fixture.state.persistence_path.as_ref().clone();
+    let account_setting = persistence_path.with_extension("codex-account.json");
+    let mut scanned = Vec::new();
+    let mut pending = vec![persistence_path.parent().unwrap().to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(bytes) = fs::read(&path) {
+                assert!(
+                    !bytes
+                        .windows(SECRET_SENTINEL.len())
+                        .any(|window| window == SECRET_SENTINEL.as_bytes()),
+                    "{}",
+                    path.display()
+                );
+                scanned.push(path);
+            }
+        }
+    }
+    for required in [&persistence_path, &account_setting] {
+        assert!(
+            scanned.contains(required),
+            "{} was not read",
+            required.display()
+        );
+    }
+}
+
 #[tokio::test]
 async fn codex_account_cancellation_fences_dispatch_and_does_not_enroll_late_completion() {
     let fixture = Fixture::new("cancel");
