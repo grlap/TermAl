@@ -101,6 +101,7 @@ mod engram_batch_binds;
 mod engram_budget_clock_boundary;
 mod engram_budget_watchdog_unwind;
 mod engram_child_temp;
+pub(crate) use engram_child_temp::link_directory as fixture_link_directory;
 mod engram_claude_resume;
 mod engram_compaction;
 mod engram_host_adapter;
@@ -1055,6 +1056,7 @@ pub(crate) fn test_app_state() -> AppState {
         shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
         shared_codex_workspace_write_runtime: Arc::new(Mutex::new(None)),
         owned_codex_servers: OwnedCodexServerRegistry::default(),
+        codex_account: Arc::default(),
         shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
         agent_runtime_spawning_enabled: false,
         test_acp_runtime_overrides: Arc::new(Mutex::new(Vec::new())),

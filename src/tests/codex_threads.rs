@@ -775,9 +775,21 @@ fn fork_codex_thread_creates_a_new_local_session() {
         }
     });
 
+    // An account action happened after the source thread was saved.
+    fs::write(
+        state.persistence_path.with_extension("codex-account.json"),
+        br#"{"mode":"standalone","generation":4}"#,
+    )
+    .unwrap();
+    state.prepare_codex_account_restore();
+
     let mut delta_events = state.subscribe_delta_events();
     let forked = state.fork_codex_thread(&created.session_id).unwrap();
     assert_ne!(forked.session_id, created.session_id);
+    // The fork records the account generation it was made under, so its own
+    // lost history may restart while the older source thread's may not.
+    assert!(state.lost_codex_thread_may_restart(&forked.session_id, "thread-forked"));
+    assert!(!state.lost_codex_thread_may_restart(&created.session_id, "thread-origin"));
 
     let forked_session = &forked.session;
     assert_eq!(forked_session.name, "Forked Review Fork");

@@ -322,6 +322,16 @@ impl AppState {
             return Ok(None);
         };
         let queued = record.queued_prompts[position].clone();
+        if record.session.agent == Agent::Codex
+            && if allow_blocked_dispatch {
+                self.codex_account.check_dispatch().is_err()
+            } else {
+                self.codex_account
+                    .workflow_dispatch_is_held(record, &queued, None)
+            }
+        {
+            return Ok(None);
+        }
         // Human sends retain their off-lock reset and exact selected owner.
         if queued.source == QueuedPromptSource::Human
             || queued_prompt_held_for_durability(record, &queued)
@@ -435,6 +445,9 @@ impl AppState {
         project_environment: ProjectEnvironment,
         read_only_git: bool,
     ) -> std::result::Result<StartedTurn, ApiError> {
+        if record.session.agent == Agent::Codex {
+            self.codex_account.check_dispatch()?;
+        }
         if record.runtime_stop_in_progress {
             return Err(ApiError::conflict("session is stopping"));
         }
@@ -1223,6 +1236,24 @@ impl AppState {
             .map(|started| started.dispatch))
     }
 
+    pub(crate) fn resume_codex_account_workflow(&self, session_id: &str, owner: QueuedDrainOwner) {
+        let result = (|| -> Result<()> {
+            self.revalidate_queued_mailbox_wakeups_before_dispatch(session_id)?;
+            if let Some(started) = self.start_next_queued_turn_off_lock_for_owner(
+                session_id,
+                false,
+                false,
+                Some(owner),
+            )? {
+                let _ = deliver_turn_dispatch(self, started.dispatch);
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            eprintln!("codex account> could not resume workflow for `{session_id}`: {error:#}");
+        }
+    }
+
     /// An explicit Resume bound to the queue head its caller checked (a held
     /// delegation's retained prompt): it bypasses the paused queue only for
     /// `owner`, so a successor exposed by a concurrent cancellation is never
@@ -1675,6 +1706,21 @@ impl AppState {
             else {
                 return Ok(None);
             };
+            if record.session.agent == Agent::Codex
+                && if bypass_owner.is_some() {
+                    self.codex_account.check_dispatch().is_err()
+                } else {
+                    let owner = live_owner
+                        .clone()
+                        .map(QueuedDrainOwner::FederationWake)
+                        .or_else(|| relay_owner.clone().map(QueuedDrainOwner::MailboxRelay))
+                        .or_else(|| activation_owner.clone().map(QueuedDrainOwner::Activation));
+                    self.codex_account
+                        .workflow_dispatch_is_held(record, &queued, owner)
+                }
+            {
+                return Ok(None);
+            }
             let checked_engram_mcp = if explicit_human
                 && is_local_root_claude_locked(&inner, index)
                 && ordinary_known_unpromoted_head(record, &queued)

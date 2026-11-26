@@ -496,6 +496,13 @@ pub(crate) fn handoff_prepared_turn_dispatch(
         Some(admission) => (admission._inner, admission._link),
         None => (state.inner.lock().expect("state mutex poisoned"), None),
     };
+    if matches!(&dispatch, TurnDispatch::PersistentCodex { .. })
+        && let Err(error) = state.codex_account.check_dispatch()
+    {
+        drop(inner);
+        drop(relay_link);
+        return reject_federation(error);
+    }
     if let Some((operation, _, _)) = &federation_handoff {
         if let Err(error) = federation_executor_target_locked(&inner, operation) {
             drop(inner);

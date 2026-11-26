@@ -1023,6 +1023,8 @@ impl TermalDelegationMcpBridge {
                     let mut result = mcp_tool_text_result(&envelope, true);
                     result["structuredContent"] = envelope;
                     mcp_json_rpc_result(id_for_response, result)
+                } else if let Some(envelope) = mailbox_unknown_outcome_envelope(&err) {
+                    mcp_json_rpc_unknown_outcome_error(id_for_response, envelope)
                 } else {
                     mcp_json_rpc_tool_error(id_for_response, err.to_string())
                 }
@@ -2484,14 +2486,17 @@ fn board_set_bridge_error(err: anyhow::Error) -> anyhow::Error {
     err
 }
 
+/// An acknowledgement whose outcome is unknown keeps the host's status when
+/// the host itself reported it, so the MCP client gets the typed result.
 fn mailbox_acknowledgement_bridge_error(err: anyhow::Error) -> anyhow::Error {
     if termal_delegation_outcome_is_unknown(&err) {
-        return anyhow!(
+        let message = format!(
             "mailbox acknowledgement response was not received; the cursor outcome is unknown. \
              For receipt acknowledgement, retry the same receipt unchanged. \
              Legacy numeric clients: call termal_read_mailbox with afterSequence omitted, \
              reconcile unread bodies, then use read.processedThrough as expectedProcessedThrough: {err}"
         );
+        return termal_delegation_unknown_outcome(&err, message);
     }
     err
 }

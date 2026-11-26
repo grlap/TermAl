@@ -209,6 +209,9 @@ duplicates. Changes to source files therefore propagate when the shared app-serv
 is next spawned and its home is seeded; they are not a live-config channel into an
 already-running process.
 
+TermAl-managed Codex sign-in for these homes, through `/login` and `/logout`, is
+described in [Codex Account Sign-In](./codex-account-login.md).
+
 At every `thread/start` and `thread/resume`, TermAl reads `[mcp_servers]` from that
 seeded `config.toml` and passes the merged table in the thread-level `config`.
 User-defined servers are preserved. TermAl then overlays its owned

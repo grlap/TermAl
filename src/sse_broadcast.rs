@@ -724,6 +724,7 @@ impl AppState {
             &self.federation_executor_wake_signal,
             &self.shutdown_signal_tx,
         );
+        self.codex_account.cancel_on_shutdown();
     }
 
     pub(crate) fn host_is_shutting_down(&self) -> bool {

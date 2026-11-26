@@ -925,6 +925,7 @@ impl AppState {
             shared_codex_read_only_runtime: Arc::new(Mutex::new(None)),
             shared_codex_workspace_write_runtime: Arc::new(Mutex::new(None)),
             owned_codex_servers: OwnedCodexServerRegistry::default(),
+            codex_account: Arc::default(),
             shared_codex_exit_claims: Arc::new(Mutex::new(HashSet::new())),
             agent_runtime_spawning_enabled: true,
             #[cfg(test)]
@@ -1013,7 +1014,9 @@ impl AppState {
     /// deferring this work past the boot persist above is safe.
     #[cfg(test)]
     pub(crate) fn run_post_listen_boot(&self) -> Result<()> {
-        self.load_delegation_inventory_observed(|_| {})?;
+        let inventory = self.load_delegation_inventory_observed(|_| {});
+        self.restore_codex_account();
+        inventory?;
         self.run_post_listen_boot_after_inventory();
         Ok(())
     }
@@ -1032,8 +1035,12 @@ impl AppState {
         std::thread::Builder::new()
             .name("termal-post-listen-boot".to_owned())
             .spawn(move || {
+                let inventory = state.load_delegation_inventory_observed(observe);
+                // Restore the account before any boot recovery can dispatch a
+                // saved Codex prompt. The inventory is already published.
+                state.restore_codex_account();
                 let result = (|| -> Result<()> {
-                    state.load_delegation_inventory_observed(observe)?;
+                    inventory?;
                     state.run_post_listen_boot_after_inventory();
                     Ok(())
                 })();

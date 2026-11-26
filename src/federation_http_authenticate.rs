@@ -8,20 +8,52 @@ use super::*;
 // is an authenticated unknown outcome, not evidence of transport failure.
 pub(crate) const FEDERATION_HANDLER_DEADLINE: Duration = Duration::from_secs(5);
 
-/// Names an authenticated request for the one bounded line written when its
-/// deadline expires: route, relay operation and request id, and the phase it
-/// was still waiting in; never a payload.
+/// The fields of the one bounded line written when a relay or mailbox
+/// request's deadline expires: route, relay operation and request id, and the
+/// phase it was still waiting in; never a payload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FederationDeadlineExpiry {
+    pub(crate) route: &'static str,
+    pub(crate) operation: &'static str,
+    pub(crate) request_id: String,
+    pub(crate) phase: &'static str,
+}
+
+impl FederationDeadlineExpiry {
+    fn write(self, control: &FederationControlSettings) {
+        eprintln!(
+            "federation request deadline expired route={} operation={} requestId={} phase={} deadlineMs={}",
+            self.route,
+            self.operation,
+            self.request_id,
+            self.phase,
+            FEDERATION_HANDLER_DEADLINE.as_millis(),
+        );
+        #[cfg(test)]
+        control
+            .deadline_expiries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(self);
+        #[cfg(not(test))]
+        let _ = control;
+    }
+}
+
+/// Names an authenticated request for its expiry line.
 struct FederationRequestLabel {
     route: &'static str,
     // The shared relay body; its correlation fields are read only on expiry.
     relay: Option<axum::body::Bytes>,
     phases: Option<Arc<MailboxRelayPhaseTrace>>,
+    // One request writes at most one expiry line.
+    written: std::cell::Cell<bool>,
 }
 
 impl FederationRequestLabel {
     /// Writes the bounded expiry line and freezes the request's phases, so the
     /// line and the failure record name the phase the deadline hit.
-    fn expired(&self) {
+    fn expired(&self, control: &FederationControlSettings) {
         // Freeze first: nothing done after the expiry, the body scan below
         // included, may move the recorded phase on.
         let phase = self
@@ -29,15 +61,27 @@ impl FederationRequestLabel {
             .as_ref()
             .and_then(|phases| phases.freeze().0)
             .map_or("-", |current| current.phase);
-        let metadata = self.relay.as_deref().map(mailbox_relay_diagnostic_metadata);
-        let (operation, request_id) = metadata
-            .as_ref()
-            .map_or(("-", "-"), |(operation, id)| (*operation, id.as_str()));
-        eprintln!(
-            "federation request deadline expired route={} operation={operation} requestId={request_id} phase={phase} deadlineMs={}",
-            self.route,
-            FEDERATION_HANDLER_DEADLINE.as_millis(),
-        );
+        self.expired_in(control, phase);
+    }
+
+    /// Writes the expiry line for a deadline met outside the traced phases,
+    /// while the response body was still being collected.
+    fn expired_in(&self, control: &FederationControlSettings, phase: &'static str) {
+        if self.written.replace(true) {
+            return;
+        }
+        let (operation, request_id) = self
+            .relay
+            .as_deref()
+            .map(mailbox_relay_diagnostic_metadata)
+            .unwrap_or(("-", "-".to_owned()));
+        FederationDeadlineExpiry {
+            route: self.route,
+            operation,
+            request_id,
+            phase,
+        }
+        .write(control);
     }
 }
 
@@ -100,6 +144,23 @@ pub(crate) async fn federation_authenticate_message(
     } else {
         FEDERATION_FRAME_LIMIT
     };
+    let route = if relay_request {
+        "mailboxRelay"
+    } else if mailbox_request {
+        "mailbox"
+    } else if prompt_policy_request {
+        "promptPolicy"
+    } else if outcome_request {
+        "executorOutcome"
+    } else if executor_request {
+        "executorWake"
+    } else if binding_request {
+        "binding"
+    } else if telemetry_request {
+        "hostUtilization"
+    } else {
+        "other"
+    };
     federation_check_request_headers(&parts.headers)?;
     let context = state.channel.security_context()?;
     let direction = if state.channel.snapshot.local_role == FederationRole::Satellite {
@@ -118,7 +179,20 @@ pub(crate) async fn federation_authenticate_message(
         .await
     {
         Ok(body) => body.map_err(|_| federation_auth_refused())?,
-        Err(_) => return Ok(federation_request_timeout()),
+        Err(_) => {
+            // Nothing of the request was read or authenticated yet, so its
+            // operation and request id are unknown.
+            if relay_request || mailbox_request {
+                FederationDeadlineExpiry {
+                    route,
+                    operation: "-",
+                    request_id: "-".to_owned(),
+                    phase: "requestBody",
+                }
+                .write(&state.channel.control);
+            }
+            return Ok(federation_request_timeout());
+        }
     };
     let target = parts
         .uri
@@ -142,27 +216,15 @@ pub(crate) async fn federation_authenticate_message(
     } else {
         None
     };
-    let relay_phases = relay_request.then(|| Arc::new(MailboxRelayPhaseTrace::default()));
+    // Relay and mailbox requests both trace their fixed phases, so an expiry
+    // names where either waited; only a relay handler marks its inner ones.
+    let request_phases =
+        (relay_request || mailbox_request).then(|| Arc::new(MailboxRelayPhaseTrace::default()));
     let label = FederationRequestLabel {
-        route: if relay_request {
-            "mailboxRelay"
-        } else if mailbox_request {
-            "mailbox"
-        } else if prompt_policy_request {
-            "promptPolicy"
-        } else if outcome_request {
-            "executorOutcome"
-        } else if executor_request {
-            "executorWake"
-        } else if binding_request {
-            "binding"
-        } else if telemetry_request {
-            "hostUtilization"
-        } else {
-            "other"
-        },
+        route,
         relay: relay_body.clone(),
-        phases: relay_phases.clone(),
+        phases: request_phases.clone(),
+        written: std::cell::Cell::new(false),
     };
     let reserved = {
         let link = state
@@ -259,7 +321,11 @@ pub(crate) async fn federation_authenticate_message(
         // keeps its slot until it settles, so jobs cannot pile up past it.
         // A counter the replay window refused is answered first, with no job
         // and no slot: an earlier delivery may have committed, so a busy peer
-        // must not turn that UNKNOWN into a capacity refusal.
+        // must not turn that UNKNOWN into a capacity refusal. The replay and
+        // capacity answers are part of admission, so their records name it.
+        if let Some(phases) = &request_phases {
+            phases.enter("admission");
+        }
         let permit = if replay_refused {
             Err(federation_mailbox_unknown_outcome(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -276,9 +342,6 @@ pub(crate) async fn federation_authenticate_message(
             Err(response) => Err(response),
             Ok(permit) => {
                 let permit = Arc::new(permit);
-                if let Some(phases) = &relay_phases {
-                    phases.enter("admission");
-                }
                 let job_permit = permit.clone();
                 let checked = run_blocking_api(move || {
                     let _permit = job_permit;
@@ -297,7 +360,7 @@ pub(crate) async fn federation_authenticate_message(
                         if relay_request {
                             relay_failure_stage = MailboxRelayHomeRpcStage::HandlerDeadline;
                         }
-                        label.expired();
+                        label.expired(&state.channel.control);
                         Err(federation_mailbox_deadline_response(
                             relay_request,
                             mailbox_intent.as_ref(),
@@ -323,11 +386,11 @@ pub(crate) async fn federation_authenticate_message(
             parts.extensions.insert(FederationAuthenticatedPeer {
                 lease: Some(lease.clone()),
                 mailbox_permit: durable_request.then(|| permit.clone()),
-                relay_phases: relay_phases.clone(),
+                relay_phases: request_phases.clone().filter(|_| relay_request),
             });
             let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(body));
             relay_failure_stage = MailboxRelayHomeRpcStage::HandlerResponse;
-            if let Some(phases) = &relay_phases {
+            if let Some(phases) = &request_phases {
                 phases.enter("handler");
             }
             let mut policy_handler_expired = false;
@@ -346,7 +409,7 @@ pub(crate) async fn federation_authenticate_message(
                     if relay_request {
                         relay_failure_stage = MailboxRelayHomeRpcStage::HandlerDeadline;
                     }
-                    label.expired();
+                    label.expired(&state.channel.control);
                     federation_mailbox_deadline_response(relay_request, mailbox_intent.as_ref())
                 }
                 Err(_) if prompt_policy_request => {
@@ -392,7 +455,7 @@ pub(crate) async fn federation_authenticate_message(
                     _ => federation_prompt_policy_unknown_outcome().into_response(),
                 }
             } else if relay_request || mailbox_request {
-                if let Some(phases) = &relay_phases {
+                if let Some(phases) = &request_phases {
                     phases.enter("postAuthority");
                 }
                 let check = state.ensure_current.clone();
@@ -427,7 +490,7 @@ pub(crate) async fn federation_authenticate_message(
                         if relay_request {
                             relay_failure_stage = MailboxRelayHomeRpcStage::HandlerDeadline;
                         }
-                        label.expired();
+                        label.expired(&state.channel.control);
                         federation_mailbox_deadline_response(relay_request, mailbox_intent.as_ref())
                     }
                 }
@@ -464,7 +527,12 @@ pub(crate) async fn federation_authenticate_message(
             .await
         {
             Ok(response) => response,
-            Err(_) => return Ok(federation_request_timeout()),
+            Err(_) => {
+                if relay_request || mailbox_request {
+                    label.expired_in(&state.channel.control, "responseBody");
+                }
+                return Ok(federation_request_timeout());
+            }
         }
     };
     let response = restore_output_failure(response);
@@ -498,7 +566,12 @@ pub(crate) async fn federation_authenticate_message(
                     b"{\"error\":\"federation response unavailable; the original operation outcome may be unknown\"}",
                 )
         }
-        Err(_) => return Ok(federation_request_timeout()),
+        Err(_) => {
+            if relay_request || mailbox_request {
+                label.expired_in(&state.channel.control, "responseBody");
+            }
+            return Ok(federation_request_timeout());
+        }
     };
     if parts.status.is_server_error()
         && let Some(request) = relay_body.as_ref()
@@ -508,7 +581,7 @@ pub(crate) async fn federation_authenticate_message(
             request,
             parts.status,
             relay_failure_stage,
-            relay_phases.as_deref(),
+            request_phases.as_deref(),
         );
     }
     // Keep both legacy 404 capability/resource branches and all 5xx

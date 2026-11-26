@@ -298,3 +298,186 @@ async fn health_deadline_answers_408_and_keeps_its_link_incarnation() {
         "the deadline does not tear down the link"
     );
 }
+
+/// A relay or mailbox request whose body never arrives still writes its one
+/// bounded expiry line: it names the route and the request-body phase, and,
+/// since nothing of the request was read, no operation or request id.
+#[tokio::test]
+async fn incomplete_relay_and_mailbox_bodies_write_their_expiry_line() {
+    for (path, route) in [
+        (MAILBOX_RELAY_RPC_ROUTE, "mailboxRelay"),
+        ("/federation/v1/mailbox", "mailbox"),
+    ] {
+        let mut channel = federation_link::channel(FederationRole::Central, 'a');
+        let (sender, _proof) = federation_control_fixture::establish(&channel).await;
+        channel.control.clock = FederationControlClock::scripted_io();
+        let clock = channel.control.clock.clone();
+        let expiries = channel.control.deadline_expiries.clone();
+        let listener = FederationListenerState {
+            channel: channel.clone(),
+            ensure_current: federation_link::allowed(),
+        };
+        let router = Router::new()
+            .route(path, post(|| async { StatusCode::OK }))
+            .route_layer(axum::middleware::from_fn_with_state(
+                listener.clone(),
+                federation_authenticate,
+            ))
+            .with_state(listener);
+        let (stalled, stalled_rx) = tokio::sync::oneshot::channel::<()>();
+        let stream = async_stream::stream! {
+            yield Ok::<_, std::io::Error>("{");
+            let _ = stalled.send(());
+            std::future::pending::<()>().await;
+        };
+        let mut request = authenticated(&sender, 1, "POST", path, b"{}");
+        *request.body_mut() = Body::from_stream(stream);
+        let running = tokio::spawn(router.oneshot(request));
+        tokio::time::timeout(phase_sync::DEADLOCK_GUARD, stalled_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        clock.advance(FEDERATION_HANDLER_DEADLINE);
+        let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT, "{route}");
+        assert_eq!(
+            *expiries.lock().unwrap(),
+            [FederationDeadlineExpiry {
+                route,
+                operation: "-",
+                request_id: "-".to_owned(),
+                phase: "requestBody",
+            }],
+        );
+    }
+}
+
+/// A mailbox request whose owner check is still held when the unchanged
+/// deadline fires answers an UNKNOWN outcome, and its expiry line names the
+/// admission phase it was waiting in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mailbox_deadline_during_a_held_owner_check_names_the_admission_phase() {
+    let mut channel = federation_link::channel(FederationRole::Central, 'a');
+    let (sender, _proof) = federation_control_fixture::establish(&channel).await;
+    channel.control.clock = FederationControlClock::scripted_io();
+    let clock = channel.control.clock.clone();
+    let expiries = channel.control.deadline_expiries.clone();
+    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let release = MailboxWorkerRelease(gate.clone());
+    let (entered_tx, entered) = std::sync::mpsc::channel::<()>();
+    let entered_tx = Mutex::new(entered_tx);
+    let held = gate.clone();
+    let listener = FederationListenerState {
+        channel: channel.clone(),
+        ensure_current: Arc::new(move || {
+            let _ = entered_tx.lock().unwrap().send(());
+            phase_sync::wait_for_gate(&held, true);
+            Ok(())
+        }),
+    };
+    let router = Router::new()
+        .route("/federation/v1/mailbox", post(|| async { StatusCode::OK }))
+        .route_layer(axum::middleware::from_fn_with_state(
+            listener.clone(),
+            federation_authenticate,
+        ))
+        .with_state(listener);
+    let running = tokio::spawn(router.oneshot(authenticated(
+        &sender,
+        1,
+        "POST",
+        "/federation/v1/mailbox",
+        b"{}",
+    )));
+    phase_sync::receive(&entered, "the mailbox owner check started");
+    // The check is still held; step past the unchanged deadline.
+    clock.advance(FEDERATION_HANDLER_DEADLINE);
+    let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    drop(release);
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        *expiries.lock().unwrap(),
+        [FederationDeadlineExpiry {
+            route: "mailbox",
+            operation: "-",
+            request_id: "-".to_owned(),
+            phase: "admission",
+        }],
+    );
+}
+
+/// A mailbox request whose handler answered but whose response body never
+/// finishes still writes its one bounded expiry line, naming the
+/// response-body phase, and answers the unsigned 408.
+#[tokio::test]
+async fn stalled_mailbox_response_body_writes_one_expiry_line() {
+    let mut channel = federation_link::channel(FederationRole::Central, 'a');
+    let (sender, _proof) = federation_control_fixture::establish(&channel).await;
+    channel.control.clock = FederationControlClock::scripted_io();
+    let clock = channel.control.clock.clone();
+    let expiries = channel.control.deadline_expiries.clone();
+    let listener = FederationListenerState {
+        channel: channel.clone(),
+        ensure_current: federation_link::allowed(),
+    };
+    let (stalled, stalled_rx) = tokio::sync::oneshot::channel::<()>();
+    let stalled = Arc::new(Mutex::new(Some(stalled)));
+    let router = Router::new()
+        .route(
+            "/federation/v1/mailbox",
+            post(move || {
+                let stalled = stalled.clone();
+                async move {
+                    let stream = async_stream::stream! {
+                        yield Ok::<_, std::io::Error>("{");
+                        if let Some(stalled) = stalled.lock().unwrap().take() {
+                            let _ = stalled.send(());
+                        }
+                        std::future::pending::<()>().await;
+                    };
+                    Response::new(Body::from_stream(stream))
+                }
+            }),
+        )
+        .route_layer(axum::middleware::from_fn_with_state(
+            listener.clone(),
+            federation_authenticate,
+        ))
+        .with_state(listener);
+    let running = tokio::spawn(router.oneshot(authenticated(
+        &sender,
+        1,
+        "POST",
+        "/federation/v1/mailbox",
+        b"{}",
+    )));
+    tokio::time::timeout(phase_sync::DEADLOCK_GUARD, stalled_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    clock.advance(FEDERATION_HANDLER_DEADLINE);
+    let response = tokio::time::timeout(phase_sync::DEADLOCK_GUARD, running)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+    assert!(response.headers().get(FEDERATION_MAC_HEADER).is_none());
+    assert_eq!(
+        *expiries.lock().unwrap(),
+        [FederationDeadlineExpiry {
+            route: "mailbox",
+            operation: "-",
+            request_id: "-".to_owned(),
+            phase: "responseBody",
+        }],
+    );
+}

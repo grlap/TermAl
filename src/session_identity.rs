@@ -25,7 +25,38 @@
 
 use super::*;
 
+/// A Codex session's newly saved thread records the account generation it was
+/// saved under; a resumed thread, saved again with the same id, keeps its own.
+fn stamp_new_codex_thread_generation(
+    record: &mut SessionRecord,
+    previous_thread: Option<String>,
+    generation: u64,
+) {
+    if record.session.agent.supports_codex_prompt_settings()
+        && record.external_session_id.is_some()
+        && record.external_session_id != previous_thread
+    {
+        record.codex_thread_account_generation = Some(generation);
+    }
+}
+
 impl AppState {
+    /// Whether a saved Codex thread whose history is lost may be replaced by
+    /// a fresh thread: only when it was saved under the current account
+    /// generation. After an account action a lost thread is never silently
+    /// replaced.
+    pub(crate) fn lost_codex_thread_may_restart(&self, session_id: &str, thread_id: &str) -> bool {
+        let generation = self.codex_account.account_generation();
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        inner
+            .find_session_index(session_id)
+            .map(|index| &inner.sessions[index])
+            .is_some_and(|record| {
+                record.external_session_id.as_deref() == Some(thread_id)
+                    && record.codex_thread_account_generation.unwrap_or(0) == generation
+            })
+    }
+
     /// Generates the next sequential message id for this `AppState`.
     /// Message ids are monotonic within the app (not per-session) so
     /// deltas that reference a message id are unambiguous across all
@@ -49,12 +80,13 @@ impl AppState {
         let index = inner
             .find_session_index(session_id)
             .ok_or_else(|| anyhow!("session `{session_id}` not found"))?;
-        set_record_external_session_id(
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid"),
-            Some(external_session_id),
-        );
+        let generation = self.codex_account.account_generation();
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("session index should be valid");
+        let previous_thread = record.external_session_id.clone();
+        set_record_external_session_id(record, Some(external_session_id));
+        stamp_new_codex_thread_generation(record, previous_thread, generation);
         if inner.sessions[index]
             .session
             .agent
@@ -82,13 +114,16 @@ impl AppState {
         let Some(index) = inner.find_session_index(session_id) else {
             return Ok(RuntimeMatchOutcome::SessionMissing);
         };
+        let generation = self.codex_account.account_generation();
         let record = inner
             .session_mut_by_index(index)
             .expect("session index should be valid");
         if !record.runtime.matches_runtime_token(token) {
             return Ok(RuntimeMatchOutcome::RuntimeMismatch);
         }
+        let previous_thread = record.external_session_id.clone();
         set_record_external_session_id(record, Some(external_session_id));
+        stamp_new_codex_thread_generation(record, previous_thread, generation);
         if inner.sessions[index]
             .session
             .agent

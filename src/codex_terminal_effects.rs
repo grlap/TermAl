@@ -105,6 +105,11 @@ impl SharedCodexTerminalEffect {
                     _ => None,
                 };
                 if let Some(code) = code {
+                    // A current runtime's Unauthorized hints that the managed
+                    // account needs a new /login. It never gates admission.
+                    if code == "unauthorized" {
+                        state.codex_account.note_managed_unauthorized();
+                    }
                     state.note_turn_failure_kind(
                         &owner.session_id,
                         &owner.runtime,

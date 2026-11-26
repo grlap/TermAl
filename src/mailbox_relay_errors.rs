@@ -238,8 +238,10 @@ impl MailboxRelayHomeRpcFailures {
             status: status.as_u16(),
             stage,
             request_id,
+            // The running phase is named once; `phases` lists only the
+            // phases finished before it.
             phase: current.map(|current| current.phase),
-            phases: phases.into_iter().chain(current).collect(),
+            phases,
         };
         let mut history = self
             .history

@@ -1382,6 +1382,7 @@ pub(crate) struct AppState {
     /// Delegation-owned app-servers by runtime id, with the profile whose
     /// Codex home they use (`owned_codex_server.rs`).
     pub(crate) owned_codex_servers: OwnedCodexServerRegistry,
+    pub(crate) codex_account: Arc<CodexAccountControl>,
     /// Runtime ids whose exit cascade has already been claimed. Several
     /// worker threads may report one shared-process death; only the first may
     /// terminalize sessions or rebind Engram.
@@ -2461,6 +2462,10 @@ pub(crate) struct SessionRecord {
     /// thread. `None` for a thread created before profiles existed, which
     /// lives in the default home. See `shared_codex_profile.rs`.
     pub(crate) codex_thread_profile: Option<SharedCodexProfile>,
+    /// The Codex account generation this thread was saved under
+    /// (`codex_account`). `None` for a thread saved before generations
+    /// existed, which counts as generation 0.
+    pub(crate) codex_thread_account_generation: Option<u64>,
     pub(crate) external_session_id: Option<String>,
     pub(crate) pending_claude_approvals: HashMap<String, ClaudePendingApproval>,
     pub(crate) pending_claude_user_inputs: HashMap<String, ClaudePendingUserInput>,

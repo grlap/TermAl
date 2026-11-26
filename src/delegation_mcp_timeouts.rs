@@ -193,6 +193,9 @@ pub(crate) struct TermalDelegationUnknownOutcome {
     /// which wait a call was given.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) transport_timeout: Option<Duration>,
+    /// The host's status, when the host's own error answer reported the
+    /// mailbox outcome unknown (`host_reported_mailbox_unknown_outcome`).
+    pub(crate) status: Option<StatusCode>,
 }
 
 impl std::fmt::Display for TermalDelegationUnknownOutcome {
@@ -216,13 +219,18 @@ pub(crate) fn termal_delegation_outcome_is_unknown(err: &anyhow::Error) -> bool 
             .is_some()
         || err
             .downcast_ref::<TermalDelegationApiError>()
-            .is_some_and(|error| {
-                error.status.is_server_error()
-                    && error
-                        .message
-                        .split(';')
-                        .any(|clause| clause.trim() == FEDERATION_MAILBOX_UNKNOWN_OUTCOME)
-            })
+            .is_some_and(host_reported_mailbox_unknown_outcome)
+}
+
+/// Whether the host's own error answer reports a mailbox operation's outcome
+/// as unknown: a server error whose message carries the complete
+/// unknown-outcome clause. Text the bridge or a caller wrote never counts.
+pub(crate) fn host_reported_mailbox_unknown_outcome(error: &TermalDelegationApiError) -> bool {
+    error.status.is_server_error()
+        && error
+            .message
+            .split(';')
+            .any(|clause| clause.trim() == FEDERATION_MAILBOX_UNKNOWN_OUTCOME)
 }
 
 /// `message`, which embeds `err`, as a `TermalDelegationUnknownOutcome`.
@@ -235,6 +243,10 @@ pub(crate) fn termal_delegation_unknown_outcome(
         transport_timeout: err
             .downcast_ref::<TermalDelegationTransportError>()
             .map(|transport| transport.timeout),
+        status: err
+            .downcast_ref::<TermalDelegationApiError>()
+            .filter(|error| host_reported_mailbox_unknown_outcome(error))
+            .map(|error| error.status),
     }
     .into()
 }

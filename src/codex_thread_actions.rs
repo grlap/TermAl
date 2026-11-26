@@ -69,6 +69,14 @@ impl AppState {
         }
 
         let context = self.resolve_codex_thread_action_context(session_id)?;
+        // The launch admission, held across the generation read and the fork,
+        // keeps any account action from changing the account in between, so
+        // the fork records the generation of the account that created it.
+        let _fork_admission = self
+            .codex_account
+            .admit_launch()
+            .map_err(|error| ApiError::conflict(error.to_string()))?;
+        let fork_generation = self.codex_account.account_generation();
         let fork_result = self.perform_codex_json_rpc_request_for(
             context.shared_codex_profile,
             "thread/fork",
@@ -150,6 +158,7 @@ impl AppState {
         record.codex_reasoning_effort = reasoning_effort;
         record.session.reasoning_effort = Some(reasoning_effort);
         set_record_external_session_id(&mut record, Some(fork_thread_id.clone()));
+        record.codex_thread_account_generation = Some(fork_generation);
         if let Some(fork_messages) = fork_messages {
             replace_session_messages_on_record(&mut record, fork_messages, fork_preview);
         } else {

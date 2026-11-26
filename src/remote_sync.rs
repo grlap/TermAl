@@ -760,6 +760,7 @@ fn push_remote_proxy_session_record(
             .sandbox_mode
             .unwrap_or_else(default_codex_sandbox_mode),
         codex_thread_profile: None,
+        codex_thread_account_generation: None,
         external_session_id: session.external_session_id.clone(),
         pending_claude_approvals: HashMap::new(),
         pending_claude_user_inputs: HashMap::new(),

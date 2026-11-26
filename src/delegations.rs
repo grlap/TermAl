@@ -1640,7 +1640,7 @@ impl AppState {
         }
 
         let checked_worktree = self.check_followup_worktree(parent_session_id, delegation_id)?;
-        let child_session_id = {
+        let (child_session_id, _codex_admission) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let index =
                 find_parent_delegation_index_locked(&inner, parent_session_id, delegation_id)?;
@@ -1651,7 +1651,26 @@ impl AppState {
                 &child,
                 !request.attachments.is_empty(),
             )?;
-            child
+            // A local Codex child's follow-up may run provider preflight, such
+            // as archive recovery, before its start. Both need the Codex account
+            // to admit work, and the launch admission held until the start keeps
+            // any account action from beginning in between.
+            let admission = match inner
+                .find_session_index(&child)
+                .map(|child_index| &inner.sessions[child_index])
+            {
+                Some(record)
+                    if record.session.agent == Agent::Codex && record.is_local_session() =>
+                {
+                    Some(
+                        self.codex_account
+                            .admit_launch()
+                            .map_err(|error| ApiError::conflict(error.to_string()))?,
+                    )
+                }
+                _ => None,
+            };
+            (child, admission)
         };
         self.recover_durable_delegation_review_submission(&child_session_id)?;
         // A finished child may keep no resident transcript. Review capture,

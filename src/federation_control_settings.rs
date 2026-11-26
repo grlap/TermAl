@@ -12,6 +12,10 @@ pub(crate) struct FederationControlSettings {
     pub(crate) clock: FederationControlClock,
     #[cfg(test)]
     pub(crate) observed: Arc<dyn Fn(&'static str, u64) + Send + Sync>,
+    /// The bounded expiry lines this channel's listener wrote, so a test can
+    /// check what an expired request named.
+    #[cfg(test)]
+    pub(crate) deadline_expiries: Arc<Mutex<Vec<FederationDeadlineExpiry>>>,
 }
 
 impl Default for FederationControlSettings {
@@ -24,6 +28,8 @@ impl Default for FederationControlSettings {
             clock: FederationControlClock::default(),
             #[cfg(test)]
             observed: Arc::new(|_, _| {}),
+            #[cfg(test)]
+            deadline_expiries: Arc::default(),
         }
     }
 }
@@ -38,6 +44,8 @@ impl FederationControlSettings {
             clock: io.control_clock.clone(),
             #[cfg(test)]
             observed: io.control_observed.clone(),
+            #[cfg(test)]
+            deadline_expiries: Arc::default(),
         }
     }
 

@@ -152,6 +152,7 @@ impl StateInner {
             codex_reasoning_effort: self.preferences.default_codex_reasoning_effort,
             codex_sandbox_mode: self.preferences.default_codex_sandbox_mode,
             codex_thread_profile: None,
+            codex_thread_account_generation: None,
             external_session_id: None,
             pending_claude_approvals: HashMap::new(),
             pending_claude_user_inputs: HashMap::new(),

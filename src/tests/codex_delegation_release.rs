@@ -1353,3 +1353,31 @@ fn release_worker_detaches_before_archive_and_immediate_followup() {
         "completed cleanup must not detach the new registration"
     );
 }
+
+#[test]
+fn a_codex_child_followup_at_a_closed_account_fence_is_refused_before_any_provider_preflight() {
+    let (state, _child, delegation, release, input_rx) = terminal_child_with_pending_durability();
+    release.retry_durability(&state).unwrap();
+    // The archive reply was lost, so a follow-up would first ask the provider.
+    release.finish(CodexReleaseOutcome::Ambiguous(
+        "lost archive reply".to_owned(),
+    ));
+    let parent = {
+        let inner = state.inner.lock().unwrap();
+        inner.delegations[inner.find_delegation_index(&delegation).unwrap()]
+            .parent_session_id
+            .clone()
+    };
+    let _fence = state.codex_account.hold_operation_for_test();
+
+    let result = state.followup_delegation(&parent, &delegation, "Continue".to_owned());
+
+    assert_eq!(
+        result.err().expect("refused at the account fence").status,
+        StatusCode::CONFLICT
+    );
+    assert!(
+        input_rx.try_recv().is_err(),
+        "no archive recovery or other provider request was sent"
+    );
+}

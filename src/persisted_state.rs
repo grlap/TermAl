@@ -891,6 +891,10 @@ pub(crate) struct PersistedSessionRecord {
     /// a thread lives in the default Codex home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) codex_thread_profile: Option<SharedCodexProfile>,
+    /// The Codex account generation the thread was saved under; absent from
+    /// records written before account generations existed (generation 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) codex_thread_account_generation: Option<u64>,
     pub(crate) external_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) codex_terminal_archive: Option<CodexTerminalArchive>,
@@ -1031,6 +1035,7 @@ impl PersistedSessionRecord {
             codex_reasoning_effort: self.codex_reasoning_effort.clone(),
             codex_sandbox_mode: self.codex_sandbox_mode.clone(),
             codex_thread_profile: self.codex_thread_profile.clone(),
+            codex_thread_account_generation: self.codex_thread_account_generation,
             external_session_id: self.external_session_id.clone(),
             codex_terminal_archive: self.codex_terminal_archive.clone(),
             queued_prompts: self.queued_prompts.clone(),
@@ -1086,6 +1091,7 @@ impl PersistedSessionRecord {
             codex_reasoning_effort: record.codex_reasoning_effort,
             codex_sandbox_mode: record.codex_sandbox_mode,
             codex_thread_profile: record.codex_thread_profile,
+            codex_thread_account_generation: record.codex_thread_account_generation,
             external_session_id: record.external_session_id.clone(),
             codex_terminal_archive: record.codex_terminal_archive.clone(),
             queued_prompts: record.queued_prompts.clone(),
@@ -1279,6 +1285,7 @@ impl PersistedSessionRecord {
             codex_reasoning_effort: self.codex_reasoning_effort,
             codex_sandbox_mode: self.codex_sandbox_mode,
             codex_thread_profile: self.codex_thread_profile,
+            codex_thread_account_generation: self.codex_thread_account_generation,
             external_session_id: self.external_session_id,
             pending_claude_approvals: HashMap::new(),
             pending_claude_user_inputs: HashMap::new(),

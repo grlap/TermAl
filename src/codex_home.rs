@@ -37,7 +37,7 @@ pub(crate) fn termal_codex_agents_section() -> String {
 }
 
 /// Resolves source Codex home dir.
-fn resolve_source_codex_home_dir() -> Result<PathBuf> {
+pub(crate) fn resolve_source_codex_home_dir() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("CODEX_HOME") {
         return Ok(PathBuf::from(path));
     }
@@ -90,7 +90,7 @@ fn is_codex_closed_stdin_tool_router_diagnostic(line: &str) -> bool {
 }
 
 /// Resolves TermAl Codex home.
-fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
+pub(crate) fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
     resolve_termal_data_dir(default_workdir)
         .join("codex-home")
         .join(scope)
@@ -98,24 +98,54 @@ fn resolve_termal_codex_home(default_workdir: &str, scope: &str) -> PathBuf {
 
 /// Prepares TermAl Codex home.
 pub(crate) fn prepare_termal_codex_home(default_workdir: &str, scope: &str) -> Result<PathBuf> {
+    prepare_codex_home(default_workdir, scope, CodexHomeAuth::Standalone)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CodexHomeAuth {
+    Standalone,
+    Enrollment,
+    Managed,
+}
+
+pub(crate) fn prepare_codex_home(
+    default_workdir: &str,
+    scope: &str,
+    auth: CodexHomeAuth,
+) -> Result<PathBuf> {
     let target_home = resolve_termal_codex_home(default_workdir, scope);
-    fs::create_dir_all(&target_home)
-        .with_context(|| format!("failed to create `{}`", target_home.display()))?;
-    match resolve_source_codex_home_dir() {
-        Ok(source_home) => seed_termal_codex_home_from(&source_home, &target_home)?,
-        Err(_) => {
-            let target_agents = target_home.join("AGENTS.md");
-            write_termal_codex_agents_file(Some(&target_agents), &target_agents)?;
-        }
-    }
+    let source_home = resolve_source_codex_home_dir().ok();
+    prepare_codex_home_from(source_home.as_deref(), &target_home, auth)?;
     Ok(target_home)
 }
 
+pub(crate) fn prepare_codex_home_from(
+    source_home: Option<&FsPath>,
+    target_home: &FsPath,
+    auth: CodexHomeAuth,
+) -> Result<()> {
+    if auth != CodexHomeAuth::Standalone {
+        validate_managed_codex_home_path(target_home).map_err(|error| anyhow!(error))?;
+    }
+    match source_home {
+        Some(source_home) => seed_codex_home(source_home, target_home, auth),
+        None => {
+            let target_agents = target_home.join("AGENTS.md");
+            write_termal_codex_agents_file(Some(&target_agents), &target_agents)
+        }
+    }
+}
+
 /// Seeds TermAl Codex home from.
+#[cfg(test)]
 pub(crate) fn seed_termal_codex_home_from(
     source_home: &FsPath,
     target_home: &FsPath,
 ) -> Result<()> {
+    seed_codex_home(source_home, target_home, CodexHomeAuth::Standalone)
+}
+
+fn seed_codex_home(source_home: &FsPath, target_home: &FsPath, auth: CodexHomeAuth) -> Result<()> {
     fs::create_dir_all(target_home)
         .with_context(|| format!("failed to create `{}`", target_home.display()))?;
     let source_exists = source_home.exists();
@@ -123,12 +153,20 @@ pub(crate) fn seed_termal_codex_home_from(
     let target_home = fs::canonicalize(target_home).unwrap_or_else(|_| target_home.to_path_buf());
 
     if source_exists && source_home != target_home {
-        for name in [
-            "auth.json",
-            "config.toml",
-            "models_cache.json",
-            ".codex-global-state.json",
-        ] {
+        if auth == CodexHomeAuth::Standalone {
+            sync_codex_home_entry(
+                &source_home.join("auth.json"),
+                &target_home.join("auth.json"),
+            )?;
+        }
+        let source_config = source_home.join("config.toml");
+        let target_config = target_home.join("config.toml");
+        if auth == CodexHomeAuth::Managed {
+            sync_managed_codex_config(&source_config, &target_config)?;
+        } else {
+            sync_codex_home_entry(&source_config, &target_config)?;
+        }
+        for name in ["models_cache.json", ".codex-global-state.json"] {
             sync_codex_home_entry(&source_home.join(name), &target_home.join(name))?;
         }
 
@@ -144,6 +182,114 @@ pub(crate) fn seed_termal_codex_home_from(
     write_termal_codex_agents_file(Some(&source_agents), &target_agents)?;
 
     Ok(())
+}
+
+fn sync_managed_codex_config(source: &FsPath, target: &FsPath) -> Result<()> {
+    use toml_edit::{DocumentMut, Item, Table, TableLike};
+
+    // The managed file retains the provider and credential settings that
+    // account enrollment verified. Ordinary preferences follow standalone.
+    fn preserve_account_fields(current: Option<&dyn TableLike>, next: &mut dyn TableLike) {
+        for key in [
+            "api_key",
+            "auth",
+            "chatgpt_base_url",
+            "cli_auth_credentials_store",
+            "forced_chatgpt_workspace_id",
+            "forced_login_method",
+            "model_provider",
+            "model_providers",
+            "openai_base_url",
+            "profile",
+        ] {
+            if let Some(item) = current.and_then(|table| table.get(key)) {
+                next.insert(key, item.clone());
+            } else {
+                next.remove(key);
+            }
+        }
+    }
+
+    let source_text = match fs::read_to_string(source) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let target_text = match fs::read_to_string(target) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let mut next = source_text
+        .parse::<DocumentMut>()
+        .map_err(|_| anyhow!("standalone Codex config is not valid TOML"))?;
+    let current = target_text
+        .parse::<DocumentMut>()
+        .map_err(|_| anyhow!("managed Codex config is not valid TOML"))?;
+    preserve_account_fields(Some(current.as_table()), next.as_table_mut());
+
+    let current_profiles = current
+        .get("profiles")
+        .and_then(|item| item.as_table_like());
+    if let Some(profiles) = next
+        .get_mut("profiles")
+        .and_then(|item| item.as_table_like_mut())
+    {
+        for (name, profile) in profiles.iter_mut() {
+            if let Some(profile) = profile.as_table_like_mut() {
+                let old_profile = current_profiles
+                    .and_then(|table| table.get(name.get()))
+                    .and_then(|item| item.as_table_like());
+                preserve_account_fields(old_profile, profile);
+            }
+        }
+    }
+    // A profile removed from standalone may still be selected by managed
+    // Codex. Keep the managed selection usable.
+    if let Some(name) = current.get("profile").and_then(|item| item.as_str())
+        && let Some(profile) = current_profiles.and_then(|profiles| profiles.get(name))
+        && next
+            .get("profiles")
+            .and_then(|profiles| profiles.get(name))
+            .is_none()
+    {
+        next.as_table_mut()
+            .entry("profiles")
+            .or_insert(Item::Table(Table::new()))
+            .as_table_like_mut()
+            .ok_or_else(|| anyhow!("standalone Codex profiles is not a table"))?
+            .insert(name, profile.clone());
+    }
+    let next = next.to_string();
+    if next == target_text {
+        return Ok(());
+    }
+    let temporary = target.with_extension(format!("{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        let permissions = fs::metadata(target)
+            .or_else(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    fs::metadata(source)
+                } else {
+                    Err(error)
+                }
+            })?
+            .permissions();
+        file.set_permissions(permissions)?;
+        file.write_all(next.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, target)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn strip_termal_codex_agents_section(contents: &str) -> String {
@@ -218,7 +364,7 @@ fn sync_codex_home_entry(source: &FsPath, target: &FsPath) -> Result<()> {
     if metadata.is_dir() {
         sync_codex_home_directory(source, target)
     } else if metadata.is_file() {
-        sync_codex_home_file(source, target, &metadata)
+        sync_codex_home_file(source, target, &metadata, false)
     } else {
         Ok(())
     }
@@ -249,14 +395,18 @@ fn sync_codex_home_file(
     source: &FsPath,
     target: &FsPath,
     source_metadata: &fs::Metadata,
+    replace: bool,
 ) -> Result<()> {
     let should_copy = match fs::metadata(target) {
         Ok(target_metadata) => {
             if target_metadata.is_dir() {
+                if replace {
+                    bail!("the managed Codex credential target is not a file");
+                }
                 fs::remove_dir_all(target)
                     .with_context(|| format!("failed to remove `{}`", target.display()))?;
                 true
-            } else if source_metadata.len() != target_metadata.len() {
+            } else if replace || source_metadata.len() != target_metadata.len() {
                 true
             } else {
                 match (
@@ -295,4 +445,192 @@ fn sync_codex_home_file(
     fs::set_permissions(target, source_metadata.permissions())
         .with_context(|| format!("failed to update permissions on `{}`", target.display()))?;
     Ok(())
+}
+
+pub(crate) fn managed_codex_home_has_grant(home: &FsPath) -> Result<bool> {
+    match fs::metadata(home.join("auth.json")) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => bail!("the managed Codex credential entry is not a file"),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// A configured standalone home may be the same directory even if neither
+/// side has been created yet. Resolve existing parents as well as full paths.
+fn resolve_codex_home_path(path: &FsPath) -> Result<PathBuf> {
+    let path = std::path::absolute(path)?;
+    match fs::canonicalize(&path) {
+        Ok(canonical) => Ok(canonical),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            match fs::symlink_metadata(&path) {
+                Ok(_) => return Err(err.into()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            let parent = path.parent().ok_or(err)?;
+            Ok(resolve_codex_home_path(parent)?
+                .join(path.file_name().context("missing home name")?))
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+const ACCOUNT_HOME_RESOLUTION_ERROR: &str =
+    "TermAl could not resolve its Codex account homes. Check CODEX_HOME and retry.";
+
+fn codex_entry_is_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    metadata.is_symlink()
+}
+
+pub(crate) fn validate_managed_codex_home_path(path: &FsPath) -> Result<(), &'static str> {
+    let path = std::path::absolute(path).map_err(|_| ACCOUNT_HOME_RESOLUTION_ERROR)?;
+    // Check from the root down so we never mistake a missing descendant
+    // behind a dangling link for an ordinary uncreated directory.
+    let ancestry: Vec<_> = path.ancestors().collect();
+    for component in ancestry.into_iter().rev() {
+        match fs::symlink_metadata(component) {
+            Ok(metadata) if codex_entry_is_reparse_point(&metadata) => {
+                return Err("A managed Codex home traverses a link. Use a separate directory.");
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(ACCOUNT_HOME_RESOLUTION_ERROR),
+        }
+    }
+    for (name, linked_error) in [
+        (
+            "auth.json",
+            "A managed Codex credential entry is linked. Use a separate regular file for each Codex home.",
+        ),
+        (
+            "config.toml",
+            "A managed Codex config entry is linked. Use a separate regular file for each Codex home.",
+        ),
+    ] {
+        let file = path.join(name);
+        match fs::symlink_metadata(&file) {
+            Ok(metadata)
+                if codex_credential_is_linked(&file, &metadata)
+                    .map_err(|_| ACCOUNT_HOME_RESOLUTION_ERROR)? =>
+            {
+                return Err(linked_error);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(ACCOUNT_HOME_RESOLUTION_ERROR),
+        }
+    }
+    Ok(())
+}
+
+fn same_codex_path(first: &FsPath, second: &FsPath) -> bool {
+    first == second
+        || cfg!(windows)
+            && first
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&second.to_string_lossy())
+}
+
+pub(crate) fn validate_managed_codex_homes(
+    standalone: &FsPath,
+    managed: impl IntoIterator<Item = PathBuf>,
+) -> Result<(), &'static str> {
+    let resolve_error = ACCOUNT_HOME_RESOLUTION_ERROR;
+    let standalone = resolve_codex_home_path(standalone).map_err(|_| {
+        "TermAl could not resolve the standalone Codex home. Repair any dangling CODEX_HOME link and retry."
+    })?;
+    let standalone_file = standalone.join("auth.json");
+    let standalone_link_target = match fs::symlink_metadata(&standalone_file) {
+        Ok(metadata) if codex_entry_is_reparse_point(&metadata) => Some(
+            fs::canonicalize(&standalone_file).map_err(|_| {
+                "The standalone Codex credential link could not be resolved. Repair it before changing accounts."
+            })?,
+        ),
+        Ok(_) => None,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => None,
+        Err(_) => return Err(resolve_error),
+    };
+    let mut homes = vec![standalone];
+    for path in managed {
+        validate_managed_codex_home_path(&path)?;
+        let home = resolve_codex_home_path(&path).map_err(|_| resolve_error)?;
+        if homes
+            .iter()
+            .any(|existing| same_codex_path(existing, &home))
+        {
+            return Err(
+                "Standalone and managed Codex homes must be separate. Set CODEX_HOME outside TermAl's managed profile homes.",
+            );
+        }
+        if standalone_link_target
+            .as_deref()
+            .is_some_and(|target| same_codex_path(target, &home.join("auth.json")))
+        {
+            return Err(
+                "The standalone Codex credential entry points into a managed home. Use a separate credential file.",
+            );
+        }
+        homes.push(home);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn codex_credential_is_linked(_path: &FsPath, metadata: &fs::Metadata) -> Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(metadata.is_symlink() || (metadata.is_file() && metadata.nlink() > 1))
+}
+
+#[cfg(windows)]
+fn codex_credential_is_linked(path: &FsPath, metadata: &fs::Metadata) -> Result<bool> {
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    if codex_entry_is_reparse_point(metadata) {
+        return Ok(true);
+    }
+    if !metadata.is_file() {
+        return Ok(false);
+    }
+    // A zero-access handle exposes link metadata without reading any bytes.
+    let handle = fs::OpenOptions::new().access_mode(0).open(path)?;
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: handle and information remain live for the call.
+    if unsafe { GetFileInformationByHandle(handle.as_raw_handle(), &mut information) } == 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(information.nNumberOfLinks > 1)
+}
+
+/// The canonical file is authoritative only after a TermAl browser login.
+/// Callers hold the account reservation while reconciling each idle home.
+pub(crate) fn reconcile_managed_codex_home(
+    canonical_home: &FsPath,
+    sibling_home: &FsPath,
+    signed_in: bool,
+) -> Result<()> {
+    let target = sibling_home.join("auth.json");
+    if signed_in {
+        let source = canonical_home.join("auth.json");
+        let metadata = fs::metadata(&source)?;
+        if !metadata.is_file() {
+            bail!("the canonical Codex credential file is unavailable");
+        }
+        sync_codex_home_file(&source, &target, &metadata, true)
+    } else {
+        match fs::remove_file(&target) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
+    }
 }

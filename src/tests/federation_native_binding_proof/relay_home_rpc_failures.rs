@@ -334,12 +334,63 @@ async fn home_rpc_failures_distinguish_admission_deadline_and_post_handler_autho
             // The record names the phase the deadline hit; nothing after the
             // expiry (no post-handler check) moves it on.
             assert_eq!(rows[0]["phase"], "handler", "{observed}");
+            // The running phase is named once, not also listed as finished.
+            let finished = rows[0]["phases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|phase| phase["phase"].as_str().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(finished, ["admission"], "{observed}");
         }
         assert_eq!(rows[0]["operation"], "read");
         assert_eq!(rows[0]["status"], 503);
         assert!(mailbox_relay_uuid(rows[0]["requestId"].as_str().unwrap()));
         assert!(!observed.to_string().contains("PRIVATE-HOME-DETAIL"));
     }
+}
+
+/// A relay request whose counter the home's replay window refuses is answered
+/// during admission, before any slot or owner check, and its failure record
+/// names that phase.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn home_rpc_failure_for_a_refused_counter_names_the_admission_phase() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "refused-counter").await;
+    read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id)
+        .await
+        .unwrap();
+    // The home already holds the counter the satellite sends next.
+    let next = fixture
+        .satellite_channel
+        .security_context()
+        .unwrap()
+        .sender
+        .lock()
+        .unwrap()
+        .next;
+    fixture
+        .channel
+        .security_context()
+        .unwrap()
+        .received
+        .lock()
+        .unwrap()
+        .reserve(next)
+        .unwrap();
+    let _ = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id).await;
+    let observed = diagnostics(&fixture.central).await;
+    proxy.finish().await;
+    fixture.finish().await;
+    let rows = observed["homeRpcFailures"].as_array().unwrap();
+    let refused = rows
+        .iter()
+        .find(|row| row["stage"] == "replayCounter")
+        .unwrap_or_else(|| panic!("no replay-counter record: {observed}"));
+    assert_eq!(refused["status"], 503, "{observed}");
+    assert_eq!(refused["phase"], "admission", "{observed}");
 }
 
 #[test]

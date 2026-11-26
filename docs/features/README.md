@@ -28,6 +28,7 @@ next, see [Project Status](./project-status.md).
 - [Coordination Board](./agent-boards.md)
 - [Response Board](./response-board.md)
 - [Shared Codex App-Server](./shared-codex-app-server.md)
+- [Codex Account Sign-In](./codex-account-login.md)
 - [Agent Integration Comparison](./agent-integration-comparison.md)
 - [Orchestration](./orchestration.md)
 - [Multi-Browser Workspaces](./multi-browser-workspaces.md)

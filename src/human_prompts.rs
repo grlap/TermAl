@@ -384,7 +384,11 @@ impl AppState {
         if prompt.is_empty() && attachments.is_empty() {
             return Err(ApiError::bad_request("prompt cannot be empty"));
         }
-        {
+        // A local Codex prompt is accepted only while the Codex account admits
+        // work, before any provider preflight such as restoring an archived
+        // child. The launch admission lasts until the start below, so no
+        // account action begins between this intake and the start.
+        let _codex_admission = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if inner
                 .find_visible_session_index(session_id)
@@ -393,7 +397,23 @@ impl AppState {
             {
                 return Err(ApiError::conflict(DELEGATION_NO_LONGER_STARTABLE_MESSAGE));
             }
-        }
+            let admission = match inner
+                .find_visible_session_index(session_id)
+                .map(|index| &inner.sessions[index])
+            {
+                Some(record)
+                    if record.session.agent == Agent::Codex && record.is_local_session() =>
+                {
+                    Some(
+                        self.codex_account
+                            .admit_launch()
+                            .map_err(|error| ApiError::conflict(error.to_string()))?,
+                    )
+                }
+                _ => None,
+            };
+            admission
+        };
         let review_recut = self.capture_followup_review_recut(followup)?;
         self.prepare_codex_child_followup(session_id)?;
         self.refresh_followup_review_custody(review_recut.as_ref())?;
