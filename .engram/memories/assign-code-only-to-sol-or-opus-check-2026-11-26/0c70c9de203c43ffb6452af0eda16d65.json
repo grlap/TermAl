@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "assign-code-only-to-sol-or-opus-check-2026-11-26",
+    "revision_id": "0c70c9de203c43ffb6452af0eda16d65",
+    "previous": null,
+    "body_sha256": "73cba3301933f46abd5e84e5feb00ea7d3074e2a65568c0f1239e8f40f0121f8",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T17:28:12.003039300Z"
+    }
+  },
+  "body": "Coordinator self-check (Termal::Fable2, 2026-11-26; my second miss). Before assigning any task that edits source or tests, confirm the assignee is a Sol (Codex) or Opus session (memory greg-decision-2026-10-22-code-authoring-override). UI, UI2, AstraUI, Architect*, Merger* and Kimi/Agy/OpenCode sessions may do design, handoff and bookkeeping only. On 11-26 I assigned w-a46f to UI2 for implementation, and UI2 refused correctly. The fix was UI2 doing the design handoff and Sol-a7bb implementing. Earlier I made the same miss with Architect1."
+}

@@ -1,0 +1,29 @@
+{
+  "id": "01a218ed-0949-79c1-85d3-32edb4dbdf2d",
+  "external_ref": null,
+  "title": "Relay sender maps a home's typed writer-admission 503 (\"nothing committed, retry\") to UNKNOWN instead of keeping it definite",
+  "outcome": "Relay sender maps a home's typed writer-admission 503 (\"nothing committed, retry\") to UNKNOWN instead of keeping it definite",
+  "acceptance": [
+    "A native relay send whose home refuses at writer admission (the typed 503 'mailbox storage is temporarily busy …; no mailbox write was committed by this operation, so retry the same request') reaches the sender as that definite nothing-committed refusal, not as federation_mailbox_unknown_outcome; other authenticated non-4xx replies keep their current UNKNOWN mapping.",
+    "A behaviour test drives a relay send against a home that refuses at writer admission and shows the definite refusal at the sender, with no message saved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "error-message",
+    "federation",
+    "mailbox-relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
