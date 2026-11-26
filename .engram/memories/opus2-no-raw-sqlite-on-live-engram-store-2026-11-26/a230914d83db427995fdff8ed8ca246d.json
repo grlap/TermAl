@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "opus2-no-raw-sqlite-on-live-engram-store-2026-11-26",
+    "revision_id": "a230914d83db427995fdff8ed8ca246d",
+    "previous": null,
+    "body_sha256": "0cb26a759746116e118d43a4be0c281c84ccbc45a4e73adff5ce26b7e1b67082",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T18:39:56.499524500Z"
+    }
+  },
+  "body": "Lesson (Opus2, my own miss, 2026-11-26 ~18:40Z, corrected by Fable2 #8072). Never read a LIVE Engram store with raw SQLite (node:sqlite, python sqlite3, mode=ro or readOnly), not even read-only, and never ask another session to. A live store is read only through engram's own tools (show, memories, control-policy show, readiness, ...). Raw access bypasses its locking and contracts, for the same reason nobody opens TermAl's live store. I read Central's obligation_rule_set 4c9cdb37 that way to compare it with WinB's built-in set, and asked WinB session-5 to do the same; that request was cancelled before it ran. When a tool can't print something (here rule-set content: Engram w-bcfe83329d68), accept Engram's source-cited word or wait for the tool; never work around a missing tool by reading the database. Even when an Engram agent suggests a raw read, decline it and ask for the tool route."
+}

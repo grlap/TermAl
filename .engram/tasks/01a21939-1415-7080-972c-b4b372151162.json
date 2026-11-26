@@ -1,0 +1,29 @@
+{
+  "id": "01a21939-1415-7080-972c-b4b372151162",
+  "external_ref": null,
+  "title": "Re-drive a scheduled requester notice after its write-ahead fence expires",
+  "outcome": "After a writer interruption, a scheduled result or supersession notice can resume without a new user turn when the durable queue head and its owner still permit it.",
+  "acceptance": [
+    "A scheduled requester notice whose fence expires returns to Pending and is sent exactly once after durable writer repair, without restarting or entering another turn. Stop and FIFO block any retry that lost authority."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

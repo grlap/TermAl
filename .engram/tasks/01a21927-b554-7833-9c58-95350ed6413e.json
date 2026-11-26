@@ -1,0 +1,31 @@
+{
+  "id": "01a21927-b554-7833-9c58-95350ed6413e",
+  "external_ref": null,
+  "title": "Use recorded source identity in coordination board examples",
+  "outcome": "The board guide illustrates review and gate coordination with the recorded source_id after schema-1 review-freeze retirement.",
+  "acceptance": [
+    "The key example and mailbox-vs-board comparison in docs/features/agent-boards.md use the recorded source_id or explicitly label schema-1 freeze fingerprints as historical. The documented board key and value contract is preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "docs",
+    "greg-directed",
+    "review-follow-up",
+    "review-freeze",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200d9-6d46-7c11-b40a-e12f9cdba686",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

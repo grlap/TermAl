@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "opus2-no-raw-sqlite-on-live-engram-store-2026-11-26",
+  "head": {
+    "state": "active",
+    "chain": [
+      "a230914d83db427995fdff8ed8ca246d"
+    ]
+  }
+}

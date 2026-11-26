@@ -1,0 +1,27 @@
+{
+  "id": "01a2193a-039e-7d62-ac78-793bfa2a24d9",
+  "external_ref": null,
+  "title": "Registration matching compares the 512-byte focused command summary, so a focused command over 512 bytes never matches its own registration",
+  "outcome": "At a Claude Bash background task's end, registration matching compares the line's decoded focused argv with the run's full recorded focused argv read from request.json, not with the bounded 512-byte display summary, so a focused command longer than 512 bytes whose words are equal is matched and settles.",
+  "acceptance": [
+    "observe_test_command_artifact_from's registration-focused comparison uses the complete focused argv from the run's request (bounded only by the request read limit), so a direct focused launcher line whose focused command exceeds 512 bytes attaches its sole matching terminal registration and settles, while differing words still refuse with ArtifactRequestMismatch; shown by a behaviour test with a command over 512 bytes. The Dart lane's existing comparison is unchanged unless reviewed separately."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

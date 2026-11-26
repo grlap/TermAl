@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "next-restart-plan-2026-11-26-evening",
+  "head": {
+    "state": "active",
+    "chain": [
+      "87c50d2960eb4775a086dea50099ebea",
+      "f2b391c3e99e41dbacf2d218aa9a85ee"
+    ]
+  }
+}

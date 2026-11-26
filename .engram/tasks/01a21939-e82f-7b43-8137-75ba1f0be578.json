@@ -1,0 +1,27 @@
+{
+  "id": "01a21939-e82f-7b43-8137-75ba1f0be578",
+  "external_ref": null,
+  "title": "Claude launcher attach paths re-parse the command with the Unknown dialect, so a quoted-pipe launcher line gets a launch row but never an artifact",
+  "outcome": "For a Claude Bash launcher line, the locator association (cut and uncut output) and the background-end registration route recognise the command with the same Bash runtime dialect that created its launch row, so a direct launcher line with a quoted `|` (e.g. `-- --skip 'alpha|beta'`) has its run attached and settled like any other.",
+  "acceptance": [
+    "For Claude provenance, observe_test_command_artifact_from and claude_ordinary_launcher recognise the line with runtime Bash (as engram_plain_check_command_in does at start), so a direct focused launcher line whose test arguments contain a quoted `|` attaches its run from a visible RUN locator and, at a background end, from its sole matching registration; shown by behaviour tests for both routes. Other providers' recognition is unchanged."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-plan-2026-11-26-evening",
+    "revision_id": "87c50d2960eb4775a086dea50099ebea",
+    "previous": null,
+    "body_sha256": "a13ab1d6c9a9e4d48d83424e4f858934b46ab34676505cf694f6fb0a8c56f893",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T18:42:04.852987900Z"
+    }
+  },
+  "body": "Restart plan (Termal::Fable2, 2026-11-26 ~18:42Z).\n- What: ONE Central restart after TermAl w-a702 R17 lands and is installed. It covers 5dfa2ae6 (w-3bdd relay 503 fix plus w-c9fb Codex /login and /logout; installed sha f74e9851…; Greg's C4 smoke test needs it). w-e12f R4 joins only if it lands within about 1 h of a702.\n- Conditions, from Engram::Fable #8921:\n  - the moment is picked from Opus2's Central queue when NO Engram launcher run (FULL or clippy) and NO evaluator or review child is running;\n  - mail Engram::Fable 15 min BEFORE sending Greg 'restart now', so Engram sessions pause new launches;\n  - WinB and DL560 are unaffected.\n- TermAl side: Opus2 sends the build hash plus the running gates and named roots (named roots are lost on restart, w-8f74). No landing between 'restart now' and Greg's restart. Greg performs the restart."
+}

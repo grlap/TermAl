@@ -1,0 +1,29 @@
+{
+  "id": "01a21939-1263-7be3-a5b0-4bff071742fa",
+  "external_ref": null,
+  "title": "Recover the exact saved scheduled evaluator brief at boot",
+  "outcome": "Boot re-offers the exact saved first brief for a live scheduled evaluator and requester wait. FIFO, requester Stop, and exact prompt ownership are enforced.",
+  "acceptance": [
+    "A cold reload with a saved first brief and a live requester wait causes the production boot dispatcher to enqueue that exact brief once. Requester Stop and ordinary FIFO guards remain effective."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "acceptance",
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

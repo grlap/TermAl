@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-plan-2026-11-26-evening",
+    "revision_id": "f2b391c3e99e41dbacf2d218aa9a85ee",
+    "previous": "87c50d2960eb4775a086dea50099ebea",
+    "body_sha256": "dd47bcff0df048f360990632e6cb5f2c79fba84a123de1393599a83722db6a4d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T19:04:48.476239900Z"
+    }
+  },
+  "body": "Restart plan, REVISED (Termal::Fable2, 2026-11-26 ~19:06Z). The restart is DECOUPLED from w-a702: its revision-13 evaluation failed on the item's outcome, R18 code is approved (about 2-3 h), and c4bf910e does not land.\n- Content: 5dfa2ae6 (w-3bdd relay 503 fix plus w-c9fb Codex /login and /logout, installed sha f74e9851…; Greg's C4 smoke test needs it), plus w-e12f R4 if its gates pass and it lands soon; otherwise 5dfa2ae6 alone.\n- Conditions, from Engram::Fable #8921: a moment from Opus2's Central queue with NO Engram launcher run (FULL or clippy) and NO evaluator or review child running; mail Engram::Fable 15 min BEFORE sending Greg 'restart now'.\n- TermAl side: Opus2 sends the build hash plus the running gates, evaluators and named roots (named roots are lost on restart, w-8f74); a702 R18's FULL is not running at that moment; no landing between 'restart now' and the restart. Greg performs it."
+}

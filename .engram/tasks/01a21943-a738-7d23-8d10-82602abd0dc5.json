@@ -1,0 +1,30 @@
+{
+  "id": "01a21943-a738-7d23-8d10-82602abd0dc5",
+  "external_ref": null,
+  "title": "Keep the delivery reason tooltip visible after Tab scrolls the reason into view",
+  "outcome": "Keyboard focus reveals the delivery reason after normal browser scrolling brings that reason into view.",
+  "acceptance": [
+    "Establish the behavior with actual Tab navigation into a historical row whose reason is its first focusable control and starts below the visible transcript. The full reason is available once the browser has scrolled it into view.",
+    "A focused reason previously visible still closes its tooltip if later scrolled out of the transcript, and Escape is forwarded."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "accessibility",
+    "conversation",
+    "greg-directed",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a218e5-883a-7663-b5f2-a46fe89d700e",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "no-raw-sqlite-reads-of-engram-store-2026-11-26",
+    "revision_id": "ee5feb37c6274aa0bb9c887f16d9bfe5",
+    "previous": null,
+    "body_sha256": "568130c3675f80f9e6347e9b6604b8655f8f635025490114392a95648ed837dc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T18:39:34.492860800Z"
+    }
+  },
+  "body": "Rule (Termal::Fable2, 2026-11-26 ~18:40Z). Agents never read Engram's live store (engram.db under an Engram home) with raw SQLite or any other direct database access, not even read-only. Use only engram's own CLI and MCP tools. This is the same principle as never opening TermAl's live ~/.termal store.\n\nOrigin: Opus2 read Central's obligation_rule_set object via node:sqlite readOnly to compare against WinB's built-in set, because the content isn't printable through engram (Engram w-bcfe83329d68). A missing tool is filed and waited for, or answered by Engram's owners from source; it is never worked around by reading the database. In that case Engram::Fable's source citation (src/control.rs:616-631: the built-in set is the single stock rule source_mutation_requires_test v1) was the admissible basis."
+}

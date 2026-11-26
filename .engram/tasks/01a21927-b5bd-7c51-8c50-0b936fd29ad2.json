@@ -1,0 +1,31 @@
+{
+  "id": "01a21927-b5bd-7c51-8c50-0b936fd29ad2",
+  "external_ref": null,
+  "title": "Update retained Git read and review fan-in documentation after schema-1 retirement",
+  "outcome": "Documentation describes the current pinned Git reader, its existing refusal and deadline policies, and the evidence actually retained by review fan-in.",
+  "acceptance": [
+    "Update the current freeze comparisons and budget wording in docs/features/engram-host-adapter.md to the applicable reader and deadline, checking the current code at each call site. Replace the removed tests reference in docs/features/host-architecture.md with an accurate statement of native coverage and make docs/features/agent-delegation-sessions.md describe retained verification notes generically. Preserve explicitly historical material."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "docs",
+    "greg-directed",
+    "review-follow-up",
+    "review-freeze",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a200d9-6d46-7c11-b40a-e12f9cdba686",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
