@@ -319,7 +319,11 @@ operations, so the rule holds only as long as every agent follows it:
   the result; Codex executes directory and worktree removal under the
   "Cleanup deletions" rule in AGENTS.md. To keep one longer,
   record on an open item the concrete need and when it ends, then remove it
-  then. A periodic sweep doesn't replace this.
+  then. When every item it served is closed, its removal needs no approval
+  from Greg (his word of 2026-11-25, TermAl mailbox 588693a8 #2781: „Jezeli
+  zadanie jest zamkniete to trzeba posprzatac bez pytania sie mnie o
+  zgode”); the checks in "Cleanup deletions" in AGENTS.md still apply. A
+  periodic sweep doesn't replace this.
 - Outside the repository only tools write, as part of their own work: TermAl
   through its tools and test runs, Engram to its store home, Cargo and npm to
   their caches. Anything else there, such as installing, repairing or updating

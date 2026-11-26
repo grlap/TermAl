@@ -394,7 +394,11 @@ operations, so the rule holds only as long as every agent follows it:
   the result; Codex executes directory and worktree removal under the
   "Cleanup deletions" rule below. To keep one longer,
   record on an open item the concrete need and when it ends, then remove it
-  then. A periodic sweep doesn't replace this.
+  then. When every item it served is closed, its removal needs no approval
+  from Greg (his word of 2026-11-25, TermAl mailbox 588693a8 #2781: „Jezeli
+  zadanie jest zamkniete to trzeba posprzatac bez pytania sie mnie o
+  zgode”); the checks in "Cleanup deletions" still apply. A periodic sweep
+  doesn't replace this.
 - Outside the repository only tools write, as part of their own work: TermAl
   through its tools and test runs, Engram to its store home, Cargo and npm to
   their caches. Anything else there, such as installing, repairing or updating
@@ -434,11 +438,13 @@ cp -rf source dest          # NOT: cp -r source dest
 
 Finishing work includes cleanup. The owner or integration owner is accountable for removing an unneeded worktree, build output and temporary files and for recording the result; Codex executes directory and worktree removal, not Opus or Claude. Another session hands Codex the exact owned targets.
 
+Cleanup of a worktree, build output or temporary file whose served items are all closed needs no approval from Greg and no question to him (Greg, 2026-11-25 23:44Z, relayed by Engram::Asistant in TermAl mailbox 588693a8 #2781, verbatim: „Jezeli zadanie jest zamkniete to trzeba posprzatac bez pytania sie mnie o zgode”). The checks below still apply to every removal.
+
 Before removal, resolve each target to an absolute path and check it is inside the intended repository or worktree, no link escapes it, its retention need has ended, runs are terminal with outcomes recovered, and no live work, frozen input, shared resource or unique unpushed change needs it. Otherwise stop and report the concrete blocker.
 
 Use a non-forced initial form: plain `rm` or `rm -r` without `-f` on POSIX, without an interactive terminal; PowerShell `Remove-Item -LiteralPath` with `-Recurse` for a directory and `-Confirm:$false`, without `-Force`; or `git worktree remove` without `--force`. Never delete through an unchecked variable or a broad `git clean`.
 
-A request for input or an operational failure stops the removal; report it to the coordinator. A policy refusal also stops it: do not retry through another form, tool, interpreter or session. Forced removal requires Greg's recorded authorization for that exact case and a permitted native route.
+When every item the target served is closed and the non-forced form fails only because of hidden, read-only or partly removed content of that checked target, complete the removal natively on Windows: for a registered worktree, `git worktree remove --force <checked path>` with a single `--force`, and if its registration remains, leave it and report it; for a plain directory, `Remove-Item -LiteralPath <checked path> -Recurse -Force -Confirm:$false`. Record the completion with the result. Any other request for input or operational failure, such as a lock or a link escape, stops the removal; report it to the coordinator. A policy refusal also stops it: do not retry through another form, tool, interpreter or session. Any other forced removal requires Greg's recorded authorization for that exact case and a permitted native route.
 
 Keep `.logs/` and `.evidence/` files only for a concrete need recorded on an open task, with its owner and end condition. The last closer or coordinator's sweep is accountable for their removal when that need ends, after the same checks; Codex executes any directory or worktree removal. Preserve evidence still needed by open work in the main checkout's `.evidence/` before removing its worktree and verify the copy.
 

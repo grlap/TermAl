@@ -379,8 +379,9 @@ The inspected upstream baseline is Codex commit
 mechanism in that source version; it does not establish the version or settings
 of a historical refusal whose original evidence is unavailable.
 
-For an already-authorized cleanup, Codex follows the separate cleanup-deletion
-rule in AGENTS.md. Before the initial attempt, resolve the
+For a cleanup handed to it, Codex follows the separate cleanup-deletion rule
+in AGENTS.md ("Cleanup deletions"); a target whose served items are all closed
+needs no approval from Greg. Before the initial attempt, resolve the
 exact owned targets, check repository containment and links, and establish that
 their retention need has ended and no live work or shared resource uses them.
 Choose a non-forced initial form appropriate to the target:
@@ -395,12 +396,17 @@ guarantee: command rules, other safety checks and filesystem permissions still
 apply. These are initial cleanup choices, not alternatives to try after a
 denial. If a policy refuses the command, stop and report it to the coordinator;
 do not retry the denied removal through another form, tool, interpreter or
-session. If a non-forced command fails operationally, such as a read-only file
-on Windows, stop and report that too. A command requesting input also requires
-stopping and reporting. A forced case needs Greg's recorded word for
-that case as well as a permitted native execution route; task authority alone
-does not override Codex's refusal. Keep the exact targets and remaining cleanup
-owner recorded until removal is confirmed.
+session. If a non-forced command fails operationally, follow "Cleanup
+deletions" in AGENTS.md: for a target whose served items are all closed and
+whose failure is only hidden, read-only or partly removed content, complete the
+removal with the native Windows form named there and record the completion; any
+other failure, a lock, a link escape or a command requesting input stops and is
+reported to the coordinator, and any other forced case still needs Greg's
+recorded word for that case as well as a permitted native execution route.
+Codex's built-in fallback classifier may refuse `Remove-Item -Force`; that
+refusal stops the removal, and task authority alone does not override it. Keep
+the exact targets and remaining cleanup owner recorded until removal is
+confirmed.
 
 TermAl answers real `item/commandExecution/requestApproval` requests with their
 native request identity, subject to its existing ownership and sandbox guards.
