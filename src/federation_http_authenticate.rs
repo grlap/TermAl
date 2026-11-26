@@ -584,19 +584,27 @@ pub(crate) async fn federation_authenticate_message(
             request_phases.as_deref(),
         );
     }
-    // Keep both legacy 404 capability/resource branches and all 5xx
-    // uncertainty handling unchanged. Only explicit non-404 client refusals
-    // acquire the bounded diagnostic envelope, before signing it.
+    // Encode the typed pre-write send refusal and the existing non-404
+    // client diagnostics before signing. Other server failures stay unknown.
+    let writer_admission = parts.status == StatusCode::SERVICE_UNAVAILABLE
+        && parts
+            .extensions
+            .get::<MailboxRelayWriterAdmissionRefusal>()
+            .is_some();
     let body = if let Some(request) = relay_body.as_ref()
-        && parts.status.is_client_error()
-        && parts.status != StatusCode::NOT_FOUND
+        && (writer_admission
+            || (parts.status.is_client_error() && parts.status != StatusCode::NOT_FOUND))
     {
         parts.headers.remove(axum::http::header::CONTENT_LENGTH);
         parts.headers.insert(
             axum::http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
         );
-        axum::body::Bytes::from(mailbox_relay_refusal_body(request, parts.status, &body))
+        axum::body::Bytes::from(if writer_admission {
+            mailbox_relay_writer_admission_body(request)
+        } else {
+            mailbox_relay_refusal_body(request, parts.status, &body)
+        })
     } else {
         body
     };

@@ -145,7 +145,7 @@ pub(crate) fn mailbox_relay_rpc_routes() -> Router<FederationListenerState> {
 pub(crate) async fn serve_mailbox_relay(
     axum::Extension(peer): axum::Extension<FederationAuthenticatedPeer>,
     Json(request): Json<MailboxRelayRequest>,
-) -> Result<Json<MailboxRelayResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     if request.version != MAILBOX_RELAY_VERSION || !mailbox_relay_uuid(&request.request_id) {
         return Err(ApiError::conflict("native mailbox relay upgrade required"));
     }
@@ -162,7 +162,8 @@ pub(crate) async fn serve_mailbox_relay(
     }
     // Every StateInner wait runs on the blocking job, never on an async
     // worker, so a long state hold cannot stall the runtime or the deadline.
-    run_blocking_api(move || {
+    let is_send = matches!(&request.operation, MailboxRelayOperation::Send { .. });
+    let result = run_blocking_api(move || {
         let _permit = permit;
         let _phases = MailboxRelayPhaseScope::install(phases);
         mailbox_relay_phase("origin");
@@ -177,7 +178,20 @@ pub(crate) async fn serve_mailbox_relay(
             value,
         }))
     })
-    .await
+    .await;
+    match result {
+        Ok(response) => Ok(response.into_response()),
+        Err(error)
+            if is_send && error.kind == Some(ApiErrorKind::FederationMailboxWriterAdmission) =>
+        {
+            let mut response = error.into_response();
+            response
+                .extensions_mut()
+                .insert(MailboxRelayWriterAdmissionRefusal);
+            Ok(response)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 impl AppState {

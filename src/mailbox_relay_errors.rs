@@ -266,6 +266,7 @@ impl MailboxRelayHomeRpcFailures {
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum MailboxRelayRefusalReason {
+    WriterAdmissionTimeout,
     PersistenceSettling,
     RpcLimitReached,
     ReceiptInvalid,
@@ -278,6 +279,7 @@ enum MailboxRelayRefusalReason {
 impl MailboxRelayRefusalReason {
     fn accepts_status(self, status: StatusCode) -> bool {
         match self {
+            Self::WriterAdmissionTimeout => status == StatusCode::SERVICE_UNAVAILABLE,
             Self::PersistenceSettling => status == StatusCode::LOCKED,
             Self::RpcLimitReached => status == StatusCode::TOO_MANY_REQUESTS,
             Self::ReceiptInvalid => status == StatusCode::BAD_REQUEST,
@@ -290,6 +292,9 @@ impl MailboxRelayRefusalReason {
 
     fn advice(self) -> &'static str {
         match self {
+            Self::WriterAdmissionTimeout => {
+                "mailbox storage is temporarily busy while waiting to begin mailbox append; no mailbox write was committed by this operation, so retry the same request"
+            }
             Self::PersistenceSettling => {
                 "native_mailbox_home_persistence_settling; home federation persistence is settling; retry the unchanged original operation"
             }
@@ -376,6 +381,18 @@ pub(crate) fn mailbox_relay_refusal_body(
     status: StatusCode,
     body: &[u8],
 ) -> Vec<u8> {
+    mailbox_relay_encode_refusal(request, mailbox_relay_refusal_reason(status, body))
+}
+
+/// Set only by the relay send handler on its typed pre-transaction error.
+#[derive(Clone, Copy)]
+pub(crate) struct MailboxRelayWriterAdmissionRefusal;
+
+pub(crate) fn mailbox_relay_writer_admission_body(request: &[u8]) -> Vec<u8> {
+    mailbox_relay_encode_refusal(request, MailboxRelayRefusalReason::WriterAdmissionTimeout)
+}
+
+fn mailbox_relay_encode_refusal(request: &[u8], reason: MailboxRelayRefusalReason) -> Vec<u8> {
     let metadata = serde_json::from_slice::<MailboxRelayErrorRequestMetadata>(request)
         .ok()
         .filter(|value| {
@@ -389,33 +406,56 @@ pub(crate) fn mailbox_relay_refusal_body(
             version: 1,
             request_id: metadata.request_id,
             request_digest: sha256_hex(request),
-            reason: mailbox_relay_refusal_reason(status, body),
+            reason,
         },
     })
     .expect("bounded relay error serializes")
 }
 
-// The caller has verified the response MAC and current authority. Diagnostics
-// grant no retry or outcome authority. Existing 404 capability/resource and
-// 5xx unknown-outcome classification stays in federation_rpc_authenticated.
+// The caller has verified the response MAC and current authority.
 pub(crate) fn mailbox_relay_verified_refusal(
     request: &MailboxRelayRequest,
     request_body: &[u8],
     status: StatusCode,
     bytes: &[u8],
 ) -> ApiError {
-    let decode = || -> Option<MailboxRelayRefusalReason> {
-        if bytes.len() > MAILBOX_RELAY_ERROR_BYTES {
-            return None;
-        }
-        let envelope: MailboxRelayErrorEnvelope = serde_json::from_slice(bytes).ok()?;
-        let body = envelope.native_mailbox_error;
-        (body.version == 1
-            && body.request_id == request.request_id
-            && body.request_digest == sha256_hex(request_body)
-            && body.reason.accepts_status(status))
-        .then_some(body.reason)
-    };
-    let reason = decode().unwrap_or(MailboxRelayRefusalReason::ReasonUnavailable);
+    let reason = mailbox_relay_decode_refusal(request, request_body, status, bytes)
+        .unwrap_or(MailboxRelayRefusalReason::ReasonUnavailable);
     ApiError::from_status(status, reason.advice())
+}
+
+pub(crate) fn mailbox_relay_verified_writer_admission(
+    request: &MailboxRelayRequest,
+    request_body: &[u8],
+    status: StatusCode,
+    bytes: &[u8],
+) -> Option<ApiError> {
+    if status != StatusCode::SERVICE_UNAVAILABLE
+        || !matches!(request.operation, MailboxRelayOperation::Send { .. })
+    {
+        return None;
+    }
+    let reason = mailbox_relay_decode_refusal(request, request_body, status, bytes)?;
+    matches!(reason, MailboxRelayRefusalReason::WriterAdmissionTimeout).then(|| {
+        ApiError::from_status(status, reason.advice())
+            .with_kind(ApiErrorKind::FederationMailboxWriterAdmission)
+    })
+}
+
+fn mailbox_relay_decode_refusal(
+    request: &MailboxRelayRequest,
+    request_body: &[u8],
+    status: StatusCode,
+    bytes: &[u8],
+) -> Option<MailboxRelayRefusalReason> {
+    if bytes.len() > MAILBOX_RELAY_ERROR_BYTES {
+        return None;
+    }
+    let envelope: MailboxRelayErrorEnvelope = serde_json::from_slice(bytes).ok()?;
+    let body = envelope.native_mailbox_error;
+    (body.version == 1
+        && body.request_id == request.request_id
+        && body.request_digest == sha256_hex(request_body)
+        && body.reason.accepts_status(status))
+    .then_some(body.reason)
 }

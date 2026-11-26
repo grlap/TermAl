@@ -543,10 +543,18 @@ impl FederationRpcClient {
                         } else if status.is_client_error() {
                             mailbox_relay_verified_refusal(relay_request, &body, status, &bytes)
                         } else {
-                            federation_mailbox_unknown_outcome(
+                            mailbox_relay_verified_writer_admission(
+                                relay_request,
+                                &body,
                                 status,
-                                "native mailbox relay response unavailable",
+                                &bytes,
                             )
+                            .unwrap_or_else(|| {
+                                federation_mailbox_unknown_outcome(
+                                    status,
+                                    "native mailbox relay response unavailable",
+                                )
+                            })
                         },
                     ));
                 }

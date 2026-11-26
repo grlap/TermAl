@@ -73,6 +73,61 @@ fn intent_custody(store: &MailboxStore, sender: &str, key: &str) -> (String, Str
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn relay_send_reports_home_writer_admission_refusal_and_saves_no_message() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::build(false, true, Some(Duration::from_millis(100)), |router| {
+        router
+    })
+    .await;
+    let (mut server, handles) = connect_sender(&fixture).await;
+    let sender = fixture
+        .satellite
+        .native_mailbox_relay_descriptor(&fixture.native)
+        .unwrap()
+        .principal;
+    let recipient = fixture
+        .central
+        .native_mailbox_relay_descriptor(&fixture.native)
+        .unwrap()
+        .principal;
+    let request = send_request(
+        format!("host:{}::{}", recipient.host.host_id, fixture.native),
+        "home-writer-admission-refused",
+    );
+    let writer = fixture.central.mailbox_store.write_lock.clone();
+    let held = lock_sqlite_state_writer(&writer);
+    let refused = fixture
+        .satellite
+        .send_native_mailbox_relay(&fixture.native, &request)
+        .await;
+    drop(held);
+    let saved = fixture
+        .central
+        .mailbox_store
+        .read_idempotent_message(&sender.participant_key(), &request.idempotency_key)
+        .unwrap();
+    server.finish().await;
+    drop(handles);
+    fixture.finish().await;
+
+    let error = refused.expect_err("held home writer admission must refuse the send");
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        error.kind,
+        Some(ApiErrorKind::FederationMailboxWriterAdmission)
+    );
+    assert!(
+        error.message.contains(
+            "no mailbox write was committed by this operation, so retry the same request"
+        ),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains(FEDERATION_MAILBOX_UNKNOWN_OUTCOME));
+    assert!(saved.is_none(), "the refusal must precede the home append");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn typed_relay_send_pins_private_scope_and_replays_only_original_custody() {
     let _scope = TestTempRootDirectoryScope::repository_local();
     let fixture = Fixture::new(false).await;
