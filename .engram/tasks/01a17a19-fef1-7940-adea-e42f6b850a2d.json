@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a1796a-82e5-7763-be05-b0a159b49c7a",
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed and installed bounded federation attestation terminal diagnostics and accepted-heartbeat measurements. Independent post-landing evaluation f57f7c20387549f08c2ca71da411181a passed all three revision-5 criteria on clean a7f9b123. The exact DL560 Linux full gate passed all six stages and matched the independently measured source across all three boundaries. The test-ref run was unbound and provided landing and judgment evidence without native verification credit. Installed build SHA-256 507f23a4494327e1e3d487eaddd9fd11a7c347f63a83b2c96bc13d98e03a1871 at target/release/termal.exe (integration note cc7c823daf9f421aab83f9bbec3d3ef7). Running host awaits its coordinated restart. The narrowly excluded handoff and ordering concerns remain tracked in w-f523efc974ff; proof output and deadline test Lows in w-52850850616b and w-96eccd7bf683.",
+    "completed_at": "2026-11-26T04:43:18.843387600Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

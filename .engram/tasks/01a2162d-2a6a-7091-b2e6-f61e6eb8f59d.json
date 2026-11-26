@@ -1,0 +1,28 @@
+{
+  "id": "01a2162d-2a6a-7091-b2e6-f61e6eb8f59d",
+  "external_ref": null,
+  "title": "Preserve uncertain verification delivery in the run-wait follow-up when artifacts are unavailable",
+  "outcome": "The run-wait follow-up reports that verification delivery is unconfirmed when a resend may have reached Engram and local artifacts prevent reconciliation.",
+  "acceptance": [
+    "A run with an uncertain verification resend and changed or missing local artifacts shows delivery as unconfirmed in its follow-up. Its message explains that local evidence prevents reconciliation.",
+    "A behavioral run-wait regression exercises a lost reply followed by missing or modified terminal artifacts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cross-project",
+    "verification-record"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a214a5-f0fe-7bb3-ba16-5818833db159",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
