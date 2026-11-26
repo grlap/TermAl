@@ -2,11 +2,40 @@
   "id": "01a19d1d-59da-7f20-9b7b-a29561736a4b",
   "external_ref": null,
   "title": "Launcher run registration reports registered-but-not-indexed for a local Engram session's focused or full run in an explicitly named root",
-  "outcome": "A focused launcher run started by a local session in a source root it named before the run is indexed by the host, with native wait available, or the launcher states the exact reason it is not (for example, the naming is not yet effective) so the agent can act on it.",
+  "outcome": "A registered run's verification receipt that no launch observation can carry (for example a Claude background full gate) reaches a terminal, explained state instead of staying 'received, not yet settled' and being retried forever, and its run wait resolves with that reason.",
   "acceptance": [
-    "Launcher run registration reports registered-but-not-indexed for a local Engram session's focused run in an explicitly named root is done"
+    "When a registered run is terminal and the host holds Engram's valid receipt for it, but no launch observation of the initiating session can carry it any longer (every launcher row of that session in the run's worktree has ended or been interrupted without an artifact, the session's runtime has changed, or no such row exists), the host moves the acknowledgement to a terminal state that names the exact reason; it grants no host check credit, is never retried, and lets the registration compact. A launcher row that is still open (a Codex row awaiting its reported end, a background task still running) keeps the receipt held until it ends: the outcome is decided by events, not by a timer.",
+    "A run wait on such a run resolves with that terminal reason instead of 'not yet settled', and GET /api/test-runs/<id> shows the terminal state and its reason.",
+    "Unchanged: a run whose launch row carries its artifact settles exactly as today (foreground launch, Codex item completion and late reported end paths); evaluation's acceptance of a received receipt is unchanged; no new directory-scan association of rows is introduced.",
+    "Behavioural regression tests cover: a Claude background launcher row ended by task_notification without a locator, whose held receipt reaches the terminal state and whose wait resolves; a still-open row that keeps it held; a foreground launch that still settles; and terminal-state persistence across a restart.",
+    "The review pair has no outstanding Medium-or-higher finding, and the full gate passes on the candidate."
   ],
-  "acceptance_bindings": [],
+  "acceptance_bindings": [
+    {
+      "criterion": 1,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 2,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    },
+    {
+      "criterion": 4,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
   "evaluation_mode": null,
   "kind": "bug",
   "priority": 1,

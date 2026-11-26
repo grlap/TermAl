@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The public read and acknowledge mailbox routes now refuse a mailbox id that is neither a relay locator nor \"mailbox-\" plus a canonical lowercase UUID. The refusal is a 400 that comes before any lookup and echoes the received value escaped and bounded. The central-domain route-miss 404 names the received id the same way. Behavioural route tests on native and central-domain sessions were RED on master first. This landed in combined commit fd4974b3 together with w-3bddbf73af2a. It passed the clean Codex and Claude review pair (2f431cf7 and bd5ca334, adopted by byte identity) and the DL560 Linux FULL test-2ad02fa8, whose source_id matched literally. The eligible claim-bound run test-7d6756ff passed 35/0. The post-landing evaluation (delegation-530287a1) passed all 3 criteria.",
+    "completed_at": "2026-11-26T04:10:51.276161500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -1,0 +1,28 @@
+{
+  "id": "01a2161e-1965-7392-8c3e-eadfcc8acf3f",
+  "external_ref": null,
+  "title": "Re-offer a saved scheduled evaluator brief after requester Resume",
+  "outcome": "After Stop cannot save a scheduled evaluator's retirement, explicit requester Resume re-offers the exact unsent brief if the original schedule wait still owns it. Queue no second brief and retain all dispatch guards.",
+  "acceptance": [
+    "Re-offer a saved scheduled evaluator brief after requester Resume is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-project",
+    "greg-reported"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a2108d-50ca-7803-b995-20e8ec69d198",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

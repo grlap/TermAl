@@ -1,0 +1,30 @@
+{
+  "id": "01a215da-b831-76e1-bb8f-a494b91203db",
+  "external_ref": null,
+  "title": "Distinguish evaluator scope changes from evidence-read infrastructure failures",
+  "outcome": "An unfinished captured-evidence recovery tells the requester when a changed evaluator scope requires a fresh evaluation and when the Engram or host read infrastructure failed.",
+  "acceptance": [
+    "A real recovery-path fixture proves that moved captured work or run identity yields a distinct scope-change diagnostic while a tracker timeout stays an evaluator infrastructure failure. Both paths remain no-verdict outcomes and recover only through an appropriate fresh evaluation."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "blocks-engram-memory-sync",
+    "cross-project",
+    "design-rule",
+    "evaluator"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1de3a-abf6-7512-a7b5-27e5e342bba4",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "id": "01a2160e-ba13-7ea2-9d13-147f0ef4e47a",
+  "external_ref": null,
+  "title": "Bound retention for verification binding waits whose initiating session survives",
+  "outcome": "Bound idle registration retention and NamedRootRead retries when Engram can establish that a deferred verification run can no longer regain the original binding, while retaining exact uncertain-delivery replay.",
+  "acceptance": [
+    "Bound retention for verification binding waits whose initiating session survives is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
