@@ -1,0 +1,29 @@
+{
+  "id": "01a219ec-8aef-7430-b1a0-53ffe250931e",
+  "external_ref": null,
+  "title": "Host check notice says 'current-input confirmation unavailable' for a settled registered focused run whose source_id matched at admission and both boundaries",
+  "outcome": "When a registered committed-input focused run in a named root ends with a matching complete source_id at admission and at both boundaries, and its native verification settles, the host's check notice and tracker observation carry that run's source revision and root instead of reporting the current-input confirmation as unavailable.",
+  "acceptance": [
+    "A registered committed-input focused run in an explicitly named root, whose complete source_id matched at admission and at both boundaries and whose native verification settled, yields a host check notice that confirms the current input. It must not report 'current-input confirmation unavailable (no source observation available for this notice)'.",
+    "The tracker observation that carries such a run's check records the source revision and root of the clean named sighting, not a check with no revision or root, and this is shown by a behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "credit",
+    "cross-project",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
