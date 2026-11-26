@@ -134,6 +134,14 @@ pub(crate) trait TurnRecorder {
         let _ = (ran, cwd);
         self.command_started(key, command)
     }
+    fn codex_command_started(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        self.command_started_in(item_id.unwrap_or(command), command, Some(command), cwd)
+    }
     /// The runtime said again what a started command runs (`ran`) or where
     /// (`cwd`), without starting or ending it: an ACP update without a
     /// status, or the one that ends it. A test check it contradicts is
@@ -168,6 +176,18 @@ pub(crate) trait TurnRecorder {
     ) -> Result<()> {
         let _ = exit;
         self.command_completed(key, command, output, status)
+    }
+    fn codex_command_completed(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        let _ = cwd;
+        self.command_completed_with_exit(item_id.unwrap_or(command), command, output, status, exit)
     }
     /// Completion with the runtime's omitted-output metadata. It explains a
     /// withheld check only; it never supplies a verdict or a file to read.
@@ -274,13 +294,13 @@ pub(crate) struct SessionRecorder {
 }
 
 impl SessionRecorder {
-    /// ACP may end a tool call with only a display title. Keep the actual
-    /// command's presence separate so a title is never execution identity.
-    pub(crate) fn command_completed_with_reported_command(
+    /// Keep ACP's actual completion description separate from its title.
+    pub(crate) fn command_completed_with_reported_location(
         &mut self,
         key: &str,
         command: &str,
         reported_command: Option<&str>,
+        reported_cwd: Option<&str>,
         output: &str,
         status: CommandStatus,
         exit: EngramCommandExit,
@@ -290,11 +310,13 @@ impl SessionRecorder {
             key,
             command,
             reported_command,
+            reported_cwd,
             output,
             status,
             Some(exit),
             false,
             false,
+            true,
         )
     }
 
@@ -936,17 +958,25 @@ fn recorder_reset_turn_state<R: SessionRecorderAccess>(recorder: &mut R) -> Resu
     Ok(())
 }
 
-// Upserts a `Command` message in `Running` status. The first call for a
-// given `key` allocates a new message id and stores it in
-// `recorder_state.command_messages`; later calls for the same key (from
-// `recorder_command_completed`) reuse it so output + final status mutate
-// the same message rather than appending a duplicate.
+// External Dart observations require a provider item ID. A transcript row
+// can still use the command text as its display key.
+pub(crate) fn codex_command_observed(item_id: Option<&str>, command: &str) -> bool {
+    item_id.is_some_and(|id| !id.trim().is_empty())
+        || !engram_observed_dart_launcher(command, &EngramObservationProvenance::Ambient)
+            .is_some_and(|command| {
+                engram_observed_dart_words(&command.program, &command.argv[1..])
+                    .is_some_and(|words| words.external.is_some())
+            })
+}
+
+// Upsert the transcript message under the same key used by command completion.
 fn recorder_command_started<R: SessionRecorderAccess>(
     recorder: &mut R,
     key: &str,
     command: &str,
     ran: Option<&str>,
     cwd: Option<&str>,
+    observe: bool,
 ) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
@@ -965,7 +995,9 @@ fn recorder_command_started<R: SessionRecorderAccess>(
         "",
         CommandStatus::Running,
     )?;
-    recorder.observe(EngramRecorderObservation::CommandStarted { key, ran, cwd });
+    if observe {
+        recorder.observe(EngramRecorderObservation::CommandStarted { key, ran, cwd });
+    }
     Ok(())
 }
 
@@ -1016,11 +1048,13 @@ fn recorder_command_completed<R: SessionRecorderAccess>(
         key,
         command,
         Some(command),
+        None,
         output,
         status,
         exit,
         runtime_output_cut,
         runtime_interrupted,
+        true,
     )
 }
 
@@ -1030,11 +1064,13 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     key: &str,
     command: &str,
     reported_command: Option<&str>,
+    reported_cwd: Option<&str>,
     output: &str,
     status: CommandStatus,
     exit: Option<EngramCommandExit>,
     runtime_output_cut: bool,
     runtime_interrupted: bool,
+    observe: bool,
 ) -> Result<()> {
     let state = recorder.state().clone();
     let session_id = recorder.session_id().to_owned();
@@ -1050,7 +1086,9 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
     // A Running reply is not an end. A simple launcher's explicit
     // NotFinished reply may still contain its RUN locator; the observation
     // owner preserves that nonterminal exit and the original invocation.
-    if status != CommandStatus::Running || EngramHost::is_nonterminal_launcher_reply(command, exit)
+    if observe
+        && (status != CommandStatus::Running
+            || EngramHost::is_nonterminal_launcher_reply(command, exit))
     {
         let provenance = recorder
             .recorder_state_mut()
@@ -1062,12 +1100,37 @@ fn recorder_command_completed_reported<R: SessionRecorderAccess>(
             key,
             command,
             reported_command,
+            reported_cwd,
             output,
             exit,
             runtime_output_cut,
         });
     }
     Ok(())
+}
+
+fn recorder_codex_command_completed<R: SessionRecorderAccess>(
+    recorder: &mut R,
+    item_id: Option<&str>,
+    command: &str,
+    cwd: Option<&str>,
+    output: &str,
+    status: CommandStatus,
+    exit: EngramCommandExit,
+) -> Result<()> {
+    recorder_command_completed_reported(
+        recorder,
+        item_id.unwrap_or(command),
+        command,
+        Some(command),
+        cwd,
+        output,
+        status,
+        Some(exit),
+        false,
+        false,
+        codex_command_observed(item_id, command),
+    )
 }
 
 // Upserts a `ParallelAgents` message keyed by `key` (the parallel-agent
@@ -1379,7 +1442,7 @@ impl TurnRecorder for SessionRecorder {
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
-        recorder_command_started(self, key, command, Some(command), None)
+        recorder_command_started(self, key, command, Some(command), None, true)
     }
 
     fn command_started_in(
@@ -1389,7 +1452,23 @@ impl TurnRecorder for SessionRecorder {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) -> Result<()> {
-        recorder_command_started(self, key, command, ran, cwd)
+        recorder_command_started(self, key, command, ran, cwd, true)
+    }
+
+    fn codex_command_started(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        recorder_command_started(
+            self,
+            item_id.unwrap_or(command),
+            command,
+            Some(command),
+            cwd,
+            codex_command_observed(item_id, command),
+        )
     }
 
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
@@ -1416,6 +1495,18 @@ impl TurnRecorder for SessionRecorder {
         exit: EngramCommandExit,
     ) -> Result<()> {
         recorder_command_completed(self, key, command, output, status, Some(exit), false, false)
+    }
+
+    fn codex_command_completed(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        recorder_codex_command_completed(self, item_id, command, cwd, output, status, exit)
     }
 
     fn command_completed_with_capture(
@@ -1560,7 +1651,7 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
     }
 
     fn command_started(&mut self, key: &str, command: &str) -> Result<()> {
-        recorder_command_started(self, key, command, Some(command), None)
+        recorder_command_started(self, key, command, Some(command), None, true)
     }
 
     fn command_started_in(
@@ -1570,7 +1661,23 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         ran: Option<&str>,
         cwd: Option<&str>,
     ) -> Result<()> {
-        recorder_command_started(self, key, command, ran, cwd)
+        recorder_command_started(self, key, command, ran, cwd, true)
+    }
+
+    fn codex_command_started(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        recorder_command_started(
+            self,
+            item_id.unwrap_or(command),
+            command,
+            Some(command),
+            cwd,
+            codex_command_observed(item_id, command),
+        )
     }
 
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
@@ -1597,6 +1704,18 @@ impl TurnRecorder for BorrowedSessionRecorder<'_> {
         exit: EngramCommandExit,
     ) -> Result<()> {
         recorder_command_completed(self, key, command, output, status, Some(exit), false, false)
+    }
+
+    fn codex_command_completed(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        recorder_codex_command_completed(self, item_id, command, cwd, output, status, exit)
     }
 
     fn command_completed_with_capture(

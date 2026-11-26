@@ -103,7 +103,12 @@ impl AppState {
         }
         // Re-read the run off-lock. A replaced request, a now-recognized stage
         // or nonterminal results must not inherit the earlier refusal.
-        if !matches!(engram_verification_record_prepare(registration),
+        let rechecked = if registration.external_launcher.is_some() {
+            self.prepare_engram_verification_record(registration)
+        } else {
+            engram_verification_record_prepare(registration)
+        };
+        if !matches!(rechecked,
             EngramVerificationRecordPrepared::Pending(
                 EngramVerificationRecordPending::UnclassifiedStages { stages: current }
             ) if current == stages)

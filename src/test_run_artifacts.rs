@@ -237,10 +237,16 @@ impl AppState {
         }
         let Some(command) = EngramHost::recognized_check(line)
             .or_else(|| engram_observed_dart_launcher(line, provenance))
-            .filter(|command| command.simple && EngramHost::launcher_arguments(command).is_some())
+            .filter(|command| command.simple)
         else {
             return;
         };
+        if EngramHost::launcher_arguments(&command).is_none()
+            || engram_observed_dart_words(&command.program, &command.argv[1..])
+                .is_some_and(|dart| dart.external.is_some())
+        {
+            return;
+        }
         let fingerprint = EngramHost::check_fingerprint(&command);
         let tool_identity = sha256_hex(key.as_bytes());
         let row = {
@@ -255,6 +261,7 @@ impl AppState {
                     && row.runtime_identity.is_some()
                     && row.tool_identity == tool_identity
                     && row.command_fingerprint == fingerprint
+                    && row.external_dart_launch.is_none()
             });
             let Some(row) = rows.next().cloned() else {
                 return;
@@ -264,6 +271,95 @@ impl AppState {
             }
             row
         };
+        self.associate_test_command_artifact(row, output, Some(&command));
+    }
+
+    /// Only the unique original observation ended by this provider result can
+    /// supply the external command. Any explicit echo must agree with the
+    /// decoded launch, and any reported location with the original invocation.
+    pub(crate) fn observe_external_dart_artifact_from_end(
+        &self,
+        ended: &[String],
+        provenance: &EngramObservationProvenance,
+        reported_command: Option<&str>,
+        reported_cwd: Option<&str>,
+        output: &str,
+        output_cut: bool,
+    ) {
+        if output_cut {
+            return;
+        }
+        let [id] = ended else {
+            return;
+        };
+        let row = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .test_run_observations
+                .get(id)
+                .filter(|row| {
+                    row.monitoring_interrupted_at.is_none()
+                        && row.artifact.is_none()
+                        && row
+                            .external_dart_launch
+                            .as_ref()
+                            .is_some_and(|launch| launch.provider_ended)
+                })
+                .cloned()
+        };
+        let Some(row) = row else {
+            return;
+        };
+        let Some(launch) = row.external_dart_launch.as_ref() else {
+            return;
+        };
+        if reported_cwd.is_some_and(|cwd| {
+            !launch
+                .provider_location
+                .as_ref()
+                .is_some_and(|location| location.matches(cwd))
+        }) {
+            return;
+        }
+        if let Some(line) = reported_command {
+            let Some(command) = engram_observed_dart_launcher(line, provenance) else {
+                return;
+            };
+            let Some(words) = engram_observed_dart_words(&command.program, &command.argv[1..])
+            else {
+                return;
+            };
+            let Some(external) = words.external else {
+                return;
+            };
+            let root = FsPath::new(&row.summary.worktree);
+            let directory_matches = command.directory.as_deref().is_none_or(|directory| {
+                engram_resolve_shell_move(None, directory).is_some_and(|directory| {
+                    engram_dart_worktree_matches(root, FsPath::new(&directory))
+                })
+            });
+            if EngramHost::check_fingerprint(&command) != row.command_fingerprint
+                || !directory_matches
+                || !engram_dart_worktree_matches(root, FsPath::new(external.root))
+                || engram_external_dart_command_digest(external.script, words.sdk).as_deref()
+                    != Some(launch.command_digest.as_str())
+            {
+                return;
+            }
+        }
+        self.associate_test_command_artifact(row, output, None);
+    }
+
+    fn associate_test_command_artifact(
+        &self,
+        row: TestRunCommandObservation,
+        output: &str,
+        command: Option<&EngramCheckCommand>,
+    ) {
+        let dart = command
+            .and_then(|command| engram_observed_dart_words(&command.program, &command.argv[1..]));
+        let is_external = command.is_none();
+        let launcher_words = command.and_then(EngramHost::launcher_arguments);
         // Native runs already own their original reservation and artifact.
         // Console locators, previews and persisted-output metadata cannot
         // replace that association.
@@ -275,12 +371,13 @@ impl AppState {
         let refuse =
             |code, facts: &[_]| self.retain_test_command_artifact_refusal(&row, code, facts);
         let mut locators = std::collections::BTreeSet::new();
+        let mut has_run_locator = false;
         for line in output.lines() {
             let line = line.trim();
-            let directory = if let Some(directory) = line
-                .strip_prefix("RUN ")
-                .or_else(|| line.strip_prefix("STARTED "))
-            {
+            let directory = if let Some(directory) = line.strip_prefix("RUN ") {
+                has_run_locator = true;
+                PathBuf::from(directory)
+            } else if let Some(directory) = line.strip_prefix("STARTED ") {
                 PathBuf::from(directory)
             } else if let Some(results) = line.strip_prefix("results: ") {
                 let path = FsPath::new(results);
@@ -320,6 +417,9 @@ impl AppState {
                 return;
             }
         }
+        if is_external && !has_run_locator {
+            return;
+        }
         let Some(directory) = locators.into_iter().next() else {
             // No explicit locator was offered for association. In particular,
             // a non-locator frame cannot rewrite an original observation.
@@ -346,13 +446,16 @@ impl AppState {
             refuse(ArtifactWorktreeUnavailable, &[(WorktreePresent, false)]);
             return;
         }
-        let Some(expected_parent) =
-            EngramHost::run_artifact_directory(FsPath::new(&row.summary.worktree))
-        else {
+        let worktree = FsPath::new(&row.summary.worktree);
+        let Some(expected_parent) = EngramHost::run_artifact_directory(worktree) else {
             refuse(ArtifactRootUnavailable, &[(ArtifactRootAvailable, false)]);
             return;
         };
-        let Ok(expected_parent) = fs::canonicalize(expected_parent) else {
+        let Some(expected_parent) = (if is_external {
+            engram_external_launcher_run_parent(worktree)
+        } else {
+            fs::canonicalize(expected_parent).ok()
+        }) else {
             refuse(ArtifactRootUnavailable, &[(ArtifactRootResolved, false)]);
             return;
         };
@@ -368,10 +471,33 @@ impl AppState {
             refuse(ArtifactRequestUnavailable, &[(RequestReadable, false)]);
             return;
         };
-        let dart_argv = engram_focused_launcher_words(&command.program, &command.argv[1..])
-            .and_then(Result::ok)
-            .filter(|argv| engram_supports_focused_dart_test(argv));
-        let worktree_matches = if dart_argv.is_some() {
+        let external_matches = match (is_external, disk.external_launcher.as_ref()) {
+            (false, None) => true,
+            (true, Some(launcher)) => {
+                !disk.command_truncated
+                    && row.external_dart_launch.as_ref().is_some_and(|launch| {
+                        disk.command
+                            .as_deref()
+                            .and_then(|sdk| {
+                                engram_external_dart_command_digest(&launcher.script, sdk)
+                            })
+                            .as_deref()
+                            == Some(launch.command_digest.as_str())
+                    })
+            }
+            _ => false,
+        };
+        if !external_matches {
+            refuse(ArtifactRequestMismatch, &[(ObservationMatches, false)]);
+            return;
+        }
+        let dart_argv = dart.as_ref().map(|dart| dart.sdk).or_else(|| {
+            let command = command?;
+            engram_focused_launcher_words(&command.program, &command.argv[1..])
+                .and_then(Result::ok)
+                .filter(|argv| engram_supports_focused_dart_test(argv))
+        });
+        let worktree_matches = if is_external || dart_argv.is_some() {
             engram_dart_worktree_matches(
                 FsPath::new(&row.summary.worktree),
                 FsPath::new(&disk.worktree),
@@ -379,8 +505,10 @@ impl AppState {
         } else {
             test_run_path_key(&disk.worktree) == test_run_path_key(&row.summary.worktree)
         };
+        let owner_matches =
+            row.summary.owner_session_id.is_some() && disk.owner == row.summary.owner_session_id;
         if disk.run_id != run_id
-            || disk.owner.as_deref() != Some(session_id)
+            || !owner_matches
             || !worktree_matches
             || disk.request_identity.is_none()
         {
@@ -388,18 +516,18 @@ impl AppState {
                 ArtifactRequestMismatch,
                 &[
                     (RunMatches, disk.run_id == run_id),
-                    (
-                        RequestOwnerMatches,
-                        disk.owner.as_deref() == Some(session_id),
-                    ),
+                    (RequestOwnerMatches, owner_matches),
                     (WorktreeMatches, worktree_matches),
                     (RequestIdentityPresent, disk.request_identity.is_some()),
                 ],
             );
             return;
         }
-        let mode = EngramHost::launcher_arguments(&command).and_then(|words| words.get(2).cloned());
-        if (disk.preset == TestRunPreset::Full) != (mode.as_deref() == Some("full")) {
+        let mode = launcher_words
+            .as_ref()
+            .and_then(|words| words.get(2))
+            .map(String::as_str);
+        if (disk.preset == TestRunPreset::Full) != (mode == Some("full")) {
             refuse(ArtifactModeMismatch, &[(ModeMatches, false)]);
             return;
         }
@@ -446,11 +574,21 @@ impl AppState {
             refuse(ArtifactLaunchWindowInvalid, &[(WithinLaunchWindow, false)]);
             return;
         }
+        // The external foreground launch must own the terminal image read
+        // during association. A subsequent scan cannot supply its identity.
+        let terminal_digest = if is_external {
+            let Some(results) = disk.results.as_ref().filter(|_| disk.is_terminal()) else {
+                return;
+            };
+            Some(results.digest.clone())
+        } else {
+            None
+        };
         let artifact = TestRunObservedArtifact {
             run_id: run_id.to_owned(),
             run_directory: test_run_display_path(&canonical),
             request_identity: disk.request_identity.clone(),
-            terminal_digest: None,
+            terminal_digest,
         };
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if inner
@@ -467,6 +605,15 @@ impl AppState {
             .is_some_and(|earlier| earlier != &artifact)
         {
             return;
+        }
+        if is_external {
+            let Some((name, binding)) =
+                engram_external_dart_registered_launch(&inner, &row, &artifact)
+            else {
+                return;
+            };
+            updated.source_root = Some(name.clone());
+            updated.work_binding = Some(binding.clone());
         }
         updated.artifact = Some(artifact);
         updated.native_completion_refusal = None;

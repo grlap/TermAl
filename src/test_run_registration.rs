@@ -52,6 +52,8 @@ pub(crate) struct TestRunRegistration {
     // registrations do not acquire a pin from a later project configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) source_owner: Option<EngramSourceOwnerPin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) external_launcher: Option<ExternalDartLauncher>,
     #[serde(default)]
     pub(crate) project_id: Option<String>,
     pub(crate) run_directory: String,
@@ -618,6 +620,9 @@ pub(crate) fn test_run_registration_identity(request: &Value) -> Result<String, 
     if let Some(pin) = request.get("sourceOwner") {
         immutable.insert("sourceOwner", pin.clone());
     }
+    if let Some(launcher) = request.get("externalLauncher") {
+        immutable.insert("externalLauncher", launcher.clone());
+    }
     if let Some(source_id) = request.get("nativeSourceId") {
         immutable.insert("nativeSourceId", source_id.clone());
     }
@@ -877,6 +882,7 @@ impl AppState {
             ));
         }
         let request_identity = test_run_registration_identity(&value)?;
+        let external_launcher = engram_external_launcher_request(&value)?;
         let causal_capture = self.resolve_test_run_causal_admission(
             session_id,
             &request.run_id,
@@ -919,6 +925,16 @@ impl AppState {
             return Err(ApiError::bad_request(
                 "test run worktree is outside the configured project",
             ));
+        }
+        if external_launcher.is_some() {
+            let target = FsPath::new(&disk.worktree);
+            let expected = engram_external_launcher_run_parent(target)
+                .map(|parent| parent.join(&request.run_id));
+            if expected.as_deref() != Some(run_directory.as_path()) {
+                return Err(ApiError::bad_request(
+                    "external Dart run directory must belong to the selected worktree's Git admin directory",
+                ));
+            }
         }
         // Committed launcher runs and original host-owned native runs bind
         // through their named root. Every other run keeps the session's
@@ -1057,6 +1073,13 @@ impl AppState {
             } else {
                 (inner.sessions[index].engram.work_binding.clone(), None)
             };
+            if external_launcher.is_some()
+                && (work_binding.is_none() || named_root.is_none() || authority_store.is_none())
+            {
+                return Err(ApiError::conflict(
+                    "external Dart launcher requires a named source root",
+                ));
+            }
             if let Some(start) = native {
                 if !start.accepts_registration_binding(work_binding.as_ref())
                     || named_root.as_ref() != Some(&start.named)
@@ -1076,6 +1099,7 @@ impl AppState {
                 native_completion: None,
                 native_completion_refusal: None,
                 source_owner,
+                external_launcher,
                 native_origin: inner
                     .federation
                     .local

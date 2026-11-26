@@ -253,15 +253,59 @@ fn engram_parse_dart_launch(
 }
 
 pub(crate) fn engram_is_observed_dart_launcher(program: &str, args: &[String]) -> bool {
-    let Some(Ok(inner)) = engram_focused_launcher_words(program, args) else {
-        return false;
+    engram_observed_dart_words(program, args).is_some()
+}
+
+pub(crate) struct EngramExternalDartLaunch<'a> {
+    pub(crate) script: &'a str,
+    pub(crate) root: &'a str,
+}
+
+pub(crate) struct EngramObservedDartWords<'a> {
+    pub(crate) sdk: &'a [String],
+    pub(crate) external: Option<EngramExternalDartLaunch<'a>>,
+}
+
+pub(crate) fn engram_observed_dart_words<'a>(
+    program: &str,
+    args: &'a [String],
+) -> Option<EngramObservedDartWords<'a>> {
+    let [script, mode, outer @ ..] = args else {
+        return None;
+    };
+    let external = engram_external_launcher_script(script);
+    let inner = if external {
+        if program != "node" || mode != "focused" {
+            return None;
+        }
+        engram_focused_launcher_options(outer, true).ok()?
+    } else {
+        engram_focused_launcher_words(program, args)?.ok()?
     };
     // The envelope parser validates the option pairs and the separator.
     let options = &args[2..args.len() - inner.len() - 1];
-    options
+    if !options
         .chunks_exact(2)
         .any(|pair| pair[0] == "--input" && pair[1] == "commit")
-        && engram_supports_focused_dart_test(inner)
+        || !engram_supports_focused_dart_test(inner)
+    {
+        return None;
+    }
+    let external = if external {
+        let root = options
+            .chunks_exact(2)
+            .find(|pair| pair[0] == "--project-root")?;
+        Some(EngramExternalDartLaunch {
+            script,
+            root: &root[1],
+        })
+    } else {
+        None
+    };
+    Some(EngramObservedDartWords {
+        sdk: inner,
+        external,
+    })
 }
 
 // Bash quotes protect only the first argv boundary. Batch programs and
@@ -679,85 +723,91 @@ pub(crate) fn engram_focused_launcher_words<'a>(
     {
         return None;
     }
-    Some((|| {
-        let mut index = 0;
-        let mut metadata = Vec::new();
-        let mut binary_envs = Vec::new();
-        while let Some(flag) = outer.get(index) {
-            if flag == "--" {
-                break;
+    Some(engram_focused_launcher_options(outer, false))
+}
+
+fn engram_focused_launcher_options(outer: &[String], external: bool) -> Result<&[String], String> {
+    let mut index = 0;
+    let mut metadata = Vec::new();
+    let mut binary_envs = Vec::new();
+    while let Some(flag) = outer.get(index) {
+        if flag == "--" {
+            break;
+        }
+        if flag == "--detach" {
+            return Err("--detach is not a foreground focused check".to_owned());
+        }
+        if external && flag == "--request-message-id" {
+            return Err("--request-message-id cannot be combined with --project-root".to_owned());
+        }
+        if !(matches!(
+            flag.as_str(),
+            "--input"
+                | "--notify"
+                | "--item"
+                | "--next-owner"
+                | "--next-action"
+                | "--require-binary-env"
+                | "--request-message-id"
+        ) || (external && flag == "--project-root"))
+        {
+            return Err(format!("unsupported focused launcher option {flag:?}"));
+        }
+        let value = outer
+            .get(index + 1)
+            .filter(|value| !value.trim().is_empty() && !value.starts_with("--"))
+            .ok_or_else(|| format!("{flag} requires a value before --"))?;
+        if flag == "--require-binary-env" {
+            let mut bytes = value.bytes();
+            if !bytes.next().is_some_and(|byte| byte.is_ascii_uppercase())
+                || !bytes
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+                || binary_envs.contains(&value.as_str())
+            {
+                return Err(format!(
+                    "{flag} requires a distinct uppercase variable name"
+                ));
             }
-            if flag == "--detach" {
-                return Err("--detach is not a foreground focused check".to_owned());
+            binary_envs.push(value.as_str());
+        } else {
+            if metadata.contains(&flag.as_str()) {
+                return Err(format!("{flag} may be supplied only once"));
             }
-            if !matches!(
-                flag.as_str(),
-                "--input"
-                    | "--notify"
-                    | "--item"
-                    | "--next-owner"
-                    | "--next-action"
-                    | "--require-binary-env"
-                    | "--request-message-id"
-            ) {
-                return Err(format!("unsupported focused launcher option {flag:?}"));
-            }
-            let value = outer
-                .get(index + 1)
-                .filter(|value| !value.trim().is_empty() && !value.starts_with("--"))
-                .ok_or_else(|| format!("{flag} requires a value before --"))?;
-            if flag == "--require-binary-env" {
-                let mut bytes = value.bytes();
-                if !bytes.next().is_some_and(|byte| byte.is_ascii_uppercase())
-                    || !bytes.all(|byte| {
-                        byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
-                    })
-                    || binary_envs.contains(&value.as_str())
-                {
-                    return Err(format!(
-                        "{flag} requires a distinct uppercase variable name"
-                    ));
+            let max_bytes = if flag == "--next-action" { 2000 } else { 256 };
+            let valid = match flag.as_str() {
+                // Both input selections retain their actual launcher argv;
+                // recognizing a plain check grants no verification credit.
+                "--input" => matches!(value.as_str(), "commit" | "plain"),
+                "--notify" => !value.trim().starts_with('-'),
+                // Recognition preserves this selector as metadata. The
+                // registration owner still authenticates original custody.
+                "--request-message-id" => mailbox_test_message_selector_valid(value),
+                "--project-root" => engram_external_launcher_local_path(value),
+                _ => {
+                    !value.contains(['\r', '\n'])
+                        && value.len() <= max_bytes
+                        && (flag != "--next-owner"
+                            || (value == value.trim() && !value.starts_with('-')))
                 }
-                binary_envs.push(value.as_str());
-            } else {
-                if metadata.contains(&flag.as_str()) {
-                    return Err(format!("{flag} may be supplied only once"));
-                }
-                let max_bytes = if flag == "--next-action" { 2000 } else { 256 };
-                let valid = match flag.as_str() {
-                    // Both input selections retain their actual launcher argv;
-                    // recognizing a plain check grants no verification credit.
-                    "--input" => matches!(value.as_str(), "commit" | "plain"),
-                    "--notify" => !value.trim().starts_with('-'),
-                    // Recognition preserves this selector as metadata. The
-                    // registration owner still authenticates original custody.
-                    "--request-message-id" => mailbox_test_message_selector_valid(value),
-                    _ => {
-                        !value.contains(['\r', '\n'])
-                            && value.len() <= max_bytes
-                            && (flag != "--next-owner"
-                                || (value == value.trim() && !value.starts_with('-')))
-                    }
-                };
-                if !valid {
-                    return Err(format!("{flag} has an invalid launcher metadata value"));
-                }
-                metadata.push(flag.as_str());
+            };
+            if !valid {
+                return Err(format!("{flag} has an invalid launcher metadata value"));
             }
-            index += 2;
+            metadata.push(flag.as_str());
         }
-        if metadata.contains(&"--next-owner") != metadata.contains(&"--next-action") {
-            return Err("--next-owner and --next-action must be supplied together".to_owned());
-        }
-        if outer.get(index).is_none_or(|word| word != "--") {
-            return Err("focused launcher requires -- before its command".to_owned());
-        }
-        let inner = &outer[index + 1..];
-        if inner.first().is_none_or(String::is_empty) {
-            return Err("focused launcher requires a command after --".to_owned());
-        }
-        Ok(inner)
-    })())
+        index += 2;
+    }
+    if metadata.contains(&"--next-owner") != metadata.contains(&"--next-action") {
+        return Err("--next-owner and --next-action must be supplied together".to_owned());
+    }
+    if outer.get(index).is_none_or(|word| word != "--") {
+        return Err("focused launcher requires -- before its command".to_owned());
+    }
+    let inner = &outer[index + 1..];
+    if inner.first().is_none_or(String::is_empty) {
+        return Err("focused launcher requires a command after --".to_owned());
+    }
+    Ok(inner)
 }
 
 /// Whether `program` with `args` runs a test suite, as far as TermAl can say

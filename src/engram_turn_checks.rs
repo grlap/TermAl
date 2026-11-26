@@ -1337,6 +1337,14 @@ impl AppState {
             }
         };
         let recognised = ran.and_then(|ran| engram_check_command_in(ran, dialect));
+        let dart_observation = recognised
+            .is_none()
+            .then(|| ran.and_then(|line| engram_observed_dart_launcher(line, provenance)))
+            .flatten();
+        let external_dart = dart_observation.as_ref().is_some_and(|command| {
+            engram_observed_dart_words(&command.program, &command.argv[1..])
+                .is_some_and(|words| words.external.is_some())
+        });
         let unsupported_focused = recognised
             .is_none()
             .then(|| ran.and_then(engram_unsupported_focused_line))
@@ -1364,7 +1372,7 @@ impl AppState {
             child,
             turn_generation,
             unresolved_writers,
-            test_run_origin,
+            mut test_run_origin,
         ) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
@@ -1380,6 +1388,10 @@ impl AppState {
                 && runtime_observation_check_owner(record).is_some()
                 && claude_observation_disposition(record, provenance)
                     == ClaudeObservationDisposition::Current;
+            let mut origin = TestRunCommandOrigin::capture(&inner, index, provenance, key);
+            if ran.is_none() || external_dart {
+                origin.external_dart_roots = engram_external_dart_launch_roots(&inner, &origin);
+            }
             (
                 record.session.workdir.clone(),
                 // A turn whose claim names a source root credits tests there.
@@ -1419,15 +1431,22 @@ impl AppState {
                 } else {
                     Vec::new()
                 },
-                TestRunCommandOrigin::capture(&inner, index, provenance, key),
+                origin,
             )
         };
-        if ran.is_none() {
+        let external_without_cwd = dart_observation.as_ref().filter(|check| {
+            check.directory.is_none()
+                && !matches!(places.as_deref(), Some([Some(_)]))
+                && external_dart
+        });
+        if ran.is_none() || external_without_cwd.is_some() {
             self.remember_unclassified_test_command(
                 test_run_origin.clone(),
                 workdir.clone(),
                 started_at.clone(),
                 places.clone(),
+                external_without_cwd.cloned(),
+                position.clone(),
             );
         }
         // Where the command's `cd` leads, from where its shell is presumed to
@@ -1526,12 +1545,14 @@ impl AppState {
             .as_ref()
             .or_else(|| declared.as_ref().map(|(command, _, _)| command))
             .or_else(|| visibility_declared.as_ref().map(|(command, _, _)| command));
-        let dart_observation = (observation_command.is_none() && !has_original_start)
-            .then(|| ran.and_then(|line| engram_observed_dart_launcher(line, provenance)))
-            .flatten();
+        let dart_observation =
+            dart_observation.filter(|_| observation_command.is_none() && !has_original_start);
         if let Some(command) = observation_command.or(dart_observation.as_ref())
             && !has_original_start
         {
+            if dart_observation.is_some() {
+                engram_place_external_dart_launch(&mut test_run_origin, command);
+            }
             // The same start's validated target is also the observation's
             // source. A named linked root must not be resolved again as the
             // session worktree, nor lent to a different command.
@@ -1543,7 +1564,10 @@ impl AppState {
                     command,
                     FsPath::new(&workdir),
                     places.as_deref(),
-                    test_run_origin.source_root.as_ref(),
+                    test_run_origin
+                        .external_dart_roots
+                        .first()
+                        .or(test_run_origin.source_root.as_ref()),
                 )
                 .map(|target| test_run_display_path(&target.root)),
                 None => engram_check_worktree_from(
@@ -1565,6 +1589,7 @@ impl AppState {
                 &observed_root,
                 &started_at,
                 declared_binding,
+                (&workdir, reported.as_deref().or(position.as_deref())),
             );
         }
         #[cfg(test)]
@@ -2453,14 +2478,15 @@ impl AppState {
             key,
             command,
             Some(command),
+            None,
             output,
             exit,
             runtime_output_cut,
         );
     }
 
-    /// Preserves an ACP completion's actual command absence independently of
-    /// the label shown in its transcript card.
+    /// Preserves an ACP completion's description independently of the label
+    /// shown in its transcript card.
     pub(crate) fn note_engram_command_finished_reported(
         &self,
         session_id: &str,
@@ -2468,6 +2494,7 @@ impl AppState {
         key: &str,
         command: &str,
         reported_command: Option<&str>,
+        reported_cwd: Option<&str>,
         output: &str,
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
@@ -2478,6 +2505,7 @@ impl AppState {
             key,
             command,
             reported_command,
+            reported_cwd,
             output,
             exit,
             runtime_output_cut,
@@ -2493,6 +2521,7 @@ impl AppState {
         key: &str,
         command: &str,
         reported_command: Option<&str>,
+        reported_cwd: Option<&str>,
         output: &str,
         exit: Option<EngramCommandExit>,
         runtime_output_cut: bool,
@@ -2541,11 +2570,21 @@ impl AppState {
         } else {
             self.observe_test_command_end(session_id, provenance, key, exit)
         };
+        self.observe_external_dart_artifact_from_end(
+            &ended_test_runs,
+            provenance,
+            reported_command,
+            reported_cwd,
+            output,
+            runtime_output_cut,
+        );
+        // Ordinary launcher association retains its existing display
+        // fallback. External association needs the exact provider end above.
         self.observe_test_command_artifact(
             session_id,
             provenance,
             key,
-            command,
+            reported_command.unwrap_or(command),
             output,
             runtime_output_cut,
         );
@@ -2829,6 +2868,7 @@ impl AppState {
                     key,
                     command,
                     reported_command,
+                    reported_cwd,
                     output,
                     exit,
                     runtime_output_cut,
@@ -2859,6 +2899,7 @@ impl AppState {
                     key,
                     command,
                     reported_command,
+                    reported_cwd,
                     output,
                     exit: Some(EngramCommandExit::Unknown),
                     runtime_output_cut,
@@ -2873,6 +2914,7 @@ impl AppState {
                     key,
                     command,
                     reported_command,
+                    reported_cwd,
                     output,
                     exit,
                     runtime_output_cut,
@@ -2891,6 +2933,7 @@ impl AppState {
                 key,
                 command,
                 reported_command,
+                reported_cwd,
                 output,
                 exit,
                 runtime_output_cut,

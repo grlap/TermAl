@@ -43,6 +43,7 @@ fn late_declared_end_keeps_the_wait_pending_until_the_original_artifact_is_appli
             &fixture.session,
             "late-task",
             DECLARED,
+            None,
             "shell success is not a verdict",
             exit,
             || {
@@ -88,6 +89,7 @@ fn late_declared_end_keeps_the_wait_pending_until_the_original_artifact_is_appli
             &fixture.session,
             "late-task",
             DECLARED,
+            None,
             "duplicate",
             EngramCommandExit::Code(0),
         );
@@ -118,6 +120,7 @@ fn a_completed_earlier_use_of_the_same_key_does_not_hide_the_current_binding() {
         &fixture.session,
         "reused-key",
         DECLARED,
+        None,
         "completed",
         EngramCommandExit::Code(0),
     );
@@ -155,6 +158,7 @@ fn a_late_declared_end_without_its_original_owner_is_unknown_even_with_a_pass_ar
             &fixture.session,
             "original-task",
             DECLARED,
+            None,
             "exit zero",
             EngramCommandExit::Code(0),
         );
@@ -188,6 +192,7 @@ fn late_declared_completion_cannot_borrow_another_command_or_replaced_runtime() 
             &fixture.session,
             "identity-task",
             "flutter test --wrong-command",
+            None,
             "not the original result",
             EngramCommandExit::Code(0),
         );

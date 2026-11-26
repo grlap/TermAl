@@ -6,7 +6,7 @@
 // output. These observations do not decide execution or test credit.
 // New file; not split from an existing one.
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
@@ -37,7 +37,7 @@ function git(root, env, args) {
   if (outcome.error?.code === "ENOBUFS") return { missing: true };
   if (outcome.error) return { unavailable: true };
   if (outcome.status !== 0) return { missing: true };
-  return { stdout: outcome.stdout };
+  return { stdout: outcome.stdout, stderr: outcome.stderr };
 }
 
 const objectId = (text) => {
@@ -63,13 +63,69 @@ export function unknownSource(reason) {
 // Source provenance comes from the owner's actual admitted observation. Only
 // the launcher's immutable blob is looked up separately; it is not an input
 // predicate and a missing blob cannot stand in for source equality.
-export function sourceMetadataFromIdentity(root, observed, env = process.env) {
+export function sourceMetadataFromIdentity(root, observed, env = process.env, externalLauncher) {
   const { unknownReason: _none, ...source } = unknownSource(null);
-  const launcher = git(root, isolatedGitEnvironment(env),
+  const launcher = externalLauncher ? {} : git(root, isolatedGitEnvironment(env),
     ["rev-parse", "--verify", "--quiet", `${observed.sourceId.commit}:${launcherPath}`]);
   return { ...source, commit: observed.sourceId.commit, tree: observed.sourceId.tree,
     clean: observed.status === "clean",
     launcherVersion: launcher.stdout === undefined ? null : objectId(launcher.stdout) };
+}
+
+/** Resolve the explicit worktree and record the separate launcher checkout. */
+export function externalLauncherProject(projectRoot, cwd, script, repository, env = process.env) {
+  const localAbsolute = (path) => {
+    if (!isAbsolute(path) || /\p{Cc}/u.test(path)) return false;
+    const spelling = path.replaceAll("\\", "/");
+    return !spelling.startsWith("//") || /^\/\/\?\/[a-z]:\//iu.test(spelling);
+  };
+  const rootError = "--project-root must equal the invocation cwd at a local Git worktree top level";
+  if (!localAbsolute(projectRoot)) throw new Error(rootError);
+  const gitEnv = isolatedGitEnvironment(env);
+  let root;
+  try {
+    root = realpathSync.native(projectRoot);
+    const top = git(root, gitEnv, ["rev-parse", "--show-toplevel"]).stdout?.replace(/\r?\n$/u, "");
+    if (!localAbsolute(root) || !top || !localAbsolute(top)
+        || realpathSync.native(top) !== root || realpathSync.native(cwd) !== root) {
+      throw new Error(rootError);
+    }
+  } catch (error) {
+    throw new Error(rootError, { cause: error });
+  }
+  const launcherRoot = realpathSync.native(repository);
+  const launcherTop = git(launcherRoot, gitEnv, ["rev-parse", "--show-toplevel"]).stdout?.replace(/\r?\n$/u, "");
+  const head = git(launcherRoot, gitEnv, ["rev-parse", "--verify", "HEAD^{commit}"]).stdout;
+  const commit = head === undefined ? null : objectId(head);
+  const entry = realpathSync.native(script);
+  if (!commit || !launcherTop || !localAbsolute(launcherTop)
+      || realpathSync.native(launcherTop) !== launcherRoot
+      || !localAbsolute(entry) || entry !== join(launcherRoot, launcherPath)) {
+    throw new Error("external_launcher_provenance_unverified: cannot identify the external launcher checkout");
+  }
+  const status = git(launcherRoot, gitEnv,
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"]);
+  const porcelain = status.stderr === "" ? status.stdout : undefined;
+  let clean = porcelain === undefined ? null : porcelain.length === 0;
+  if (clean) {
+    const tracked = git(launcherRoot, gitEnv, ["ls-files", "-v", "-z"]);
+    // A lowercase tag or an S tag means status may have skipped checking a
+    // tracked file, including an imported launcher helper.
+    if (tracked.stderr !== "" || !tracked.stdout
+        || tracked.stdout.split("\0").some((entry) => entry && !entry.startsWith("H "))) {
+      clean = null;
+    }
+  }
+  if (clean) {
+    const recorded = git(launcherRoot, gitEnv,
+      ["rev-parse", "--verify", "--quiet", `${commit}:${launcherPath}`]).stdout;
+    // Use Git's checkout conversions, including Windows line endings.
+    const measured = git(launcherRoot, gitEnv,
+      ["hash-object", `--path=${launcherPath}`, "--", entry]).stdout;
+    const blob = objectId(recorded ?? "");
+    if (!blob || blob !== objectId(measured ?? "")) clean = null;
+  }
+  return { root, externalLauncher: { script: entry, commit, clean } };
 }
 
 /**

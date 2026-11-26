@@ -53,6 +53,7 @@ import { watchCommandProgress } from "./test-command-progress.mjs";
 import { bootstrapUiDependencies } from "./test-ui-bootstrap.mjs";
 import {
   captureSourceMetadata,
+  externalLauncherProject,
   sourceMetadataFromIdentity,
   cargoConfigSelectsRustc,
   compilerWrapperInEnvironment,
@@ -654,6 +655,7 @@ function gitRunDirectory(root, env) {
 
 export async function createRun({
   root = repository,
+  externalLauncher,
   stages,
   notifyTo,
   requiredBinaryEnv = [],
@@ -682,6 +684,9 @@ export async function createRun({
       ? new Error(`${error.message}; ${registrationCorrection}`, { cause: error })
       : error);
   if (requestMessageId !== undefined) {
+    if (externalLauncher !== undefined) {
+      throw new Error("--request-message-id cannot be combined with --project-root");
+    }
     validateRequestMessageId(requestMessageId);
     if (scope !== undefined || liveEngram !== undefined) {
       throw new Error("selected test requests support only full or focused mode");
@@ -750,6 +755,7 @@ export async function createRun({
   const request = {
     runId,
     root: normalizedRoot,
+    ...(externalLauncher ? { externalLauncher } : {}),
     sourceBinary,
     ...(sourceOwner ? { sourceOwner } : {}),
     stages,
@@ -869,7 +875,7 @@ export async function createRun({
     const input = commitInput ?? await captureInput();
     if (!sourceIdsEqual(input.sourceId, input.sourceId)) throw new Error("source_id is unavailable or malformed; no stage ran");
     const initial = readJson(join(runDir, "results.json"));
-    initial.source = sourceMetadataFromIdentity(normalizedRoot, input, env);
+    initial.source = sourceMetadataFromIdentity(normalizedRoot, input, env, externalLauncher);
     // Check all copies before publishing a source-bound request. In particular,
     // a one-copy request fit alone does not establish a two-copy result fit.
     encodeRunRecord({ ...request, sourceId: input.sourceId }, "request.json");
@@ -2530,12 +2536,23 @@ function parseCommon(args) {
   let liveBinary;
   let liveSha256;
   let input;
+  let inputCount = 0;
+  let projectRoot;
   let requestMessageId;
   const requiredBinaryEnv = [];
   while (args.length && args[0] !== "--") {
     const flag = args.shift();
     if (flag === "--detach") detach = true;
-    else if (flag === "--input" && ["commit", "plain"].includes(args[0])) input = args.shift();
+    else if (flag === "--input" && ["commit", "plain"].includes(args[0])) {
+      input = args.shift();
+      inputCount += 1;
+    }
+    else if (flag === "--project-root") {
+      if (projectRoot !== undefined || !args[0] || args[0].startsWith("--")) {
+        throw new Error("--project-root requires one non-duplicate absolute worktree path");
+      }
+      projectRoot = args.shift();
+    }
     else if (flag === "--request-message-id") {
       if (requestMessageId !== undefined || !args.length) throw new Error("request-message-id requires one non-duplicate message id");
       requestMessageId = validateRequestMessageId(args.shift());
@@ -2547,8 +2564,10 @@ function parseCommon(args) {
     else if (flag === "--engram-sha256" && args.length) liveSha256 = args.shift();
     else throw new Error(`invalid option: ${flag}`);
   }
-  if (args[0] === "--") args.shift();
-  return { notifyTo, detach, liveBinary, liveSha256, input, requestMessageId, requiredBinaryEnv, rest: args };
+  const separated = args[0] === "--";
+  if (separated) args.shift();
+  return { notifyTo, detach, liveBinary, liveSha256, input, inputCount, projectRoot, separated,
+    requestMessageId, requiredBinaryEnv, rest: args };
 }
 
 async function main(args) {
@@ -2593,6 +2612,17 @@ async function main(args) {
     category = resolveCategory(await loadCategoryManifest(repository), name);
   }
   const options = parseCommon(args);
+  let externalProject;
+  if (options.projectRoot !== undefined) {
+    if (options.requestMessageId !== undefined) {
+      throw new Error("--request-message-id cannot be combined with --project-root");
+    }
+    if (mode !== "focused" || options.detach || options.input !== "commit" || options.inputCount !== 1
+        || !options.separated || !supportsFocusedDartTest(options.rest[0], options.rest.slice(1))) {
+      throw new Error("--project-root requires a foreground focused --input commit -- flutter test or dart test command in a supported form");
+    }
+    externalProject = externalLauncherProject(options.projectRoot, process.cwd(), script, repository);
+  }
   if (options.requestMessageId !== undefined && !["full", "focused"].includes(mode)) {
     throw new Error("request-message-id is supported only by full and focused");
   }
@@ -2621,6 +2651,7 @@ async function main(args) {
         ? [categoryStage(category)]
         : [{ name: "focused", command: options.rest[0], args: options.rest.slice(1) }];
   const runDir = await createRun({
+    ...externalProject,
     stages,
     notifyTo: options.notifyTo,
     requiredBinaryEnv: options.requiredBinaryEnv,

@@ -235,6 +235,7 @@ fn record_run(fixture: &RunFixture, run_id: &str, request: Value, results: Value
         native_completion: None,
         native_completion_refusal: None,
         source_owner: None,
+        external_launcher: None,
         project_id: Some(fixture.project_id.clone()),
         run_directory: test_run_display_path(&run_dir),
         locator_identity: None,

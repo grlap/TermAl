@@ -351,6 +351,10 @@ pub(crate) enum EngramVerificationRecordPending {
     NoConnection,
     /// Historical progress only; current routing does not emit this reason.
     AwaitingNamingBinding,
+    /// An external run has terminal results but no original launch attachment.
+    ExternalLaunchCustodyMissing,
+    /// The separate launcher checkout was dirty or could not be measured.
+    ExternalLauncherProvenanceUnverified,
     /// A stage is neither a test, build nor admitted lint check. Preparation
     /// names it without building a body; the tick rejects a completed generic
     /// run locally. Declared-native runs await their original end as Waiting,
@@ -1104,6 +1108,12 @@ fn engram_verification_record_run_command(
     .into_iter()
     .map(str::to_owned)
     .collect();
+    if let Ok(Some(launcher)) = engram_external_launcher_request(request)
+        && let Some(root) = request.get("root").and_then(Value::as_str)
+    {
+        command[1] = launcher.script;
+        command.extend(["--project-root".to_owned(), root.to_owned()]);
+    }
     if mode == EngramVerificationRecordMode::Focused
         && let Some(argv) = request
             .get("stages")
@@ -1189,6 +1199,14 @@ fn engram_verification_record_check(
         counts: engram_verification_record_counts(stage),
     };
     if dart {
+        if let Some(launcher) = &registration.external_launcher
+            && let Some(clean) = launcher.clean
+        {
+            check
+                .refs
+                .push(format!("launcher_commit:{}", launcher.commit));
+            check.refs.push(format!("launcher_clean:{clean}"));
+        }
         engram_focused_dart_check_result(
             FsPath::new(&registration.run_directory),
             stage,
@@ -1419,6 +1437,9 @@ pub(crate) fn engram_verification_record_build_with_stage_policy(
     }
     if !engram_verification_record_results_are_terminal(registration, results) {
         return Err("the run has no terminal result".into());
+    }
+    if let Some(launcher) = registration.external_launcher.as_ref() {
+        engram_external_dart_verification_shape(launcher, request, results)?;
     }
     let input = TestRunCommittedInput::read(results)
         .ok_or_else(|| "the run records no committed input".to_owned())?;
@@ -2090,6 +2111,8 @@ fn store_engram_verification_record_look_locked(
 pub(crate) enum EngramVerificationRecordLook {
     /// The look left the record pending, for this reason.
     Pending(EngramVerificationRecordPending),
+    /// Missing original launch custody, read after this look's start.
+    ExternalLaunchCustodyMissing { begun: u64 },
     /// The look found nothing holding the record back: it is being sent or
     /// settled, or read again later.
     NoBlocker,
@@ -2137,6 +2160,10 @@ pub(crate) enum EngramVerificationRecordInputs {
     /// after the host wrote them, which no later read undoes; a look begun
     /// earlier may have read them while the host was still publishing them.
     NativeResultsChanged,
+    /// A terminal external run has no original launch association.
+    ExternalLaunchCustodyMissing,
+    /// The terminal image differs from the one captured at launch association.
+    ExternalResultsChanged,
 }
 
 impl EngramVerificationRecordInputs {
@@ -2157,6 +2184,7 @@ impl EngramVerificationRecordInputs {
 
 pub(crate) fn engram_verification_record_inputs(
     registration: &TestRunRegistration,
+    external_terminal_digest: Option<&str>,
 ) -> EngramVerificationRecordInputs {
     use EngramVerificationRecordInputs as Inputs;
     if !engram_verification_record_registration_bound(registration) {
@@ -2179,9 +2207,17 @@ pub(crate) fn engram_verification_record_inputs(
         return Inputs::NotEligible;
     }
     let results = match test_run_read_json(&run_dir.join("results.json")) {
-        TestRunJson::Parsed(results, _, _)
+        TestRunJson::Parsed(results, digest, _)
             if engram_verification_record_results_are_terminal(registration, &results) =>
         {
+            if registration.external_launcher.is_some() {
+                let Some(expected) = external_terminal_digest else {
+                    return Inputs::ExternalLaunchCustodyMissing;
+                };
+                if digest != expected {
+                    return Inputs::ExternalResultsChanged;
+                }
+            }
             results
         }
         TestRunJson::TooLarge if registration.declared_native.is_some() => {
@@ -2290,7 +2326,7 @@ impl AppState {
 pub(crate) fn engram_verification_record_prepare(
     registration: &TestRunRegistration,
 ) -> EngramVerificationRecordPrepared {
-    engram_verification_record_prepare_noting(registration, &std::cell::Cell::new(false))
+    engram_verification_record_prepare_noting(registration, &std::cell::Cell::new(false), None)
 }
 
 /// `engram_verification_record_prepare`, setting `no_record` to whether the
@@ -2301,6 +2337,7 @@ pub(crate) fn engram_verification_record_prepare(
 fn engram_verification_record_prepare_noting(
     registration: &TestRunRegistration,
     no_record: &std::cell::Cell<bool>,
+    external_terminal_digest: Option<&str>,
 ) -> EngramVerificationRecordPrepared {
     use EngramVerificationRecordBuildError::{Invalid, RetryDartReporter};
     use EngramVerificationRecordPrepared as Prepared;
@@ -2335,7 +2372,7 @@ fn engram_verification_record_prepare_noting(
     // The run's own request and terminal results, as the record is built
     // from; `Err` is what the look comes to without them.
     let inputs = || -> std::result::Result<(Value, Value), Prepared> {
-        let read = engram_verification_record_inputs(registration);
+        let read = engram_verification_record_inputs(registration, external_terminal_digest);
         no_record.set(read.make_no_record_of_a_finished_run());
         match read {
             EngramVerificationRecordInputs::Read(request, results) => Ok((request, results)),
@@ -2345,6 +2382,12 @@ fn engram_verification_record_prepare_noting(
             | EngramVerificationRecordInputs::ResultsTooLarge
             | EngramVerificationRecordInputs::NativeResultsChanged => Err(Prepared::Waiting),
             EngramVerificationRecordInputs::NotEligible => Err(Prepared::NotEligible),
+            EngramVerificationRecordInputs::ExternalLaunchCustodyMissing => Err(pending(
+                EngramVerificationRecordPending::ExternalLaunchCustodyMissing,
+            )),
+            EngramVerificationRecordInputs::ExternalResultsChanged => {
+                Err(pending(EngramVerificationRecordPending::BodyMismatch))
+            }
             EngramVerificationRecordInputs::NativeResultsTooLarge => {
                 Err(pending(EngramVerificationRecordPending::BodyNotBuilt {
                     detail: format!(
@@ -2385,7 +2428,12 @@ fn engram_verification_record_prepare_noting(
             },
             // Results that cannot be read just now are read again on a later
             // tick; only readable inputs can show the body is not the host's.
-            Err(Prepared::Waiting) => return Prepared::Waiting,
+            Err(
+                prepared @ (Prepared::Waiting
+                | Prepared::Pending(
+                    EngramVerificationRecordPending::ExternalLaunchCustodyMissing,
+                )),
+            ) => return prepared,
             Err(_) => None,
         };
         if rebuilt.as_ref() != Some(&frozen.body) {
@@ -2405,6 +2453,13 @@ fn engram_verification_record_prepare_noting(
         Ok(inputs) => inputs,
         Err(prepared) => return prepared,
     };
+    if registration
+        .external_launcher
+        .as_ref()
+        .is_some_and(|launcher| !launcher.clean_checkout())
+    {
+        return pending(EngramVerificationRecordPending::ExternalLauncherProvenanceUnverified);
+    }
     let stages = engram_verification_record_registration_unclassified_stages(
         registration,
         &request,
@@ -3041,6 +3096,23 @@ impl AppState {
                             }
                         }
                         match step {
+                            EngramVerificationRecordStep::Received { body, receipt }
+                                if registration.external_launcher.is_some() =>
+                            {
+                                !stopping()
+                                    && clock.now() < deadline
+                                    && self
+                                        .read_back_external_verification_receipt(
+                                            &registration,
+                                            &body,
+                                            &receipt,
+                                        )
+                                        .is_some_and(|received| {
+                                            settled(self.complete_engram_verification_record_until(
+                                                &received, &body, &receipt, deadline,
+                                            ))
+                                        })
+                            }
                             EngramVerificationRecordStep::Received { body, receipt } => {
                                 settled(self.complete_engram_verification_record_until(
                                     &registration,
@@ -3107,17 +3179,22 @@ impl AppState {
     ) -> EngramVerificationRecordPrepared {
         // The look's place in the sequence, taken before it reads any file,
         // and the look in flight until it publishes what it came to.
-        let begun = {
+        let (begun, external_terminal_digest) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let begun = inner.test_run_look_sequence;
             inner.test_run_look_sequence += 1;
             inner
                 .test_run_record_looks_in_flight
                 .insert(registration.run_id.clone(), begun);
-            begun
+            let digest = engram_external_launch_terminal_digest(&inner, registration);
+            (begun, digest.map(str::to_owned))
         };
         let no_record = std::cell::Cell::new(false);
-        let prepared = engram_verification_record_prepare_noting(registration, &no_record);
+        let prepared = engram_verification_record_prepare_noting(
+            registration,
+            &no_record,
+            external_terminal_digest.as_deref(),
+        );
         // A frozen body this process may send from memory.
         let built = matches!(
             prepared,
@@ -3125,6 +3202,9 @@ impl AppState {
                 | EngramVerificationRecordPrepared::ReceiptHeld { .. }
         );
         let look = match &prepared {
+            EngramVerificationRecordPrepared::Pending(
+                EngramVerificationRecordPending::ExternalLaunchCustodyMissing,
+            ) => EngramVerificationRecordLook::ExternalLaunchCustodyMissing { begun },
             EngramVerificationRecordPrepared::Pending(reason) => {
                 EngramVerificationRecordLook::Pending(reason.clone())
             }
@@ -3166,6 +3246,39 @@ impl AppState {
         }
         drop(inner);
         prepared
+    }
+
+    /// A first external receipt is already held. Read back the exact body
+    /// through the same original terminal and reporter checks as a later tick.
+    fn read_back_external_verification_receipt(
+        &self,
+        registration: &TestRunRegistration,
+        body: &EngramVerificationRecordBody,
+        receipt: &EngramVerificationRecordReceipt,
+    ) -> Option<TestRunRegistration> {
+        let ack = TestRunVerificationAck::Received {
+            receipt: receipt.clone(),
+            body_digest: engram_verification_record_body_digest(body),
+        };
+        let current = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .test_run_registrations
+                .get(&registration.run_id)
+                .filter(|row| {
+                    row.request_identity == registration.request_identity
+                        && row.run_directory == registration.run_directory
+                        && row.verification_record.as_ref() == Some(&ack)
+                })
+                .cloned()
+        }?;
+        match self.prepare_engram_verification_record(&current) {
+            EngramVerificationRecordPrepared::ReceiptHeld {
+                frozen,
+                receipt: held,
+            } if &frozen.body == body && &held == receipt => Some(current),
+            _ => None,
+        }
     }
 
     /// Keeps what the run's latest look came to: `reason`, or no blocker.
