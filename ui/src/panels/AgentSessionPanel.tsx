@@ -18,6 +18,7 @@ import {
   type PendingCreatedConversationMarker,
 } from "./agent-session-panel-helpers";
 import { SessionComposer } from "./AgentSessionPanel.composer";
+import { PromptDeliveryRow } from "./PromptDeliveryRow";
 import { MessageSlot, PanelEmptyState } from "./session-message-leaves";
 import {
   PendingPromptCard,
@@ -1276,22 +1277,15 @@ const SessionConversationPage = memo(
         // hand-off has no Dismiss: its outcome is not settled yet.
         const dismissible = historical && delivery?.disposition !== "handingOff";
         const card = historical ? (
-          <article className="activity-card" aria-label="Prompt delivery status">
-            <div className="activity-card-copy">
-              <div className="card-label">{deliveryLabel}</div>
-              <p>{delivery?.reason ?? "This delivery record does not authorize sending the prompt again."}</p>
-              {!bodyVisible ? <PendingPromptCard prompt={prompt} sessionId={session.id}
-                onOpenMailbox={onOpenMailbox} searchQuery={conversationSearchQuery}
-                searchHighlightTone={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"} /> : null}
-            </div>
-            {dismissible ? (
-              <button className="queue-resume-button" type="button"
-                title="Remove this row from the queue. The prompt is never sent again; its delivery record stays."
-                onClick={() => onCancelQueuedPrompt(session.id, prompt.id)}>
-                Dismiss
-              </button>
-            ) : null}
-          </article>
+          <PromptDeliveryRow
+            label={deliveryLabel}
+            reason={delivery?.reason ?? "This delivery record does not authorize sending the prompt again."}
+            onDismiss={dismissible ? () => onCancelQueuedPrompt(session.id, prompt.id) : undefined}
+            searchRevealQuery={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? conversationSearchQuery : null}
+            promptContent={!bodyVisible ? <PendingPromptCard prompt={prompt} sessionId={session.id}
+              onOpenMailbox={onOpenMailbox} searchQuery={conversationSearchQuery}
+              searchHighlightTone={conversationSearchActiveItemKey === `pendingPrompt:${prompt.id}` ? "active" : "match"} /> : undefined}
+          />
         ) : (
           <PendingPromptCard prompt={prompt} sessionId={session.id}
             onOpenMailbox={onOpenMailbox} onCancel={() => onCancelQueuedPrompt(session.id, prompt.id)}

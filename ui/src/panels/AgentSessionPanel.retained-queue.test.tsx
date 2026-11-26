@@ -434,14 +434,20 @@ describe("AgentSessionPanel conversation caching", () => {
         onResumeSessionQueue: vi.fn(), onCancelQueuedPrompt: vi.fn(),
       });
       expect(screen.getAllByText("Original exact prompt")).toHaveLength(1);
-      expect(screen.getByLabelText("Prompt delivery status")).toHaveTextContent("Retained delivery evidence");
+      const row = screen.getByLabelText("Prompt delivery status");
+      expect(row).toHaveTextContent("Retained delivery evidence");
+      expect(within(row).queryByRole("button", { name: "Show prompt" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Resume queued prompts|Cancel retained prompt|Cancel queued prompt/ })).not.toBeInTheDocument();
     },
   );
 
-  it.each(["ambiguous", "accepted"] as const)(
-    "dismisses a %s history row through the queue-removal callback, never by resuming it",
-    disposition => {
+  it.each([
+    ["ambiguous", "Delivery outcome unknown"],
+    ["accepted", "Prompt accepted by provider"],
+  ] as const)(
+    "shows and dismisses a compact %s delivery row",
+    async (disposition, label) => {
+      const user = userEvent.setup();
       const onResumeSessionQueue = vi.fn();
       const onCancelQueuedPrompt = vi.fn();
       renderSessionPanelWithDefaults({
@@ -452,14 +458,103 @@ describe("AgentSessionPanel conversation caching", () => {
         }),
         onResumeSessionQueue, onCancelQueuedPrompt,
       });
-      const dismiss = screen.getByRole("button", { name: "Dismiss" });
-      // The wording never claims the prompt was not sent.
-      expect(dismiss.getAttribute("title") ?? "").not.toMatch(/not (been )?sent|unsent/i);
+      const row = within(screen.getByLabelText("Prompt delivery status"));
+      expect(row.getByText(label)).toBeInTheDocument();
+      expect(row.getByText("This delivery record does not authorize sending the prompt again.")).toBeInTheDocument();
+      expect(row.queryByText("Original exact prompt")).not.toBeInTheDocument();
+      const toggle = row.getByRole("button", { name: "Show prompt" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      act(() => toggle.focus());
+      await user.keyboard("{Enter}");
+      expect(row.getByRole("button", { name: "Hide prompt" })).toHaveAttribute("aria-expanded", "true");
+      expect(row.getByText("Original exact prompt")).toBeVisible();
+      await user.click(row.getByRole("button", { name: "Hide prompt" }));
+      expect(row.queryByText("Original exact prompt")).not.toBeInTheDocument();
+      expect(onCancelQueuedPrompt).not.toHaveBeenCalled();
+      const dismiss = row.getByRole("button", { name: "Dismiss" });
+      expect(dismiss).toHaveAttribute(
+        "title",
+        "Remove this row from the queue. The prompt is never sent again; its delivery record stays.",
+      );
       fireEvent.click(dismiss);
       expect(onCancelQueuedPrompt).toHaveBeenCalledWith("session-history", "history");
       expect(onResumeSessionQueue).not.toHaveBeenCalled();
     },
   );
+
+  it("reveals the full delivery reason on keyboard focus or hover", async () => {
+    const user = userEvent.setup();
+    const reason = "Earlier provider delivery could not be established; this historical queue entry will not be replayed.";
+    renderSessionPanelWithDefaults({
+      activeSession: makeSession("session-reason", {
+        status: "idle", messages: [],
+        pendingPrompts: [{ id: "history", timestamp: "10:00", text: "Original prompt" }],
+        promptDeliveries: [{ promptId: "history", disposition: "ambiguous", attempt: 1, reason }],
+      }),
+    });
+    const row = within(screen.getByLabelText("Prompt delivery status"));
+    const reasonText = row.getByText(reason);
+    expect(screen.queryByRole("tooltip", { hidden: true })).not.toBeInTheDocument();
+    act(() => row.getByRole("button", { name: "Show prompt" }).focus());
+    await user.tab();
+    expect(document.activeElement).toContainElement(reasonText);
+    expect(screen.getByRole("tooltip", { hidden: true })).toHaveTextContent(reason);
+    expect(row.queryByText("Original prompt")).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("tooltip", { hidden: true })).not.toBeInTheDocument();
+    await user.tab();
+    const dismiss = row.getByRole("button", { name: "Dismiss" });
+    expect(dismiss).toHaveFocus();
+    await user.hover(reasonText);
+    const tooltip = screen.getByRole("tooltip", { hidden: true });
+    expect(tooltip).toHaveTextContent(reason);
+    fireEvent.mouseOut(reasonText, { relatedTarget: tooltip });
+    fireEvent.mouseOver(tooltip, { relatedTarget: reasonText });
+    expect(tooltip).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(tooltip).not.toBeInTheDocument();
+    expect(dismiss).toHaveFocus();
+  });
+
+  it("closes the tooltip and releases Escape when the focused reason scrolls out of the transcript", async () => {
+    const user = userEvent.setup();
+    const onEscape = vi.fn();
+    const reason = "Earlier delivery could not be established.";
+    const panel = createAgentSessionPanelHarness({
+      activeSession: makeSession("session-reason-scroll", {
+        status: "idle", messages: [],
+        pendingPrompts: [{ id: "history", timestamp: "10:00", text: "Original prompt" }],
+        promptDeliveries: [{ promptId: "history", disposition: "ambiguous", attempt: 1, reason }],
+      }),
+    });
+    render(
+      <div className="message-stack" data-testid="transcript" onKeyDown={event => {
+        if (event.key === "Escape") onEscape();
+      }}>
+        {panel()}
+      </div>,
+    );
+    const scrollport = screen.getByTestId("transcript");
+    const trigger = screen.getByText(reason).parentElement!;
+    vi.spyOn(scrollport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 20, 300, 100));
+    vi.spyOn(scrollport, "clientHeight", "get").mockReturnValue(100);
+    const bounds = vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(new DOMRect(30, 40, 200, 18));
+
+    act(() => trigger.focus());
+    const tooltip = screen.getByRole("tooltip", { hidden: true });
+    expect(tooltip).toHaveTextContent(reason);
+
+    bounds.mockReturnValue(new DOMRect(30, 110, 200, 18));
+    fireEvent.scroll(scrollport);
+    expect(tooltip).toBeInTheDocument();
+
+    bounds.mockReturnValue(new DOMRect(30, 121, 200, 18));
+    fireEvent.scroll(scrollport);
+    expect(tooltip).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(onEscape).toHaveBeenCalledOnce();
+  });
 
   it("offers no Dismiss on an in-flight handingOff row", () => {
     renderSessionPanelWithDefaults({
@@ -470,7 +565,9 @@ describe("AgentSessionPanel conversation caching", () => {
       }),
       onResumeSessionQueue: vi.fn(), onCancelQueuedPrompt: vi.fn(),
     });
-    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+    const row = within(screen.getByLabelText("Prompt delivery status"));
+    expect(row.getByText("Prompt handoff in progress")).toBeInTheDocument();
+    expect(row.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
   });
 
   it("keeps an unknown original passive while generic Resume targets the ordinary queue", () => {
@@ -489,10 +586,11 @@ describe("AgentSessionPanel conversation caching", () => {
         ],
       }), onResumeSessionQueue, onCancelQueuedPrompt,
     });
-    expect(screen.getByText("Original unknown A")).toBeInTheDocument();
-    // The history row offers only Dismiss: no replay, resume or cancel.
-    expect([...screen.getByLabelText("Prompt delivery status").querySelectorAll("button")]
-      .map(button => button.textContent)).toEqual(["Dismiss"]);
+    const row = within(screen.getByLabelText("Prompt delivery status"));
+    expect(row.queryByText("Original unknown A")).not.toBeInTheDocument();
+    fireEvent.click(row.getByRole("button", { name: "Show prompt" }));
+    expect(row.getByText("Original unknown A")).toBeVisible();
+    expect(row.queryByRole("button", { name: /Resume|Cancel/ })).not.toBeInTheDocument();
     expect(screen.getByText("1 prompt waiting. Send a new prompt or resume the queue to continue.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Resume queued prompts" }));
     expect(onResumeSessionQueue).toHaveBeenCalledWith("session-mixed");
@@ -524,6 +622,48 @@ describe("AgentSessionPanel conversation caching", () => {
     const slot = document.querySelector('[data-session-search-item-key="pendingPrompt:search-target"]');
     expect(slot).toHaveClass("session-search-hit", "session-search-hit-active");
     expect(slot?.querySelector("mark.search-highlight.is-active")).toHaveTextContent("original");
+  });
+
+  it("reveals an already mounted delivery match before scroll and reopens it for a new query", async () => {
+    const user = userEvent.setup();
+    const itemKey = "pendingPrompt:search-target";
+    const panel = createAgentSessionPanelHarness({
+      activeSession: makeSession("session-search", {
+        status: "idle", messages: [],
+        pendingPrompts: [{ id: "search-target", timestamp: "10:00", text: "Searchable original prompt" }],
+        promptDeliveries: [{ promptId: "search-target", disposition: "ambiguous", attempt: 1 }],
+      }),
+      conversationSearchMatchedItemKeys: new Set([itemKey]),
+    });
+    const matchesInLayout = vi.fn();
+
+    function SearchHarness({ query, active }: { query: string; active: boolean }) {
+      useLayoutEffect(() => {
+        if (active) {
+          const slot = document.querySelector(`[data-session-search-item-key="${itemKey}"]`);
+          matchesInLayout(slot?.querySelector("mark.search-highlight.is-active")?.textContent);
+        }
+      }, [query, active]);
+      return panel({
+        conversationSearchQuery: query,
+        conversationSearchActiveItemKey: active ? itemKey : null,
+      });
+    }
+
+    const { rerender } = render(<SearchHarness query="original" active={false} />);
+    const row = screen.getByLabelText("Prompt delivery status");
+    expect(row.closest(".message-slot")).toHaveClass("session-search-hit");
+    expect(within(row).getByRole("button", { name: "Show prompt" })).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<SearchHarness query="original" active />);
+    expect(screen.getByLabelText("Prompt delivery status")).toBe(row);
+    expect(matchesInLayout).toHaveBeenLastCalledWith("original");
+    await user.click(within(row).getByRole("button", { name: "Hide prompt" }));
+    expect(within(row).getByRole("button", { name: "Show prompt" })).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<SearchHarness query="Searchable" active />);
+    expect(matchesInLayout).toHaveBeenLastCalledWith("Searchable");
+    expect(within(row).getByRole("button", { name: "Hide prompt" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("does not carry deferred transcript cards into an empty active session", async () => {

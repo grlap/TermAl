@@ -1,0 +1,95 @@
+.prompt-delivery-row {
+  min-width: 0;
+}
+
+.prompt-delivery-row-header {
+  display: flex;
+  align-items: center;
+  gap: 0.22rem;
+  min-width: 0;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--pending-dismiss-border);
+  border-radius: var(--control-radius-button);
+  color: var(--ink);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.message-slot.session-search-hit > .prompt-delivery-row .prompt-delivery-row-header {
+  border-color: color-mix(in srgb, var(--ink) 52%, var(--view-selected-border));
+}
+
+.message-slot.session-search-hit-active > .prompt-delivery-row .prompt-delivery-row-header {
+  border-color: var(--signal-blue);
+  box-shadow: 0 0 0 1px var(--accent-blue-border);
+}
+
+.prompt-delivery-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prompt-delivery-row-toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--control-radius-button);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.prompt-delivery-row-toggle span {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-right: 1.5px solid;
+  border-bottom: 1.5px solid;
+  transform: rotate(-45deg);
+}
+
+.prompt-delivery-row-toggle[aria-expanded="true"] span {
+  transform: rotate(45deg);
+}
+
+.prompt-delivery-row-reason {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  align-self: stretch;
+  min-width: 3ch;
+}
+
+.prompt-delivery-row-reason-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prompt-delivery-row-tooltip {
+  position: fixed;
+  z-index: var(--z-pane-tooltip);
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--tooltip-border);
+  border-radius: var(--control-radius-button);
+  background: var(--tooltip-bg);
+  box-shadow: var(--tooltip-shadow);
+  color: var(--tooltip-fg);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.prompt-delivery-row-header .prompt-delivery-row-dismiss {
+  margin-inline-start: 0;
+  padding: 0.15rem 0.35rem;
+  color: var(--ink);
+}
