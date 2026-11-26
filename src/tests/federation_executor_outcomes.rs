@@ -431,7 +431,7 @@ async fn federation_outcome_cancelled_receiver_read_keeps_its_rpc_slot_until_it_
         payload_digest: operation.digest(), operation };
     let slots = fixture.channel.bound.permits.clone();
     let all = slots.available_permits();
-    let peer = FederationAuthenticatedPeer { lease: Some(fixture.channel.current_lease().unwrap()),
+    let peer = FederationAuthenticatedPeer { relay_phases: None, lease: Some(fixture.channel.current_lease().unwrap()),
         mailbox_permit: Some(Arc::new(fixture.channel.bound.try_acquire().unwrap())) };
     // The receiver's state is held, so its blocking read cannot finish. Only
     // observe while it is held: an assertion there would poison the state.
@@ -458,6 +458,9 @@ async fn federation_outcome_answer_past_its_handler_deadline_keeps_the_link() {
     let mut fixture = Fixture::new();
     acknowledge_all_fences(&mut fixture.satellite);
     let _input = root(&fixture, "outcome-slow-answer", true);
+    // The receiver's request deadline runs on logical time: the test steps
+    // past it instead of waiting in real time.
+    fixture.channel.control.clock = FederationControlClock::scripted_io();
     let (stop, server) = attach_loopback(&fixture).await;
     dispatch_and_activate(&fixture).await;
     let (entered, held) = mpsc::channel();
@@ -466,6 +469,7 @@ async fn federation_outcome_answer_past_its_handler_deadline_keeps_the_link() {
     let central = fixture.central.clone();
     let polling = tokio::spawn(async move { central.poll_federation_executor_outcomes().await });
     phase_sync::receive(&held, "the receiver's outcome answer is held past its handler deadline");
+    fixture.channel.control.clock.advance(FEDERATION_HANDLER_DEADLINE);
     tokio::time::timeout(phase_sync::DEADLOCK_GUARD, polling).await.unwrap().unwrap();
     drop(release);
     let row = outcome_row(&fixture).unwrap();

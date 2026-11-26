@@ -155,10 +155,19 @@ pub(crate) async fn serve_mailbox_relay(
         .app
         .clone()
         .ok_or_else(federation_transport_unavailable)?;
-    let origin = lease.with_current(&app, |_, current| Ok(current.peer.clone()))?;
     let permit = peer.mailbox_permit;
+    let phases = peer.relay_phases;
+    if let Some(phases) = &phases {
+        phases.enter("dispatch");
+    }
+    // Every StateInner wait runs on the blocking job, never on an async
+    // worker, so a long state hold cannot stall the runtime or the deadline.
     run_blocking_api(move || {
         let _permit = permit;
+        let _phases = MailboxRelayPhaseScope::install(phases);
+        mailbox_relay_phase("origin");
+        let origin = lease.with_current(&app, |_, current| Ok(current.peer.clone()))?;
+        mailbox_relay_phase("operation");
         let value = app.execute_mailbox_relay(request.operation, &lease, &origin)?;
         let host = lease.with_current(&app, |_, current| Ok(current.local.clone()))?;
         Ok(Json(MailboxRelayResponse {
@@ -186,10 +195,13 @@ impl AppState {
     ) -> Result<MailboxRelayDescriptor, NativeMailboxRelayDescriptorError> {
         use NativeMailboxRelayDescriptorError::{Authority, StoreRead};
         let store_error = |error| StoreRead(mailbox_api_error(error));
+        mailbox_relay_phase("connection");
         let store_id = {
             let connection = self.mailbox_store.connection().map_err(store_error)?;
+            mailbox_relay_phase("storeId");
             mailbox_relay_store_id(&connection).map_err(store_error)?
         };
+        mailbox_relay_phase("state");
         let inner = self.inner.lock().expect("state mutex poisoned");
         let root = federation_mailbox_root_locked(&inner, session).map_err(Authority)?;
         let host = inner
@@ -309,6 +321,7 @@ impl AppState {
                     native: vec![descriptor.principal.clone()],
                     home: None,
                 };
+                mailbox_relay_phase("authority");
                 let _guard = authority.lock().map_err(mailbox_api_error)?;
                 serde_json::to_value(descriptor)
             }

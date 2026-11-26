@@ -177,7 +177,11 @@ impl AppState {
             caller_session_id
                 .as_deref()
                 .unwrap_or("<invalid session id>"),
-            mailbox_id.as_deref().unwrap_or("<invalid mailbox id>"),
+            // The caller learns the id it sent, escaped and bounded; the
+            // retained record below keeps generated identifier shapes only.
+            mailbox_id
+                .clone()
+                .unwrap_or_else(|| mailbox_id_echo(mailbox)),
             coordination_store_id.as_deref().unwrap_or("unavailable"),
             self.server_instance_id,
         );

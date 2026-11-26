@@ -17,6 +17,8 @@ pub(crate) struct FederationAuthenticatedPeer {
     pub(crate) lease: Option<FederationLinkLease>,
     // A canceled mailbox handler retains its slot on the owned blocking job.
     pub(crate) mailbox_permit: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    // A relay request's phase trace, shared with the middleware's records.
+    pub(crate) relay_phases: Option<Arc<MailboxRelayPhaseTrace>>,
 }
 
 pub(crate) fn federation_router(

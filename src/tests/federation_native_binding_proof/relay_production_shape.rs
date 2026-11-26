@@ -13,6 +13,9 @@ mod home_reasons;
 #[path = "relay_home_rpc_failures.rs"]
 mod home_rpc_failures;
 
+#[path = "relay_admission_deadline.rs"]
+mod admission_deadline;
+
 pub(super) struct ProxySend {
     caller: String,
     _proxy: String,
