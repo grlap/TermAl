@@ -84,7 +84,7 @@ pub(crate) fn query_workspace_ignored_changes(
     if input.len() > WORKSPACE_PENDING_BYTES {
         anyhow::bail!("ignore batch too large");
     }
-    let git = ReviewFreezeGit::for_ignore_query(&root, Some(deadline), None)?;
+    let git = PinnedGitRead::for_ignore_query(&root, Some(deadline), None)?;
     let mut command = git.command(&["check-ignore", "-z", "--stdin", "--non-matching", "-v"]);
     // Ordinary subdirectory workdirs inherit their known project's Git
     // policy. Independent projects stop discovery at their own boundary;
@@ -117,7 +117,7 @@ pub(crate) fn workspace_ignored_changes(
     changes: &[WorkspaceFileChangeEvent],
     project_roots: &[PathBuf],
 ) -> HashSet<String> {
-    let deadline = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
+    let deadline = std::time::Instant::now() + SOURCE_READ_TIMEOUT;
     #[cfg(test)]
     let deadline = WORKSPACE_IGNORE_DEADLINE_TEST_OVERRIDE
         .with(|value| value.get())

@@ -449,7 +449,7 @@ impl AppState {
         // processing. Registration waits cannot substitute a later artifact.
         let check = end.check.clone();
         let deadline = EngramSourcePhasePlan::from(
-            std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET),
+            std::time::Instant::now() + SOURCE_READ_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET),
         );
         let live = self
             .inner

@@ -185,8 +185,7 @@ pub(crate) fn declared_run_source_with_owner(
     drop(source_capture);
     // This checks only declaration-path membership, not source cleanliness.
     // The producer's full object is the sole source-state measurement.
-    let git =
-        ReviewFreezeGit::new_with_deadline_and_timings(&binding.root, Some(deadline), timings)?;
+    let git = PinnedGitRead::new_with_deadline_and_timings(&binding.root, Some(deadline), timings)?;
     // An ignored/untracked declaration would otherwise be invisible to status.
     // Require this one committed path, rather than listing index entries.
     // The owner's identity owns line-ending normalization; the worktree

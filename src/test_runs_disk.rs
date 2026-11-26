@@ -266,7 +266,7 @@ pub(crate) fn test_run_read_json(path: &FsPath) -> TestRunJson {
     if fs::metadata(path).is_ok_and(|metadata| metadata.len() > TEST_RUN_JSON_MAX_BYTES as u64) {
         return TestRunJson::TooLarge;
     }
-    match review_freeze_file_versioned(path, TEST_RUN_JSON_MAX_BYTES) {
+    match read_bounded_file_versioned(path, TEST_RUN_JSON_MAX_BYTES) {
         Ok((bytes, version)) => {
             let stamp = version
                 .modified()

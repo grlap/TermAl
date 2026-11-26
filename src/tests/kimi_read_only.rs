@@ -822,28 +822,14 @@ fn a_kimi_session_that_is_not_read_only_keeps_manual_approvals() {
 }
 
 #[test]
-fn the_freeze_tool_is_allowed_with_a_valid_request_and_a_mismatched_summary_is_not() {
-    let title = TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME;
-    let args = json!({ "manifestPath": "review/manifest.json",
-        "expectedFingerprint": "a".repeat(64) });
+fn the_retired_freeze_tool_is_rejected_with_a_valid_legacy_request() {
+    let title = "mcp__termal-delegation__termal_review_freeze_check";
+    let args = json!({
+        "manifestPath": "review/manifest.json",
+        "expectedFingerprint": "a".repeat(64),
+    });
     let observation = observed(title, &args.to_string());
-    assert_eq!(
-        decide(&mcp_params(title), Some(&observation)),
-        KimiReadOnlyDecision::Allow { args: args.clone() }
-    );
-    let other_summary = request_params(
-        "m",
-        title,
-        &format!(
-            "Requesting approval to Approve {TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME}"
-        ),
-    );
-    assert!(is_reject(&decide(&other_summary, Some(&observation))));
-    let bad = json!({ "manifestPath": "", "expectedFingerprint": "x" });
-    assert!(is_reject(&decide(
-        &mcp_params(title),
-        Some(&observed(title, &bad.to_string()))
-    )));
+    assert!(is_reject(&decide(&mcp_params(title), Some(&observation))));
 }
 
 #[test]

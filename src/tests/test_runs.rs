@@ -425,13 +425,10 @@ async fn raw_results_route_refuses_swap_at_open(label: &str, swap: fn(&FsPath)) 
     );
     fixture.refresh(&[]);
     let results = run_dir.join("results.json");
-    install_test_review_freeze_before_open(
-        PathBuf::from(&run_id).join("results.json"),
-        move || {
-            fs::remove_file(&results).unwrap();
-            swap(&results);
-        },
-    );
+    install_test_bounded_file_before_open(PathBuf::from(&run_id).join("results.json"), move || {
+        fs::remove_file(&results).unwrap();
+        swap(&results);
+    });
     let (status, body) = raw_results_refusal(&app_router(fixture.state.clone()), &run_id).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "test_run_results_changed", "{body}");

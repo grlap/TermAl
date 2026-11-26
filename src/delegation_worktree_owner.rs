@@ -32,7 +32,7 @@ fn delegation_worktree_exact_line(path: &FsPath) -> io::Result<Option<String>> {
     let regular = |metadata: &fs::Metadata| {
         metadata.is_file()
             && !metadata.file_type().is_symlink()
-            && !review_freeze_is_reparse(metadata)
+            && !file_metadata_is_reparse(metadata)
     };
     if !regular(&fs::symlink_metadata(path)?) {
         return Ok(None);

@@ -125,7 +125,7 @@ fn engram_spawn_toolchain_capture(
         engram_toolchain_label(
             &command,
             &directory,
-            std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
+            std::time::Instant::now() + SOURCE_READ_TIMEOUT,
         )
     })
 }

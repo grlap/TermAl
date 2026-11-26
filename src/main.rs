@@ -139,9 +139,6 @@ async fn run() -> Result<()> {
     match Mode::parse(args)? {
         Mode::Server => run_server().await,
         Mode::Repl { agent } => run_repl(agent),
-        Mode::ReviewFreeze(args) => {
-            tokio::task::spawn_blocking(move || review_freeze_mode(&args)).await?
-        }
         Mode::DelegationMcp {
             parent_session_id,
             base_url,
@@ -719,10 +716,6 @@ fn app_router_with_acceptance_policy_limiter(
             post(submit_delegation_review_result),
         )
         .route(
-            "/api/sessions/{id}/delegation-review-freeze",
-            post(verify_delegation_review_freeze),
-        )
-        .route(
             "/api/sessions/{id}/acceptance-evaluations",
             post(request_session_acceptance_evaluation),
         )
@@ -905,7 +898,6 @@ fn run_repl(agent: Agent) -> Result<()> {
 /// Enumerates value modes.
 enum Mode {
     Server,
-    ReviewFreeze(Vec<String>),
     Repl {
         agent: Agent,
     },
@@ -930,9 +922,6 @@ impl Mode {
         let tail_requests_help = || args.iter().skip(1).any(|arg| is_cli_help_argument(arg));
         let requests_help = match args.first().map(String::as_str) {
             Some("--help" | "-h" | "help") => true,
-            // Complete verification commands own every positional argument,
-            // including paths named help, -h or --help.
-            Some("review-freeze-check") => args.len() == 2 && tail_requests_help(),
             // These parsers distinguish options from consumed data values.
             Some("sessions" | "mailbox" | "federation" | "delegation-mcp") | None => false,
             Some("server" | "repl" | "cli" | "--agent" | "telegram" | "telegram-bot") => {
@@ -945,7 +934,6 @@ impl Mode {
         }
         match args.first().map(String::as_str) {
             None | Some("server") => Ok(Self::Server),
-            Some("review-freeze-check") => Ok(Self::ReviewFreeze(args)),
             Some("sessions") | Some("mailbox") | Some("federation") => {
                 Ok(Self::CoordinationCli(parse_coordination_cli_args(args)?))
             }
@@ -1411,10 +1399,10 @@ mod delegation_mcp_durability_pending;
 use delegation_mcp_durability_pending::*;
 mod delegation_mcp_unknown_outcome;
 use delegation_mcp_unknown_outcome::*;
-mod delegation_mcp_review_freeze;
-
-mod review_freeze;
-use review_freeze::*;
+mod pinned_git_read;
+use pinned_git_read::*;
+mod bounded_file_read;
+use bounded_file_read::*;
 mod capture_lifetime;
 use capture_lifetime::*;
 mod source_capture;
@@ -1459,10 +1447,6 @@ mod bounded_read_retained;
 use bounded_read_retained::*;
 mod bounded_read_process;
 use bounded_read_process::*;
-mod review_freeze_process;
-use review_freeze_process::*;
-mod review_freeze_api;
-use review_freeze_api::*;
 mod acceptance_evaluation;
 use acceptance_evaluation::*;
 mod acceptance_source;

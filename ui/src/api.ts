@@ -88,7 +88,7 @@ export type StateResponse = {
 export type DelegationStateSummary = Pick<
   DelegationSummary,
   "id" | "childSessionId" | "mode" | "reviewResultRequired"
-> & { reviewFreezeAllowed?: boolean; acceptanceEvaluationAllowed?: boolean };
+> & { acceptanceEvaluationAllowed?: boolean };
 
 export type CreateSessionResponse = {
   sessionId: string;

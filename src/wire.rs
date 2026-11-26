@@ -2332,9 +2332,6 @@ pub(crate) struct DelegationStateSummary {
     pub(crate) child_session_id: String,
     pub(crate) mode: DelegationMode,
     pub(crate) review_result_required: bool,
-    /// Static policy capability; the endpoint separately checks live authority.
-    #[serde(default)]
-    pub(crate) review_freeze_allowed: bool,
     /// Static policy capability for the evaluator-only submission tool; the
     /// endpoint separately checks live authority. Written only when true, so
     /// every other delegation's broad-state link keeps its shape.

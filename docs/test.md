@@ -70,12 +70,15 @@ The maintained full gate is one launcher invocation:
 node scripts/test-launcher.mjs full
 ```
 
-It runs six stages, in fail-fast order: `cargo fmt --check`, `cargo check`,
-TypeScript `--noEmit`, the review fingerprint and launcher fixtures, the native
-Git Bash Rust wrapper, and the full Vitest suite. Fingerprinting, Cargo and Rust stay rooted at the repository;
-TypeScript and Vitest execute with `ui/` as their real working directory so
-relative source and fixture paths retain the same semantics as `cd ui`. On
-every platform, the effective Cargo is `TERMAL_TEST_CARGO` when explicitly set,
+It runs six stages in fail-fast order. The stages run `cargo fmt --check`,
+`cargo check`, TypeScript `--noEmit`, the Node launcher and helper fixtures
+(`node-helper-tests`), the Rust wrapper (Git Bash on Windows), and the full
+Vitest suite. The launcher records the measured `source_id` when available in
+`request.sourceId`, `results.sourceIdBefore` and `results.sourceIdAfter`.
+Cargo, the Node helper fixtures and the Rust wrapper run from the repository
+root. TypeScript and Vitest run from `ui/` so relative source and fixture
+paths retain the same semantics as `cd ui`. On every platform, the effective
+Cargo is `TERMAL_TEST_CARGO` when explicitly set,
 otherwise `cargo` resolved from `PATH`; that same executable is used by the
 format check, compile check and passed to `scripts/test-rust.sh`. The format
 stage checks Rust using the repository's toolchain and configuration; it never

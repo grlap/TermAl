@@ -559,7 +559,7 @@ fn test_run_raw_results_directories(run_dir: &FsPath) -> Result<(), Response> {
                 ));
             }
         };
-        if !metadata.is_dir() || review_freeze_is_link(&metadata) {
+        if !metadata.is_dir() || file_metadata_is_link(&metadata) {
             return Err(test_run_raw_results_refusal(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "test_run_results_redirected",
@@ -572,7 +572,7 @@ fn test_run_raw_results_directories(run_dir: &FsPath) -> Result<(), Response> {
 
 /// Serves only a regular file, never through a link and never a FIFO or
 /// device, and only the version it opened: the same checked, bounded read the
-/// index uses (`review_freeze_file_versioned`). The entry is inspected without
+/// index uses (`read_bounded_file_versioned`). The entry is inspected without
 /// following links before anything is opened.
 fn test_run_raw_results(path: &FsPath) -> Result<Vec<u8>, Response> {
     let entry = match fs::symlink_metadata(path) {
@@ -606,7 +606,7 @@ fn test_run_raw_results(path: &FsPath) -> Result<Vec<u8>, Response> {
             "results.json is larger than 1 MiB",
         ));
     }
-    review_freeze_file_versioned(path, TEST_RUN_RAW_RESULTS_MAX_BYTES as usize)
+    read_bounded_file_versioned(path, TEST_RUN_RAW_RESULTS_MAX_BYTES as usize)
         .map(|(bytes, _)| bytes)
         .map_err(|error| match error.downcast_ref::<std::io::Error>() {
             // Deleted between the inspection and the open.

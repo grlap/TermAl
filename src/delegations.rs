@@ -2938,9 +2938,6 @@ Final answer requirements:\n\
     if record.mode == DelegationMode::Reviewer {
         prompt.push_str("\n\n");
         prompt.push_str(DELEGATION_REVIEW_RESULT_PROTOCOL_INSTRUCTIONS.trim());
-        if matches!(record.write_policy, DelegationWritePolicy::ReadOnly) {
-            prompt.push_str("\n\nIf your task requires Engram schema-1 freeze verification, use `termal_review_freeze_check` before and after inspection with the manifest path and the parent's independently supplied SHA-256 literal. It runs a compiled host checker and returns a real separate-stream subprocess observation. Require `verified: true` and `observer.stdoutExact: true`; failure is unavailable verification, never a clean review. Do not run Node, repository helpers, or arbitrary interpreters as a workaround.");
-        }
     }
     if record.agent == Agent::Kimi && matches!(record.write_policy, DelegationWritePolicy::ReadOnly)
     {
@@ -3029,9 +3026,6 @@ pub(crate) fn delegation_control_plane_capability_allowed_locked(
     };
     let delegation = &inner.delegations[delegation_index];
     match capability {
-        DelegationControlPlaneCapability::ReviewFreeze => {
-            review_freeze_authority_locked(inner, child_session_id).is_ok()
-        }
         DelegationControlPlaneCapability::SubmitAcceptanceEvaluation => {
             acceptance_evaluation_submit_authority_locked(inner, child_session_id).is_ok()
         }
@@ -5865,8 +5859,6 @@ pub(crate) fn delegation_state_summary_from_record(
         child_session_id: record.child_session_id.clone(),
         mode: record.mode,
         review_result_required: record.mode == DelegationMode::Reviewer,
-        review_freeze_allowed: record.mode == DelegationMode::Reviewer
-            && matches!(record.write_policy, DelegationWritePolicy::ReadOnly),
         acceptance_evaluation_allowed: record.mode == DelegationMode::Evaluator
             && matches!(record.write_policy, DelegationWritePolicy::ReadOnly)
             && record.acceptance_evaluation.is_some(),

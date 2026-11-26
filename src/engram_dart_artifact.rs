@@ -57,7 +57,7 @@ fn engram_launcher_dart_result(
     let metadata = file.metadata().map_err(report_io)?;
     if !metadata.is_file()
         || metadata.file_type().is_symlink()
-        || review_freeze_is_reparse(&metadata)
+        || file_metadata_is_reparse(&metadata)
     {
         return Err(Unusable(unreadable));
     }

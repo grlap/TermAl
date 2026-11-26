@@ -56,7 +56,7 @@ fn shutdown_kills_inflight_git_and_joins_an_abandoned_capture_before_root_cleanu
     let cleaned = state.test_temp_root.as_ref().unwrap().observe_cleanup();
     let root = state.test_temp_root.as_ref().unwrap().path().to_owned();
     run_git_test_command(&root, &["init"]);
-    let git = ReviewFreezeGit::new(&root).unwrap();
+    let git = PinnedGitRead::new(&root).unwrap();
     let live = Arc::new(AtomicUsize::new(0));
     let (ready_tx, ready_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();

@@ -36,7 +36,7 @@ pub(crate) struct EngramWorkSourceRoot {
     pub(crate) short_ref: String,
     pub(crate) claim_id: String,
     pub(crate) claim_fence: i64,
-    /// The canonical path as `ReviewFreezeGit` returns it (on Windows with
+    /// The canonical path as `PinnedGitRead` returns it (on Windows with
     /// its verbatim prefix), which is also the basis's `workspace_id`.
     pub(crate) root: String,
     /// `engram_exact_path_key` of the repository's common Git directory,
@@ -1517,7 +1517,7 @@ pub(crate) fn validate_engram_source_root(
     {
         return Err(outside(&resolved));
     }
-    let git = ReviewFreezeGit::new(&requested).map_err(|error| {
+    let git = PinnedGitRead::new(&requested).map_err(|error| {
         format!("`{path}` is not the root of a worktree TermAl can measure: {error:#}")
     })?;
     let root = git.root.clone();

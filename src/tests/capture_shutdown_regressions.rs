@@ -255,7 +255,7 @@ fn uncontained_capture_is_refused_before_it_can_spawn_a_descendant() {
         command.arg(marker_arg).current_dir(directory);
         command.force_unavailable_containment();
         let result = run_bounded_read_windows_with_setup(&mut command,
-            std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, 4096, |_| Ok(()));
+            std::time::Instant::now() + SOURCE_READ_TIMEOUT, 4096, |_| Ok(()));
         result_tx.send(result.map(|_| ()).map_err(|error| format!("{error:#}"))).unwrap();
     }).unwrap();
     let result = result_rx.recv_timeout(TEST_PHASE_DEADLOCK_GUARD).unwrap();
@@ -283,7 +283,7 @@ fn uncontained_capture_is_refused_before_it_can_spawn_a_descendant() {
 fn unix_shutdown_cancels_live_git_before_releasing_the_capture_root() {
     let (lifetime, root, cleaned) = lifetime_fixture();
     run_git_test_command(&root, &["init"]);
-    let git = ReviewFreezeGit::new(&root).unwrap();
+    let git = PinnedGitRead::new(&root).unwrap();
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let (finished_tx, finished_rx) = mpsc::channel();

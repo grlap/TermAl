@@ -42,7 +42,7 @@ are disabled by the trusted transport; repository and index policies apply.
 Failed classification
 is unknown and keeps conservative refresh coverage. These reads run off the
 notify callback and state mutex; identical attribution roots share a query
-within a batch. Queries use the existing review-freeze transport budget. A
+within a batch. Queries use the shared pinned Git read budget. A
 slow query synchronously delays later watcher publications for up to that
 budget per relevant root, while callback ingress stays bounded. No polling
 or ignore-cache lifecycle is added.

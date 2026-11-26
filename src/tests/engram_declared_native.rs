@@ -139,7 +139,7 @@ fn native_opening_uses_only_the_acknowledged_binding_for_its_exact_selection() {
             }
             let snapshot = native
                 .source_owner
-                .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+                .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
                 .unwrap();
             let state = Arc::downgrade(&native.fixture.state.inner);
             let move_owner = case == "changed-during-capture";
@@ -659,7 +659,7 @@ fn native_opening_ignored_uncommitted_declaration_has_a_named_agent_notice() {
     native.source_owner.refresh_commit();
     let source = native
         .source_owner
-        .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+        .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
         .map_err(|error| format!("{error:#}"));
     assert!(
         source.is_err(),
@@ -741,7 +741,7 @@ fn native_opening_publication_and_expiry_use_a_controlled_clock() {
         // separately from dispatch availability or real-producer latency.
         let snapshot = native
             .source_owner
-            .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+            .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
             .unwrap();
         let initial = std::time::Instant::now();
         let clock = Arc::new(Mutex::new(initial));
@@ -1026,7 +1026,7 @@ fn native_opening_owner_authority_is_rechecked_at_final_publication() {
     let native = NativeFixture::new("native-opening-publication-authority", false);
     let snapshot = native
         .source_owner
-        .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+        .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
         .unwrap();
     let state = native.fixture.state.clone();
     let session = native.session.clone();
@@ -1156,7 +1156,7 @@ impl NativeFixture {
         self.source_owner.refresh_commit();
         let snapshot = self
             .source_owner
-            .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+            .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
             .unwrap();
         self.install_snapshot(Ok(snapshot));
         self.fixture

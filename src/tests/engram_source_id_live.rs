@@ -26,7 +26,7 @@ fn owner_fixture(module: &FsPath, parent: &FsPath, id: &str) -> Value {
     // Reuse the existing finite Git setup/read budget.
     let output = run_bounded_read_command(
         &mut command,
-        std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
+        std::time::Instant::now() + SOURCE_READ_TIMEOUT,
         ENGRAM_SOURCE_JSON_LIMIT,
         true,
     )

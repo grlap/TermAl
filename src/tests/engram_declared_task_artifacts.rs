@@ -61,7 +61,7 @@ fn ordinary(membership: &str) -> NativeFixture {
     if membership == "untracked" {
         let snapshot = fixture
             .source_owner
-            .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+            .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
             .map_err(|error| format!("{error:#}"));
         assert!(
             snapshot

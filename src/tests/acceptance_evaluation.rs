@@ -2009,7 +2009,6 @@ fn acceptance_and_review_capabilities_are_never_shared() {
             TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME,
             false,
         ),
-        (&evaluator, TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME, false),
         (
             &reviewer,
             TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME,
@@ -2059,7 +2058,7 @@ fn acceptance_and_review_capabilities_are_never_shared() {
         .unwrap();
     let summary = delegation_state_summary_from_record(record);
     assert!(summary.acceptance_evaluation_allowed);
-    assert!(!summary.review_result_required && !summary.review_freeze_allowed);
+    assert!(!summary.review_result_required);
     assert!(!delegation_summary_from_record(record).review_result_required);
     let prompt = build_delegation_prompt(record);
     assert!(!prompt.contains("TERMAL_STRUCTURED_REVIEW_RESULT_V1"));

@@ -90,7 +90,7 @@ receipt, two eleven-second inventory response budgets and ten seconds of detach/
 headroom (68 seconds). It bounds waiting, not a blocked mutex or SQL commit.
 The MCP follow-up HTTP request has a separate derived allowance: release (68 s),
 two reconciliation responses (22 s), durability retry (5 s), unarchive response
-(31 s), ordinary provider preparation and the review-freeze fence (40 s), and
+(31 s), ordinary turn delivery (40 s), and
 ordinary request overhead (30 s): 196 seconds. It is single-attempt,
 not automatically replayed on timeout; a network failure still has an unknown
 outcome and must be checked before retrying. Concurrent recovery returns a conflict
@@ -107,7 +107,6 @@ bridge starts it at once:
 - an acceptance evaluation request (its tracker reads, then its evaluator's
   spawn) and its submission;
 - [source-root naming](engram-host-adapter.md#source-root);
-- the [review-freeze check](review-freeze-verification.md);
 - a mailbox send that wakes a session and delivers its turn;
 - a `termal_wait_delegations` call on one delegation with its default wait.
 
@@ -486,10 +485,11 @@ For read-only delegations, `changedFiles` is empty (and omitted in JSON).
 Watcher paths instead appear in `observedWorkspaceChanges`, labelled in result
 text as changes observed in the workspace during the run, not attributed to the
 child. They may include another session's edits in the same checkout or a nested
-worktree. Observations alone do not prove a read-only violation; review-freeze
-checks still compare the reviewed source. Older saved read-only results are
-projected into this shape using their saved write policy. Writing delegations
-retain their existing `changedFiles` behavior. Empty observation lists are omitted.
+worktree. Observations alone do not prove a read-only violation. Reviewers
+check their checkout against the parent's [recorded source](source-identity.md).
+TermAl projects older saved results using their saved write policy. Writing
+delegations retain their existing `changedFiles` behavior. Empty observation
+lists are omitted.
 Results retain at most 200 sorted observed paths within a 16 KiB JSON-encoded
 path budget. `observedWorkspaceChangesOmitted` counts additional paths omitted
 from the result. Fan-in reports counts and points to the result API for the
@@ -525,10 +525,6 @@ complete typed payload, derives the delegation/child/parent identity, and
 appends a self-describing envelope to the parent-child mailbox under topic
 `delegation-review-result/v1`. The mailbox append is durable and idempotent; it
 intentionally does not wake the parent ahead of the normal delegation fan-in.
-Reviewers that require Engram schema-1 freeze checks also receive the narrow
-[`termal_review_freeze_check` capability](review-freeze-verification.md). It
-replaces repository Node checker/observer execution, not source inspection or
-the parent's quality gates. Interpreter and workspace-write refusals remain.
 The validated payload is held provisionally until the child turn independently
 becomes terminal, then promoted to the delegation result. Once accepted, that
 payload is the authoritative terminal truth: a later runtime error, idle teardown,

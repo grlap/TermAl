@@ -6,8 +6,8 @@
 // that may end a PowerShell child during its startup gives it a TEMP inside
 // that test's own temp root.
 //
-// What it owns: the checks that the terminal shell, the PowerShell children it
-// starts, and the review-freeze deadline fixture get such a TEMP.
+// What it owns: the checks that the terminal shell and the PowerShell children
+// it starts get such a TEMP.
 // What it does not own: the Engram fixture children (src/tests/engram_child_temp.rs)
 // and the launcher's temp guard (unchanged).
 //
@@ -79,35 +79,6 @@ fn terminal_shell_and_its_powershell_children_keep_temp_inside_their_test_root()
                 std::env::var_os("TEMP")
             );
         }
-    }
-}
-
-#[test]
-fn review_freeze_deadline_fixture_keeps_temp_inside_its_test_root() {
-    let state = test_app_state();
-    let test_root = state
-        .test_temp_root
-        .as_ref()
-        .expect("test state should own a temp root")
-        .path()
-        .to_owned();
-    let command = super::review_freeze::freeze_deadline_fixture_command(
-        &super::review_freeze::freeze_fixture_child_temp(&state),
-    );
-    let canonical_root = fs::canonicalize(&test_root).expect("the test root should canonicalize");
-    for name in ["TEMP", "TMP"] {
-        let value = command
-            .get_envs()
-            .find(|(key, _)| *key == name)
-            .and_then(|(_, value)| value)
-            .unwrap_or_else(|| panic!("the deadline fixture should be given {name}"));
-        let value = fs::canonicalize(value).expect("the fixture's TEMP should exist");
-        assert!(
-            value != canonical_root && value.starts_with(&canonical_root),
-            "the deadline fixture's {name} {} should lie inside its test root {}",
-            value.display(),
-            canonical_root.display()
-        );
     }
 }
 

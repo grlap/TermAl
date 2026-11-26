@@ -301,9 +301,8 @@ returns, and `allow_always` is never chosen.
   - the command passes the bash read-only checker that also gates Claude
     reviewers.
 - **TermAl result tools.**
-  `mcp__termal-delegation__termal_submit_review_result` and
-  `mcp__termal-delegation__termal_review_freeze_check` are approved once if
-  and only if:
+  `mcp__termal-delegation__termal_submit_review_result` is approved once when
+  all of these conditions hold:
   - the summary names the tool;
   - the arguments are a valid request for it;
   - the delegation holds that capability.

@@ -276,7 +276,7 @@ impl CaptureLifetime {
     ) -> io::Result<()> {
         self.spawn_owned(
             name,
-            Some(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT),
+            Some(std::time::Instant::now() + SOURCE_READ_TIMEOUT),
             run,
         )
     }
@@ -390,7 +390,7 @@ impl CaptureLifetime {
     /// the exiting host never waits beyond the workers' existing shared budget.
     pub(crate) fn stop_and_join(self: &Arc<Self>) -> bool {
         self.stop();
-        let backstop = std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT;
+        let backstop = std::time::Instant::now() + SOURCE_READ_TIMEOUT;
         let mut state = self.state.lock().unwrap();
         loop {
             // A different waiter may have transferred all handles to a drainer

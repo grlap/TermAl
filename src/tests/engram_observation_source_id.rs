@@ -569,7 +569,7 @@ fn observation_capture_consumes_the_pinned_owner_and_discards_failure_payloads()
             // real check worker must still permit this admitted source call
             // beyond the unrelated Git capture window.
             let after_git_window =
-                std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT + Duration::from_millis(1);
+                std::time::Instant::now() + SOURCE_READ_TIMEOUT + Duration::from_millis(1);
             assert!(after_git_window < until);
             check_capture_cancellation_at(after_git_window)?;
             assert_eq!(capture_deadline(until), until);

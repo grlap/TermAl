@@ -2965,7 +2965,7 @@ pub(crate) fn is_lowercase_hex(value: &str) -> bool {
         .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// A content fingerprint, such as the review-freeze fingerprint.
+/// A SHA-256 content fingerprint.
 pub(crate) fn is_lowercase_sha256(value: &str) -> bool {
     value.len() == 64 && is_lowercase_hex(value)
 }

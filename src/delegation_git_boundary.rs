@@ -4,7 +4,7 @@
 
 use std::{fs, io, path::Path as FsPath};
 
-use super::{normalize_path_best_effort, review_freeze_is_reparse};
+use super::{file_metadata_is_reparse, normalize_path_best_effort};
 
 /// Opens the final entry itself. Callers check that its handle is a regular file.
 pub(crate) fn open_metadata_entry(path: &FsPath) -> io::Result<fs::File> {
@@ -82,7 +82,7 @@ pub(crate) fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
     let inspected = fs::symlink_metadata(path)?;
     if !inspected.is_file()
         || inspected.file_type().is_symlink()
-        || review_freeze_is_reparse(&inspected)
+        || file_metadata_is_reparse(&inspected)
     {
         return Ok(None);
     }
@@ -90,7 +90,7 @@ pub(crate) fn metadata_line(path: &FsPath) -> io::Result<Option<String>> {
     // link substituted after inspection cannot make this request wait.
     let file = open_metadata_entry(path)?;
     let opened = file.metadata()?;
-    if !opened.is_file() || opened.file_type().is_symlink() || review_freeze_is_reparse(&opened) {
+    if !opened.is_file() || opened.file_type().is_symlink() || file_metadata_is_reparse(&opened) {
         return Ok(None);
     }
     let mut text = String::new();

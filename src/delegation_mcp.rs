@@ -66,7 +66,6 @@ const TERMAL_DELEGATION_SAFE_REPLAY_MIN_REPLAY_BUDGET: Duration = Duration::from
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DelegationControlPlaneCapability {
     SubmitReviewResult,
-    ReviewFreeze,
     SubmitAcceptanceEvaluation,
     ReadAcceptanceEvidence,
 }
@@ -84,9 +83,6 @@ pub(crate) fn delegation_control_plane_capability_for_claude_tool_name(
     match tool_name {
         TERMAL_SUBMIT_REVIEW_RESULT_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::SubmitReviewResult)
-        }
-        TERMAL_REVIEW_FREEZE_QUALIFIED_TOOL_NAME => {
-            Some(DelegationControlPlaneCapability::ReviewFreeze)
         }
         TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_QUALIFIED_TOOL_NAME => {
             Some(DelegationControlPlaneCapability::SubmitAcceptanceEvaluation)
@@ -111,16 +107,6 @@ pub(crate) fn delegation_control_plane_capability_for_codex_elicitation(
         return None;
     };
     let metadata = meta.as_object()?;
-    if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
-        && metadata.get("tool_description").and_then(Value::as_str)
-            == Some(TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION)
-        && metadata.get("tool_params").is_some_and(|value| {
-            serde_json::from_value::<ReviewFreezeRequest>(value.clone())
-                .is_ok_and(|request| request.validate().is_ok())
-        })
-    {
-        return Some(DelegationControlPlaneCapability::ReviewFreeze);
-    }
     if metadata.get("codex_approval_kind").and_then(Value::as_str) == Some("mcp_tool_call")
         && metadata.get("tool_description").and_then(Value::as_str)
             == Some(TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_DESCRIPTION)
@@ -842,7 +828,6 @@ pub(crate) struct TermalDelegationMcpBridge {
     /// Derived from the same state snapshot as caller kind so explorer and
     /// worker children never receive the reviewer-only submission tool.
     caller_requires_structured_review_result: OnceLock<bool>,
-    caller_allows_review_freeze: OnceLock<bool>,
     /// Same snapshot again: only an evaluator child sees the submission tool.
     caller_allows_acceptance_evaluation: OnceLock<bool>,
     // Sleep hook for explicit safe-replay retries. Production uses
@@ -944,7 +929,6 @@ impl TermalDelegationMcpBridge {
             request_timeout,
             caller_is_delegation_child: OnceLock::new(),
             caller_requires_structured_review_result: OnceLock::new(),
-            caller_allows_review_freeze: OnceLock::new(),
             caller_allows_acceptance_evaluation: OnceLock::new(),
             safe_replay_retry_sleeper: std::thread::sleep,
             turn_delivery_budget: termal_delegation_turn_delivery_budget(),
@@ -1060,9 +1044,6 @@ impl TermalDelegationMcpBridge {
                 );
             }
         }
-        if name == TERMAL_REVIEW_FREEZE_TOOL_NAME && !self.caller_allows_review_freeze() {
-            bail!("`{name}` is available only to a read-only reviewer child");
-        }
         if matches!(
             name.as_str(),
             TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
@@ -1080,7 +1061,6 @@ impl TermalDelegationMcpBridge {
             "termal_resume_session" => self.tool_resume_session(arguments),
             "termal_followup_session" => self.tool_followup_session(arguments),
             "termal_submit_review_result" => self.tool_submit_review_result(arguments),
-            "termal_review_freeze_check" => self.tool_review_freeze_check(arguments),
             "termal_evaluate_acceptance" => self.tool_evaluate_acceptance(arguments),
             "termal_replay_acceptance_evaluation" => {
                 self.tool_replay_acceptance_evaluation(arguments)
@@ -1106,7 +1086,7 @@ impl TermalDelegationMcpBridge {
             "termal_release_named_root" => self.tool_release_named_root(arguments),
             other => Err(anyhow!("unknown TermAl delegation MCP tool `{other}`")),
         }?;
-        Ok(delegation_mcp_tool_result(&name, &result))
+        Ok(mcp_tool_text_result(&result, false))
     }
 
     pub(crate) fn tool_spawn_session(&self, arguments: Value) -> Result<Value> {
@@ -2180,17 +2160,6 @@ impl TermalDelegationMcpBridge {
         let is_child = !is_root_peer_session(session, &delegation_child_ids);
         let requires_structured_review_result = is_child
             && delegation_child_requires_structured_review_result(&state, &self.serving_session_id);
-        let allows_review_freeze = requires_structured_review_result
-            && state
-                .get("delegations")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .any(|d| {
-                    d.get("childSessionId").and_then(Value::as_str)
-                        == Some(self.serving_session_id.as_str())
-                        && d.get("reviewFreezeAllowed").and_then(Value::as_bool) == Some(true)
-                });
         let allows_acceptance_evaluation = is_child
             && state
                 .get("delegations")
@@ -2205,7 +2174,6 @@ impl TermalDelegationMcpBridge {
                             .and_then(Value::as_bool)
                             == Some(true)
                 });
-        let _ = self.caller_allows_review_freeze.set(allows_review_freeze);
         let _ = self
             .caller_allows_acceptance_evaluation
             .set(allows_acceptance_evaluation);
@@ -2221,14 +2189,6 @@ impl TermalDelegationMcpBridge {
     fn caller_requires_structured_review_result(&self) -> bool {
         let _ = self.caller_is_delegation_child();
         self.caller_requires_structured_review_result
-            .get()
-            .copied()
-            .unwrap_or(false)
-    }
-
-    fn caller_allows_review_freeze(&self) -> bool {
-        let _ = self.caller_is_delegation_child();
-        self.caller_allows_review_freeze
             .get()
             .copied()
             .unwrap_or(false)
@@ -2253,9 +2213,6 @@ impl TermalDelegationMcpBridge {
                 let Some(name) = tool.get("name").and_then(Value::as_str) else {
                     return true;
                 };
-                if name == TERMAL_REVIEW_FREEZE_TOOL_NAME {
-                    return caller_is_child && self.caller_allows_review_freeze();
-                }
                 if matches!(
                     name,
                     TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME
@@ -2712,7 +2669,7 @@ fn tool_requires_root_session(name: &str) -> bool {
 }
 
 fn tool_requires_delegation_child(name: &str) -> bool {
-    name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME || name == TERMAL_REVIEW_FREEZE_TOOL_NAME
+    name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
 }
 
 fn delegation_write_policy_input_schema() -> Value {
@@ -2897,19 +2854,6 @@ pub(crate) fn mcp_tools_list_result() -> Value {
                     "properties": {
                         "delegationId": { "type": "string" },
                         "message": { "type": "string" }
-                    }
-                }
-            },
-            {
-                "name": TERMAL_REVIEW_FREEZE_TOOL_NAME,
-                "description": TERMAL_REVIEW_FREEZE_TOOL_DESCRIPTION,
-                "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
-                "inputSchema": {
-                    "type": "object", "additionalProperties": false,
-                    "required": ["manifestPath", "expectedFingerprint"],
-                    "properties": {
-                        "manifestPath": { "type": "string", "maxLength": 4096 },
-                        "expectedFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
                     }
                 }
             },
@@ -3222,12 +3166,6 @@ fn mcp_json_rpc_tool_error(id: Value, message: String) -> Value {
             "isError": true,
         }),
     )
-}
-
-pub(crate) fn delegation_mcp_tool_result(name: &str, result: &Value) -> Value {
-    let is_error = name == TERMAL_REVIEW_FREEZE_TOOL_NAME
-        && result.get("verified").and_then(Value::as_bool) != Some(true);
-    mcp_tool_text_result(result, is_error)
 }
 
 pub(crate) fn mcp_tool_text_result(value: &Value, is_error: bool) -> Value {

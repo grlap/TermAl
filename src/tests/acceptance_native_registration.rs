@@ -142,7 +142,7 @@ fn decision(
         &target.store,
         &task,
         Some(&root),
-        std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT,
+        std::time::Instant::now() + SOURCE_READ_TIMEOUT,
         &std::time::Instant::now,
     )
 }

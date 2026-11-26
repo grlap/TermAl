@@ -181,44 +181,35 @@ fn serialized_delegation_child_state(child_session_id: &str, mode: DelegationMod
 }
 
 #[test]
-fn delegation_mcp_freeze_tool_advertisement_and_calls_require_read_only_capability() {
-    for allowed in [None, Some(false), Some(true)] {
-        let mut snapshot =
-            serialized_delegation_child_state("review-child", DelegationMode::Reviewer);
-        let delegation = snapshot["delegations"][0].as_object_mut().unwrap();
-        delegation.remove("reviewFreezeAllowed");
-        if let Some(value) = allowed {
-            delegation.insert("reviewFreezeAllowed".to_owned(), json!(value));
-        }
-        let permitted = allowed == Some(true);
-        let (base_url, _, server) =
-            spawn_test_mcp_http_server(if permitted { 2 } else { 1 }, move |request| {
-                if request.method == "GET" {
-                    assert_eq!(request.path, "/api/state");
-                    (200, snapshot.clone())
-                } else {
-                    assert!(permitted, "unauthorized freeze request reached backend");
-                    assert_eq!(
-                        request.path,
-                        "/api/sessions/review-child/delegation-review-freeze"
-                    );
-                    (200, json!({"verified": true}))
-                }
-            });
-        let bridge = TermalDelegationMcpBridge::new("review-child".into(), base_url).unwrap();
-        let list = bridge.tools_list_for_caller();
-        assert_eq!(
-            list["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|tool| tool["name"] == TERMAL_REVIEW_FREEZE_TOOL_NAME),
-            permitted
-        );
-        let result = bridge.handle_tool_call(json!({"name": TERMAL_REVIEW_FREEZE_TOOL_NAME, "arguments": {"manifestPath":".git/freeze.json", "expectedFingerprint":"a".repeat(64)}}));
-        assert_eq!(result.is_ok(), permitted);
-        server.join().unwrap();
-    }
+fn legacy_reviewer_snapshot_does_not_restore_the_retired_freeze_tool() {
+    const RETIRED_TOOL: &str = "termal_review_freeze_check";
+    let mut snapshot = serialized_delegation_child_state("review-child", DelegationMode::Reviewer);
+    snapshot["delegations"][0]["reviewFreezeAllowed"] = json!(true);
+    let (base_url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/api/state");
+        (200, snapshot.clone())
+    });
+    let bridge = TermalDelegationMcpBridge::new("review-child".into(), base_url).unwrap();
+    let list = bridge.tools_list_for_caller();
+    let names = list["tools"].as_array().unwrap();
+    assert!(!names.iter().any(|tool| tool["name"] == RETIRED_TOOL));
+    assert!(
+        names
+            .iter()
+            .any(|tool| tool["name"] == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME)
+    );
+    let error = bridge.handle_tool_call(json!({
+        "name": RETIRED_TOOL,
+        "arguments": {"manifestPath": ".git/freeze.json", "expectedFingerprint": "a".repeat(64)},
+    })).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unknown TermAl delegation MCP tool")
+    );
+    server.join().unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 1);
 }
 
 fn try_read_test_mcp_http_request(stream: &mut std::net::TcpStream) -> Result<TestMcpHttpRequest> {
@@ -469,7 +460,6 @@ fn delegation_mcp_base_tools_list_includes_role_scoped_tools() {
             "termal_followup_session",
             "termal_evaluate_acceptance",
             "termal_replay_acceptance_evaluation",
-            "termal_review_freeze_check",
             "termal_submit_review_result",
             "termal_submit_acceptance_evaluation",
             "termal_read_acceptance_evidence",
@@ -1355,8 +1345,7 @@ fn delegation_mcp_acceptance_submission_tool_is_scoped_to_evaluator_children() {
             assert!(
                 !names
                     .iter()
-                    .any(|name| name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME
-                        || name == TERMAL_REVIEW_FREEZE_TOOL_NAME),
+                    .any(|name| name == TERMAL_SUBMIT_REVIEW_RESULT_TOOL_NAME),
                 "an evaluator never receives the reviewer-only tools"
             );
         }
@@ -4796,10 +4785,6 @@ fn delegation_mcp_transport_errors_name_the_allowance_that_ran_out() {
         allowance(DelegationLongCall::SourceRootNaming)
     );
     assert_eq!(
-        timeout_of(bridge.tool_review_freeze_check(json!({}))),
-        allowance(DelegationLongCall::ReviewFreeze)
-    );
-    assert_eq!(
         timeout_of(bridge.tool_followup_session(
             json!({ "delegationId": "delegation-child", "message": "Continue" })
         )),
@@ -4835,21 +4820,6 @@ fn delegation_mcp_transport_errors_name_the_allowance_that_ran_out() {
     );
     // Its safe replays share the allowance, and the error names it whole.
     assert_eq!(timeout_of(send), allowance(DelegationLongCall::MailboxSend));
-    // A read-only reviewer's review-freeze call, through the real dispatch,
-    // goes out with the freeze allowance rather than an ordinary request's.
-    bridge.caller_is_delegation_child.set(true).unwrap();
-    bridge
-        .caller_requires_structured_review_result
-        .set(true)
-        .unwrap();
-    bridge.caller_allows_review_freeze.set(true).unwrap();
-    assert_eq!(
-        timeout_of(bridge.handle_tool_call(json!({
-            "name": TERMAL_REVIEW_FREEZE_TOOL_NAME,
-            "arguments": {},
-        }))),
-        allowance(DelegationLongCall::ReviewFreeze)
-    );
 }
 
 #[test]
@@ -4895,11 +4865,9 @@ fn delegation_mcp_bridge_and_codex_wait_out_the_server_budgets() {
         "http://127.0.0.1:1".to_owned(),
     )
     .unwrap();
-    // A deliberate second pin of the production review-freeze wait (freeze
-    // 40 s, grace 5 s, ordinary request 30 s), so a change to any shows here.
     assert_eq!(
-        bridge.allowance(DelegationLongCall::ReviewFreeze),
-        Duration::from_secs(40 + 5 + 30)
+        bridge.allowance(DelegationLongCall::Spawn),
+        Duration::from_secs(40) + TERMAL_DELEGATION_MCP_HTTP_TIMEOUT
     );
     // Every long call waits longer than an ordinary request, and Codex waits
     // longer than the bridge on each, and than its own 60 s default.

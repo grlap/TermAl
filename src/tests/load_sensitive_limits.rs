@@ -1,6 +1,6 @@
 // The operation limits and the relations the limits and waits
 // derived from them must keep. The limits live in their owners
-// (engram_host_adapter.rs, engram_readiness.rs, review_freeze_process.rs,
+// (engram_host_adapter.rs, engram_readiness.rs, pinned_git_read.rs,
 // engram_source_roots.rs, acceptance_evaluation_api.rs); the bridge waits in
 // delegation_mcp_timeouts.rs. Exact values belong to those owners.
 use super::*;
@@ -72,16 +72,16 @@ fn the_long_calls_wait_out_the_server_work_they_cover() {
     .unwrap();
     let wait = |call| bridge.allowance(call);
     // A mailbox send that wakes a session holding a claim delivers its turn
-    // before it answers. Ordinary delivery retains the review-freeze budget.
-    assert!(wait(DelegationLongCall::MailboxSend) > REVIEW_FREEZE_TIMEOUT);
+    // before it answers. Ordinary delivery retains the 40-second budget.
+    assert!(wait(DelegationLongCall::MailboxSend) > SOURCE_READ_TIMEOUT);
     // A follow-up delivers the re-armed child turn after its recovery.
     assert!(
         wait(DelegationLongCall::Followup)
-            > termal_delegation_followup_recovery_allowance() + REVIEW_FREEZE_TIMEOUT
+            > termal_delegation_followup_recovery_allowance() + SOURCE_READ_TIMEOUT
     );
     // A spawn delivers the child's first ordinary turn; an evaluation
     // request additionally reads the tracker before spawning its evaluator.
-    let spawn = REVIEW_FREEZE_TIMEOUT;
+    let spawn = SOURCE_READ_TIMEOUT;
     assert!(wait(DelegationLongCall::Spawn) > spawn);
     assert!(
         wait(DelegationLongCall::EvaluationRequest)
@@ -90,10 +90,4 @@ fn the_long_calls_wait_out_the_server_work_they_cover() {
                 + spawn
     );
     assert!(wait(DelegationLongCall::EvaluationSubmit) > acceptance_evaluation_submit_budget());
-    // The freeze check outlasts the checker's watch. Naming's issued-call
-    // overrun is exercised through the bridge's sender seam.
-    assert!(
-        wait(DelegationLongCall::ReviewFreeze)
-            > REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE
-    );
 }

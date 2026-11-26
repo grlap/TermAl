@@ -790,7 +790,7 @@ fn engram_inspect_artifact(
 /// not ignored) is refused, and Git must list it as ignored.
 fn engram_artifact_ignored(root: &FsPath, canonical: &FsPath) -> Result<(), &'static str> {
     const UNREAD: &str = "the artifact's ignore state cannot be read";
-    let git = ReviewFreezeGit::new(root).map_err(|_| UNREAD)?;
+    let git = PinnedGitRead::new(root).map_err(|_| UNREAD)?;
     let relative = canonical
         .strip_prefix(&git.root)
         .map_err(|_| "the artifact is outside the worktree")?;

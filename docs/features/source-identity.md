@@ -27,8 +27,10 @@ reconstructed revision.
 
 TermAl reviews use the shared `source_id` from a recorded execution when they
 need source identity. Git commits and diff ranges select the content to inspect.
-TermAl's `review_freeze` and Engram's separate freeze tooling retain their
-packaging and authority checks until explicitly migrated.
+Before restarting a host with the schema-1 verifier removed, finish or
+update any active review that still depends on it. An older bridge that calls
+the removed endpoint receives a failure. TermAl still loads older state
+snapshots carrying the former reviewer flag and ignores that field.
 
 A source identity is not a run, record, review, evaluation or build identity. It
 does not prove that a command ran, that it passed, that a root is authorized, or
@@ -330,14 +332,10 @@ See [the launcher contract](../test.md#ordinary-committed-input-runs---input-com
 | --- | --- | --- |
 | Ordinary observations and test credit | Complete Engram-owned source_id; the registered Commit lane also checks its eligibility predicate at both boundaries | Root commit, command/check identity, real execution/result, root/work/run/claim/fence and frozen input |
 | TermAl clean-commit reviews and gates | Cite the complete Engram-owned source_id and compare the launcher's admitted and boundary values for the exact candidate | Base and candidate commits, diff scope, read-only checkout checks and review and gate results |
-| TermAl review_freeze | Requires explicit migration | Existing fingerprint, reviewer identity and packaging checks |
-| Engram's separate freeze consumer | Requires explicit migration without replacing its packaging checks | HEAD, index, untracked/cleanliness components and before/after execution identity |
 
-Engram's freeze answers whether the worktree changed, including packaging
-state. Source-content equality does not answer that question alone. No consumer
-may silently replace its old freeze hash with source_id, reinterpret a stored
-fingerprint, or drop a cleanliness or authority check because source_id matches.
-The schema-1 verifier belongs to the separate Engram manifest profile.
+Stored schema-1 fingerprints keep their historical meaning. Current reviews and
+gates still check checkout cleanliness and authority in addition to source
+identity.
 
 The direct source-basis producer and registered committed-input flow must use
 the same eligibility rules for the committed-input lane. Reuse the existing

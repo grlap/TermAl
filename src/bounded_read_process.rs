@@ -1,6 +1,6 @@
 // Shared finite read-command transport, introduced for host freeze and Work
 // reads. Owns child/group and bounded pipe observation, not caller authority,
-// command construction or response parsing. Extracted from review_freeze_process.rs.
+// command construction or response parsing. Shared by pinned Git and other host-owned reads.
 
 use super::*;
 #[derive(Debug)]

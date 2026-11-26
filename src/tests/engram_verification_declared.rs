@@ -284,7 +284,7 @@ fn observed_declared_source_retains_local_changes_and_requires_a_committed_decla
     let fixture = native_fixture("native-declared-source");
     let binding = test_run_declared_binding(&native_request(&fixture.root), &fixture.root).unwrap();
     let owner = NativeSourceOwner::new(&fixture.root);
-    let capture = || owner.source(&binding, std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT);
+    let capture = || owner.source(&binding, std::time::Instant::now() + SOURCE_READ_TIMEOUT);
     let before = capture().unwrap();
     assert_eq!(before.source_id.commit.len(), 40);
     fs::write(fixture.root.join("untracked.txt"), "dirt").unwrap();
@@ -403,7 +403,7 @@ fn native_committed_declaration_membership_does_not_require_blob_byte_equality()
         "Git actually checked out CRLF"
     );
     let owner = NativeSourceOwner::new(&fixture.root);
-    let snapshot = owner.snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None);
+    let snapshot = owner.snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None);
     assert!(
         snapshot.is_ok(),
         "committed CRLF declaration path: {snapshot:?}"
@@ -475,7 +475,7 @@ fn native_source_retains_child_changes_in_the_full_owner_object() {
         changes: Vec::new(),
     }];
     owner.replace(identity);
-    let capture = || owner.source(&binding, std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT);
+    let capture = || owner.source(&binding, std::time::Instant::now() + SOURCE_READ_TIMEOUT);
     let before = capture().unwrap();
     assert_eq!(capture().unwrap().source_id, before.source_id);
     fs::write(child.join("input.txt"), "dirty after\n").unwrap();
@@ -505,7 +505,7 @@ fn native_opening_keeps_the_pre_prompt_artifact_image_and_exact_command() {
     let timings = Arc::new(SourceReadTimings::default());
     let owner = NativeSourceOwner::new(&fixture.root);
     let started = std::time::Instant::now();
-    let captured = owner.snapshot(started + REVIEW_FREEZE_TIMEOUT, Some(timings.clone()));
+    let captured = owner.snapshot(started + SOURCE_READ_TIMEOUT, Some(timings.clone()));
     let summary = timings.summary();
     eprintln!(
         "scripted-owner native S0 assembly: success={} elapsed_ms={} stages={summary}",
@@ -644,7 +644,7 @@ fn codex_native_command_and_claude_one_call_select_the_same_opening_entry() {
     let fixture = native_fixture("native-provider-command");
     let owner = NativeSourceOwner::new(&fixture.root);
     let snapshot = owner
-        .snapshot(std::time::Instant::now() + REVIEW_FREEZE_TIMEOUT, None)
+        .snapshot(std::time::Instant::now() + SOURCE_READ_TIMEOUT, None)
         .unwrap();
     let mut codex = TestRecorder::default();
     handle_codex_app_server_item_started(

@@ -48,7 +48,7 @@ fn acceptance_evaluation_closing_budget() -> Duration {
     ENGRAM_WORK_BINDING_COMMAND_TIMEOUT * 2
         + ENGRAM_MIN_CALL_TIMEOUT * 2
         + ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT
-        + ENGRAM_SOURCE_METADATA_BUDGET.max(REVIEW_FREEZE_TIMEOUT)
+        + ENGRAM_SOURCE_METADATA_BUDGET.max(SOURCE_READ_TIMEOUT)
 }
 
 /// The bounded mandatory evidence phase may admit one last full call near
@@ -156,10 +156,10 @@ pub(crate) fn acceptance_evaluation_submit_budget() -> Duration {
     let call = acceptance_evaluation_call_worst_case(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT);
     let ordinary = call * 2
         + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 2
-        + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_METADATA_BUDGET + ENGRAM_SOURCE_PROCESS_BUDGET);
+        + SOURCE_READ_TIMEOUT.max(ENGRAM_SOURCE_METADATA_BUDGET + ENGRAM_SOURCE_PROCESS_BUDGET);
     let refresh = call
         + ACCEPTANCE_EVALUATION_PERSIST_ACK_TIMEOUT * 5
-        + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_METADATA_BUDGET + ENGRAM_SOURCE_PROCESS_BUDGET)
+        + SOURCE_READ_TIMEOUT.max(ENGRAM_SOURCE_METADATA_BUDGET + ENGRAM_SOURCE_PROCESS_BUDGET)
         + acceptance_evaluation_request_tracker_budget()
         + acceptance_evaluation_request_overrun_budget();
     ordinary.max(refresh)
@@ -2524,7 +2524,7 @@ impl AppState {
                     parent,
                     FsPath::new(&source_root.root),
                     std::time::Instant::now()
-                        + REVIEW_FREEZE_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET),
+                        + SOURCE_READ_TIMEOUT.max(ENGRAM_SOURCE_COMMAND_BUDGET),
                 )
             });
             if current.as_deref() == Some(commit) {

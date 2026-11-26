@@ -503,7 +503,7 @@ fn state_diff_rows_compare_values_and_report_keys_absent_from_the_cut() {
 
     let mut next = cut(2, &[&a]);
     let mut d1 = delegation("d1", "a");
-    d1.review_freeze_allowed = true;
+    d1.review_result_required = false;
     next.header.delegations = vec![d1, delegation("d3", "a")];
     next.header.test_run_overview.wire = test_run_overview(
         &[test_run("r1", "passed"), test_run("r2", "running")],
@@ -516,8 +516,8 @@ fn state_diff_rows_compare_values_and_report_keys_absent_from_the_cut() {
     let diff = only_diff(&mut receiver);
     assert_eq!(ids(&diff["delegations"]["changed"], "id"), ["d1", "d3"]);
     assert_eq!(
-        diff["delegations"]["changed"][0]["reviewFreezeAllowed"],
-        true
+        diff["delegations"]["changed"][0]["reviewResultRequired"],
+        false
     );
     assert_eq!(keys(&diff["delegations"]["removed"]), ["d2"]);
     assert!(diff.get("testRuns").is_none());

@@ -9,11 +9,11 @@
 // the wait it was given: the response decoder (`decode_response_within`,
 // which `decode_response` calls with the ordinary timeout) and the
 // safe-replay POST within a budget (`post_json_with_safe_replay_within`).
-// Does not own the server budgets these cover (`review_freeze_process.rs`,
+// Does not own the server budgets these cover (`pinned_git_read.rs`,
 // `engram_source_roots.rs`, `acceptance_evaluation_api.rs`,
 // `engram_host_adapter.rs`, the Codex child lifecycle constants), the tools
-// that make these calls (`delegation_mcp.rs`, `delegation_mcp_source_root.rs`,
-// `delegation_mcp_review_freeze.rs`), the bridge's ordinary request wrappers
+// that make these calls (`delegation_mcp.rs`, `delegation_mcp_source_root.rs`),
+// the bridge's ordinary request wrappers
 // and its replay classification and backoff, or the Codex config the tool
 // timeout is written into (`delegation_mcp.rs`). New module: the follow-up
 // allowance, the response decoder and the safe-replay POST body moved here
@@ -33,9 +33,9 @@ pub(crate) fn termal_delegation_followup_recovery_allowance() -> Duration {
 
 /// What delivering a turn inline may spend: a spawn, a follow-up and a mailbox
 /// send that wakes an idle target deliver a turn before they answer. The
-/// allowance covers actual provider preparation and the review-freeze fence.
+/// allowance covers provider preparation and source observation.
 pub(crate) fn termal_delegation_turn_delivery_budget() -> Duration {
-    REVIEW_FREEZE_TIMEOUT
+    SOURCE_READ_TIMEOUT
 }
 
 /// Defines `DelegationLongCall` and its `ALL` from one list of variants, so
@@ -72,8 +72,6 @@ delegation_long_calls! {
     /// Waits out a running reclamation pass, then the release's authority
     /// budget and the writer's confirmation and acknowledgement.
     NamedRootRelease,
-    /// The server watches its checker child for the freeze budget and a grace.
-    ReviewFreeze,
     /// Recovers the child's thread, then delivers its re-armed turn.
     Followup,
     /// Wakes an idle target and delivers its turn; its safe replays share the
@@ -105,7 +103,6 @@ impl DelegationLongCall {
                     + ENGRAM_NAMED_ROOT_RELEASE_PERSIST_BUDGET * 2
                     + ENGRAM_MIN_CALL_TIMEOUT
             }
-            Self::ReviewFreeze => REVIEW_FREEZE_TIMEOUT + REVIEW_FREEZE_OBSERVER_GRACE,
             Self::Followup => termal_delegation_followup_recovery_allowance() + turn_delivery,
             Self::MailboxSend => turn_delivery,
         }
