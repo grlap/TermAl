@@ -1,0 +1,30 @@
+{
+  "id": "01a219b2-27c3-72f2-9baa-5c63fff3f74a",
+  "external_ref": null,
+  "title": "Session listing shows a provider-usage-limit-paused session as \"active\" with queuePaused false, and later mail reads lose the pause reason",
+  "outcome": "Session listing shows a provider-usage-limit-paused session as \"active\" with queuePaused false, and later mail reads lose the pause reason",
+  "acceptance": [
+    "While a root session's wake queue is held by a provider usage limit, termal_list_sessions (and the session listing API) reports that state for the session — e.g. queuePaused true with queuePauseReason naming the provider usage limit and its start time — instead of status active with queuePaused false.",
+    "An exact mailbox-message read of a message held behind that pause keeps reporting the pause reason (e.g. recipientQueuePause: provider_usage_limit with its start) for as long as the hold lasts, not only on the first read.",
+    "Behaviour tests cover a session paused by a provider usage limit: the listing shows the pause and reason, and repeated exact reads of a held message keep the reason; when the pause clears, both report the session as unpaused."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "coordination",
+    "mailbox",
+    "provider-limits"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

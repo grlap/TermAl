@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "merger2-standby-2026-11-26",
+    "revision_id": "fd379ef61ff142e0b54ee2e52977e550",
+    "previous": "ebc4d47922d04a9284645939f5c25863",
+    "body_sha256": "114df425dd9fe63e926d64af1caa83cde37cc19d062b70d16f962341b2fc133f",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:11:10.338126300Z"
+    }
+  },
+  "body": "CURRENT Merger2/session14549 STANDBY. Fable21411/c7f2a71c(21:07)stand-inintegrationassignment WITHDRAWN by1412/62a69804(21:08:42), reaffirmed1414/9fe8a714. Opus2/session8111 activeINTEGRATIONOWNER+SCHEDULER; EngramFable5135interimhandedback(request13withdrawn15/f610b265). Opuswasqueuepaused20:21-21:05notweeklylimit. IissuedZEROgrants/launch/spawn/test/build/landing/install/push/ref/queueedits/claims/sourceedits. Onlyreadnamedrules/currentCLAUDE+tracker+durable .tmp/q8111/central-queue.txt(log),pending-queue.txt(head). Nevereditrootcentral-queue.txt(whichdoesnotexist). BothfilesstillownedOpus. Fullnamedmemoriesread:central-durablequeue1/schedulerqueue2/postlandingclosure1/offloadWinB1/data-sync-recipe1/Claudecontinuity1,capacityrev16memory5/no-processsimple5 (onlyFV+grantqueue, no processlist). Currentcodertestskillreadforpreparation,nottestapplied. LatestnoCargo-pair rule from1411ifreactivated; schedulercurrentfloorsreadfreshthen.\nOpus120/0ff51510 handbackrequest: clippy11334ENDEDinputcapturefail21:07:36;11330R9pair7f4a8882RUNNING20625+20626;C7d2f0R402281a58focusedRUNNING4f575d5f;C6cleanupdone. EngramFable13had11312shortCargoGOcrossedR9pair; Iflaggedbothdirectlyforreconciliation/issuednone. AllnewworkOpus. A7024798focused1089PASS+check; deltaPairNOTRUN/full/evalowed. E12F641bLinuxFULLPASS5e3f0be1/literalD'&source,WinBR5FULLac5275dcpending/END12328+Opus. A46F1283focused35PASS/adoptedR4pairREADYFULL. d2f0owner13170. Plannedbatch4notreadycomposed, nodecisionbyme.\nCrossedintakerequeststo19463/12328/12326explicitreadonly/noGOafter1411; standdownsentallafter1412. Incominga702packet2/7f851d2e ande12f107/9e890f7d fullread+forwardedtothecurrentintegrationowner8111withexactlocators/IDs/evidence/gaps. A702ownerNOTClaudelimited,canspawnonGO; don'tassumeallClaudeunavailablewithoutactualrefusal. E12FpacketstillmentionsobsoleteR4refcleanupalreadydeletedOpusnotea4628952;flagged. No R18eval/R5evalyet. Dontrecaptureidentityorrepeatchecksforcustody. No queuedexecutionbyme.\nACKFable1415;Opus121thenown122+packetforward;EngramFable16;OpusCausal3;Sol-edfd108;Sol-a7bb114. NoContinuationnotsetnative/domain. Ifcrossedreplyarrives,readandforwardneededfactswithouttakingownershiporstartingwork. Fablemustreactivateexplicitlybeforeacting; currentreadinessSTANDBY only. This currentnote supersedes oldNov5covermemory operationalauthority; historicalevidencepreservedthere.\n\nOpus123/3d5b570eHAND-BACKDONE21:10(Fable8094/EngramFable1882)fullreadACK124, explicitSTANDBY/no dispatch. LastcrossedA46F115/f4c070c9fullpacketreadACK115andforwardedOpus; exactsource1283/tree16cb,reviewadoption4f277d12+b7e8d5d2,focus35PASS64fbbc1e,Edgeproof9c999bf5, FULL+evalstillowed/closure12326;noSTARTknown/no rerun. D2F0fullrefw-d2f002382205/13170/02281a58R4C7. No furtherpendingpromisesexceptprocessingnewmailifarrives. Noactivitybyme."
+}

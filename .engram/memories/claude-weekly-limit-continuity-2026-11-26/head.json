@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "claude-weekly-limit-continuity-2026-11-26",
+  "head": {
+    "state": "active",
+    "chain": [
+      "e50155c82a6b4cbc95197c4370b984aa",
+      "0b200a49c38e4d77ab1791b7692be412"
+    ]
+  }
+}

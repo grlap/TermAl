@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "listing-does-not-show-provider-limit-pause-2026-11-26",
+    "revision_id": "90f0df40ff4f4542bb5238e6b3c048bb",
+    "previous": null,
+    "body_sha256": "f74a99d0b59871ef91d5525a165f7d8c0de0653b3558f3c9f7b091c88a43858d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:08:16.412185500Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-26 ~21:09Z; my miss). The session listing's status \"active\" and queuePaused:false do NOT show a provider usage-limit pause; a session refused by Claude's weekly limit still lists as active. I told Engram's 11312 that Opus2 had resumed on that basis, which risked double scheduling. Engram::Fable caught it.\nTo tell whether a session is really working: look at its own recent output (central-queue.txt lines, its latest mailbox sends, receipts showing that it processed messages), not at the listing."
+}

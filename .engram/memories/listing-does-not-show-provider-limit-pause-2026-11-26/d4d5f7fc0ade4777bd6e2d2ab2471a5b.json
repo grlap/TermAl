@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "listing-does-not-show-provider-limit-pause-2026-11-26",
+    "revision_id": "d4d5f7fc0ade4777bd6e2d2ab2471a5b",
+    "previous": "90f0df40ff4f4542bb5238e6b3c048bb",
+    "body_sha256": "c542f97e5f7fb9f9359dcb8b385a3dfbc41a99c97977081ac117b7d07597aa8a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:08:52.027238400Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-26 ~21:10Z; my misses, both ways).\n- (1) The session listing (\"active\", queuePaused false) doesn't show a provider usage-limit pause.\n- (2) Silence from a session doesn't prove a usage limit either. Opus2's 20:21-21:05Z gap was a PAUSED QUEUE (its incoming mail held \"behind paused queue\", possibly a long turn); it resumed on its own at about 21:06Z.\nI appointed an interim scheduler (Engram::Fable) and a stand-in integration owner (Merger2) on a third party's guess, causing a double-scheduler window, and reverted at about 21:09Z.\nRule: before appointing stand-ins, get POSITIVE evidence of the cause. That means an actual refusal text from the session itself, or Greg's word, or the queue-paused disposition on a fresh send to it. Prefer asking the session (a send shows \"heldBehindPausedQueue\") and waiting a short, bounded time. Stand-ins take over only with an explicit hand-off message, and the original owner reclaims only by explicit hand-back."
+}

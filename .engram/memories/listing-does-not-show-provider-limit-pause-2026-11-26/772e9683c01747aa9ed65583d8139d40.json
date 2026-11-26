@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "listing-does-not-show-provider-limit-pause-2026-11-26",
+    "revision_id": "772e9683c01747aa9ed65583d8139d40",
+    "previous": "d4d5f7fc0ade4777bd6e2d2ab2471a5b",
+    "body_sha256": "c7cd207f3498eb0cd69f14f6241d546e2f4e9f1a8c1346f1845ff73d8e53d3a7",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:10:43.754381300Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-26 ~21:10Z; my misses, both ways).\n- (1) The session listing (\"active\", queuePaused false) doesn't show a provider usage-limit pause.\n- (2) Silence from a session doesn't prove a usage limit either. Opus2's 20:21-21:05Z gap was a PAUSED QUEUE (its incoming mail held \"behind paused queue\", possibly a long turn); it resumed on its own at about 21:06Z.\nI appointed an interim scheduler (Engram::Fable) and a stand-in integration owner (Merger2) on a third party's guess, causing a double-scheduler window, and reverted at about 21:09Z.\nRule: before appointing stand-ins, get POSITIVE evidence of the cause. That means an actual refusal text from the session itself, or Greg's word, or the queue-paused disposition on a fresh send to it. Prefer asking the session (a send shows \"heldBehindPausedQueue\") and waiting a short, bounded time. Stand-ins take over only with an explicit hand-off message, and the original owner reclaims only by explicit hand-back.\n\nCORRECTION (~21:11Z, from Engram 11312's exact reads, TermAl mailbox f9538400 #145). Opus2 WAS held by a provider usage limit from 20:21:56Z: an exact read at 20:30:03Z showed recipientQueuePause provider_usage_limit. It cleared when Greg fixed the limit (about 21:05Z). The listing showed \"active\", and later exact reads dropped the reason. That product defect is filed as w-5c63fff3f74a. Reliable signal: an exact mailbox-message read of a message held to that session, which shows recipientQueuePause while the hold lasts (although later reads can lose it, per w-5c63)."
+}

@@ -1,0 +1,27 @@
+{
+  "id": "01a219b8-ea29-7730-b29e-de039b4a7967",
+  "external_ref": null,
+  "title": "Background end: a detached compound launcher line reports TerminalNotConfirmed instead of the compound refusal, and the compound refusal paths are not tested separately",
+  "outcome": "A Claude compound launcher line records the compound refusal (ArtifactRequestMismatch, ObservationMatches=false) at its background end even when it is detached, and the shared-association refusal and the background-end refusal for compound lines are each pinned by their own behaviour test.",
+  "acceptance": [
+    "attach_claude_background_launcher_artifact evaluates the compound (non-simple) guard before the detached check, so `node scripts/test-launcher.mjs full --input commit --detach --notify coordinator && echo done` records ArtifactRequestMismatch/ObservationMatches=false while a simple detached line keeps TerminalNotConfirmed; a foreground compound Claude launcher line records the refusal through observe_test_command_artifact_from alone; and a background-end test whose launch row carries no earlier refusal shows the background end records it; each shown by its own behaviour test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "test-launcher"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

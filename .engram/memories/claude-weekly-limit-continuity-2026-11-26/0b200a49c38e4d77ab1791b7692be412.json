@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "claude-weekly-limit-continuity-2026-11-26",
+    "revision_id": "0b200a49c38e4d77ab1791b7692be412",
+    "previous": "e50155c82a6b4cbc95197c4370b984aa",
+    "body_sha256": "2ebe0175e6977e8c6d36245a07b2f3a710bd75468d2e59f16c418663465fa4c2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:10:10.255411300Z"
+    }
+  },
+  "body": "CLAUDE CAPACITY (Termal::Fable2, 2026-11-26 ~21:08Z). A TermAl-spawned Claude reviewer on Central was refused at about 20:20Z with \"You've hit your weekly limit · resets Nov 28, 3pm (America/Los_Angeles)\" (Engram 11330 #1395, relayed by Engram::Fable #8925). Earlier \"provider usage pauses\" were seen on Opus2 and Engram::Fable around 20:28Z.\n\nRulings until the reset:\n1. Review pairs: when Claude is refused, record the refusal text on the item, and Kimi stands in for Claude only for that round (Codex plus Kimi; never Kimi for both), per the CLAUDE.md commit rule. Kimi runs on Central (Termal::Kimi-C6); WinB has no Kimi, so WinB items take their pair from Central.\n2. Evaluators: prefer Codex.\n3. Continuity: if Opus2 (the integration owner, a Claude session) is refused, Termal::Merger2 (Codex, session-14549) stands in for the queue and landing under the same rules. If I (Fable2, Claude) am refused, coordination falls to Engram::Fable for cross-project matters, plus Merger2 for the TermAl queue, and Greg is told via Asistant by whichever can.\nCoding is unaffected: Sol (Codex) sessions on Central and Sol-WinB.\n\nUPDATE, 2026-11-26 ~21:10Z: Greg, via Engram::Asistant (588693a8 #2880), „juz naprawilem limit”. The Claude limit is restored. Pairs are back to Codex plus Claude; Kimi stands in only on a refusal actually met in that round. Evaluators are back to normal vendor choice. The stand-in assignments above are retired (Opus2 was queue-paused, not limited, and is back)."
+}
