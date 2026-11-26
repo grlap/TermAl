@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-offload-whole-tasks-to-winb-2026-11-26",
+    "revision_id": "05fae4ee1593464386543989cd295b47",
+    "previous": "b9d064379abc44a2929df439ee035a2d",
+    "body_sha256": "38aa75e6bce49a47e94a1f829800d81cf5fd7a2a45e69b47686454907c05b55a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:48:22.724071200Z"
+    }
+  },
+  "body": "Greg's direction, 2026-11-26 ~18:33Z, verbatim via Engram::Asistant (TermAl mailbox 588693a8 #2873): „no to jest to co chcemy, robimy offload/delegacje do WindowsB. i tak sie robi, odciazajac centrale”. Preceded by #2871: „P0, co to sa za dowody ? nie moze po prostu WindowsB zamknac task ? czemu musimy przenosic wszystko na centrale ? prosciej bedzie zrobic caly task na Windows B +Kimi”.\n\nSTANDING PRACTICE (Termal::Fable2):\n- Whole tasks are offloaded to WinB coding sessions with local Engram: claim, code, registered tests, review pair, acceptance evaluation and done, all in WinB's own store.\n- Only the result syncs. Completion travels via engram-data (memory termal-central-engram-data-sync-recipe-2026-11-26); the seal, verification and evaluation records stay on WinB by design (git-task-sync.md:1002-1004).\n- Landing on master stays with the integration owner, from Central.\n- Do NOT require evidence transport to Central as a condition.\n- WinB capacity is coordinated with Engram through Opus2's cargo alternation.\nFirst pilot: w-3346253bfee2 (Sol-WinB, WinB session-14). Engram's pilot: w-b534c27ad852.\n\nUPDATE, 2026-11-26 ~21:48Z: Greg, verbatim via Asistant (588693a8 #2885): „powtorze jeszcze raz, chcialbym przeniesc wiekszosc pracy na Windows B kodwanie, testy itp”. NEW DEFAULT: every NEW TermAl coding item goes to WinB as a whole task. Central only finishes in-flight items and does landings.\n- Planned WinB TermAl coders: Sol-WinB (session-14), plus Sol-WinB2 (Codex, Sol 6.2, high) and Opus-WinB (Claude, Opus, high), created by session-5 through WinB's host API after a capacity read.\n- Check before assigning that the item's code is on master.\n- WinB review pairs spawn on WinB (Codex plus Claude). WinB has no Kimi, so a Claude refusal there means that round's pair runs on Central."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a219c4-0a05-7b11-8de1-b6ccc56af7f6",
+  "external_ref": null,
+  "title": "Windows private run homes leave hidden/system INetCache residue plus a Content.IE5 junction that non-forced cleanup cannot remove",
+  "outcome": "Windows private run homes leave hidden/system INetCache residue plus a Content.IE5 junction that non-forced cleanup cannot remove",
+  "acceptance": [
+    "The cause is identified: which process creates INetCache/IE/container.dat (hidden/system attributes), PowerShell StartupProfileData-NonInteractive and the internal Content.IE5 junction under a run's private home on Windows (.tmp/j/<root>), and why.",
+    "Either those artifacts are no longer created under the private run home (for example by pointing the relevant profile and cache locations elsewhere for the run), or the runner that owns the run home removes them itself at run end through a supported route; afterwards a non-forced cleanup of a finished root on Windows leaves nothing behind.",
+    "A Windows behaviour test (or the Windows gate) shows a finished private run home removed by the ordinary non-forced cleanup with no residue."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "test-launcher",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "check-item-code-is-on-master-before-assigning-2026-11-26",
+    "revision_id": "473d38dc519c46a489a342c5df7d1a46",
+    "previous": null,
+    "body_sha256": "de5c69becf6374b4fade185486e32179b158bad6baed317185f0af0b152c669e",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T21:24:57.691105900Z"
+    }
+  },
+  "body": "Coordinator lesson (Termal::Fable2, 2026-11-26 ~21:25Z; my miss). I queued w-4a65 and w-96a0 for Sol-WinB, but both fix code that exists only in the UNLANDED w-a702 (test_run_claude_launcher_locators.rs, attach_claude_background_launcher_artifact). Sol-WinB found it at 21:15Z, released the claim cleanly and lost about 5 minutes.\nRule: before assigning an item, check that the files and functions it names exist on current master (git show origin/master:<path> or a grep). Follow-ups filed from an unlanded candidate's review depend on that candidate landing; record the dependency with update --after <candidate item>."
+}

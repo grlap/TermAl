@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Retired the schema-1 review-freeze and review-identity machinery in landed 641b9bc1. Current review and validation workflows use the shared source_id. Preserved the bounded readers used by source-root admission, declared runs, artifact admission, workspace ignore and test runs, and preserved structured review submission. Post-landing independent evaluation a1f614f2f0464938bfcf5a2a6da6e3e3 at cut 412 passed all 3 criteria on the same clean landed source. Exact Linux and Windows FULLs both passed all required stages with matching recorded input and no native verification credit claimed. Landing evidence dd0dd28f657d4fa6aae472a327f133f3; adopted review pair and source e96d00691b534d039aa6101a43a46303. Integration test ref removed. Install/restart remain with the integration owner. Two Low documentation follow-ups are tracked separately.",
+    "completed_at": "2026-11-26T21:27:25.786548200Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
