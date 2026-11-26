@@ -22,6 +22,23 @@ use owner_sources::EOOwnerSources;
 mod ordinary_opening;
 
 #[test]
+fn launcher_detach_recognition_uses_only_launcher_options() {
+    for command in [
+        "node scripts/test-launcher.mjs focused -- cargo test --detach",
+        "node scripts/test-launcher.mjs live -- --detach",
+    ] {
+        let check = engram_check_command(command).expect("a recognised foreground test");
+        assert_eq!(check.kind, EngramVerificationKind::Test, "{command}");
+    }
+    for command in [
+        "node scripts/test-launcher.mjs focused --detach -- cargo test",
+        "node scripts/test-launcher.mjs live --detach",
+    ] {
+        assert!(engram_check_command(command).is_none(), "{command}");
+    }
+}
+
+#[test]
 fn a_test_command_is_recognised_through_one_shell_wrapper() {
     let recognised = |command: &str| {
         engram_check_command(command).unwrap_or_else(|| panic!("`{command}` is a test"))

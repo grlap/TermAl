@@ -360,16 +360,19 @@ pub(crate) fn engram_launch_disposition(
     };
     // A word ends at a shell operator a compound line may join to it
     // (`full;`, `--detach&&`), so such a launch is still seen as the gate's.
-    let bare = |word: &String| {
+    fn bare(word: &str) -> &str {
         word.split([';', '&', '|', '<', '>', '(', ')'])
             .next()
             .unwrap_or("")
-            .to_owned()
-    };
-    if words.get(2).map(bare).as_deref() != Some("full") {
+    }
+    if words.get(2).map(|word| bare(word)) != Some("full") {
         return EngramLaunchDisposition::Ordinary;
     }
-    let detached = words.iter().any(|word| bare(word) == "--detach");
+    let detached = words[3..]
+        .iter()
+        .map(|word| bare(word))
+        .take_while(|word| *word != "--")
+        .any(|word| word == "--detach");
     let background = exit == EngramCommandExit::NotFinished;
     if !detached && !background {
         return EngramLaunchDisposition::Ordinary;

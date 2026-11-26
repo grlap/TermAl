@@ -573,6 +573,27 @@ fn a_full_gate_launch_is_carried_dropped_or_ordinary_by_its_line_and_result() {
 }
 
 #[test]
+fn launcher_detach_disposition_uses_only_launcher_options() {
+    for (line, expected) in [
+        (
+            "node scripts/test-launcher.mjs full -- cargo test --detach",
+            EngramLaunchDisposition::Ordinary,
+        ),
+        (
+            "node scripts/test-launcher.mjs full --detach -- cargo test",
+            EngramLaunchDisposition::Carry,
+        ),
+    ] {
+        let check = engram_check_command(line).expect("a recognised test");
+        assert_eq!(
+            engram_launch_disposition(&check, EngramCommandExit::Code(0)),
+            expected,
+            "{line}"
+        );
+    }
+}
+
+#[test]
 fn only_a_command_that_reads_leaves_a_carried_check_unfenced() {
     let workdir = if cfg!(windows) { r"C:\repo" } else { "/repo" };
     for reads in [

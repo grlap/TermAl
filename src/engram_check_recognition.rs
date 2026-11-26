@@ -811,8 +811,12 @@ pub(crate) fn engram_is_test_command(program: &str, args: &[String]) -> bool {
             // A detached run is a launch, carried until it settles
             // (`engram_carried_checks.rs`); only a full gate is carried.
             if !launcher
-                || (args.iter().any(|word| word == "--detach")
-                    && !matches!(arg(1), Some("full" | "focused")))
+                || (!matches!(arg(1), Some("full" | "focused"))
+                    && args
+                        .iter()
+                        .skip(2)
+                        .take_while(|word| word.as_str() != "--")
+                        .any(|word| word == "--detach"))
             {
                 return false;
             }
