@@ -240,10 +240,15 @@ fn focused_dart_receipt_settlement_respects_original_worktree_and_shell_boundari
                 Some(TestRunVerificationAck::Settled { .. }),
             ));
         } else {
-            assert_eq!(settlement, EngramVerificationRecordSettlement::NoLaunchRow);
+            // The launch ended without its row carrying the run, so no launch
+            // observation can carry the records: the receipt is final.
+            assert!(
+                matches!(settlement, EngramVerificationRecordSettlement::Unassociated { .. }),
+                "{settlement:?}"
+            );
             assert!(matches!(
                 current(&fixture, &run).verification_record,
-                Some(TestRunVerificationAck::Received { .. }),
+                Some(TestRunVerificationAck::Unassociated { .. }),
             ));
         }
     }

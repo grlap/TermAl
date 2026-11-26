@@ -355,6 +355,14 @@ test("a received but unsettled verification record is named in the summary as no
     /^verification: received, not yet settled; Engram record\(s\) record-0001 record-0002; run outcome failed$/mu);
 });
 
+test("an unassociated verification record is named in the summary as final, with no credit and its reason", async (t) => {
+  const summary = await failedRunWithRecordState(t, { state: "unassociated", receipt: failedReceipt,
+    reason: "its launch returned while the run kept going as a background task\nand named no run directory" });
+  assert.match(summary,
+    /^verification: unassociated; Engram record\(s\) record-0001 record-0002; run outcome failed; no host check credit: its launch returned while the run kept going as a background task and named no run directory$/mu);
+  assert.doesNotMatch(summary, /not yet settled/u);
+});
+
 test("a hostless plain-input run keeps only its input: plain explanation", async (t) => {
   const summary = await creditRun(t, hostlessEnv(), "plain");
   assert.match(summary, /^input: plain; no committed-input verification: /mu);

@@ -246,7 +246,8 @@ impl AppState {
                 .expect("validated receipt");
             let receipt = match ack {
                 TestRunVerificationAck::Received { receipt, .. }
-                | TestRunVerificationAck::Settled { receipt, .. } => receipt,
+                | TestRunVerificationAck::Settled { receipt, .. }
+                | TestRunVerificationAck::Unassociated { receipt, .. } => receipt,
                 _ => unreachable!("validated receipt"),
             };
             // The acknowledged immutable digest remains authoritative even

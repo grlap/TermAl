@@ -544,6 +544,11 @@ pub(crate) fn acceptance_committed_input_record_acknowledged(
             | TestRunVerificationAck::Settled {
                 receipt,
                 body_digest,
+            }
+            | TestRunVerificationAck::Unassociated {
+                receipt,
+                body_digest,
+                ..
             },
         ) => (receipt.clone(), body_digest.clone()),
         Some(TestRunVerificationAck::Rejected { detail, .. }) => {
@@ -1111,6 +1116,7 @@ impl AppState {
                                     ack,
                                     TestRunVerificationAck::Received { .. }
                                         | TestRunVerificationAck::Settled { .. }
+                                        | TestRunVerificationAck::Unassociated { .. }
                                 ) && ack.body_digest().is_some()
                             })
                 })

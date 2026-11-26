@@ -442,6 +442,12 @@ pub(crate) enum EngramVerificationRecordProgress {
     Settled {
         receipt: EngramVerificationRecordReceipt,
     },
+    /// Engram received the records, but no launch observation of the run can
+    /// carry them any longer (`reason`): final, with no host check credit.
+    Unassociated {
+        receipt: EngramVerificationRecordReceipt,
+        reason: String,
+    },
     /// Engram refused the record or answered unreadably: not sent again.
     Rejected { detail: String },
 }
@@ -475,6 +481,17 @@ pub(crate) enum TestRunVerificationAck {
         #[serde(default)]
         body_digest: String,
     },
+    /// That receipt answered the body, but the run is terminal and no launch
+    /// observation of its initiating session can carry its records any longer
+    /// (`reason`): final. Engram keeps the records it received; the host
+    /// settles nothing from them, grants no host check credit and never looks
+    /// at the run again.
+    Unassociated {
+        receipt: EngramVerificationRecordReceipt,
+        #[serde(default)]
+        body_digest: String,
+        reason: String,
+    },
     /// The host saw Engram refuse the record, answer it unreadably, or locally
     /// retired an unsent legacy input.
     Rejected {
@@ -492,9 +509,9 @@ impl TestRunVerificationAck {
     /// The digest of the body a received or settled receipt answered.
     pub(crate) fn body_digest(&self) -> Option<&str> {
         match self {
-            Self::Received { body_digest, .. } | Self::Settled { body_digest, .. } => {
-                Some(body_digest)
-            }
+            Self::Received { body_digest, .. }
+            | Self::Settled { body_digest, .. }
+            | Self::Unassociated { body_digest, .. } => Some(body_digest),
             Self::BindingRetry { .. } | Self::Rejected { .. } | Self::LocalUnclassified { .. } => {
                 None
             }
@@ -616,6 +633,11 @@ pub(crate) enum EngramVerificationRecordSettlement {
     /// The host already holds a receipt for another body of this run (its
     /// kept digest differs): nothing is settled for this one.
     AcknowledgedBodyChanged,
+    /// No launch observation of the terminal run can carry its records any
+    /// longer (`reason`): the receipt is final as unassociated.
+    Unassociated {
+        reason: String,
+    },
 }
 
 /// What associating a receipt's records found: the run's own launch rows as
@@ -1955,8 +1977,9 @@ pub(crate) fn engram_verification_record_is_host_body(
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TestRunVerificationRecordView {
     /// `settled`, `received` (Engram answered; not yet settled here),
-    /// `pending` (retained binding retry), `rejected` (refused by Engram)
-    /// or `refusedByHost` (before sending).
+    /// `unassociated` (Engram answered; no launch observation can carry it,
+    /// with the reason in `detail`), `pending` (retained binding retry),
+    /// `rejected` (refused by Engram) or `refusedByHost` (before sending).
     pub(crate) state: &'static str,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) record_ids: Vec<String>,
@@ -2005,6 +2028,12 @@ fn test_run_verification_record_view(
         }
         TestRunVerificationAck::Settled { receipt, .. } => receipt_view("settled", receipt),
         TestRunVerificationAck::Received { receipt, .. } => receipt_view("received", receipt),
+        TestRunVerificationAck::Unassociated {
+            receipt, reason, ..
+        } => TestRunVerificationRecordView {
+            detail: Some(reason.clone()),
+            ..receipt_view("unassociated", receipt)
+        },
         TestRunVerificationAck::Rejected { detail, .. } => refusal_view("rejected", detail),
         TestRunVerificationAck::LocalUnclassified { detail } => {
             refusal_view("refusedByHost", detail)
@@ -2321,6 +2350,7 @@ fn engram_verification_record_prepare_noting(
     let held = match &registration.verification_record {
         Some(
             TestRunVerificationAck::Settled { .. }
+            | TestRunVerificationAck::Unassociated { .. }
             | TestRunVerificationAck::Rejected { .. }
             | TestRunVerificationAck::LocalUnclassified { .. },
         ) => {
@@ -2916,6 +2946,85 @@ pub(crate) fn engram_verification_record_row_matches(
         })
 }
 
+/// Why no launch observation can carry `registration`'s records any longer,
+/// so that its held receipt is final; `None` while one still may. Only a row
+/// of the initiating session in the run's worktree can be the run's launch.
+/// Such a row may still carry the records while it is open on the session's
+/// current runtime and its provider can still report the launch's output.
+/// A launch that returned while its command kept running in the background
+/// (`launch_only`) already gave its launch result, which named no run
+/// directory; only the background task's own end can still attach it, so it
+/// keeps the receipt held while that task is outstanding, and never after. A
+/// row of an earlier runtime hears from nothing. A row that names this run's
+/// artifact keeps the receipt held, as before.
+pub(crate) fn engram_verification_record_unassociable_locked(
+    inner: &StateInner,
+    registration: &TestRunRegistration,
+) -> Option<String> {
+    let observations = &inner.test_run_observations;
+    if observations
+        .index()
+        .artifact_run(&registration.run_id)
+        .next()
+        .is_some()
+    {
+        return None;
+    }
+    let session_id = registration.initiating_session_id.as_str();
+    let Some(index) = inner.find_session_index(session_id) else {
+        return Some(
+            "its initiating session is gone, so no launch observation of it can carry the records"
+                .to_owned(),
+        );
+    };
+    let record = &inner.sessions[index];
+    let runtime = test_run_runtime_identity(record, &EngramObservationProvenance::Ambient);
+    let worktree = test_run_path_key(&registration.worktree);
+    let mut background_launch = false;
+    for row in observations.values() {
+        if row.summary.owner_session_id.as_deref() != Some(session_id)
+            || row.artifact.is_some()
+            || test_run_path_key(&row.summary.worktree) != worktree
+        {
+            continue;
+        }
+        if row.launch_only {
+            // Held while its background task may still be running: while
+            // the runtime that launched it still holds the task under the
+            // launch's tool key, until its notice that the task ended, or for
+            // good once work past the bound was dropped and nothing can tell.
+            let outstanding = &record.claude_outstanding;
+            if outstanding.unknown
+                || outstanding.entries.iter().any(|entry| {
+                    sha256_hex(entry.key.as_bytes()) == row.tool_identity
+                        && row.runtime_identity.as_deref()
+                            == Some(sha256_hex(format!("{:?}", entry.token).as_bytes()).as_str())
+                })
+            {
+                return None;
+            }
+            background_launch = true;
+            continue;
+        }
+        if row.runtime_identity.is_some()
+            && row.runtime_identity == runtime
+            && row.awaiting_runtime_report()
+        {
+            return None;
+        }
+    }
+    Some(if background_launch {
+        "its launch returned while the run kept going as a background task, and that result \
+         names no run directory, so no launch observation of the run can carry the records"
+            .to_owned()
+    } else {
+        "no launch observation of its initiating session in the run's worktree can carry the \
+         records any longer: none is still open on the session's current runtime (each ended, \
+         was interrupted or belongs to an earlier runtime, or none was recorded)"
+            .to_owned()
+    })
+}
+
 impl AppState {
     /// One pass over the registered, bound runs within
     /// `ENGRAM_VERIFICATION_RECORD_TICK_BUDGET`; tests call it directly.
@@ -2975,6 +3084,7 @@ impl AppState {
                             registration.verification_record,
                             Some(
                                 TestRunVerificationAck::Settled { .. }
+                                    | TestRunVerificationAck::Unassociated { .. }
                                     | TestRunVerificationAck::Rejected { .. }
                             )
                         )
@@ -3269,25 +3379,60 @@ impl AppState {
         // Whether a launch observation of the run carries the records, kept
         // for a run wait, which resumes on a receipt none carries.
         let association = self.settle_engram_verification_record(registration, body, receipt);
-        {
+        // With no row carrying the records, whether one still can: a row that
+        // can never carry them makes the held receipt final, decided by what
+        // the rows are now, never by a timer.
+        let unassociable = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             match &association {
                 EngramVerificationRecordAssociation::Associated(_) => {
                     inner
                         .test_run_unassociated_receipts
                         .remove(&registration.run_id);
+                    None
                 }
                 EngramVerificationRecordAssociation::NoLaunchRow => {
-                    inner
-                        .test_run_unassociated_receipts
-                        .insert(registration.run_id.clone(), body_digest.clone());
+                    let reason = engram_verification_record_unassociable_locked(&inner, registration);
+                    if reason.is_some() {
+                        inner
+                            .test_run_unassociated_receipts
+                            .remove(&registration.run_id);
+                    } else {
+                        inner
+                            .test_run_unassociated_receipts
+                            .insert(registration.run_id.clone(), body_digest.clone());
+                    }
+                    reason
                 }
             }
-        }
+        };
         let rows = match association {
             EngramVerificationRecordAssociation::Associated(rows) => rows,
             EngramVerificationRecordAssociation::NoLaunchRow => {
-                return EngramVerificationRecordSettlement::NoLaunchRow;
+                let Some(reason) = unassociable else {
+                    return EngramVerificationRecordSettlement::NoLaunchRow;
+                };
+                eprintln!(
+                    "engram> run={} verification record received but unassociated: {reason}",
+                    registration.run_id
+                );
+                self.note_engram_verification_record_ack(
+                    registration,
+                    TestRunVerificationAck::Unassociated {
+                        receipt: receipt.clone(),
+                        body_digest,
+                        reason: reason.clone(),
+                    },
+                );
+                engram_verification_record_set_progress(
+                    run_dir,
+                    &registration.run_id,
+                    EngramVerificationRecordProgress::Unassociated {
+                        receipt: receipt.clone(),
+                        reason: reason.clone(),
+                    },
+                );
+                return EngramVerificationRecordSettlement::Unassociated { reason };
             }
         };
         let clock = self.engram_budget_clock();
@@ -3539,7 +3684,9 @@ impl AppState {
                 && !(matches!(ack, TestRunVerificationAck::Received { .. })
                     && matches!(
                         row.verification_record,
-                        Some(TestRunVerificationAck::Settled { .. } | TestRunVerificationAck::Rejected { .. }
+                        Some(TestRunVerificationAck::Settled { .. }
+                            | TestRunVerificationAck::Unassociated { .. }
+                            | TestRunVerificationAck::Rejected { .. }
                             | TestRunVerificationAck::LocalUnclassified { .. })
                     ))
                 // A binding wait or receipt remains associated with its original body.

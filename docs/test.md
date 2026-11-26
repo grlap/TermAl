@@ -1302,12 +1302,26 @@ authoritative read-only route to a run's record ids and outcome is
 session. It answers `{ "runId", "verificationRecord" }` from the host's own
 record, live or retained, without reading the run's files, so it is right
 whatever the run directory holds or accepts. `verificationRecord` has
-`state` (`settled`, `received`, `pending`, `rejected` or `refusedByHost`),
-`recordIds`, `runOutcome` and `detail` for a refusal or retained binding
-retry. It is null while the host holds no answer for the run. An unknown
-run is 404. The full detail
+`state` (`settled`, `received`, `unassociated`, `pending`, `rejected` or
+`refusedByHost`), `recordIds`, `runOutcome` and `detail` for a refusal, a
+retained binding retry or an unassociated record. It is null while the host
+holds no answer for the run. An unknown run is 404. The full detail
 (`GET /api/test-runs/{id}`) also carries it as `detail.verificationRecord`
 when the run's files can be read.
+
+`unassociated` is final. Engram received the run's records, but no launch
+observation of the initiating session can carry them any longer, so the host
+settles nothing from them and grants no host check credit. `detail` names the
+reason. The host decides this only from the launch observations of that
+session in the run's worktree, never on a timer:
+- a row still open on the session's current runtime keeps the receipt held;
+- a launch that returned while the run kept going as a background task keeps
+  it held only while that task is outstanding, since its launch result named no
+  run directory and only the task's own end can still attach it;
+- neither can a row that ended, was interrupted or belongs to an earlier
+  runtime.
+A run wait ends on it with an `unassociated; …` line, and the launcher
+summary reports `verification: unassociated; …`.
 
 A run wait in `any` mode resumes as soon as one of its runs settles. Its
 first prompt names each run's record the host already holds. It follows a

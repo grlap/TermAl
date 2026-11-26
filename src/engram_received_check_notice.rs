@@ -49,8 +49,11 @@ impl ReceivedCheckNotice {
             } => (receipt, body_digest),
             // Receipt custody precedes the association fence. A held receipt
             // cannot bypass settlement through a closing or companion read.
+            // An unassociated receipt reached no launch observation, so it
+            // carries no host check credit to tell.
             TestRunVerificationAck::BindingRetry { .. }
             | TestRunVerificationAck::Received { .. }
+            | TestRunVerificationAck::Unassociated { .. }
             | TestRunVerificationAck::Rejected { .. }
             | TestRunVerificationAck::LocalUnclassified { .. } => return None,
         };

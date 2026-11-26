@@ -3617,3 +3617,6 @@ fn a_settlement_whose_state_file_cannot_be_written_is_read_from_the_host_and_rep
     let (status, _) = read("/api/test-runs/test-unknown-run?view=verification".to_owned());
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[path = "engram_verification_unassociated.rs"]
+mod unassociated;

@@ -25,13 +25,15 @@ const TEST_RUN_WAIT_RECORD_ID_MAX_BYTES: usize = 64;
 const TEST_RUN_WAIT_RECORD_FOLLOW_UP: &str = "; this wait resumes once more when Engram \
     settles or refuses it, or the host leaves it unsent";
 
-/// Whether a run's record reached its last state: settled, or refused by
-/// Engram or by this host. A received receipt is not settled yet.
+/// Whether a run's record reached its last state: settled, received with no
+/// launch observation that can ever carry it, or refused by Engram or by
+/// this host. A received receipt is not settled yet.
 fn test_run_wait_record_final(ack: Option<&TestRunVerificationAck>) -> bool {
     matches!(
         ack,
         Some(
             TestRunVerificationAck::Settled { .. }
+                | TestRunVerificationAck::Unassociated { .. }
                 | TestRunVerificationAck::Rejected { .. }
                 | TestRunVerificationAck::LocalUnclassified { .. }
         )
@@ -72,7 +74,7 @@ pub(super) fn test_run_wait_record_final_locked(
 /// refused (`test_run_wait_record_state`): such a run has finished, and
 /// needs no recovery.
 pub(super) fn test_run_wait_record_text_final(text: &str) -> bool {
-    text.starts_with("settled;") || text.starts_with("refused")
+    text.starts_with("settled;") || text.starts_with("unassociated;") || text.starts_with("refused")
 }
 
 /// A run's wait verdict from the host's own record, for a run the index has
@@ -100,7 +102,10 @@ pub(super) fn test_run_wait_record_verdict_locked(
         })
     };
     match registration.verification_record.as_ref()? {
-        TestRunVerificationAck::Settled { receipt, .. } => Some(match receipt.run_outcome {
+        // An unassociated receipt is Engram's answer to the run's terminal
+        // results, so its outcome is the run's, though it carries no credit.
+        TestRunVerificationAck::Settled { receipt, .. }
+        | TestRunVerificationAck::Unassociated { receipt, .. } => Some(match receipt.run_outcome {
             EngramVerificationRecordRunOutcome::Passed => TestRunWaitVerdict::Pass,
             EngramVerificationRecordRunOutcome::Failed => TestRunWaitVerdict::Fail,
             EngramVerificationRecordRunOutcome::Indeterminate => unknown(),
@@ -145,6 +150,19 @@ fn test_run_wait_receipt_text(receipt: &EngramVerificationRecordReceipt) -> Stri
     format!("Engram record(s) {records}; run outcome {outcome}")
 }
 
+/// A final unassociated receipt: Engram holds its records, but this host
+/// settles nothing from them and grants no host check credit.
+fn test_run_wait_unassociated_text(
+    receipt: &EngramVerificationRecordReceipt,
+    reason: &str,
+) -> String {
+    format!(
+        "unassociated; {}; Engram has it, but no host check credit: {}",
+        test_run_wait_receipt_text(receipt),
+        test_run_wait_refusal_text(reason)
+    )
+}
+
 fn test_run_wait_refusal_text(detail: &str) -> String {
     let detail = detail.replace(['\r', '\n', '`'], " ");
     let (detail, cut) = test_run_card_cut(&detail, TEST_RUN_WAIT_RECORD_DETAIL_MAX_BYTES);
@@ -161,6 +179,9 @@ fn test_run_wait_record_state(registration: Option<&TestRunRegistration>) -> Str
             "received, not yet settled; {}",
             test_run_wait_receipt_text(receipt)
         ),
+        Some(TestRunVerificationAck::Unassociated {
+            receipt, reason, ..
+        }) => test_run_wait_unassociated_text(receipt, reason),
         Some(TestRunVerificationAck::Rejected { detail, .. }) => {
             format!("refused: {}", test_run_wait_refusal_text(detail))
         }
@@ -204,6 +225,14 @@ pub(super) fn test_run_wait_record_mandatory_bound() -> String {
         "refused by this host before sending: {}",
         test_run_wait_refusal_text(&"x".repeat(TEST_RUN_WAIT_RECORD_DETAIL_MAX_BYTES + 1))
     );
+    let unassociated = format!(
+        "{}{}",
+        test_run_wait_unassociated_text(
+            &receipt,
+            &"x".repeat(TEST_RUN_WAIT_RECORD_DETAIL_MAX_BYTES + 1)
+        ),
+        " ".repeat(19)
+    );
     // A first resume can also name a reason a look left the record pending
     // for good, with the records Engram already gave for it.
     let pending = [
@@ -222,7 +251,7 @@ pub(super) fn test_run_wait_record_mandatory_bound() -> String {
     })
     .max_by_key(String::len)
     .unwrap_or_default();
-    [received, refused, pending]
+    [received, refused, unassociated, pending]
         .into_iter()
         .max_by_key(String::len)
         .unwrap_or_default()

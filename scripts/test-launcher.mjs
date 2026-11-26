@@ -2027,7 +2027,8 @@ function verificationReceiptLine(verification) {
   const records = Array.isArray(receipt.verifications)
     ? receipt.verifications.map((entry) => entry?.record_id).filter((id) => typeof id === "string")
     : [];
-  const status = verification.state === "settled" ? "settled" : "received, not yet settled";
+  const status = verification.state === "settled" ? "settled"
+    : verification.state === "unassociated" ? "unassociated" : "received, not yet settled";
   const ids = records.length ? clean(records.join(" ")) : "none named";
   const outcome = typeof receipt.run_outcome === "string" ? clean(receipt.run_outcome) : "unknown";
   return `verification: ${status}; Engram record(s) ${ids}; run outcome ${outcome}`;
@@ -2077,6 +2078,10 @@ export async function summarize(runDir) {
       }
     } else if (verification.state === "settled" || verification.state === "received") {
       lines.push(verificationReceiptLine(verification));
+    } else if (verification.state === "unassociated") {
+      const reason = typeof verification.reason === "string" ? verification.reason : "reason unavailable";
+      lines.push(`${verificationReceiptLine(verification)}; no host check credit: ${
+        reason.replace(/[\r\n\x1b]/g, " ").slice(0, diagnosticLimit)}`);
     }
   } catch (error) {
     if (error.code !== "ENOENT") lines.push("verification: status unreadable");

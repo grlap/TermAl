@@ -503,6 +503,41 @@ fn attach_launch_row(fixture: &RunFixture, run: &RecordRun) -> String {
     execution_id
 }
 
+/// Gives `session` a current runtime, as a session that launches runs has.
+/// The receiver is kept by the caller for as long as the runtime is used.
+fn with_runtime(
+    fixture: &RunFixture,
+    session: &str,
+    label: &str,
+) -> std::sync::mpsc::Receiver<CodexRuntimeCommand> {
+    let (runtime, runtime_rx) = test_codex_runtime_handle(label);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let index = inner.find_session_index(session).expect("the session");
+    inner.sessions[index].runtime = SessionRuntime::Codex(runtime);
+    runtime_rx
+}
+
+/// The run's own launch observation while its launcher still runs: open on
+/// the initiating session's current runtime, not yet carrying the run's
+/// artifact, so a receipt Engram answers stays held until it does
+/// (`attach_launch_row` then attaches the artifact to this same row).
+fn open_launch_row(fixture: &RunFixture, run: &RecordRun) -> String {
+    let (execution_id, mut row) = launch_row(run);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let index = inner
+        .find_session_index(&run.registration.initiating_session_id)
+        .expect("the initiating session");
+    row.runtime_identity =
+        test_run_runtime_identity(&inner.sessions[index], &EngramObservationProvenance::Ambient);
+    assert!(row.runtime_identity.is_some(), "the session has a runtime");
+    row.artifact = None;
+    row.summary.state = TestRunState::Running;
+    row.summary.ended_at = None;
+    row.summary.exit_code = None;
+    inner.test_run_observations.insert(execution_id.clone(), row);
+    execution_id
+}
+
 /// The records on the run's launch row, in association order.
 fn row_records(fixture: &RunFixture, execution_id: &str) -> Vec<Option<String>> {
     let inner = fixture.state.inner.lock().unwrap();
@@ -3000,6 +3035,9 @@ fn a_receipt_is_held_until_the_launch_row_appears_then_settles_without_a_resend(
     );
     initiated_by(&mut run, &session);
     register(&fixture, &[&run]);
+    // The launch is still running: its row is open and names no run yet.
+    let _runtime = with_runtime(&fixture, &session, "verification-record-held");
+    open_launch_row(&fixture, &run);
     let receipt: EngramVerificationRecordReceipt =
         serde_json::from_value(receipt_for("failed")).expect("the receipt reads");
 
@@ -3326,6 +3364,10 @@ fn a_run_whose_calls_spend_the_pass_never_starves_the_runs_after_it() {
     );
     initiated_by(&mut later, &session);
     register(&fixture, &[&early, &later]);
+    // Both launches are still running, so a receipt for either stays held.
+    let _runtime = with_runtime(&fixture, &session, "verification-record-round-robin");
+    open_launch_row(&fixture, &early);
+    open_launch_row(&fixture, &later);
     // Every call that sends the early run's record spends the whole pass.
     {
         let clock = clock.clone();

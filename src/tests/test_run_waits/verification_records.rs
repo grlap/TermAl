@@ -372,6 +372,46 @@ fn a_held_receipt_no_launch_observation_carries_ends_the_wait_naming_its_records
 }
 
 #[test]
+fn a_final_unassociated_receipt_ends_the_wait_with_its_reason_not_as_unsettled() {
+    let (fixture, _) = resumed_on_failure("record-unassociated-final");
+    fixture.state.note_engram_verification_record_ack(
+        &registration(&fixture, RUN),
+        TestRunVerificationAck::Received {
+            receipt: failed_receipt(RECORD),
+            body_digest: "fixture-digest".into(),
+        },
+    );
+    fixture.state.refresh_test_run_waits();
+    assert_eq!(fixture.queued_prompts().len(), 1);
+    // The producer's settlement found that no launch observation can carry
+    // the records any longer: the same receipt, now final.
+    fixture.state.note_engram_verification_record_ack(
+        &registration(&fixture, RUN),
+        TestRunVerificationAck::Unassociated {
+            receipt: failed_receipt(RECORD),
+            body_digest: "fixture-digest".into(),
+            reason: "fixture reason: its launch named no run directory".into(),
+        },
+    );
+    fixture.state.refresh_test_run_waits();
+    let prompts = fixture.queued_prompts();
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    let line = prompts[1]
+        .lines()
+        .find(|line| line.starts_with(&format!("- `{RUN}`:")))
+        .unwrap();
+    assert!(
+        line.contains(&format!(
+            "unassociated; Engram record(s) `{RECORD}`; run outcome failed"
+        )) && line.contains("no host check credit: fixture reason: its launch named no run directory")
+            && !line.contains("not yet settled"),
+        "{line}"
+    );
+    assert_record_lines_read_cleanly(&prompts[1]);
+    assert!(fixture.pending_waits().is_empty(), "the wait does not stay");
+}
+
+#[test]
 fn a_newer_look_replaces_an_older_unassociated_mark() {
     let (fixture, _) = resumed_on_failure("record-mark-stale");
     fixture.state.note_engram_verification_record_ack(
