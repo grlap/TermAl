@@ -1,0 +1,30 @@
+{
+  "id": "01a21a03-ec0e-7b61-9300-bb9897b72de0",
+  "external_ref": null,
+  "title": "A stalled registered test run has no supported cancel or timeout, so it holds its WinB slot indefinitely",
+  "outcome": "A stalled registered test run has no supported cancel or timeout, so it holds its WinB slot indefinitely",
+  "acceptance": [
+    "A registered test run (foreground, background or detached) can be stopped through a supported launcher or host route by its owner or coordinator. The stop ends the run's whole process tree and records a terminal 'cancelled' result that frees its slot. It needs no process kill by hand and no process listing.",
+    "A run whose output has stopped beyond a documented liveness bound can be ended through that same supported route. The bound must not decide pass/fail for a slow but progressing run.",
+    "Behavioural tests start a real child tree that hangs and show that the cancel route ends it and records the cancelled result, on Windows and on POSIX."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "test-launcher",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "winb-cargo-budget-2026-11-26",
+    "revision_id": "b73b668f27684effa17ba271f546487b",
+    "previous": "6fa1be4c522547bc82393c9871e0bef1",
+    "body_sha256": "1a7416ee40d666441d73639012e014f352c02313931d9e9a027b8b07942ff505",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-26T22:39:12.484615300Z"
+    }
+  },
+  "body": "WinB cargo budget (Opus2, integration owner and scheduler for both projects; set 2026-11-26 ~21:50Z after Greg's „powtorze jeszcze raz, chcialbym przeniesc wiekszosc pracy na Windows B kodwanie, testy itp”, relayed by Fable2 #8105 and Engram::Fable #1886). Capacity from WinB session-5's read-only WMI/CIM report #1499 (21:48Z): 24 logical cores, 103 GB RAM (69 GiB free), FreeVirtualMemory 77 GiB, 323 GB free on C:.\nRULES (TermAl and Engram COMBINED on WinB):\n1. At most TWO concurrent cargo or launcher test runs on WinB, each with its own worktree and target dir, each capped at CARGO_BUILD_JOBS=2 (-j2 or less).\n2. At most ONE FULL gate on WinB at a time (either project). While a FULL runs, at most ONE other bounded (-j2) run beside it.\n3. Launch floor: WinB FreeVirtualMemory >= 20,971,520 KiB, read by the runner at launch. Below it, do not start; tell Opus2.\n4. Every WinB cargo or launcher run sends START and END to Opus2. Opus2 grants each by name (a standing grant may cover a session's serial runs on one item). Review and evaluator children on WinB count against memory, not cargo slots.\n5. Kill nothing; no process listing (FV/disk census only).\nWinB has no Kimi: a Claude refusal on a WinB pair moves that round's pair to Central with Kimi (Fable2 #8105).\n\nSLOT SPLIT (rev 2, added by Opus2 at 2026-11-26 ~22:00Z on Fable2 #8111; source: Engram::Fable #8945, agreed with Termal::Fable2), inside the rules above:\n- One bounded -j2 run PER PROJECT at a time (TermAl one, Engram one).\n- The single FULL slot alternates between the projects by request time; at most one other bounded run beside a FULL.\n- Engram::Fable-WinB (WinB session-24, Engram's WinB coordinator) and Termal::Coord-WinB (WinB session-26, Codex) mail each other START and END for every cargo run and FULL.\n- Whoever starts a run checks the FV floor (20,971,520 KiB) at launch.\n- Disputes go to Engram::Fable and Termal::Fable2.\n- WinB grants MOVE to the two WinB coordinators once Termal::Coord-WinB is briefed by Fable2. Until then Opus2 keeps granting on WinB for both projects, so nothing stalls.\n\nCORRECTION (rev 3, Opus2 ~22:10Z): Engram::Fable-WinB is WinB session-27 (relay-principal-546d7f4c…), not session-24. It introduced itself to Opus2 as session-27; session-24 was a number given in Kimi::Consultant's #75. Termal::Coord-WinB is WinB session-26 (Codex), briefed by Fable2 at about 21:57Z (#8113). The take-over of WinB grants takes effect when Coord-WinB confirms it explicitly to Opus2.\n\nTEMPORARY EXCEPTION (rev 4, Fable2, 2026-11-26 ~22:40Z, ruling on Engram::Fable #8949, which asked for it): Engram's WinB bounded slot was held by a stalled test, test-eb00a39e (Coder4, a 20,000-note fixture, no output since 22:14:43Z). The launcher stop was refused (no supervisor), and nobody kills.\n- While test-eb00a39e stays stalled, it does not count against Engram's slot or the \"one beside a FULL\" count.\n- Engram may run ONE new bounded -j2 run in that slot: w-bd4b R15, then w-b07e.\n- The stalled run still counts against memory, so the FV floor is checked at every launch by every runner.\n- TermAl's slot and the FULL alternation are unchanged. START/END is unchanged.\n- The exception ENDS when test-eb00a39e ends; rev 3 applies again in full.\n- Coord-WinB was told (relay seq 8). Engram is to file the stall as a defect.\n- If the run is still stalled at the next quiet moment, ending it is Greg's act, requested through Asistant."
+}
