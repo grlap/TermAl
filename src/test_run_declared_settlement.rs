@@ -77,11 +77,11 @@ impl AppState {
         command: &str,
         exit: EngramCommandExit,
         #[cfg(test)] after_observation_end: impl FnOnce(),
-    ) {
+    ) -> Vec<String> {
         let (ended, declared, binding) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
-                return;
+                return Vec::new();
             };
             let record = &inner.sessions[index];
             let runtime = test_run_runtime_identity(record, &EngramObservationProvenance::Ambient);
@@ -115,7 +115,7 @@ impl AppState {
         #[cfg(test)]
         after_observation_end();
         if !declared || ended.len() != 1 {
-            return;
+            return ended;
         }
         let (outcome, detail) = if let Some(binding) = binding {
             let matches = engram_declared_candidate(command).is_some_and(|(_, words)| {
@@ -140,6 +140,7 @@ impl AppState {
             )
         };
         self.apply_declared_verdict_to_test_run_with_detail(&ended, outcome, detail);
+        ended
     }
 
     pub(crate) fn observe_test_command_end_awaiting_declared_verdict(

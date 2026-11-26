@@ -635,6 +635,92 @@ fn a_look_begun_before_the_run_was_marked_never_ends_its_wait() {
     }
 }
 
+#[test]
+fn external_dart_wait_ends_when_terminal_launch_custody_never_arrives() {
+    for input in ["clean", "dirty", "missing"] {
+        external_dart_wait_reports_missing_custody(input);
+    }
+}
+
+fn external_dart_wait_reports_missing_custody(input: &str) {
+    let fixture = WaitFixture::new("external-dart-custody-wait");
+    let directory = recorded_run(&fixture, RUN);
+    let path = directory.join("request.json");
+    let mut request: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    request["full"] = json!(false);
+    request["detached"] = json!(false);
+    request["stages"] = json!([{"name":"focused", "command":"dart", "args":["test"]}]);
+    request["externalLauncher"] = json!({"script": test_run_display_path(&fixture.root.join("scripts/test-launcher.mjs")), "commit": COMMIT});
+    fs::write(path, request.to_string()).unwrap();
+    fixture
+        .state
+        .inner
+        .lock()
+        .unwrap()
+        .test_run_registrations
+        .update(RUN, |row| {
+            row.request_identity = test_run_registration_identity(&request).unwrap();
+            row.external_launcher = engram_external_launcher_request(&request).unwrap();
+            row.preset = TestRunPreset::Focused;
+            row.stage_names = vec!["focused".to_owned()];
+        })
+        .unwrap();
+    fixture.scan(&[std::process::id()]);
+    fixture.busy();
+    fixture.register(&[RUN], "all").unwrap();
+    fail(&directory, RUN);
+    let results_path = directory.join("results.json");
+    let mut results: Value = serde_json::from_slice(&fs::read(&results_path).unwrap()).unwrap();
+    let now = test_run_timestamp();
+    results["started"] = json!(now);
+    results["ended"] = json!(now);
+    let owned = fs::canonicalize(&directory)
+        .unwrap()
+        .join(ENGRAM_LAUNCHER_DART_REPORT);
+    results["stages"] = json!([{"name":"focused", "state":"failed", "code":1,
+        "cwd": request["root"], "started": now, "ended": now,
+        "command":["dart", "test", "--file-reporter", format!("json:{}", test_run_display_path(&owned))]}]);
+    if input == "missing" {
+        results.as_object_mut().unwrap().remove("input");
+    } else if input == "dirty" {
+        results["input"]["outcome"] = json!("input_changed");
+        results["input"]["after"]["clean"] = json!(false);
+        results["input"]["after"]["paths"] = json!([{"status": " M", "path": "changed.txt"}]);
+    }
+    fs::write(results_path, results.to_string()).unwrap();
+    let registered = registration(&fixture, RUN);
+    assert!(matches!(
+        fixture
+            .state
+            .prepare_engram_verification_record(&registered),
+        EngramVerificationRecordPrepared::Pending(
+            EngramVerificationRecordPending::ExternalLaunchCustodyMissing
+        )
+    ));
+    fixture.scan(&[]);
+    assert_eq!(fixture.queued_prompts().len(), 1);
+    fixture.state.refresh_test_run_waits();
+    assert_eq!(
+        fixture.pending_waits().len(),
+        1,
+        "a look from before the terminal mark is insufficient"
+    );
+    fixture
+        .state
+        .prepare_engram_verification_record(&registered);
+    fixture.state.refresh_test_run_waits();
+    let prompts = fixture.queued_prompts();
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    assert!(
+        prompts[1].contains("external_launch_custody_missing")
+            && prompts[1].contains("If the original command output arrives later")
+            && prompts[1].contains("Sending still requires an eligible run"),
+        "{prompts:?}"
+    );
+    assert!(fixture.pending_waits().is_empty());
+    assert!(registration(&fixture, RUN).verification_record.is_none());
+}
+
 /// The run is indexed while it runs, then a wait is registered on it.
 fn waited_while_running(label: &str) -> (WaitFixture, PathBuf) {
     let fixture = WaitFixture::new(label);

@@ -130,6 +130,15 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
         self.inner.command_started_in(key, command, ran, cwd)
     }
 
+    fn codex_command_started(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+    ) -> Result<()> {
+        self.inner.codex_command_started(item_id, command, cwd)
+    }
+
     fn command_described(&mut self, key: &str, ran: Option<&str>, cwd: Option<&str>) -> Result<()> {
         self.inner.command_described(key, ran, cwd)
     }
@@ -154,6 +163,19 @@ impl TurnRecorder for DynTurnRecorderRef<'_> {
     ) -> Result<()> {
         self.inner
             .command_completed_with_exit(key, command, output, status, exit)
+    }
+
+    fn codex_command_completed(
+        &mut self,
+        item_id: Option<&str>,
+        command: &str,
+        cwd: Option<&str>,
+        output: &str,
+        status: CommandStatus,
+        exit: EngramCommandExit,
+    ) -> Result<()> {
+        self.inner
+            .codex_command_completed(item_id, command, cwd, output, status, exit)
     }
 
     fn command_completed_with_capture(

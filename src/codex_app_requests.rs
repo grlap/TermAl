@@ -352,9 +352,9 @@ pub(crate) fn handle_codex_app_server_item_started(
         }
         Some("commandExecution") => {
             if let Some(command) = item.get("command").and_then(Value::as_str) {
-                let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
+                let item_id = item.get("id").and_then(Value::as_str);
                 let cwd = item.get("cwd").and_then(Value::as_str);
-                recorder.command_started_in(key, command, Some(command), cwd)?;
+                recorder.codex_command_started(item_id, command, cwd)?;
             }
         }
         Some("webSearch") => {
@@ -517,12 +517,43 @@ pub(crate) fn describe_codex_mcp_elicitation_request(
     }
 }
 
-/// Surfaces `item/completed` events by type: agent messages are
-/// reconciled against any verbatim streamed text; command executions
-/// and web searches finalize their recorder entries with the exit
-/// status; file changes are pushed as diff messages annotated with
-/// create/edit change type. Other item types are intentionally
-/// ignored.
+/// Preserve the provider's item ID and working directory in both event formats.
+pub(crate) fn record_codex_command_item_completed(
+    item: &Value,
+    recorder: &mut impl TurnRecorder,
+) -> Result<()> {
+    let Some(command) = item.get("command").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let item_id = item.get("id").and_then(Value::as_str);
+    let cwd = item.get("cwd").and_then(Value::as_str);
+    let output = item
+        .get("aggregatedOutput")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let status = match item.get("status").and_then(Value::as_str) {
+        Some("completed") if item.get("exitCode").and_then(Value::as_i64) == Some(0) => {
+            CommandStatus::Success
+        }
+        Some("completed" | "failed" | "declined") => CommandStatus::Error,
+        _ => CommandStatus::Running,
+    };
+    if item.get("status").and_then(Value::as_str) == Some("declined")
+        && codex_command_observed(item_id, command)
+    {
+        recorder.command_abandoned(item_id.unwrap_or(command))?;
+    }
+    recorder.codex_command_completed(
+        item_id,
+        command,
+        cwd,
+        output,
+        status,
+        EngramHost::codex_command_exit(item),
+    )
+}
+
+/// Surfaces completed agent messages, command executions, file changes and web searches.
 pub(crate) fn handle_codex_app_server_item_completed(
     item: &Value,
     state: &AppState,
@@ -540,35 +571,7 @@ pub(crate) fn handle_codex_app_server_item_completed(
             }
         }
         Some("commandExecution") => {
-            if let Some(command) = item.get("command").and_then(Value::as_str) {
-                let key = item.get("id").and_then(Value::as_str).unwrap_or(command);
-                let output = item
-                    .get("aggregatedOutput")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let status = match item.get("status").and_then(Value::as_str) {
-                    Some("completed")
-                        if item.get("exitCode").and_then(Value::as_i64) == Some(0) =>
-                    {
-                        CommandStatus::Success
-                    }
-                    Some("completed") => CommandStatus::Error,
-                    Some("failed") | Some("declined") => CommandStatus::Error,
-                    _ => CommandStatus::Running,
-                };
-                if item.get("status").and_then(Value::as_str) == Some("declined") {
-                    // A declined command never ran: a test check it started
-                    // is dropped rather than reported as unknown.
-                    recorder.command_abandoned(key)?;
-                }
-                recorder.command_completed_with_exit(
-                    key,
-                    command,
-                    output,
-                    status,
-                    EngramHost::codex_command_exit(item),
-                )?;
-            }
+            record_codex_command_item_completed(item, recorder)?;
         }
         Some("fileChange") => {
             if item.get("status").and_then(Value::as_str) != Some("completed") {

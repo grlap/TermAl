@@ -3020,7 +3020,7 @@ fn a_finished_native_runs_rewritten_results_make_no_record() {
     fixture.wait();
     fixture.artifact(include_str!("fixtures/declared-trx/pass.trx"));
     let (_, registration, _, results) = fixture.finish(&mut recorder, 0);
-    let inputs = engram_verification_record_inputs(&registration);
+    let inputs = engram_verification_record_inputs(&registration, None);
     assert!(matches!(inputs, EngramVerificationRecordInputs::Read(..)));
     assert!(!inputs.make_no_record_of_a_finished_run());
     // Rewritten after the host wrote it: it still parses and still reads as
@@ -3032,7 +3032,7 @@ fn a_finished_native_runs_rewritten_results_make_no_record() {
         serde_json::to_vec_pretty(&rewritten).unwrap(),
     )
     .unwrap();
-    let inputs = engram_verification_record_inputs(&registration);
+    let inputs = engram_verification_record_inputs(&registration, None);
     assert!(matches!(
         inputs,
         EngramVerificationRecordInputs::NativeResultsChanged
@@ -3055,7 +3055,7 @@ fn a_finished_native_runs_rewritten_results_make_no_record() {
     )
     .unwrap();
     assert!(matches!(
-        engram_verification_record_inputs(&registration),
+        engram_verification_record_inputs(&registration, None),
         EngramVerificationRecordInputs::NativeResultsChanged
     ));
 }

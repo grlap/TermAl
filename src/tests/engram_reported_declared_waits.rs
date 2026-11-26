@@ -171,6 +171,7 @@ fn a_carried_declared_wait_holds_during_artifact_read_and_keeps_its_original_ter
             &turn.session_id,
             ITEM,
             DECLARED,
+            None,
             "provider status is not the artifact verdict",
             exit,
             || {
