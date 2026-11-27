@@ -11,6 +11,7 @@ use super::*;
 thread_local! {
     pub(crate) static TEST_TEST_RUN_TERMINAL_RETENTION_VISITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static TEST_TEST_RUN_TERMINAL_RETENTION_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(crate) fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
@@ -71,14 +72,28 @@ impl AppState {
     // same positive association as API/SSE alias suppression, with no I/O or
     // evidence settlement here. A native terminal proof is never rewritten.
     pub(crate) fn retain_test_command_artifact_terminals_locked(&self, inner: &mut StateInner) {
-        // Reuse the fresh per-cut projection's candidate index and BTreeMap
-        // row order. Its linear preparation still sees completed history,
-        // but only unfinished same-run candidates reach exact matching.
-        let projection = TestRunProjection::new(inner);
+        // Use maintained row indexes and preserve the entry vector order.
+        // The same exact predicates still decide each candidate's outcome.
+        let observations = &inner.test_run_observations;
+        let entries = &inner.test_runs.entries;
+        let pending = observations
+            .index()
+            .unfinished_artifact_runs()
+            .chain(inner.test_run_registrations.index().pending_native_runs());
+        let positions = pending
+            .filter_map(|run| entries.positions.get(run))
+            .flatten()
+            .copied()
+            .collect::<BTreeSet<_>>();
         let mut terminal = Vec::new();
         let mut native_outcomes = Vec::new();
-        for entry in &inner.test_runs.entries {
-            if !entry.disk.is_terminal()
+        for position in positions {
+            #[cfg(test)]
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(count.get() + 1));
+            let entry = &entries[position];
+            let run_id = &entry.summary.run_id;
+            if entry.disk.run_id != *run_id
+                || !entry.disk.is_terminal()
                 || !matches!(
                     entry.summary.state,
                     TestRunState::Passed | TestRunState::Failed
@@ -91,12 +106,18 @@ impl AppState {
             // original registration/provider/artifact predicate below.
             if let Some(registration) = inner
                 .test_run_registrations
-                .get(&entry.summary.run_id)
-                .filter(|row| row.native_completion.is_none())
+                .get(run_id)
+                .filter(|row| row.run_id == *run_id && row.native_completion.is_none())
             {
                 let mut completion = None;
                 let mut refusal = None;
-                for row in projection.observations(&entry.summary.run_id) {
+                // Native completion may need an already-ended provider row.
+                // Keep its exact bucket even after the ordinary observation settles.
+                for row in observations
+                    .index()
+                    .artifact_run(run_id)
+                    .filter_map(|key| observations.get(key))
+                {
                     match test_run_native_completion_from_settlement(
                         inner,
                         registration,
@@ -131,7 +152,7 @@ impl AppState {
                     )
                     .err();
                 }
-                native_outcomes.push((registration.run_id.clone(), completion, refusal));
+                native_outcomes.push((run_id.clone(), completion, refusal));
             }
             let Some(digest) = entry
                 .summary
@@ -141,10 +162,10 @@ impl AppState {
             else {
                 continue;
             };
-            for row in projection
-                .observations(&entry.summary.run_id)
-                .iter()
-                .copied()
+            for row in observations
+                .index()
+                .unfinished_artifact_rows(run_id)
+                .filter_map(|key| observations.get(key))
                 .filter(|row| {
                     #[cfg(test)]
                     TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(count.get() + 1));
@@ -162,7 +183,6 @@ impl AppState {
                 }
             }
         }
-        drop(projection);
         let mut native_changed = false;
         let mut native_completed = false;
         for (run_id, completion, refusal) in native_outcomes {

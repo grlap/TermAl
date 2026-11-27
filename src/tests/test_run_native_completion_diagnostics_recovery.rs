@@ -50,6 +50,14 @@ async fn restored_original_runtime_clears_refusal_and_retains_only_original_comp
         detail(&fixture, &id).await["detail"]["nativeCompletionRefusal"]["code"],
         "provider_runtime_missing"
     );
+    // Ordinary artifact retention is already finished. The outstanding native
+    // registration must still find the exact original, ended observation.
+    assert!(
+        fixture.state.inner.lock().unwrap().test_run_observations[&original.execution_id]
+            .summary
+            .ended_at
+            .is_some()
+    );
     fixture
         .state
         .inner

@@ -157,12 +157,15 @@ impl<V, I: RowIndex<V>> IndexedRows<V, I> {
     /// run and claim ids and producer observation id (and the evidence
     /// list's membership); summary owner session and run id; monitoring
     /// eligibility (report awaited or launch unconfirmed); grant and
-    /// tool identities; artifact presence and artifact run id. For
+    /// tool identities; artifact presence and artifact run id; and whether
+    /// the observation has ended. For
     /// compacted proofs: summary run id, and each nested observation's
     /// execution id and association store and binding ids. For
-    /// registrations: run id and original causal request key; for compacted
-    /// proofs also that key from its retained registration. Only result-filling paths use it (lifecycle
-    /// read, verification record, checkpoint, confirmed cursor). Test
+    /// registrations: run id, original causal request key and whether
+    /// native terminal retention is still pending. For compacted proofs,
+    /// also the causal key from the retained registration. Only result-filling
+    /// paths use it (lifecycle read, verification record, checkpoint,
+    /// confirmed cursor). Test
     /// builds rebuild the row's memberships before and after and panic
     /// on any difference.
     pub(super) fn update_unindexed_fields<R>(
@@ -412,6 +415,7 @@ pub(super) struct TestRunObservationIndex {
     check: BTreeMap<TestRunCheckBucket, BTreeSet<String>>,
     summary_run: BTreeMap<String, BTreeSet<String>>,
     artifact_run: BTreeMap<String, BTreeSet<String>>,
+    unfinished_artifact_run: BTreeMap<String, BTreeSet<String>>,
     monitored: BTreeSet<String>,
 }
 
@@ -433,6 +437,13 @@ impl RowIndex<TestRunCommandObservation> for TestRunObservationIndex {
         add_member(&mut self.summary_run, row.summary.run_id.clone(), key);
         if let Some(artifact) = &row.artifact {
             add_member(&mut self.artifact_run, artifact.run_id.clone(), key);
+            if row.summary.ended_at.is_none() {
+                add_member(
+                    &mut self.unfinished_artifact_run,
+                    artifact.run_id.clone(),
+                    key,
+                );
+            }
         }
         if row.awaiting_runtime_report() || row.has_unconfirmed_launch() {
             self.monitored.insert(key.to_owned());
@@ -456,6 +467,9 @@ impl RowIndex<TestRunCommandObservation> for TestRunObservationIndex {
         remove_member(&mut self.summary_run, &row.summary.run_id, key);
         if let Some(artifact) = &row.artifact {
             remove_member(&mut self.artifact_run, &artifact.run_id, key);
+            if row.summary.ended_at.is_none() {
+                remove_member(&mut self.unfinished_artifact_run, &artifact.run_id, key);
+            }
         }
         self.monitored.remove(key);
     }
@@ -476,6 +490,14 @@ impl TestRunObservationIndex {
     }
     pub(super) fn artifact_run(&self, run_id: &str) -> impl Iterator<Item = &String> {
         members(&self.artifact_run, run_id)
+    }
+
+    pub(super) fn unfinished_artifact_runs(&self) -> impl Iterator<Item = &String> {
+        self.unfinished_artifact_run.keys()
+    }
+
+    pub(super) fn unfinished_artifact_rows(&self, run_id: &str) -> impl Iterator<Item = &String> {
+        members(&self.unfinished_artifact_run, run_id)
     }
 
     pub(super) fn monitored_after(&self, after: Option<&str>) -> impl Iterator<Item = &String> {
@@ -550,6 +572,14 @@ impl TestRunCompactedIndex {
 pub(super) struct TestRunRegistrationIndex {
     causal: BTreeMap<TestRunCausalKey, BTreeSet<String>>,
     run: BTreeMap<String, BTreeSet<String>>,
+    pending_native_run: BTreeSet<String>,
+}
+
+fn needs_native_terminal_retention(row: &TestRunRegistration) -> bool {
+    // A run without native origin still needs its first diagnostic. Once
+    // diagnosed, it cannot gain original origin from a later observation.
+    row.native_completion.is_none()
+        && (row.native_origin.is_some() || row.native_completion_refusal.is_none())
 }
 
 impl RowIndex<TestRunRegistration> for TestRunRegistrationIndex {
@@ -558,12 +588,18 @@ impl RowIndex<TestRunRegistration> for TestRunRegistrationIndex {
             add_member(&mut self.causal, causal, key);
         }
         add_member(&mut self.run, row.run_id.clone(), key);
+        if needs_native_terminal_retention(row) {
+            self.pending_native_run.insert(key.to_owned());
+        }
     }
     fn remove(&mut self, key: &str, row: &TestRunRegistration) {
         if let Some(causal) = test_run_causal_key(row) {
             remove_member(&mut self.causal, &causal, key);
         }
         remove_member(&mut self.run, &row.run_id, key);
+        if needs_native_terminal_retention(row) {
+            self.pending_native_run.remove(key);
+        }
     }
 }
 
@@ -573,6 +609,11 @@ impl TestRunRegistrationIndex {
     }
     pub(super) fn run(&self, run_id: &str) -> impl Iterator<Item = &String> {
         members(&self.run, run_id)
+    }
+
+    // Retention finds the registration by the artifact run's actual map key.
+    pub(super) fn pending_native_runs(&self) -> impl Iterator<Item = &String> {
+        self.pending_native_run.iter()
     }
 }
 

@@ -191,7 +191,122 @@ fn measure<T>(label: &str, action: impl FnOnce() -> T) -> (T, usize) {
 }
 
 #[test]
-fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() {
+#[ignore = "diagnostic runtime probe, run explicitly with --ignored --nocapture"]
+fn terminal_retention_rescan_cold_and_idle_probe() {
+    const HISTORY: usize = 48;
+    const IDLE_SCANS: usize = 3;
+    let fixture = RunFixture::new("terminal-retention-rescan-probe");
+    let session = create_test_project_session(
+        &fixture.state,
+        Agent::Codex,
+        &fixture.project_id,
+        &fixture.root,
+    );
+    fixture.state.note_engram_command_started(
+        &session,
+        &EngramObservationProvenance::Ambient,
+        "terminal-retention-probe",
+        Some("cargo test"),
+        Some(&test_run_display_path(&fixture.root)),
+    );
+    let mut request = full_request(&fixture.root, "2026-09-25T10:00:00.000Z");
+    request["owner"] = json!(session);
+    let results = passed_results();
+    let ended = results["ended"].as_str().unwrap();
+    {
+        let mut inner = fixture.state.inner.lock().unwrap();
+        assert!(inner.test_runs.entries.is_empty());
+        let template = inner.test_run_observations.values().next().unwrap().clone();
+        inner.test_run_observations.clear();
+        for ordinal in 0..HISTORY {
+            let run_id = format!("test-probe-{ordinal:04}");
+            let directory = write_run(
+                &fixture.runs_dir(),
+                &run_id,
+                request.clone(),
+                Some(results.clone()),
+            );
+            let disk = TestRunDisk::read(&directory, None).unwrap();
+            let execution_id = format!("observed-probe-{ordinal:04}");
+            let mut row = template.clone();
+            row.execution_id = execution_id.clone();
+            row.summary.run_id = execution_id.clone();
+            row.tool_identity = sha256_hex(execution_id.as_bytes());
+            row.artifact = Some(TestRunObservedArtifact {
+                run_id,
+                run_directory: test_run_display_path(&disk.run_dir),
+                request_identity: Some(disk.request_identity.expect("fixture request identity")),
+                terminal_digest: None,
+            });
+            // One exact observation remains unfinished at the cold scan.
+            if ordinal != 0 {
+                row.summary.state = TestRunState::Passed;
+                row.summary.ended_at = Some(ended.to_owned());
+                row.summary.exit_code = Some(0);
+            }
+            inner.test_run_observations.insert(execution_id, row);
+        }
+    }
+
+    // Advance the scheduling input without sleeping. The scan and all its
+    // lock phases still use the real implementation and monotonic clock.
+    let mut active = false;
+    let mut since_last_scan = None;
+    for scan in 0..=IDLE_SCANS {
+        let origin = test_run_rescan_origin(active, since_last_scan, || false).unwrap();
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(0));
+        active = fixture.state.refresh_test_runs_from(origin);
+        assert!(!active);
+        since_last_scan = Some(TEST_RUN_IDLE_RESCAN_INTERVAL);
+
+        let (traces, _) = fixture.state.test_run_phase_traces.recent_rescans(1);
+        let trace = &traces[0];
+        assert!(trace.completed && !trace.truncated);
+        let rescan = trace.rescan.as_ref().expect("rescan work counts");
+        assert_eq!(rescan.origin, origin);
+        assert_eq!(rescan.scanned, HISTORY);
+        assert_eq!(rescan.indexed_before, if scan == 0 { 0 } else { HISTORY });
+        assert_eq!(rescan.observations, HISTORY);
+        let micros = |phase| {
+            trace
+                .phases
+                .iter()
+                .find(|point| point.phase == phase)
+                .unwrap_or_else(|| panic!("missing rescan phase {phase}"))
+                .monotonic_micros
+        };
+        let entries = TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get());
+        let rows = TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get());
+        let visits = TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get());
+        let expected = if scan == 0 { 1 } else { 0 };
+        assert_eq!((entries, rows, visits), (expected, expected, expected));
+        eprintln!(
+            "terminal_retention_rescan_probe {}",
+            json!({
+                "scan": scan,
+                "fixtureRunCount": HISTORY,
+                "commitWaitUs": micros("commit_acquired") - micros("commit_requested"),
+                "commitHoldUs": micros("commit_released") - micros("commit_acquired"),
+                "terminalRetentionUs": micros("terminals_retained") - micros("index_installed"),
+                "retentionEntries": entries,
+                "retentionRows": rows,
+                "retentionMatchesAttempted": visits,
+                "wholeScanAssociationVisits": TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.get()),
+                "trace": trace,
+            })
+        );
+    }
+    let inner = fixture.state.inner.lock().unwrap();
+    let settled = &inner.test_run_observations["observed-probe-0000"];
+    assert_eq!(settled.summary.ended_at.as_deref(), Some(ended));
+    assert!(settled.artifact.as_ref().unwrap().terminal_digest.is_some());
+}
+
+#[test]
+fn terminal_retention_skips_unrelated_completed_history() {
     let visits = |count| {
         let fixture = populated_history(count);
         let mut inner = fixture.state.inner.lock().unwrap();
@@ -203,6 +318,7 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
         let before = inner.test_run_observations.clone();
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
         TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
         TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.set((0, 0, 0)));
         TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.set(0));
         fixture
@@ -210,23 +326,25 @@ fn terminal_retention_completed_history_has_linear_preparation_and_no_matches() 
             .retain_test_command_artifact_terminals_locked(&mut inner);
         let visited = TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get());
         let inspected = TEST_TEST_RUN_TERMINAL_RETENTION_ROWS.with(|count| count.get());
+        let entries = TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get());
         let preparation = TEST_TEST_RUN_PROJECTION_WORK.with(|count| count.get());
         assert_eq!(inner.test_run_observations, before);
         assert_eq!(
             preparation,
-            (1, count, count),
-            "build one linear projection per pass"
+            (0, 0, 0),
+            "retention needs no history projection"
         );
         assert_eq!(
-            inspected, count,
-            "completed rows must not be scanned once per entry"
+            (entries, inspected),
+            (0, 0),
+            "settled history adds no entry or observation visits"
         );
         assert_eq!(
             TEST_TEST_RUN_ASSOCIATION_VISITS.with(|count| count.get()),
             0
         );
         eprintln!(
-            "terminal_retention_profile completed_history={count} preparation={preparation:?} inspected_rows={inspected} unfinished_candidates={visited}"
+            "terminal_retention_profile completed_history={count} preparation={preparation:?} inspected_entries={entries} inspected_rows={inspected} unfinished_candidates={visited}"
         );
         visited
     };
@@ -267,11 +385,16 @@ fn terminal_retention_matches_only_the_unfinished_exact_association() {
             &before[id]
         ));
         TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.set(0));
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
         fixture
             .state
             .retain_test_command_artifact_terminals_locked(&mut inner);
         assert_eq!(
             TEST_TEST_RUN_TERMINAL_RETENTION_VISITS.with(|count| count.get()),
+            1
+        );
+        assert_eq!(
+            TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
             1
         );
         let after = &inner.test_run_observations[id];
@@ -393,6 +516,85 @@ fn terminal_retention_failed_persistence_keeps_fact_for_explicit_writer_retry() 
     assert_eq!(inner.test_run_observations[id], retained);
     assert!(!inner.test_runs.observations_failed.contains(id));
     assert!(inner.test_runs.observations_durable.contains(id));
+}
+
+#[test]
+fn terminal_retention_keeps_a_missing_origin_diagnostic_without_revisiting_it() {
+    let fixture = registered_history(1);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let run_id = inner.test_runs.entries[0].summary.run_id.clone();
+    assert!(
+        inner.test_run_registrations[&run_id]
+            .native_completion_refusal
+            .is_none()
+    );
+    fixture
+        .state
+        .retain_test_command_artifact_terminals_locked(&mut inner);
+    let registered = &inner.test_run_registrations[&run_id];
+    assert!(registered.native_completion.is_none());
+    let refusal = registered
+        .native_completion_refusal
+        .clone()
+        .expect("missing origin diagnosed");
+    assert_eq!(
+        refusal
+            .observed
+            .get(&TestRunNativeCompletionFact::NativeOriginPresent),
+        Some(&false)
+    );
+    TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.set(0));
+    fixture
+        .state
+        .retain_test_command_artifact_terminals_locked(&mut inner);
+    assert_eq!(
+        TEST_TEST_RUN_TERMINAL_RETENTION_ENTRIES.with(|count| count.get()),
+        0
+    );
+    assert_eq!(
+        inner.test_run_registrations[&run_id]
+            .native_completion_refusal
+            .as_ref(),
+        Some(&refusal)
+    );
+    drop(inner);
+    let saved = load_state(fixture.state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        saved.test_run_registrations[&run_id]
+            .native_completion_refusal
+            .as_ref(),
+        Some(&refusal)
+    );
+    assert!(
+        saved
+            .test_run_registrations
+            .index()
+            .pending_native_runs()
+            .next()
+            .is_none()
+    );
+}
+
+#[test]
+fn terminal_retention_does_not_redirect_a_miskeyed_registration() {
+    let fixture = registered_history(2);
+    let mut inner = fixture.state.inner.lock().unwrap();
+    let key = "test-history-0000";
+    let other = "test-history-0001";
+    // The other registration's own terminal isn't indexed in this cut.
+    inner.test_runs.entries.remove(1);
+    inner
+        .test_run_registrations
+        .update(key, |row| row.run_id = other.to_owned());
+    let before = inner.test_run_registrations[key].clone();
+    let other_before = inner.test_run_registrations[other].clone();
+    fixture
+        .state
+        .retain_test_command_artifact_terminals_locked(&mut inner);
+    assert_eq!(inner.test_run_registrations[key], before);
+    assert_eq!(inner.test_run_registrations[other], other_before);
 }
 
 #[test]

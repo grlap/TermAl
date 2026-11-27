@@ -476,6 +476,22 @@ its session, a removed observation persistence fence, a durable observation or
 a lifecycle revalidation. An unchanged idle rescan builds no compaction
 population. Failed compaction/removal writes retain retry eligibility.
 
+Terminal-artifact retention uses the maintained run positions, unfinished
+artifact associations and pending native registrations. It visits entries in
+the same order as the scanner's index, with the exact matching checks still
+applied. An ended provider observation can still complete its pending native
+registration. A registration with no original native origin gets its first
+diagnostic and can leave the pending set once diagnosed. Later association
+recovery remains eligible when the registered origin exists.
+
+The rescan commit still has history-sized work outside terminal retention.
+It copies the previous index, compares summaries and aliases, installs the
+settled index, processes compacted metadata and history summaries, and may
+persist or publish changes. Direct compaction selection still runs when its
+input is invalidated. Compare cold initial scans and later idle backstop scans
+separately using the rescan trace. The terminal-retention phase measures only
+that part of the commit hold.
+
 A lifecycle revalidation after a named-root read builds no full-history
 projection while it holds the state lock. Each changed row publishes the
 first run of its own execution id, or else of its artifact's run id and run
