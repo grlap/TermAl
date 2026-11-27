@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Closed by independent evaluation (delegation-e212eaf9, all 3 criteria PASS at master 995515bc).\nC1: diagnosis note 31e258bd separates proven from inferred. The exact historical endpoint, input and size are recorded as not provable.\nC2: both candidate builders are fixed on master: chunked writes of at most 1 GiB (649d77d5) and a 64 MiB bounded encoder with typed refusal (1bf874d9), plus no whole-history clones before pagination (ab3aa0f6), with regression tests (note d49418d4).\nC3: full gates with clean pairs on both landed trees (note ef6d9ac1), and two consecutive post-fix Central instances with 0 panics (notes 15cc585c, 95eaed1a).",
+    "completed_at": "2026-11-27T04:32:54.832993500Z",
+    "actor": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

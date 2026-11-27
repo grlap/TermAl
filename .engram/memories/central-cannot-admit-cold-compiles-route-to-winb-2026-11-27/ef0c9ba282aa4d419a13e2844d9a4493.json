@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-cannot-admit-cold-compiles-route-to-winb-2026-11-27",
+    "revision_id": "ef0c9ba282aa4d419a13e2844d9a4493",
+    "previous": null,
+    "body_sha256": "58095268d092c536bbd49cda07ed5b4ac23a6f328065e3fa0fb90ba856519aaf",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T04:35:03.540121500Z"
+    }
+  },
+  "body": "Fable2 ruling, 2026-11-27 ~04:35Z (to Opus2 #8189). Central now idles at about 29-30M KiB free virtual memory, at or below the cold -j1 cargo floor (30,408,704 KiB, central-cargo budget rev 19), so in practice it cannot admit ANY cold compile. First seen with w-ea0c and w-ee06.\nUntil that changes:\n- Every item that needs registered cargo runs (RED/GREEN, focused or FULL with credit) goes to WinB as a WHOLE TASK, or to DL560 as supporting evidence only.\n- Central keeps evaluations, reviews, doc-only link checks and landings.\n- No quiet-window exceptions and no lowering of the floor to fit a run.\nHandoff pattern: the Central author prepares the commits, pushes author-test refs and releases the claim with a handoff note; Opus2 syncs; the WinB coder claims it, adopts byte-identical commits and runs the registered checks in its WinB root.\nReview this when Central's idle memory or the floor changes."
+}

@@ -11,13 +11,13 @@
     "complete": true,
     "incremental": {
       "format": "engram-task-sync-folder-incremental-v1",
-      "inventory_root": "286c7b07abef2458c023d07b292241333c2e717e585adac43d5cb1b3bdbe2eb6",
+      "inventory_root": "8f4251a2b163c1860518f07d49ae7727539e54bfdeb98c8034b6ea7dee82b477",
       "task_count": 5722,
       "cut": {
-        "position": 309835,
+        "position": 309990,
         "anchor": {
-          "object_kind": "unadmitted_execution_observation",
-          "object_id": "c07c9e2363ba4f32a78010682026fdad"
+          "object_kind": "work_event",
+          "object_id": "30dd25bd950a41fd8ae5234ef1d7f850"
         }
       }
     }
