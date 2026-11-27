@@ -1,0 +1,30 @@
+{
+  "id": "01a21a5b-4262-77b3-a679-9d740ecf39b3",
+  "external_ref": null,
+  "title": "Federation listener preface-drop diagnostic writes with eprintln! inside the accept loop (can block, panic, or flood)",
+  "outcome": "The listener's diagnostic for a connection dropped before its preface cannot stall, panic or flood the accept loop.",
+  "acceptance": [
+    "The preface-drop diagnostic in FederationSocketListener::accept is written through a path that cannot panic when stderr is unwritable and does not block the accept loop on a slow stderr sink.",
+    "Repeated immediate preface read failures from a peer are rate-limited or aggregated so they cannot flood the log, and the outcome name and peer address stay visible for at least the first occurrence.",
+    "A behaviour test drives repeated preface failures and shows the accept loop keeps admitting connections, with no wall-clock thresholds and no retries."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "logging",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

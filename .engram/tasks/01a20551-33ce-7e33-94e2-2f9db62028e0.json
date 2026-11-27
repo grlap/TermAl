@@ -2,9 +2,9 @@
   "id": "01a20551-33ce-7e33-94e2-2f9db62028e0",
   "external_ref": null,
   "title": "Nondeterministic federation fixture: placement_refuses_enrolled fails in Pair::new when the onboarding probe hits a transport error at 0 ms (controlTaskDropped)",
-  "outcome": "Nondeterministic federation fixture: placement_refuses_enrolled fails in Pair::new when the onboarding probe hits a transport error at 0 ms (controlTaskDropped)",
+  "outcome": "The entrypoint fixture's listener no longer drops a connection on a real-time preface deadline under the scripted clock, and every pre-preface drop (preface timeout or preface read failure) is recorded with its outcome, so a recurrence of the placement_refuses_enrolled Pair::new failure is attributable. Attribution of the original 56c25a34 incident is carried by w-408873de9a32.",
   "acceptance": [
-    "The cause is identified from source and the preserved run: why the fixture's onboarding probe can fail on transport at 0 ms with controlTaskDropped, and whether it is a fixture race or a product race.",
+    "The cause is narrowed from source and the preserved run: the 0 ms and controlTaskDropped signals are explained, every excluded path is listed with its evidence, and each remaining candidate is named and classified as a fixture race or a product/environment cause, stating which candidate this change fixes.",
     "The defect is fixed where it lives (fixture or product), with a behaviour test that reproduces the ordering deterministically, with no wall-clock thresholds and no retries."
   ],
   "acceptance_bindings": [],
@@ -18,12 +18,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "The federation listener's preface-classification deadline now runs on the channel's control clock: real time in production, and the scripted clock in fixtures. Every pre-preface drop (prefaceTimeout or prefaceReadFailed) is logged with its outcome and peer. A deterministic behaviour test covers the deadline (tests::federation_listener_io::federation_preface_deadline_follows_the_scripted_control_clock). The cause of the entrypoint fixture failure is narrowed by elimination to candidates H1a-H6. This change fixes H1a, the real-time preface timeout race under the scripted clock. Attribution of the 56c25a34 incident is carried by w-408873de9a32. Landed as f8560ab1 on master; Windows FULL test-f306a669 PASS; review pair adopted from b6528469; landing evaluation 1679e311 C1 and C2 PASS.",
+    "completed_at": "2026-11-27T01:39:08.941613500Z",
+    "actor": {
+      "actor_id": "dev/claude",
+      "actor_kind": "agent"
+    }
+  }
 }
