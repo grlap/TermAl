@@ -75,9 +75,12 @@ fn intent_custody(store: &MailboxStore, sender: &str, key: &str) -> (String, Str
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn relay_send_reports_home_writer_admission_refusal_and_saves_no_message() {
     let _scope = TestTempRootDirectoryScope::repository_local();
-    let fixture = Fixture::build(false, true, Some(Duration::from_millis(100)), |router| {
-        router
-    })
+    let fixture = Fixture::build(
+        false,
+        true,
+        Some(Duration::from_millis(100)),
+        |router, _| router,
+    )
     .await;
     let (mut server, handles) = connect_sender(&fixture).await;
     let sender = fixture

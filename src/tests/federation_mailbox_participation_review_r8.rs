@@ -803,7 +803,7 @@ async fn native_address_review_verified_satellite_listed_central_name_wakes_with
     assert_eq!(pending, 0);
     assert!(refusals.is_empty());
     let receipt: MailboxAppendReceipt = serde_json::from_value(value).unwrap();
-    assert_eq!(receipt.notification_disposition, "durableButNotWoken");
+    assert_eq!(receipt.notification_disposition, "relayWakePending");
     assert!(
         receipt.notification_cause.is_none(),
         "no activation remedy is required"

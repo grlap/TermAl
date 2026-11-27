@@ -80,20 +80,20 @@ impl Fixture {
     }
 
     async fn with_router(install_binding: bool, wrap: impl FnOnce(Router) -> Router) -> Self {
-        Self::build(install_binding, true, None, wrap).await
+        Self::build(install_binding, true, None, |router, _| wrap(router)).await
     }
 
     /// The deployed pair: central verifies and activates its satellite, and
     /// the satellite's own record of its central stays enrolled.
     async fn production_shape() -> Self {
-        Self::build(false, false, None, |router| router).await
+        Self::build(false, false, None, |router, _| router).await
     }
 
     async fn build(
         install_binding: bool,
         satellite_activates_central: bool,
         home_writer_timeout: Option<Duration>,
-        wrap: impl FnOnce(Router) -> Router,
+        wrap: impl FnOnce(Router, FederationChannel) -> Router,
     ) -> Self {
         let mut central = federation_mailboxes::central_store();
         if let Some(timeout) = home_writer_timeout {
@@ -160,10 +160,13 @@ impl Fixture {
         // loaded host never expires them; only a test that advances it does.
         satellite_channel.control.clock = FederationControlClock::scripted_io();
         let check = satellite_channel.clone();
-        let server = DomainServer::start(wrap(federation_router(
+        let server = DomainServer::start(wrap(
+            federation_router(
+                satellite_channel.clone(),
+                Arc::new(move || check.current_authority().map(|_| ())),
+            ),
             satellite_channel.clone(),
-            Arc::new(move || check.current_authority().map(|_| ())),
-        )))
+        ))
         .await;
         let mut channel = FederationChannel::for_app(
             central

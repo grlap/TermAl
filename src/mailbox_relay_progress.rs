@@ -75,19 +75,48 @@ impl MailboxStore {
             |row| row.get::<_, bool>(0),
         ).optional()?;
         if let Some(status) = message.current_status.as_mut() {
-            let progress = MailboxRelayProgress {
+            status.relay_progress = Some(MailboxRelayProgress {
                 home_observed_at: chrono::Utc::now().to_rfc3339(),
                 home_queue_admission_confirmed: admitted,
                 target: mailbox_relay_target_unavailable("target progress has not been observed"),
-            };
-            status.summary = mailbox_relay_current_status_summary(
-                &status.observed_at,
-                &progress,
-                status.recipient_acknowledged,
-            );
-            status.relay_progress = Some(progress);
+            });
         }
+        project_mailbox_relay_home_wake(message);
         Ok(())
+    }
+}
+
+/// Normalize exact reads from either a current or an older relay home using
+/// its recorded admission. No confirmation alone does not establish a decline.
+pub(crate) fn project_mailbox_relay_home_wake(message: &mut MailboxMessage) {
+    let admitted = message
+        .current_status
+        .as_ref()
+        .and_then(|status| status.relay_progress.as_ref())
+        .and_then(|progress| progress.home_queue_admission_confirmed);
+    let state = match (admitted, message.notification_state.as_str()) {
+        (Some(true), _) => "relayWakeAdmitted",
+        (Some(false), "relayWakeNotAdmitted") => "relayWakeNotAdmitted",
+        _ => "relayWakePending",
+    };
+    message.notification_state = state.to_owned();
+    message.notification_summary = mailbox_wake_state_sentence(state);
+    if let Some(status) = message.current_status.as_mut() {
+        status.notification_state = state.to_owned();
+        status.summary = if let Some(progress) = status.relay_progress.as_ref() {
+            mailbox_relay_current_status_summary(
+                &status.observed_at,
+                state,
+                progress,
+                status.recipient_acknowledged,
+            )
+        } else {
+            mailbox_current_status_summary(
+                &status.observed_at,
+                state,
+                status.recipient_acknowledged,
+            )
+        };
     }
 }
 
@@ -310,6 +339,7 @@ impl AppState {
             };
             status.summary = mailbox_relay_current_status_summary(
                 &status.observed_at,
+                &status.notification_state,
                 progress,
                 status.recipient_acknowledged,
             );

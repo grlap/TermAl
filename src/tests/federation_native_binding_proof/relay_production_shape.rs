@@ -119,6 +119,17 @@ impl ProxySend {
         response.json().await.unwrap()
     }
 
+    async fn read_exact(&self, fixture: &Fixture, sent: &MailboxAppendReceipt) -> MailboxMessage {
+        let locator = MailboxRelayLocator::decode(&sent.message_id, true)
+            .unwrap()
+            .unwrap();
+        fixture
+            .central
+            .read_native_mailbox_relay_message(&self.caller, locator)
+            .await
+            .unwrap()
+    }
+
     pub(super) async fn finish(mut self) {
         self.central_api.finish().await;
         self.central_domain.finish().await;
@@ -176,6 +187,7 @@ async fn mailbox_relay_wake_reaches_a_satellite_whose_record_of_central_is_only_
     );
     let proxy = ProxySend::new(&fixture).await;
     let sent = proxy.send(&fixture, "production-shape").await;
+    assert_eq!(sent.notification_disposition, "relayWakePending");
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     let wake = queued_relay_wake(&fixture, &sent.mailbox_id)
         .expect("the satellite admits a wake from its enrolled central home");
@@ -188,6 +200,12 @@ async fn mailbox_relay_wake_reaches_a_satellite_whose_record_of_central_is_only_
         0,
         "the home settles the delivered obligation"
     );
+    let status = proxy
+        .read_exact(&fixture, &sent)
+        .await
+        .current_status
+        .unwrap();
+    assert_eq!(status.notification_state, "relayWakeAdmitted");
     assert!(
         fixture
             .central
@@ -701,6 +719,183 @@ async fn mailbox_relay_production_shape_holds_on_link_loss_and_delivers_on_a_fre
         "the fresh lease delivers the held wake"
     );
     assert_eq!(ProxySend::pending_home_wakes(&fixture), 0);
+    proxy.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_relay_receipt_is_pending_and_exact_read_reports_a_declined_wake() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let decline = Arc::new(AtomicBool::new(true));
+    let target_declines = decline.clone();
+    let fixture = Fixture::build(false, false, None, move |router, channel| {
+        let checked = channel.clone();
+        let listener = FederationListenerState {
+            channel,
+            ensure_current: Arc::new(move || checked.current_authority().map(|_| ())),
+        };
+        Router::new()
+            .route(
+                MAILBOX_RELAY_RPC_ROUTE,
+                post(
+                    move |peer: axum::Extension<FederationAuthenticatedPeer>,
+                          Json(request): Json<MailboxRelayRequest>| {
+                        let target_declines = target_declines.clone();
+                        async move {
+                            if matches!(&request.operation, MailboxRelayOperation::Wake { .. })
+                                && target_declines.load(Ordering::SeqCst)
+                            {
+                                // An authenticated target can decline the wake
+                                // without admitting a carrier to its queue.
+                                let lease = peer.lease.as_ref().unwrap();
+                                return Ok(Json(MailboxRelayResponse {
+                                    version: MAILBOX_RELAY_VERSION,
+                                    request_id: request.request_id,
+                                    host: lease.channel.current_authority().unwrap().local,
+                                    value: json!(false),
+                                })
+                                .into_response());
+                            }
+                            serve_mailbox_relay(peer, Json(request)).await
+                        }
+                    },
+                ),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                listener,
+                federation_authenticate,
+            ))
+            .fallback_service(router)
+    })
+    .await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "wake-declined").await;
+    assert_eq!(sent.notification_disposition, "relayWakePending");
+    drain_mailbox_relay_wakes(&fixture.central).await;
+    assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_none());
+
+    let declined = proxy.read_exact(&fixture, &sent).await;
+    assert!(declined.notification_summary.contains("did not admit"));
+    let status = declined.current_status.unwrap();
+    assert_eq!(status.notification_state, "relayWakeNotAdmitted");
+    assert_eq!(
+        status
+            .relay_progress
+            .unwrap()
+            .home_queue_admission_confirmed,
+        Some(false)
+    );
+    let retry = proxy.send(&fixture, "wake-declined").await;
+    assert!(retry.duplicate);
+    assert_eq!(retry.message_id, sent.message_id);
+    assert_eq!(
+        retry.notification_disposition,
+        sent.notification_disposition
+    );
+    decline.store(false, Ordering::SeqCst);
+    drain_mailbox_relay_wakes(&fixture.central).await;
+    assert!(queued_relay_wake(&fixture, &sent.mailbox_id).is_some());
+    let admitted = proxy.read_exact(&fixture, &sent).await;
+    assert_eq!(admitted.notification_state, "relayWakeAdmitted");
+    assert!(
+        admitted
+            .notification_summary
+            .contains("recorded target queue admission")
+    );
+    let page = read_relay_page(&fixture.satellite, &fixture.native, &sent.mailbox_id)
+        .await
+        .unwrap();
+    assert_eq!(page.messages[0].notification_state, "relayWakeAdmitted");
+    proxy.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn satellite_exact_read_normalizes_a_legacy_homes_wake_state() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let reports_admission = Arc::new(AtomicBool::new(true));
+    let home_reports_admission = reports_admission.clone();
+    let channel = fixture.channel.clone();
+    let checked = channel.clone();
+    let listener = FederationListenerState {
+        channel,
+        ensure_current: Arc::new(move || checked.current_authority().map(|_| ())),
+    };
+    let proxy = ProxySend::with_home_router(&fixture, move |router| {
+        Router::new()
+            .route(
+                MAILBOX_RELAY_RPC_ROUTE,
+                post(
+                    move |peer: axum::Extension<FederationAuthenticatedPeer>,
+                          Json(request): Json<MailboxRelayRequest>| {
+                        let home_reports_admission = home_reports_admission.clone();
+                        async move {
+                            let exact = matches!(
+                                &request.operation,
+                                MailboxRelayOperation::ReadMessage { .. }
+                            );
+                            let response = serve_mailbox_relay(peer, Json(request)).await?;
+                            if !exact || !response.status().is_success() {
+                                return Ok::<_, ApiError>(response);
+                            }
+                            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                                .await
+                                .unwrap();
+                            let mut reply: MailboxRelayResponse =
+                                serde_json::from_slice(&body).unwrap();
+                            reply.value["notificationState"] = json!("durableButNotWoken");
+                            reply.value["notificationSummary"] = json!("No wake confirmed");
+                            let status = &mut reply.value["currentStatus"];
+                            status["notificationState"] = json!("durableButNotWoken");
+                            status["relayProgress"]["homeQueueAdmissionConfirmed"] =
+                                json!(home_reports_admission.load(Ordering::SeqCst));
+                            Ok(Json(reply).into_response())
+                        }
+                    },
+                ),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                listener,
+                federation_authenticate,
+            ))
+            .fallback_service(router)
+    })
+    .await;
+    let sent = proxy.send(&fixture, "legacy-home-exact-read").await;
+    drain_mailbox_relay_wakes(&fixture.central).await;
+    let locator = MailboxRelayLocator::decode(&sent.message_id, true)
+        .unwrap()
+        .unwrap();
+    let read = || {
+        fixture
+            .satellite
+            .read_native_mailbox_relay_message(&fixture.native, locator.clone())
+    };
+    let admitted = read().await.unwrap();
+    assert_eq!(admitted.notification_state, "relayWakeAdmitted");
+    assert_eq!(
+        admitted.current_status.unwrap().notification_state,
+        "relayWakeAdmitted"
+    );
+    assert!(
+        admitted
+            .notification_summary
+            .contains("recorded target queue admission")
+    );
+
+    reports_admission.store(false, Ordering::SeqCst);
+    let pending = read().await.unwrap();
+    assert_eq!(pending.notification_state, "relayWakePending");
+    assert_eq!(
+        pending.current_status.unwrap().notification_state,
+        "relayWakePending"
+    );
+    assert!(
+        pending
+            .notification_summary
+            .contains("no confirmed wake outcome")
+    );
     proxy.finish().await;
     fixture.finish().await;
 }

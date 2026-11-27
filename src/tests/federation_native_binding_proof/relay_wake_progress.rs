@@ -77,8 +77,13 @@ async fn native_exact_status_distinguishes_home_admission_target_queue_and_provi
     // Admission revalidation needs the target's authenticated route home too.
     let proxy = ProxySend::new(&fixture).await;
     let (_, receipt) = append_to_satellite(&fixture, "exact-progress-phases");
+    assert_eq!(receipt.notification_disposition, "relayWakePending");
     let immutable_receipt = serde_json::to_value(&receipt).unwrap();
     let before = exact_home_read(&fixture, &receipt).await;
+    assert_eq!(
+        before.current_status.as_ref().unwrap().notification_state,
+        "relayWakePending"
+    );
     let progress = before
         .current_status
         .as_ref()
@@ -97,6 +102,7 @@ async fn native_exact_status_distinguishes_home_admission_target_queue_and_provi
     fixture.central.run_mailbox_relay_wake_batch(0, 0).await;
     let queued = exact_home_read(&fixture, &receipt).await;
     let status = queued.current_status.as_ref().unwrap();
+    assert_eq!(status.notification_state, "relayWakeAdmitted");
     assert!(!status.recipient_acknowledged);
     let progress = status.relay_progress.as_ref().unwrap();
     assert_eq!(progress.home_queue_admission_confirmed, Some(true));
@@ -166,8 +172,8 @@ async fn native_exact_status_distinguishes_home_admission_target_queue_and_provi
         "a provider handoff is not a recipient protocol ACK"
     );
     assert_eq!(
-        before.notification_state, handed_off.notification_state,
-        "the stored conservative home disposition is not rewritten as provider delivery"
+        queued.notification_state, handed_off.notification_state,
+        "provider handoff leaves the recorded home admission unchanged"
     );
     assert_eq!(serde_json::to_value(&receipt).unwrap(), immutable_receipt);
     assert_eq!(
