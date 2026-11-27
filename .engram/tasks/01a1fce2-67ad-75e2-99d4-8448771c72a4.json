@@ -20,12 +20,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a1e043-631a-75b2-885b-e0df41e91371",
+  "disposal_reason": "Fable2 ruling 9731f9f5286049baa259a6d7786c7696 (mail #8179, relayed by Opus2 #3019). DL560 evidence 48ab023b37274957ae5692e3e5dab67d and host readback 41df15f8557b4b4a8ea3a8bbf486990a establish a compound-shell command rejected before provider observation; WinB evidence 32353c33ab8441ef82e057c039cd092c and f825c3b75f8d435d9015c11393b7404f show the wrapper and missing provider observation. Neither retained a terminal to deliver after reconnect. Preserve the originals and track the distinct DL560 observer identity RPC issue separately.",
   "completion": null
 }

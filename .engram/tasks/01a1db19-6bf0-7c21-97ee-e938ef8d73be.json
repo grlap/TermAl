@@ -2,9 +2,9 @@
   "id": "01a1db19-6bf0-7c21-97ee-e938ef8d73be",
   "external_ref": null,
   "title": "Central TermAl host crashed: \"memory allocation of 2719744 bytes failed\" (0xc0000409) at 17:08Z during the Engram baa6 Windows FULL",
-  "outcome": "The Central host does not die when system commit runs low: test-run placement keeps enough commit headroom for the host, and the host degrades or refuses work rather than aborting on a failed allocation. The cause of the 17:08Z commit exhaustion is identified from measurements.",
+  "outcome": "The Central host does not die when system commit runs low: test-run placement keeps enough commit headroom for the host through a commit-based floor, and the host's abort on a failed allocation is carried by w-ee06482f6d8e. The cause of the 17:08Z commit exhaustion is identified from the retained measurements, with the unmeasured per-process split recorded as such.",
   "acceptance": [
-    "The 2026-11-14 17:08:27Z crash is explained from evidence (commit charge and the largest consumers at that time: the Engram baa6 Windows FULL started 17:05Z, rustc/test processes, Node, Chrome, the host itself), not from the exit code alone.",
+    "The 2026-11-14 17:08:27Z crash is explained from the retained evidence, with proven facts and inferences marked: commit charge reached the system commit limit (os error 1455 and LNK1102 in the crash minute), the charge already present at launch (the limit minus the launch free-commit census), and the increment from the Engram baa6 Windows FULL's 24-job link phase. A per-process split of the charge at crash time (rustc/test, Node, Chrome, the host itself) is recorded as not measured and not reconstructable from the retained evidence.",
     "Central placement rules (capacity memory central-cargo-memory-budget) cover FULLs on Central with a commit-based floor that would have prevented this, recorded and applied by the integration owner.",
     "If the host's own abort on allocation failure is avoidable (for example a bounded allocation on a hot path), that is filed or fixed separately with a behavioural test."
   ],

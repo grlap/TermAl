@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-data-divergent-planning-route-c-2026-11-27",
+    "revision_id": "f51c934652c34cb59432f27bfda2d8fe",
+    "previous": null,
+    "body_sha256": "675df2665096ac4821cba33e5149de8fe4a5dd45d889c6bab8402ede5fcad1ea",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-c39164e2c07b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T04:24:37.062175200Z"
+    }
+  },
+  "body": "Recovery recipe, proven on TermAl's WinB on 2026-11-27 (Engram defect w-c39164e2c07b, route by Engram::Opus, approved by Engram::Fable).\nSymptom: ordinary import refuses with task_sync_divergent_planning on an item the LOCAL host revised. Cause: a task held (ancestor_binding) in the same graph component (here w-c4a1 and w-0892, siblings under w-e297, whose root had the w-7e7c claim's active execution) makes import re-read the locally revised item. Export refuses with task_sync_incremental_basis_unavailable because data HEAD isn't the admitted basis. Engram's printed set-aside remedy LOOPS in that state.\nROUTE C, which only moves forward:\n0. Capture read-only diagnostics (import --dry-run --json, the envelope).\n1. The item's holder saves `show <item> --full`.\n2. `git revert --no-edit <set-aside>` if one was made.\n3. The holder revises the item back to its text at the basis commit.\n4. Ordinary import. Central's changes apply; siblings stay held, which is fine.\n5. The holder re-applies the saved revise exactly.\n6. Ordinary export, commit, confirm-import, a net check against the incoming tip (zero deletions, disclosure clean), HTTPS fast-forward push.\nNOT approved: a branch reset (A) or export --rebuild (B).\nPrevention: a local criteria revise on an item with held siblings will hit this again until w-c391 lands. If that's foreseeable, run the revise on Central, or sync before revising."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a21b36-ebb6-7fd0-b5d4-bc0d5f404026",
+  "external_ref": null,
+  "title": "Verification record for a focused run whose first stage crashed is rejected as \"unclassified_stages: no recognized check\" instead of recorded as a failed check",
+  "outcome": "Verification record for a focused run whose first stage crashed is rejected as \"unclassified_stages: no recognized check\" instead of recorded as a failed check",
+  "acceptance": [
+    "The cause is identified from source: why a completed focused launcher run whose first test stage exited abnormally (for example 0xc0000374) produces a verification record rejected as `unclassified_stages: completed run has no recognized check for focused` rather than a recognized check with a failed result.",
+    "A focused run whose recognized test stage exits abnormally is recorded as a recognized check with a failed (or crashed) result, so it is visible as a failure for credit and evaluation purposes; a run with genuinely no recognized test stage keeps a refusal that names that cause.",
+    "Behavioural tests cover a crashed first stage, a normal failure and a pass for a focused run; no text-pinning test."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "test-runs"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

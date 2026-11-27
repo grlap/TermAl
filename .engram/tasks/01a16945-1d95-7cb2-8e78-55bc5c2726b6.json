@@ -4,7 +4,8 @@
   "title": "Ordinary SQLite storage: clarify mandatory empty metadata initialization",
   "outcome": "Correct the storage documentation's obsolete empty-store metadata exception for primary format 4",
   "acceptance": [
-    "Correct the storage documentation's obsolete empty-store metadata exception for primary format 4 is done"
+    "The SQLite session storage guide states that current-format databases initialize and require complete metadata units even when empty, and limits the absent-units exception to supported migration from a proven uninitialized predecessor. The explanation agrees with the storage initializer and reader contract.",
+    "The candidate changes only the SQLite session storage guide and passes the repository Markdown link check on its exact clean committed input."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

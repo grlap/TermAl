@@ -1,0 +1,30 @@
+{
+  "id": "01a21b39-91c2-79e2-bc96-febc3a1115fc",
+  "external_ref": null,
+  "title": "DL560 authenticated observer lookup cannot read B79D native run identity after reconnect",
+  "outcome": "Identify why ObserveTestRun fails for the original DL560 registration after reconnect, and preserve authenticated origin-identity and terminal-custody checks when fixing or reporting the identified refusal.",
+  "acceptance": [
+    "The authenticated DL560 observer failure is traced to the original failing boundary, or a supported bounded diagnostic distinguishes authority mismatch, transport/timeout, semantic reply refusal and unavailable durable registration without exposing sensitive details.",
+    "A behavior test exercises the diagnosed path with a valid original registration and absent native terminal, proving identity is observable when authority and durable readback hold and no terminal or credit is inferred, with existing reconnect and identity-conflict guards preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "diagnostics",
+    "federation",
+    "k3",
+    "remote-runner"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
