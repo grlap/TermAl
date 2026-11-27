@@ -4,14 +4,18 @@
   "title": "termal_evaluate_acceptance refuses with registered_check_root_rebound, and the retired-run exclusion is capped at four, below the five historical same-claim runs",
   "outcome": "An item whose claim has more than four historical registered runs from an earlier named-root generation can still request its acceptance evaluation on the current exact root: the old runs can be excluded or retired, and the evaluation is admitted.",
   "acceptance": [
-    "termal_evaluate_acceptance refuses with registered_check_root_rebound, and the retired-run exclusion is capped at four, below the five historical same-claim runs is done"
+    "When termal_evaluate_acceptance refuses with registered_check_root_rebound, the refusal lists every retired-root registered run that blocks admission, with its run id and named-root generation, in one response.",
+    "A supported disposition can exclude or retire every listed run, either in one request with no cap below the listed set or persistently per run for the claim, and later requests on the same claim are not refused for runs already disposed.",
+    "A behavioural test with five or more historical retired-root registered runs on one claim shows that the evaluation is admitted after a single disposition step, and that a later request on the same claim is not refused for those runs. No text-pinning test."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
   "kind": "bug",
-  "priority": 1,
+  "priority": 0,
   "labels": [
     "acceptance-evaluation",
+    "blocks-engram-p0",
+    "cross-project",
     "engram-host"
   ],
   "assigned_to": null,
