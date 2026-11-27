@@ -137,7 +137,7 @@ public static class TestCommandOwner {
     protocol = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
     IntPtr job = IntPtr.Zero, input = IntPtr.Zero, output = IntPtr.Zero, attributes = IntPtr.Zero;
     IntPtr jobList = IntPtr.Zero, handles = IntPtr.Zero, environment = IntPtr.Zero;
-    bool attributesReady = false;
+    bool attributesReady = false, admitted = false;
     ProcessInfo child = new ProcessInfo();
     var result = new Dictionary<string, object> { { "nonce", nonce }, { "code", 1 }, { "signal", null }, { "pid", null } };
     string trigger = "startup-failure"; bool interrupted = false;
@@ -149,9 +149,11 @@ public static class TestCommandOwner {
       // EOF identifies this exact parent's pipe without a reusable PID lookup.
       string environmentJson = ReadEnvironment(controlInput);
       if (environmentJson == null) { interrupted = true; trigger = "launcher-exit"; throw new IOException("launcher exited before command admission"); }
+      admitted = true;
       var security = new Security { Size = Marshal.SizeOf(typeof(Security)), Inherit = 1 };
       input = CreateFileW("NUL", 0x80000000, 3, ref security, 3, 0, IntPtr.Zero);
-      output = CreateFileW(log, 4, 7, ref security, 3, 0, IntPtr.Zero); // FILE_APPEND_DATA
+      // Git Bash cannot write to inherited append-only handles.
+      output = CreateFileW(log, 6, 7, ref security, 3, 0, IntPtr.Zero); // FILE_WRITE_DATA | FILE_APPEND_DATA
       Check(input != new IntPtr(-1) && output != new IntPtr(-1), "open command handles");
       IntPtr size = IntPtr.Zero;
       InitializeProcThreadAttributeList(IntPtr.Zero, 2, 0, ref size);
@@ -200,12 +202,11 @@ public static class TestCommandOwner {
         else {
           Check(ResumeThread(child.Thread) != UInt32.MaxValue, "resume contained command");
           while (true) {
-            // Cancellation wins a crossed command exit and can never become PASS.
+            // The first observed stop or process exit fixes the command outcome.
             if (ControlRequested(out controlReason)) { interrupted = true; trigger = controlReason; break; }
             uint status = WaitForSingleObject(child.Process, 20);
             if (status == 0) {
-              if (ControlRequested(out controlReason)) { interrupted = true; trigger = controlReason; }
-              else trigger = "command-exit";
+              trigger = "command-exit";
               break;
             }
             Check(status == 258, "wait command");
@@ -241,6 +242,12 @@ public static class TestCommandOwner {
     result["cleanup"] = new { state = cleanup, trigger = trigger, pids = pids,
       pidScope = "best-effort job snapshot before termination", pidObservationError = pidObservationError, ownership = "windows-job" };
     if (cleanup != "reaped") result["code"] = 1;
+    // Before admission the launcher has no command to recover and may not
+    // have recorded this process. Only an admitted owner publishes a ledger.
+    if (!admitted) {
+      Emit(new { type = "finished", nonce = nonce, result = result });
+      return;
+    }
     string json = new JavaScriptSerializer().Serialize(result);
     // One immutable final ledger survives even when the launcher was killed.
     string partial = ledger + ".partial";

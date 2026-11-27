@@ -11,9 +11,18 @@ export const OWNER_RESPONSE_CHARACTER_LIMIT = 262144;
 export const OWNER_STDERR_CHARACTER_LIMIT = 2400;
 const interruptReason = (signal) => `interrupt: ${String(signal.reason ?? "requested").slice(0, 512)}`;
 
+export class OwnerCleanupPending extends Error {
+  constructor(pid, detail) {
+    super(`native process owner pid ${pid} has no confirmed cleanup ledger: ${detail}. Use recover after the owner exits.`);
+  }
+}
+
 export async function runOwnedCommand(command, args, { cwd, env, log, signal, onStart, onOwner, dartBatch }, {
   spawnOwner = spawn, platform = process.platform,
 } = {}) {
+  if ([command, ...args].some((value) => value.includes("\0"))) {
+    throw new Error("owned command and arguments must not contain NUL");
+  }
   const fd = openSync(log, "wx");
   closeSync(fd);
   const nonce = randomUUID();
@@ -29,7 +38,7 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
     code: 1, signal: null, interrupted: true,
     cleanup: { state: "reaped", trigger: interruptReason(signal), pids: [] },
   };
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const windows = platform === "win32";
     const program = process.execPath;
     const ownerArgs = windows
@@ -48,8 +57,9 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
       pendingStop ??= reason;
       try {
         if (windows) {
-          if (!environmentSent) return;
-          if (!owner.stdin.destroyed && !owner.stdin.writableEnded) owner.stdin.end(`${reason}\n`);
+          if (!owner.stdin.destroyed && !owner.stdin.writableEnded) {
+            owner.stdin.end(environmentSent ? `${reason}\n` : undefined);
+          }
         }
         else if (owner.connected) owner.send({ type: "interrupt", reason }, () => {});
       } catch (error) { protocolError ??= `owner control failed: ${error.message}`; }
@@ -67,7 +77,11 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
     };
     owner.stdin?.on("error", () => {}); // A closed owner is judged from its ledger/close event.
     const receive = (message) => {
-      if (message?.nonce !== nonce) { protocolError ??= "process owner nonce mismatch"; return; }
+      if (message?.nonce !== nonce) {
+        protocolError ??= "process owner nonce mismatch";
+        requestStop("interrupt: invalid owner response");
+        return;
+      }
       if (message.type === "started") {
         // POSIX IPC can drop a signal sent before the owner's ESM listener
         // exists. This acknowledgement proves that listener is now installed.
@@ -78,9 +92,20 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
           requestStop("interrupt: observation failed");
         }
       } else if (message.type === "bootstrap") {
+        if (!windows || !Number.isSafeInteger(message.pid) || message.pid <= 0) {
+          protocolError ??= "invalid native process owner identity";
+          requestStop("interrupt: invalid native owner identity");
+          return;
+        }
         bootstrapPid = message.pid;
         try { onOwner?.({ pid: owner.pid, ledger, nonce, bootstrapPid }); }
         catch (error) { protocolError ??= error.message; requestStop("interrupt: bootstrap observation failed"); }
+        if (!environmentSent && !pendingStop && !signal?.aborted) {
+          // The native owner waits for this private environment message.
+          // Admit its command only after recovery has its bootstrap PID.
+          environmentSent = true;
+          owner.stdin.write(`${JSON.stringify(env)}\n`);
+        }
       } else if (message.type === "finished") result = message.result;
     };
     if (windows) owner.stdout.on("data", (chunk) => {
@@ -103,28 +128,46 @@ export async function runOwnedCommand(command, args, { cwd, env, log, signal, on
       try { appendFileSync(bootstrap, `${JSON.stringify({ phase: "owner-close", pid: owner.pid, code, signal: closeSignal })}\n`); }
       catch (error) { protocolError ??= `owner trace failed: ${error.message}`; }
       if (code !== 0) protocolError ??= `process owner failed: exit=${code ?? "unknown"} signal=${closeSignal ?? "none"}${stderr ? `; ${stderr}` : ""}`;
-      try {
-        const durable = JSON.parse(readFileSync(ledger, "utf8"));
-        if (durable.nonce !== nonce || JSON.stringify(durable) !== JSON.stringify(result)) throw new Error("missing or inconsistent process owner result");
-      } catch (error) { protocolError ??= error.message; }
+      let hasLedger = false;
+      if (!windows || environmentSent) {
+        try {
+          const durable = JSON.parse(readFileSync(ledger, "utf8"));
+          if (durable.nonce !== nonce || (result && JSON.stringify(durable) !== JSON.stringify(result)) ||
+              (!result && !windows) || !["reaped", "unresolved"].includes(durable.cleanup?.state)) {
+            throw new Error("missing or inconsistent process owner result");
+          }
+          hasLedger = true;
+          if (!result) {
+            protocolError ??= "process owner finished message was lost";
+            result = durable;
+          }
+        } catch (error) {
+          if (windows) {
+            // Guardian closure does not prove the native job owner has
+            // finished. Leave the saved running entry available to recover.
+            reject(new OwnerCleanupPending(bootstrapPid, protocolError ?? error.message));
+            return;
+          }
+          protocolError ??= error.message;
+        }
+      }
+      if (!result) protocolError ??= "missing process owner result";
       if (!result) result = { code: 1, signal: closeSignal, cleanup: { state: "unresolved", trigger: "owner-failure", pids: [] } };
-      if (signal?.aborted) {
+      // A validated ledger tells us whether the owner acted on the abort.
+      // Closing the IPC channel can lag behind a completed command.
+      if (signal?.aborted && (result.interrupted || (protocolError && !hasLedger))) {
         result.interrupted = true; result.code = 1;
         result.cleanup = { ...result.cleanup, ownerTrigger: result.cleanup.trigger, trigger: interruptReason(signal) };
       }
-      if (protocolError) { result.code = 1; result.error = protocolError; }
+      if (protocolError) {
+        result.code = windows && hasLedger && result.code ? result.code : 1;
+        result.error = protocolError;
+        if (!windows || !hasLedger) result.cleanup = { ...result.cleanup, state: "unresolved" };
+      }
       resolve({ ...result, ownerDiagnostics, ownerPid: owner.pid, bootstrapPid, ownerLedger: ledger });
     });
     try { if (Number.isSafeInteger(owner.pid)) onOwner?.({ pid: owner.pid, ledger, nonce }); }
     catch (error) { protocolError ??= error.message; requestStop("interrupt: owner observation failed"); }
-    if (windows) {
-      // Admit environment only after the owner identity was recorded. A
-      // cancellation in that observation cannot race native command startup:
-      // the helper is still blocked waiting for this exact private pipe.
-      environmentSent = true;
-      if (pendingStop || signal?.aborted) owner.stdin.end();
-      else owner.stdin.write(`${JSON.stringify(env)}\n`);
-    }
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
   });

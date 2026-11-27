@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One execution, durable logs, one completion. Notification retries never run tests.
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import fs, {
   constants,
   accessSync,
@@ -48,8 +48,9 @@ import {
   resolveCategory,
 } from "./test-categories-plan.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
-import { runOwnedCommand, OWNER_RESPONSE_CHARACTER_LIMIT, OWNER_STDERR_CHARACTER_LIMIT } from "./test-process-owner.mjs";
+import { runOwnedCommand, OwnerCleanupPending, OWNER_RESPONSE_CHARACTER_LIMIT, OWNER_STDERR_CHARACTER_LIMIT } from "./test-process-owner.mjs";
 import { watchCommandProgress } from "./test-command-progress.mjs";
+import { cancelKeyEnvironment, requestRunCancellation, scrubCancellationEnvironment, watchRunCancellation } from "./test-run-cancellation.mjs";
 import { bootstrapUiDependencies } from "./test-ui-bootstrap.mjs";
 import {
   captureSourceMetadata,
@@ -133,6 +134,7 @@ export const helperSupportFiles = Object.freeze([
   "scripts/test-process-owner-windows.ps1",
   "scripts/test-process-owner-windows.cs",
   "scripts/test-command-progress.mjs",
+  "scripts/test-run-cancellation.mjs",
   "scripts/test-run-registration.mjs",
   "scripts/test-ui-bootstrap.mjs",
   "scripts/test-ui-bootstrap-fixtures.mjs",
@@ -235,7 +237,7 @@ function failureInvestigation(runDir) {
 }
 
 function attachFailureInvestigation(result, runDir) {
-  if (result.state === "failed" && !result.failureInvestigation) {
+  if (result.state === "failed" && !result.cancelled && !result.failureInvestigation) {
     result.failureInvestigation = failureInvestigation(runDir);
   }
 }
@@ -962,7 +964,7 @@ const PANIC_JOURNAL_BACKTRACE_LINES = 12;
 // variable is kept. On Windows an existing name in another case is replaced,
 // never duplicated.
 export function runEnvironment(env, runDir, platform = process.platform) {
-  const childEnv = { ...env };
+  const childEnv = scrubCancellationEnvironment({ ...env });
   const panicBacktrace = cargoOutputEnvironment(env, "RUST_BACKTRACE", platform);
   const libraryBacktrace = cargoOutputEnvironment(env, "RUST_LIB_BACKTRACE", platform);
   if (panicBacktrace === undefined) {
@@ -1433,7 +1435,13 @@ export function saveProgressObservation(resultPath, result, entry, observation, 
   }
 }
 
-export async function executeRun(runDir, env = process.env, { onReady, diskSpace, signal, progress, commandPhase, uiSetup } = {}) {
+export async function executeRun(runDir, env = process.env, {
+  onReady, diskSpace, signal, cancellationController, cancellationKey, progress, commandPhase, uiSetup,
+  ownedCommand = runOwnedCommand, observeSource = captureCommitInputStatus,
+} = {}) {
+  if (cancellationController && (signal || !/^[a-f0-9]{64}$/u.test(cancellationKey ?? ""))) {
+    throw new Error("launcher cancellation requires its own controller and launch key");
+  }
   // Exclusive admission: an interrupted run is not a retryable test command.
   closeSync(openSync(join(runDir, "execution.lock"), "wx"));
   const resultPath = join(runDir, "results.json");
@@ -1482,8 +1490,75 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     return result;
   }
   const childEnv = runEnvironment(env, runDir);
+  signal ??= cancellationController?.signal;
+  let cancellation;
+  const checkCancelled = () => {
+    // The launcher controller owns admission and readiness. Direct focused
+    // callers keep their signal path through runOwnedCommand so a pre-abort
+    // still records the stage's interrupted outcome without starting a child.
+    cancellation?.check();
+    if (cancellationController?.signal.aborted) {
+      throw new Error(String(cancellationController.signal.reason ?? "cancelled"));
+    }
+  };
   result.panicJournal = childEnv[PANIC_JOURNAL_ENV];
   save(resultPath, result);
+  let cancellationCleanup;
+  let unresolvedCleanup = false;
+  let commandDecidedRun = false;
+  const interrupted = () => signal?.aborted && !commandDecidedRun;
+  const runStageCommand = async (entry, command, args, settings, { required, lastStage } = {}) => {
+    let stopProgress;
+    const notices = [];
+    const releaseCommandPhase = commandPhase?.();
+    const previousCleanup = cancellationCleanup;
+    cancellationCleanup = "unresolved";
+    try {
+      const outcome = await ownedCommand(command, args, {
+        ...settings, signal: cancellation?.startCommand() ?? signal,
+        onOwner: (owner) => { entry.processOwner = owner; save(resultPath, result); },
+        onStart: (pid) => {
+          entry.pid = pid;
+          save(resultPath, result);
+          stopProgress = watchCommandProgress({
+            log: entry.log, pid, runId: request.runId, stage: entry.name,
+            observe: (observation) => {
+              saveProgressObservation(resultPath, result, entry, observation);
+              cancellation?.observe(observation);
+              if (observation.state !== "stalled") return;
+              console.error(stallSummary(observation));
+              const notice = progress?.notify
+                ? progress.notify(observation)
+                : notifyStall(runDir, observation, childEnv);
+              notices.push(Promise.resolve(notice).catch((error) => {
+                console.error(`stall notice failed: ${error.message}; the command was not retried`);
+              }));
+            },
+          }, progress);
+          progress?.onWatching?.(pid, entry.name);
+        },
+      });
+      cancellation?.settleCommand(outcome);
+      cancellationCleanup = outcome.cleanup?.state ?? "unresolved";
+      unresolvedCleanup ||= cancellationCleanup === "unresolved";
+      const decidesRun = lastStage || (required && (outcome.code !== 0 || outcome.error));
+      // An owner can finish the deciding command before a crossed stop
+      // arrives. Preserve that outcome through accounting and finalization.
+      if (decidesRun && outcome.interrupted === false) commandDecidedRun = true;
+      if (decidesRun || cancellationCleanup === "unresolved") cancellation?.close();
+      return outcome;
+    } catch (error) {
+      if (entry.processOwner) unresolvedCleanup = true;
+      else cancellationCleanup = previousCleanup;
+      if (required || unresolvedCleanup) cancellation?.close();
+      throw error;
+    } finally {
+      stopProgress?.();
+      cancellation?.clearCommand();
+      releaseCommandPhase?.();
+      await Promise.all(notices);
+    }
+  };
   // `entries` is where the probe is recorded: `result.preflight` for a probe
   // that gates the run, `result.toolchainProbes` for provenance only, which
   // no failure reader treats as the run's failure.
@@ -1491,18 +1566,36 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     const log = join(runDir, `preflight-${name}.log`);
     const entry = { name, command: [command, ...args], cwd: request.root, log };
     const field = entries === result.preflight ? "preflight" : "toolchainProbes";
-    reserveCommandResult(result, entry, field, entries.length, runDir, request.sourceId);
-    const outcome = await runCommand(command, args, {
-      cwd: request.root,
-      env: childEnv,
-      log,
-    });
-    entries.push({ ...entry,
+    reserveCommandResult(result, entry, field, entries.length, runDir, request.sourceId,
+      { owned: Boolean(cancellation) });
+    const settings = { cwd: request.root, env: childEnv, log };
+    const running = cancellation ? { ...entry, state: "running" } : entry;
+    if (cancellation) entries.push(running);
+    let outcome;
+    try {
+      outcome = cancellation ? await runStageCommand(running, command, args, settings,
+        { required: field === "preflight" })
+        : await runCommand(command, args, settings);
+    } catch (error) {
+      if (error instanceof OwnerCleanupPending) throw error;
+      if (cancellation) {
+        Object.assign(running, { state: "failed", ended: new Date().toISOString(),
+          error: boundedRunError(error.message, runDir) });
+        save(resultPath, result);
+      }
+      throw error;
+    }
+    Object.assign(running, {
       ...outcome,
+      ...(cancellation ? { state: outcome.code === 0 && !outcome.error ? "passed" : "failed" } : {}),
       ...(outcome.error ? { error: boundedRunError(outcome.error, runDir) } : {}),
       diagnostics: await diagnostics(log, outcome.code !== 0 || Boolean(outcome.error)),
     });
+    if (!cancellation) entries.push(running);
     save(resultPath, result);
+    if (cancellation && cancellationCleanup !== "reaped") {
+      throw new Error(`${name} preflight cleanup could not be confirmed; see ${log}`);
+    }
     if (outcome.code !== 0 || outcome.error) {
       throw new Error(`${name} preflight failed (${outcome.error ?? outcome.code}); see ${log}`);
     }
@@ -1518,9 +1611,9 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
   // not use. rustup's resolution is recorded only for a Cargo that sits
   // beside rustup (a rustup proxy); a Cargo named directly is not described
   // by whatever rustup is on PATH. These probes are provenance only
-  // (`result.toolchainProbes`): a missing or failing one leaves its part of
-  // the record unknown and never fails a gate that Cargo's own preflight
-  // admitted.
+  // (`result.toolchainProbes`): a missing or failing probe with settled
+  // cleanup leaves provenance unknown. Interruption or unconfirmed owner
+  // cleanup still stops the gate before readiness.
   const recordToolchain = async (cargo) => {
     result.toolchainProbes = [];
     const output = (name) => preflightVersion(readFileSync(join(runDir, `preflight-${name}.log`), "utf8"), name);
@@ -1540,7 +1633,10 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       try {
         await probe(name, command, args, result.toolchainProbes);
         return "ran";
-      } catch {
+      } catch (error) {
+        if (error instanceof OwnerCleanupPending) throw error;
+        checkCancelled();
+        if (cancellation && unresolvedCleanup) throw error;
         return "failed";
       }
     };
@@ -1597,15 +1693,16 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     result.pid = process.pid;
     result.owner = request.owner;
     result.preflight = [];
+    if (cancellationController) {
+      cancellation = watchRunCancellation(runDir, request, result, cancellationController, cancellationKey);
+    }
     save(resultPath, result);
-    if (!request.full) await onReady?.();
     result.diskSpace = diskSpacePreflight(request, runDir, childEnv, diskSpace);
     save(resultPath, result);
     for (const warning of result.diskSpace.warnings) console.error(warning);
     if (result.diskSpace.error) throw new Error(result.diskSpace.error);
     if (request.full) {
       let setupEntry;
-      const releaseCommandPhase = commandPhase?.();
       try {
         await bootstrapUiDependencies(request.root, {
           env: childEnv,
@@ -1616,11 +1713,8 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
           run: (command, args, options) => {
             reserveCommandResult(result, setupEntry, "preflight", result.preflight.indexOf(setupEntry),
               runDir, request.sourceId, { owned: true });
-            return (uiSetup?.run ?? ((program, arguments_, settings) => runOwnedCommand(program, arguments_, {
-              ...settings, signal,
-              onOwner: (owner) => { setupEntry.processOwner = owner; save(resultPath, result); },
-              onStart: (pid) => { setupEntry.pid = pid; save(resultPath, result); },
-            })))(command, args, options);
+            return (uiSetup?.run ?? ((program, arguments_, settings) =>
+              runStageCommand(setupEntry, program, arguments_, settings, { required: true })))(command, args, options);
           },
           observe: (entry) => {
             const observed = { ...setupEntry, ...entry,
@@ -1635,8 +1729,11 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
             setupEntry = observed;
           },
         });
+      } catch (error) {
+        cancellation?.close();
+        if (error instanceof OwnerCleanupPending) setupEntry = undefined;
+        throw error;
       } finally {
-        releaseCommandPhase?.();
         if (setupEntry && existsSync(setupEntry.log)) {
           setupEntry.diagnostics = await diagnostics(setupEntry.log, setupEntry.state === "failed");
           save(resultPath, result);
@@ -1728,8 +1825,15 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       await probe("engram", binary, ["--version"]);
     }
     childEnv.ENGRAM_SOURCE_BINARY = request.sourceBinary;
-    const before = await captureCommitInputStatus(request.root, childEnv, { pin: request.sourceOwner });
-    result.sourceIdBefore = before.sourceId;
+    let before;
+    try {
+      before = await observeSource(request.root, childEnv, { pin: request.sourceOwner });
+      result.sourceIdBefore = before.sourceId;
+    } finally {
+      // The periodic poll cannot fence readiness on its own. Consume a
+      // request posted at the end of the observation, even if it rejected.
+      checkCancelled();
+    }
     const admissionComparison = compareSourceIds(request.sourceId, result.sourceIdBefore);
     if (admissionComparison !== "matched") {
       const changed = admissionComparison === "mismatch";
@@ -1752,13 +1856,13 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
     if (result.sourceInputReason === "input-unverified") {
       throw new Error(result.sourceUnavailableReason);
     }
-    // A full gate's detached STARTED receipt means setup and preflight have
-    // succeeded. Setup failure closes with durable evidence, never READY.
-    if (request.full) {
-      try { await onReady?.(); }
-      catch (error) { throw new Error(`detached readiness failed: ${error.message}`); }
-    }
+    checkCancelled();
+    // STARTED means the detached worker cleared preflight, source validation
+    // and the pre-workload cancellation check.
+    try { await onReady?.(); }
+    catch (error) { throw new Error(`detached readiness failed: ${error.message}`); }
     for (let index = 0; index < request.stages.length; index += 1) {
+      checkCancelled();
       const stage = request.stages[index];
       const entry = result.stages[index];
       // The duration report only adds a machine-readable artifact beside the
@@ -1780,54 +1884,28 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       const reserved = dartReport ? {
         ...running, dartReportDigest: `sha256:${"0".repeat(64)}`,
       } : running;
+      // The CLI supplies cancellation for every stage. Existing in-process
+      // callers still own focused commands, without changing their other
+      // subprocess or artifact contracts.
+      const owned = Boolean(cancellation) || stage.name === "focused" && !request.full;
       reserveCommandResult(result, reserved, "stages", index, runDir, request.sourceId,
-        { owned: stage.name === "focused" && !request.full, report });
+        { owned, report });
       const proposed = { ...result, stages: result.stages.map((value, position) => position === index ? running : value) };
       save(resultPath, proposed);
       // Only adopt running after the durable proposed record fits. Refusal
       // before this point leaves this unspawned stage unrun.
       Object.assign(entry, running);
-      let outcome;
       let dartReportDigest;
-      if (stage.name === "focused" && !request.full) {
-        let stopProgress;
-        let releaseCommandPhase;
-        const notices = [];
-        try {
-          releaseCommandPhase = commandPhase?.();
-          outcome = await runOwnedCommand(stage.command, args, {
-            cwd: stage.cwd, env: childEnv, log: entry.log, signal,
-            dartBatch: dartStage && /\.bat$/iu.test(stage.command),
-            onOwner: (owner) => { entry.processOwner = owner; save(resultPath, result); },
-            onStart: (pid) => {
-              entry.pid = pid;
-              save(resultPath, result);
-              stopProgress = watchCommandProgress({
-                log: entry.log, pid, runId: request.runId, stage: stage.name,
-                observe: (observation) => {
-                  saveProgressObservation(resultPath, result, entry, observation);
-                  if (observation.state !== "stalled") return;
-                  console.error(stallSummary(observation));
-                  const notice = progress?.notify
-                    ? progress.notify(observation)
-                    : notifyStall(runDir, observation, childEnv);
-                  notices.push(Promise.resolve(notice).catch((error) => {
-                    console.error(`stall notice failed: ${error.message}; the command was not retried`);
-                  }));
-                },
-              }, progress);
-              progress?.onWatching?.(pid);
-            },
-          });
-          if (dartReport && !outcome.error && !outcome.interrupted && !outcome.signal) {
-            dartReportDigest = captureDartReportDigest(dartReport.owned);
-          }
-        } finally { stopProgress?.(); releaseCommandPhase?.(); }
-        await Promise.all(notices);
-      } else {
-        outcome = await runCommand(stage.command, args, {
-          cwd: stage.cwd, env: childEnv, log: entry.log,
-        });
+      const settings = {
+        cwd: stage.cwd, env: childEnv, log: entry.log,
+        dartBatch: dartStage && /\.bat$/iu.test(stage.command),
+      };
+      const outcome = owned
+        ? await runStageCommand(entry, stage.command, args, settings,
+          { required: true, lastStage: index === request.stages.length - 1 })
+        : await runCommand(stage.command, args, settings);
+      if (dartReport && !outcome.error && !outcome.interrupted && !outcome.signal) {
+        dartReportDigest = captureDartReportDigest(dartReport.owned);
       }
       Object.assign(entry, outcome, {
         ended: new Date().toISOString(),
@@ -1872,12 +1950,16 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
           entry.error = `UI project accounting ${entry.accounting.status}: ${entry.accounting.reason ?? "no reason recorded"}`;
         }
       }
+      if (entry.state === "failed") cancellation?.close();
       if (entry.error) entry.error = boundedRunError(entry.error, runDir);
       entry.diagnostics = await diagnostics(entry.log, entry.state === "failed");
       fitDurationReport(result, entry, runDir, request.sourceId);
       save(resultPath, result);
       if (entry.state === "failed") break;
     }
+    // The workload outcome is decided. A late command must not replace an
+    // actual failure while the launcher captures its final source snapshot.
+    cancellation?.close();
     let status, sourceRefusal;
     try {
       status = await captureCommitInputStatus(request.root, childEnv, { pin: request.sourceOwner });
@@ -1896,7 +1978,7 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
       result.input.outcome = commitInputOutcome(result.input.commit, status);
     }
     result.state = result.stages.every((stage) => stage.state === "passed") ? "passed" : "failed";
-    if (signal?.aborted) {
+    if (interrupted()) {
       result.state = "failed";
       result.interrupted = true;
       result.error = `interrupted: ${String(signal.reason ?? "requested")}`;
@@ -1932,24 +2014,34 @@ export async function executeRun(runDir, env = process.env, { onReady, diskSpace
         && sourceMatches;
     }
   } catch (error) {
+    if (error instanceof OwnerCleanupPending) {
+      cancellation?.close();
+      throw error;
+    }
     result.state = "failed";
     const failedStage = result.stages.find((stage) => stage.state === "failed");
     result.exitCode = failedStage?.code || 1;
     result.error = boundedRunError(error.message, runDir);
     if (error.code === "RUN_RECORD_OUTPUT_LIMIT") refuseRunSource(result, error.artifact);
     if (result.input?.kind === "commit") result.input.eligible = false;
-    if (signal?.aborted || error.interrupted) {
+    if (interrupted() || error.interrupted) {
       result.interrupted = true;
       result.error = `interrupted: ${String(signal?.reason ?? error.message)}`;
     } else if (error.setupFailure) result.setupFailure = error.setupFailure;
-    for (const stage of result.stages) {
+    for (const stage of [...(result.preflight ?? []), ...(result.toolchainProbes ?? []), ...result.stages]) {
       if (stage.state === "running") {
         stage.state = "failed";
+        stage.ended = new Date().toISOString();
         stage.error = boundedRunError(error.message, runDir);
       }
     }
   }
-  attachFailureInvestigation(result, runDir);
+  cancellation?.close();
+  if (cancellation?.wasRequested() && !commandDecidedRun) {
+    result.cancelled = !unresolvedCleanup && cancellationCleanup !== "unresolved";
+    result.reason ??= result.cancelled ? "cancelled" : "cancellation_cleanup_unresolved";
+  }
+  if (!result.cancelled) attachFailureInvestigation(result, runDir);
   if (result.error) result.error = boundedRunError(result.error, runDir);
   result.ended = new Date().toISOString();
   save(resultPath, result);
@@ -2044,7 +2136,7 @@ export async function summarize(runDir) {
   }
   const terminal = isTerminal(result);
   const lines = [
-    `${terminal ? result.state === "passed" ? "PASS" : "FAIL" : "UNKNOWN (no terminal result; running or interrupted)"} ${result.runId} exit=${terminal ? result.exitCode : "unknown"}`,
+    `${terminal ? result.cancelled ? "CANCELLED" : result.state === "passed" ? "PASS" : "FAIL" : "UNKNOWN (no terminal result; running or interrupted)"} ${result.runId} exit=${terminal ? result.exitCode : "unknown"}`,
     `results: ${join(runDir, "results.json")}`,
   ];
   if (result.scope?.kind === "category") {
@@ -2089,7 +2181,7 @@ export async function summarize(runDir) {
   if (gateLine) lines.push(gateLine);
   const liveTests = result.stages?.find((stage) => stage.liveTests?.length)?.liveTests;
   if (liveTests) lines.push(`live tests: ${liveTests.join(" ")}`);
-  const investigation = result.failureInvestigation ??
+  const investigation = result.cancelled ? undefined : result.failureInvestigation ??
     (terminal && result.state === "failed" ? failureInvestigation(runDir) : undefined);
   if (investigation) {
     lines.push(`INVESTIGATION REQUIRED: ${investigation.action}`);
@@ -2103,10 +2195,15 @@ export async function summarize(runDir) {
   // Failure excerpts get first use of the shared budget; earlier successful
   // commands may emit warnings but must not crowd out the actual failure.
   const entries = [
-    ...(result.preflight ?? []).filter((probe) => probe.diagnostics?.text || probe.error || probe.cleanup).map((probe) => ({
+    ...(result.preflight ?? []).filter((probe) => probe.diagnostics?.text || probe.error || probe.cleanup || probe.stall).map((probe) => ({
       ...probe,
       failed: probe.code !== 0 || Boolean(probe.error),
       header: `preflight ${probe.name}: exit=${probe.code} log=${probe.log}`,
+    })),
+    ...(result.toolchainProbes ?? []).filter((probe) => probe.interrupted ||
+      (probe.processOwner && (probe.cleanup?.state !== "reaped" || probe.error))).map((probe) => ({
+      ...probe, failed: Boolean(probe.interrupted) || probe.cleanup?.state !== "reaped",
+      header: `toolchain probe ${probe.name}: exit=${probe.code ?? "unknown"} log=${probe.log}`,
     })),
     ...result.stages.map((stage) => ({
       ...stage,
@@ -2285,11 +2382,15 @@ export async function recoverRun(runDir, env = process.env, {
     return current;
   };
   let result = readResult();
-  const commandEntries = () => [...(result.preflight ?? []), ...result.stages];
+  const commandEntries = () => [...(result.preflight ?? []), ...(result.toolchainProbes ?? []), ...result.stages];
   const requireOwnersExited = () => {
     for (const entry of commandEntries()) {
-      if (entry.state === "running" && Number.isSafeInteger(entry.processOwner?.pid) && isAlive(entry.processOwner.pid)) {
-        throw new Error(`process owner pid ${entry.processOwner.pid} may still be cleaning up; wait before recovering. If this PID was reused, the run stays UNKNOWN: start a new run instead of editing its evidence (docs/test.md).`);
+      if (entry.state !== "running" || !entry.processOwner) continue;
+      const { pid, bootstrapPid } = entry.processOwner;
+      const active = [pid, bootstrapPid].find((candidate) =>
+        Number.isSafeInteger(candidate) && candidate > 0 && isAlive(candidate));
+      if (active !== undefined) {
+        throw new Error(`process owner pid ${active} may still be cleaning up; wait before recovering. If this PID was reused, the run stays UNKNOWN: start a new run instead of editing its evidence (docs/test.md).`);
       }
     }
   };
@@ -2344,6 +2445,7 @@ export async function recoverRun(runDir, env = process.env, {
           error: `interrupted: ${interruption}; no stage was rerun`,
           ended: new Date().toISOString(),
         });
+        delete result.cancellationKeyDigest;
         attachFailureInvestigation(result, runDir);
         saveResult(resultPath, result);
         settled = true;
@@ -2385,7 +2487,7 @@ async function sendWorkerReady(runDir) {
   });
 }
 
-async function finish(runDir, { workerHandshake = false } = {}) {
+async function finish(runDir, { workerHandshake = false, cancellationKey } = {}) {
   // Admission is the point after which this process owns the run: a failure
   // before it (another owner's lock) must not speak for the run.
   let admitted = false;
@@ -2395,7 +2497,8 @@ async function finish(runDir, { workerHandshake = false } = {}) {
   const onTerminate = () => interruption.abort("SIGTERM");
   try {
     result = await executeRun(runDir, process.env, {
-      signal: interruption.signal,
+      cancellationController: interruption,
+      cancellationKey,
       commandPhase: () => {
         process.once("SIGINT", onInterrupt);
         process.once("SIGTERM", onTerminate);
@@ -2420,12 +2523,13 @@ async function finish(runDir, { workerHandshake = false } = {}) {
     } catch {
       // Unreadable results are exactly what the UNKNOWN notice reports.
     }
-    process.stderr.write(!admitted
+    const reportRunnerFailure = admitted || error instanceof OwnerCleanupPending;
+    process.stderr.write(!reportRunnerFailure
       ? `FAIL launcher: failed before admission: ${error.message}\n`
       : saved
         ? `FAIL launcher: runner error after its terminal result was saved: ${error.message}\n`
         : `FAIL launcher: no terminal result was saved: ${error.message}\n`);
-    if (admitted) {
+    if (reportRunnerFailure) {
       try {
         if (!saved) {
           const outcome = await notifyRunnerFailure(runDir, error);
@@ -2477,7 +2581,7 @@ function closedBeforeReadyError(log, code, signal) {
   );
 }
 
-export async function startDetachedRun(runDir, env = process.env) {
+export async function startDetachedRun(runDir, env = process.env, cancellationKey = randomBytes(32).toString("hex")) {
   const log = join(runDir, "launcher.log");
   const fd = openSync(log, "wx");
   try {
@@ -2485,13 +2589,14 @@ export async function startDetachedRun(runDir, env = process.env) {
       detached: true,
       windowsHide: true,
       stdio: ["ignore", fd, fd, "ipc"],
-      env,
+      env: scrubCancellationEnvironment({ ...env }),
     });
     const completion = new Promise((resolveCompletion) => {
       child.once("exit", (code, signal) => resolveCompletion({ code, signal }));
     });
     await new Promise((resolveReady, rejectReady) => {
       let settled = false;
+      let keySent = false;
       const cleanup = () => {
         child.off("message", onMessage);
         child.off("error", onError);
@@ -2504,7 +2609,15 @@ export async function startDetachedRun(runDir, env = process.env) {
         action(value);
       };
       const onMessage = (message) => {
-        if (message?.type === "READY" && message.runDir === resolve(runDir)) {
+        if (message?.type === "CANCELLATION_KEY_REQUEST" && !keySent) {
+          keySent = true;
+          child.send({ type: "CANCELLATION_KEY", key: cancellationKey }, (error) => {
+            if (error) {
+              settle(rejectReady, error);
+              if (child.connected) child.disconnect();
+            }
+          });
+        } else if (keySent && message?.type === "READY" && message.runDir === resolve(runDir)) {
           settle(resolveReady);
         }
       };
@@ -2522,6 +2635,27 @@ export async function startDetachedRun(runDir, env = process.env) {
   } finally {
     closeSync(fd);
   }
+}
+
+function readDetachedCancellationKey() {
+  // A direct internal worker invocation has no caller to receive a key.
+  // Keep its admission diagnostics without enabling external cancellation.
+  if (!process.connected) return randomBytes(32).toString("hex");
+  return new Promise((resolveKey, reject) => {
+    const disconnected = () => reject(new Error("detached launcher lost its parent before receiving its key"));
+    process.once("disconnect", disconnected);
+    process.once("message", (message) => {
+      process.off("disconnect", disconnected);
+      if (message?.type !== "CANCELLATION_KEY" || !/^[a-f0-9]{64}$/u.test(message.key ?? "")) {
+        reject(new Error("detached launcher received an invalid cancellation key"));
+        return;
+      }
+      resolveKey(message.key);
+    });
+    process.send({ type: "CANCELLATION_KEY_REQUEST" }, (error) => {
+      if (error) reject(error);
+    });
+  });
 }
 
 function parseCommon(args) {
@@ -2559,6 +2693,23 @@ async function main(args) {
     process.stdout.write(`${JSON.stringify(fullGatePlan(readJson(resolve(args[0]))), null, 2)}\n`);
     return;
   }
+  if (mode === "cancel") {
+    const cancellationKey = process.env[cancelKeyEnvironment];
+    scrubCancellationEnvironment(process.env);
+    const stalledOnly = args[0] === "--stalled";
+    if (stalledOnly) args.shift();
+    if (args.length !== 1) throw new Error("cancel requires [--stalled] RUN_DIRECTORY");
+    const runDir = realpathSync.native(resolve(args[0]));
+    const request = readJson(join(runDir, "request.json"));
+    validateRequestRecord(runDir, request);
+    if (realpathSync.native(gitRunDirectory(request.root, isolatedGitEnvironment(process.env))) !== dirname(runDir)) {
+      throw new Error("run directory does not belong to the recorded checkout");
+    }
+    requestRunCancellation(runDir, request, readJson(join(runDir, "results.json")),
+      cancellationKey, stalledOnly);
+    console.log(`Cancellation requested; the owner will record the outcome. ${runDir}`);
+    return;
+  }
   if (["summary", "notify", "recover", "_run"].includes(mode)) {
     if (args.length !== 1) throw new Error(`${mode} requires one run directory`);
     const runDir = resolve(args[0]);
@@ -2577,11 +2728,13 @@ async function main(args) {
       console.log(`${settled ? "Settled as interrupted" : "Already terminal"}; notification ${notification}; tests not rerun.`);
       return;
     }
-    await finish(runDir, { workerHandshake: true });
+    scrubCancellationEnvironment(process.env);
+    const cancellationKey = await readDetachedCancellationKey();
+    await finish(runDir, { workerHandshake: true, cancellationKey });
     return;
   }
   if (!["full", "focused", "live", "category"].includes(mode)) {
-    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit|plain] [--request-message-id MESSAGE_ID (full/focused only)] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | plan INPUT_JSON");
+    throw new Error("usage: test-launcher.mjs full|focused|live [--notify SESSION] [--detach] [--input commit|plain] [--request-message-id MESSAGE_ID (full/focused only)] [--require-binary-env NAME] [--engram-binary ABSOLUTE --engram-sha256 SHA256] [-- COMMAND ARGS... | -- LIVE_TEST_PATH...] | category NAME [--notify SESSION] [--detach] [--input commit|plain] | summary|notify|recover RUN_DIR | cancel [--stalled] RUN_DIR | plan INPUT_JSON");
   }
   // A category is resolved, or refused, before any run directory exists.
   let category;
@@ -2620,6 +2773,7 @@ async function main(args) {
       : mode === "category"
         ? [categoryStage(category)]
         : [{ name: "focused", command: options.rest[0], args: options.rest.slice(1) }];
+  scrubCancellationEnvironment(process.env);
   const runDir = await createRun({
     stages,
     notifyTo: options.notifyTo,
@@ -2648,15 +2802,17 @@ async function main(args) {
     automaticInput: ORDINARY_COMMIT_INPUT_DEFAULT && options.input === undefined,
     onRunCreated: (directory) => console.log(`RUN ${directory}`),
   });
+  const cancellationKey = randomBytes(32).toString("hex");
+  console.log(`CANCEL_KEY ${cancellationKey}`);
   if (!options.detach) {
     // The run directory is known before any stage executes, so an interrupted
     // host wait can still inspect or settle this run without rerunning it.
-    await finish(runDir);
+    await finish(runDir, { cancellationKey });
     return;
   }
   // No inherited terminal handles: process lifetime is independent of the turn.
   // STARTED is printed only after the child owns admission and validates state.
-  const detached = await startDetachedRun(runDir);
+  const detached = await startDetachedRun(runDir, process.env, cancellationKey);
   console.log(`STARTED ${runDir}\npid=${detached.pid} completion=mailbox:${options.notifyTo.trim()} basis=source_id input=${join(runDir, "input.json")}\nEnd your turn; do not poll. Missing terminal results mean running/interrupted, not PASS.`);
 }
 

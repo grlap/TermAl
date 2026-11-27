@@ -208,10 +208,10 @@ that compiler, under that same environment. Version lines are read by shape
 (`cargo 1.x …`, `rustc 1.x …`, `NAME (REASON)`), so rustup's own messages in
 the same log are never taken for them. rustup is asked only when it sits beside the chosen Cargo
 (a rustup proxy); a Cargo named directly records `rustup_not_beside_cargo`.
-The rustc and rustup probes are provenance only and are recorded under
-`toolchainProbes`, not `preflight`, so no failure reader takes them for the
-run's failure: a missing or failing one leaves its part unknown
-(`rustc_unavailable`, `rustup_failed`, ...) and never fails a gate. A worker
+The rustc and rustup probes are recorded under `toolchainProbes`. A missing
+probe or a failed probe with confirmed cleanup leaves its part of provenance
+unknown (`rustc_unavailable`, `rustup_failed`, ...). Interruption or
+unconfirmed owner cleanup stops the gate before it reports readiness. A worker
 that fails at startup keeps the measured `source`; when it cannot be read
 back, the record says `source_unrecoverable`.
 
@@ -791,12 +791,16 @@ delivered completion.
 [Host architecture](features/host-architecture.md#84-launcher-recovery-is-a-declaration-about-a-run)
 describes how a recovered run is recorded in the proposed execution record.
 
-For a focused stage, recovery also refuses while its recorded process owner
-may be alive and cleaning up. Once the owner has exited, recovery imports its
-nonce-matched cleanup ledger when available; a missing ledger remains
+For any owned command, recovery refuses while its recorded process owner may
+be alive and cleaning up. On Windows this includes both the Node guardian and
+the PowerShell job owner. Once the recorded owners have exited, recovery
+imports the nonce-matched cleanup ledger when available. A missing ledger remains
 `unresolved`. Recovery never converts an interrupted test into a pass or
-reruns it. Older runs and non-focused stages can still have a child that
+reruns it. Older runs with unowned commands can still have a child that
 outlived their launcher; their raw logs need not be final after recovery.
+If the Windows guardian exits after admission and the native cleanup ledger
+is unavailable, the launcher leaves the run recoverable. Run `recover` once
+the recorded native owner has exited.
 If the recorded pid has been reused by an unrelated process, `recover` keeps
 refusing and the run stays `UNKNOWN`, which is never a pass: start a new run
 instead of editing its evidence. If a killed `recover` left `recovery.lock`
@@ -805,15 +809,16 @@ behind, remove that file by hand once no other `recover` is running.
 When a command is launched through TermAl's native Windows terminal or bounded
 reader with confirmed job membership, the host owns a kill-on-close job and
 ends its members after observing root exit. An `unavailable` launch can run
-without that job. This host containment is separate from the focused
-launcher's command owner described below. `recover` itself never kills a
+without that job. This host containment is separate from the launcher's
+command owner described below. `recover` itself never kills a
 process or creates ownership retroactively.
 See [Windows command containment](features/windows-command-containment.md) for
 the reported status, packaged-process limits and retained-handle fixture proof.
 
-### Focused command ownership and stall notices
+### Command ownership, stall notices and cancellation
 
-Every focused stage has a separate process owner. On Windows, a detached Node
+Every workload stage, UI setup command, and toolchain or required-binary probe
+has a separate process owner. On Windows, a detached Node
 guardian starts built-in Windows PowerShell without detaching that shell.
 Windows PowerShell cannot initialize reliably under DETACHED_PROCESS; the
 guardian preserves independent lifetime while its ordinary child can run.
@@ -855,7 +860,7 @@ alive. Windows job-close containment also covers guardian death. A POSIX host
 without a working orphan reaper may retain zombies; a still-visible group is
 conservatively reported unresolved, never assumed reaped.
 
-Ctrl-C/SIGINT or SIGTERM requests focused shutdown. A forced launcher exit
+Ctrl-C/SIGINT or SIGTERM requests shutdown during an owned command. A forced launcher exit
 (including a runner deadline that terminates it) closes the owner's private
 control channel, so its owner also shuts down the tree. Teardown is idempotent
 and observes termination for at most five seconds. Windows confirms
@@ -880,7 +885,7 @@ On Windows, buffered bootstrap cancellation is checked directly on the private
 pipe before creation and again before resuming a created command; it does not
 depend on scheduling a background reader task.
 
-While a focused command runs, stdout and stderr still go directly to its log.
+While an owned command runs, stdout and stderr still go directly to its log.
 The launcher checks the log's byte count once per second. Five minutes without
 new bytes produces a `STALLED` notice naming the run, stage, command PID,
 inactivity duration and log path, and saves the observation on that stage of
@@ -889,16 +894,47 @@ It applies to a quiet build as well as a quiet test. New output records
 `resumed` and starts a new inactivity interval; one notice is emitted per
 quiet episode. Tests control the clock rather than waiting five minutes.
 
-Use `--notify COORDINATOR_SESSION_ID` on a focused invocation to send each
+Use `--notify COORDINATOR_SESSION_ID` on an invocation to send each
 stall notice to that coordinator too. Without a notification target, the
 durable observation and foreground holder notice remain available. A notice
 uses a separate idempotency key and a bounded notification attempt; it never
-consumes the eventual completion key. A stalled command stays running until
-it exits or its owner explicitly interrupts it. No stall notice kills, retries
-or reruns a stage, changes a test timeout, supplies test counts, or declares a
-terminal result. Inspect the original run with `summary`; interrupt its owning
-execution if needed, then use `recover` only after the launcher and command
-owner have exited.
+consumes the eventual completion key. A stall is advisory. It never sets a
+failure deadline, reruns a stage, or declares a result.
+
+The launcher prints a per-run `CANCEL_KEY` in the launching session's output.
+The owner can use it or share it privately with the coordinator. Set
+`TERMAL_LAUNCHER_CANCEL_KEY` in the cancelling command's environment to that
+value and run one of the following on the same host:
+
+```sh
+node scripts/test-launcher.mjs cancel RUN_DIRECTORY
+node scripts/test-launcher.mjs cancel --stalled RUN_DIRECTORY
+```
+
+Treat the key as authority to cancel that run. Keep it out of the run directory,
+shared logs, and command arguments. A command's children receive no key, and
+the run directory holds only the key digest and the signed cancellation request.
+
+The second form requires a recorded five-minute inactivity episode. Before
+acting, the owning launcher checks the episode and that its log has gained no
+bytes. A resumed command or a different stage invalidates that request. The
+first form is an explicit operator stop independent of output activity.
+Both forms ask the existing launcher to close its owned command tree without
+PID lookup. Registration and source observation have their own bounded
+timeouts. A request posted during the pre-execution source observation is
+recorded after that observation returns or reaches its timeout, before any
+workload or detached readiness receipt. The stalled form applies to the owned
+commands with log progress observations. If its target command already settled
+without interruption, the launcher keeps that outcome and continues any
+remaining stages.
+
+A successful request only means it was posted. Inspect `summary`
+or wait for the registered terminal result. A late stop preserves an already
+settled command outcome that decides the run. Confirmed teardown is recorded as
+`CANCELLED` with nonzero exit and no test credit. If teardown is unresolved,
+the artifact records an interrupted failure with unresolved cleanup. Use
+`recover` only after the launcher and command owner have exited. Runs started
+before this control was available cannot be cancelled through it.
 The 15-second notification budget includes its process-owner bootstrap; a
 failed attempt is recorded and reported without an automatic retry. Failure to
 save a progress observation is reported to the holder without crashing the

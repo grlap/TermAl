@@ -30,7 +30,7 @@ export function watchCommandProgress({ log, pid, runId, stage, observe }, {
       if (pendingResume && report(pendingResume)) { pendingResume = undefined; stalled = false; }
       if (!stalled && current - lastProgress >= stallAfterMs) {
         const nextEpisode = episode + 1;
-        if (report({ state: "stalled", runId, stage, pid, log, inactiveMs: current - lastProgress, episode: nextEpisode })) {
+        if (report({ state: "stalled", runId, stage, pid, log, logBytes: size, inactiveMs: current - lastProgress, episode: nextEpisode })) {
           stalled = true; episode = nextEpisode;
         }
       }

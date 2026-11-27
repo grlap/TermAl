@@ -7,6 +7,7 @@ import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
+import { OwnerCleanupPending } from "./test-process-owner.mjs";
 
 export const uiDependencyFiles = Object.freeze([
   "node_modules/typescript/bin/tsc",
@@ -142,6 +143,7 @@ export async function bootstrapUiDependencies(root, {
     observe(entry);
     return entry;
   } catch (cause) {
+    if (cause instanceof OwnerCleanupPending) throw cause;
     entry.state = "failed";
     entry.error = cause.message;
     entry.ended = new Date().toISOString();

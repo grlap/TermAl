@@ -24,16 +24,19 @@ export function startPosixOwner(request, {
   },
 } = {}) {
   const fd = openLog();
-  let child, reason, ending;
+  let child, ending;
   let rootOutcome = { code: 1, signal: null };
   const send = (message) => new Promise((done) => {
     if (!parent.connected) { done(new Error("launcher-exit")); return; }
     try { parent.send(message, (error) => done(error)); }
     catch (error) { done(error); }
   });
-  const interrupt = (trigger) => { reason ??= trigger; return finish(reason); };
-  async function finish(trigger) {
+  const interrupt = (trigger) => finish(trigger, true);
+  async function finish(trigger, interrupted = false) {
     if (ending) return ending;
+    // The first observation decides the outcome. An interruption can still
+    // learn the native exit signal while reaping the child it stopped.
+    const observedOutcome = interrupted ? undefined : rootOutcome;
     ending = (async () => {
       let cleanup = "reaped", error;
       try {
@@ -67,13 +70,13 @@ export function startPosixOwner(request, {
         }
       } catch (failure) { cleanup = "unresolved"; error = failure.message; }
       const result = {
-        ...rootOutcome, nonce: request.nonce, pid: child?.pid ?? null,
-        interrupted: Boolean(reason),
+        ...(observedOutcome ?? rootOutcome), nonce: request.nonce, pid: child?.pid ?? null,
+        interrupted,
         cleanup: { state: cleanup, trigger, pids: child?.pid ? [child.pid] : [],
           pidScope: "command root only", ownership: "posix-process-group" },
         ...(error ? { error } : {}),
       };
-      if (reason || error) result.code = 1;
+      if (interrupted || error) result.code = 1;
       try {
         persist(result);
         await send({ type: "finished", nonce: request.nonce, result });
@@ -102,8 +105,8 @@ export function startPosixOwner(request, {
     void send({ type: "started", nonce: request.nonce, pid: child.pid, ownerPid: parent.pid })
       .then((error) => { if (error) return interrupt("launcher-exit"); });
   });
-  child.once("error", (error) => { rootOutcome.error = error.message; void finish("spawn-failure"); });
-  child.once("exit", (code, signal) => { rootOutcome = { code, signal }; void finish(reason ?? "command-exit"); });
+  child.once("error", (error) => { rootOutcome = { ...rootOutcome, error: error.message }; void finish("spawn-failure"); });
+  child.once("exit", (code, signal) => { rootOutcome = { code, signal }; void finish("command-exit"); });
   return { finish };
 }
 

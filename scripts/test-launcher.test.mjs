@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import childProcess, { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { runOwnedCommand } from "./test-process-owner.mjs";
 import fs, {
   chmodSync,
   closeSync,
@@ -55,7 +56,8 @@ import {
   startDetachedRun,
   summarize,
 } from "./test-launcher.mjs";
-import { sourceIdsEqual, RUN_RECORD_JSON_BYTES } from "./test-launcher-input.mjs";
+import { captureCommitInputStatus, sourceIdsEqual, RUN_RECORD_JSON_BYTES } from "./test-launcher-input.mjs";
+import { requestRunCancellation } from "./test-run-cancellation.mjs";
 import { isolatedGitEnvironment } from "./git-environment.mjs";
 import { cargoConfigTexts, focusedCountSummaryLines, focusedTestCounts, focusedTestThreads } from "./test-counts.mjs";
 import { removeFixture, removeFixtureOnPass } from "./test-fixture-cleanup.mjs";
@@ -97,7 +99,7 @@ const copiedLauncherFiles = Object.freeze([
   "git-environment.mjs",
   "test-temp-root.mjs", "test-durations.mjs", "node-test-duration-reporter.mjs",
   "test-categories-plan.mjs", "test-counts.mjs", "test-process-owner.mjs",
-  "test-command-progress.mjs", "test-process-owner-posix.mjs",
+  "test-command-progress.mjs", "test-run-cancellation.mjs", "test-process-owner-posix.mjs",
   "test-process-owner-windows.mjs",
   "test-process-owner-windows.ps1", "test-process-owner-windows.cs",
 ]);
@@ -1055,6 +1057,38 @@ for (const [label, statfs] of [
   });
 }
 
+for (const [full, observationFails] of [[true, false], [true, true], [false, false], [false, true]]) test(
+  `cancellation posted at the end of a ${observationFails ? "failed" : "successful"} source observation prevents readiness (${full ? "full" : "focused"})`,
+  async (t) => {
+    await isolatedDetachedRepository(t, async (root, env) => {
+      const runDir = await createRun({ root, full, detached: true,
+        stages: [stage("must-not-run")], notifyTo: "fixture-coordinator",
+      }, env);
+      const key = "d".repeat(64);
+      let ready = false;
+      let posted = false;
+      t.mock.timers.enable({ apis: ["setInterval"] });
+      const result = await executeRun(runDir, env, {
+        cancellationController: new AbortController(), cancellationKey: key,
+        diskSpace: { statfs: () => capacity(200n * GiB) },
+        onReady: () => { ready = true; },
+        observeSource: async (...args) => {
+          const observed = observationFails ? undefined : await captureCommitInputStatus(...args);
+          requestRunCancellation(runDir, json(join(runDir, "request.json")),
+            json(join(runDir, "results.json")), key, false);
+          posted = true;
+          if (observationFails) throw new Error("fixture source observation timeout");
+          return observed;
+        },
+      });
+      assert.equal(posted, true, result.error);
+      assert.equal(ready, false);
+      assert.equal(result.cancelled, true);
+      assert.equal(result.stages[0].state, "unrun");
+    });
+  },
+);
+
 test("detached setup failure closes before readiness and sends one named terminal failure", async (t) => {
   await isolatedDetachedRepository(t, async (root, sourceEnv, notificationMarker) => {
     const env = { ...sourceEnv, FIXTURE_UI_MODE: "fail" };
@@ -1075,6 +1109,57 @@ test("detached setup failure closes before readiness and sends one named termina
     assert.match(notifications[0].body, /UI dependency setup failed \(npm-ci\)/u);
     assert.match(readFileSync(join(runDir, "launcher.log"), "utf8"), /UI dependency setup failed/u);
     assert.equal(existsSync(marker), false);
+  });
+});
+
+for (const probeOutcome of ["interrupted", "unresolved", "reaped launch error"]) test(
+  `an owned compiler probe with ${probeOutcome} ${probeOutcome === "reaped launch error" ? "stays advisory" : "prevents full-run readiness"}`,
+  async (t) => {
+  await isolatedDetachedRepository(t, async (root, sourceEnv) => {
+    const env = { ...sourceEnv, TERMAL_TEST_CARGO: process.execPath, RUSTC: process.execPath,
+      TERMAL_TEST_CARGO_CONFIG_CEILING: root };
+    for (const name of ["CARGO_BUILD_RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+      "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"]) delete env[name];
+    const runDir = await createRun({ root, full: true, detached: true, needsCargo: true,
+      stages: [stage("unused")], notifyTo: "fixture-coordinator",
+    }, env);
+    const controller = new AbortController();
+    const reaped = probeOutcome === "reaped launch error";
+    const interrupted = probeOutcome === "interrupted";
+    let probeStarted = false;
+    let ready = false;
+    const result = await executeRun(runDir, env, {
+      cancellationController: controller, cancellationKey: "c".repeat(64),
+      diskSpace: { statfs: () => capacity(200n * GiB) },
+      onReady: () => { ready = true; },
+      ownedCommand: (command, args, settings) => {
+        if (!settings.log.endsWith("preflight-rustc.log")) return runOwnedCommand(command, args, settings);
+        if (interrupted) {
+          return runOwnedCommand(command, ["-e", "setInterval(() => {}, 1000)"], settings);
+        }
+        probeStarted = true;
+        writeFileSync(settings.log, reaped ? "fixture executable refused to start" : "fixture probe cleanup was unconfirmed");
+        settings.onOwner({ pid: 4242, nonce: "fixture-probe", ledger: `${settings.log}.owner-result.json` });
+        return { code: 1, signal: null, ...(reaped ? { error: "fixture executable refused to start" } : {}),
+          cleanup: { state: reaped ? "reaped" : "unresolved", trigger: "fixture", pids: [] } };
+      },
+      progress: { onWatching(_pid, name) {
+        if (name === "rustc") {
+          probeStarted = true;
+          controller.abort("fixture interrupted active compiler probe");
+        }
+      } },
+    });
+    assert.equal(probeStarted, true, result.error);
+    assert.equal(ready, reaped);
+    assert.equal(Boolean(result.interrupted), interrupted);
+    assert.equal(result.toolchainProbes[0].state, "failed");
+    assert.equal(result.stages[0].state, reaped ? "passed" : "unrun");
+    assert.equal(result.state, reaped ? "passed" : "failed");
+    if (probeOutcome === "unresolved") {
+      assert.match(result.error, /preflight cleanup could not be confirmed/u);
+      assert.match(await summarize(runDir), /toolchain probe rustc: [^\n]+\ncleanup=unresolved/u);
+    }
   });
 });
 
@@ -2963,6 +3048,11 @@ test("recover settles a dead worker's run as interrupted, and only the owner not
     running.pid = 4242;
     Object.assign(running.stages[0], { state: "passed", code: 0 });
     running.stages[1].state = "running";
+    const ledger = join(runDir, "preflight-rustup.log.owner-result.json");
+    const cleanup = { state: "reaped", trigger: "launcher-exit", pids: [] };
+    const nonce = "fixture-rustup-owner";
+    running.toolchainProbes = [{ name: "rustup", state: "running",
+      processOwner: { pid: 4243, bootstrapPid: 4244, ledger, nonce } }];
     writeFileSync(resultPath, `${JSON.stringify(running, null, 2)}\n`);
     const calls = [];
     const send = async (command, args) => {
@@ -2970,6 +3060,17 @@ test("recover settles a dead worker's run as interrupted, and only the owner not
       return { code: 0, signal: null };
     };
     const gone = () => false;
+    const runningBytes = readFileSync(resultPath, "utf8");
+    for (const activeOwner of [4243, 4244]) {
+      await assert.rejects(
+        recoverRun(runDir, registrationFixtureEnv, { send, isAlive: (pid) => pid === activeOwner }),
+        new RegExp(`process owner pid ${activeOwner} may still be cleaning up`, "u"),
+      );
+      assert.equal(readFileSync(resultPath, "utf8"), runningBytes);
+      assert.equal(existsSync(join(runDir, "recovery.lock")), false);
+      assert.equal(calls.length, 0);
+    }
+    writeFileSync(ledger, JSON.stringify({ nonce, cleanup }));
 
     // The waiting coordinator may settle the run but cannot speak for its owner.
     const coordinator = { ...registrationFixtureEnv, TERMAL_SESSION_ID: "fixture-parent" };
@@ -2984,6 +3085,9 @@ test("recover settles a dead worker's run as interrupted, and only the owner not
     assert.match(settled.error, /worker 4242 exited without saving a terminal result/u);
     assert.deepEqual(settled.stages.map(({ state }) => state), ["passed", "failed", "unrun"]);
     assert.match(settled.stages[1].error, /outcome is unknown/u);
+    assert.equal(settled.toolchainProbes[0].state, "failed");
+    assert.equal(settled.toolchainProbes[0].interrupted, true);
+    assert.deepEqual(settled.toolchainProbes[0].cleanup, cleanup);
     assert.equal(settled.failureInvestigation.status, "required");
     assert.match(await summarize(runDir), /^FAIL /u);
     assert.equal(calls.length, 0);

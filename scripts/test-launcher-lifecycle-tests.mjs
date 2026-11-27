@@ -1,16 +1,18 @@
 // Real process witnesses for launcher ownership; no product tests are run here.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync, unlinkSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmdirSync, symlinkSync, writeFileSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createRun, executeRun, notifyStall, recoverRun, summarize, saveProgressObservation } from "./test-launcher.mjs";
+import { createRun, executeRun, notifyStall, recoverRun, requiredStages, startDetachedRun, summarize, saveProgressObservation } from "./test-launcher.mjs";
 import { runOwnedCommand } from "./test-process-owner.mjs";
 import { startPosixOwner } from "./test-process-owner-posix.mjs";
 import { watchCommandProgress } from "./test-command-progress.mjs";
+import { cancelKeyEnvironment, requestRunCancellation } from "./test-run-cancellation.mjs";
 
 const gone = (pid) => {
   try { process.kill(pid, 0); return false; }
@@ -122,6 +124,26 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
     return repository(t, callback, undefined, fixtureDirectory);
   };
   if (process.platform === "win32") {
+    test("focused lifecycle: owned Git Bash captures stdout and stderr", { timeout: 15_000 }, async (t) => {
+      await lifecycleRepository(t, async (root, env) => {
+        const { command } = requiredStages(process.platform, env).find((entry) => entry.name === "rust-tests");
+        const log = join(root, ".git", "owned-bash.log");
+        writeFileSync(join(root, ".git", "owned-stdio.sh"), [
+          "#!/usr/bin/env sh",
+          "printf 'stdout\\n'",
+          "printf 'stderr\\n' >&2",
+          "exec /usr/bin/printf 'child stdout\\n'",
+          "",
+        ].join("\n"), { mode: 0o755 });
+        const outcome = await runOwnedCommand(command, ["-c", "exec .git/owned-stdio.sh"], {
+          cwd: root, env, log, signal: t.signal,
+        });
+        assert.equal(outcome.code, 0, outcome.error);
+        assert.equal(outcome.cleanup.state, "reaped");
+        assert.equal(readFileSync(log, "utf8").replaceAll("\r\n", "\n"), "stdout\nstderr\nchild stdout\n");
+      });
+    });
+
     for (const redirected of [".tmp", "ow"]) {
       test(`focused lifecycle: redirected ${redirected} compiler scratch refuses without touching target`, async (t) => {
         await lifecycleRepository(t, async (root, env) => {
@@ -193,6 +215,108 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
     });
   });
 
+  test("focused lifecycle: Windows records its native owner before command admission", async (t) => {
+    await lifecycleRepository(t, async (root) => {
+      const events = [];
+      const outcome = await runOwnedCommand("fixture", [], {
+        cwd: root, env: { WITNESS: "fixture" }, log: join(root, ".git", "native-identity.log"),
+        onOwner: ({ pid, bootstrapPid }) => events.push(["owner", pid, bootstrapPid]),
+      }, { platform: "win32", spawnOwner: (_program, args) => {
+        const { nonce, ledger } = json(args.at(-1));
+        const owner = new EventEmitter();
+        owner.pid = 2;
+        owner.stdin = new PassThrough();
+        owner.stdout = new PassThrough();
+        owner.stderr = new PassThrough();
+        owner.stdin.on("data", (bytes) => events.push(["environment", JSON.parse(bytes).WITNESS]));
+        const send = (message) => owner.stdout.write(`TERMAL_OWNER ${JSON.stringify({ nonce, ...message })}\n`);
+        queueMicrotask(() => {
+          send({ type: "bootstrap", pid: 3 });
+          const result = { nonce, code: 0, interrupted: false,
+            cleanup: { state: "reaped", trigger: "command-exit", pids: [] } };
+          writeFileSync(ledger, JSON.stringify(result));
+          send({ type: "finished", result });
+          owner.emit("close", 0, null);
+        });
+        return owner;
+      } });
+      assert.deepEqual(events, [["owner", 2, undefined], ["owner", 2, 3], ["environment", "fixture"]]);
+      assert.equal(outcome.code, 0, outcome.error);
+      assert.equal(outcome.bootstrapPid, 3);
+    });
+  });
+
+  for (const phase of ["before admission", "before ledger", "after ledger"]) {
+    test(`focused lifecycle: Windows guardian loss ${phase}`, async (t) => {
+      await lifecycleRepository(t, async (root, env) => {
+        const runDir = await createRun({ root, stages: [stage("focused")] }, env);
+        const resultPath = join(runDir, "results.json");
+        const cleanup = { state: "reaped", trigger: phase === "after ledger" ? "command-exit" : "launcher-exit",
+          pids: [], ownership: "windows-job" };
+        const controller = new AbortController();
+        let nativeEnvironmentReceived = false;
+        let ownerRequest;
+        const run = executeRun(runDir, env, {
+          cancellationController: controller, cancellationKey: randomBytes(32).toString("hex"),
+          ownedCommand: (command, args, options) => runOwnedCommand(command, args, options, {
+            platform: "win32",
+            spawnOwner: (_program, ownerArgs) => {
+              ownerRequest = json(ownerArgs.at(-1));
+              const owner = new EventEmitter();
+              owner.pid = 4243;
+              owner.stdin = new PassThrough();
+              owner.stdout = new PassThrough();
+              owner.stderr = new PassThrough();
+              owner.stdin.on("data", () => { nativeEnvironmentReceived = true; });
+              queueMicrotask(() => {
+                const { nonce, ledger } = ownerRequest;
+                if (phase !== "before admission") {
+                  owner.stdout.write(`TERMAL_OWNER ${JSON.stringify({ type: "bootstrap", nonce, pid: 4244 })}\n`);
+                }
+                if (phase === "after ledger") {
+                  writeFileSync(ledger, JSON.stringify({ nonce, code: 7, interrupted: false, cleanup }));
+                  controller.abort("crossed stop after ledger");
+                }
+                owner.emit("close", 1, null);
+              });
+              return owner;
+            },
+          }),
+        });
+        if (phase !== "before ledger") {
+          const result = await run;
+          assert.equal(result.state, "failed");
+          assert.equal(result.exitCode, phase === "after ledger" ? 7 : 1);
+          assert.match(result.stages[0].error, /process owner failed/u);
+          assert.ok(result.ended);
+          assert.equal(nativeEnvironmentReceived, phase === "after ledger");
+          assert.equal(existsSync(ownerRequest.ledger), phase === "after ledger");
+          if (phase === "after ledger") {
+            assert.equal(result.interrupted, undefined);
+            assert.deepEqual(result.stages[0].cleanup, cleanup);
+          }
+          return;
+        }
+        await assert.rejects(run, /native process owner pid 4244 has no confirmed cleanup ledger/u);
+        assert.equal(nativeEnvironmentReceived, true);
+        const bytes = readFileSync(resultPath, "utf8");
+        const running = JSON.parse(bytes);
+        assert.equal(running.ended, undefined);
+        assert.equal(running.stages[0].state, "running");
+        assert.equal(running.stages[0].processOwner.bootstrapPid, 4244);
+        await assert.rejects(recoverRun(runDir, env, { isAlive: (pid) => pid === 4244 }),
+          /process owner pid 4244 may still be cleaning up/u);
+        assert.equal(readFileSync(resultPath, "utf8"), bytes);
+        writeFileSync(ownerRequest.ledger, JSON.stringify({ nonce: ownerRequest.nonce, cleanup }));
+        assert.equal((await recoverRun(runDir, env, { isAlive: () => false })).settled, true);
+        const recovered = json(resultPath);
+        assert.equal(recovered.state, "failed");
+        assert.equal(recovered.stages[0].interrupted, true);
+        assert.deepEqual(recovered.stages[0].cleanup, cleanup);
+      });
+    });
+  }
+
   test("focused lifecycle: an early POSIX interrupt is repeated after the owner attaches its listener", async (t) => {
     await lifecycleRepository(t, async (root, env) => {
       const controller = new AbortController();
@@ -259,6 +383,49 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
       assert.equal(order[1], "closed");
       assert.equal(alive, exhausted);
       if (exhausted) assert.equal(clock, 5000);
+    });
+  }
+
+  for (const code of [0, 7]) {
+    test(`focused lifecycle: POSIX late stop during cleanup preserves observed exit ${code}`, async () => {
+      const parent = new EventEmitter();
+      parent.connected = true;
+      parent.env = {};
+      parent.disconnect = () => {
+        parent.connected = false;
+        parent.emit("disconnect");
+      };
+      const child = new EventEmitter();
+      child.pid = 2;
+      child.unref = () => {};
+      const draining = Promise.withResolvers();
+      const signaled = [];
+      const ledgers = [];
+      const sent = [];
+      let groupAlive = true;
+      parent.send = (message, callback) => {
+        if (message.type === "finished") sent.push(message.result);
+        callback();
+      };
+      const owner = startPosixOwner({ command: "fixture", args: [], cleanupBudgetMs: 5000, nonce: "fixture" }, {
+        parent, spawnCommand: () => child, openLog: () => 7, closeLog: () => {},
+        killGroup: (pid) => signaled.push(pid), groupAlive: () => groupAlive,
+        now: () => 0, sleep: () => draining.promise, persist: (result) => ledgers.push(result),
+      });
+      child.emit("exit", code, null);
+      assert.deepEqual(signaled, [2]);
+      assert.equal(ledgers.length, 0, "cleanup must still be pending when the stop is delivered");
+      parent.emit("message", { type: "interrupt", reason: "operator stopped during cleanup" });
+      groupAlive = false;
+      draining.resolve();
+      const result = await owner.finish("fixture joined cleanup");
+      assert.equal(result.code, code);
+      assert.equal(result.interrupted, false);
+      assert.equal(result.cleanup.trigger, "command-exit");
+      assert.equal(result.cleanup.state, "reaped");
+      assert.deepEqual(signaled, [2]);
+      assert.deepEqual(ledgers, [result]);
+      assert.deepEqual(sent, [result]);
     });
   }
 
@@ -344,7 +511,7 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
       } finally { stop(); t.mock.timers.reset(); }
     });
   });
-  test("focused lifecycle: interruption reaps a real grandchild even when the command exits concurrently", async (t) => {
+  test("focused lifecycle: a concurrent stop and command exit preserve the first outcome and reap the grandchild", async (t) => {
     await lifecycleRepository(t, async (root, sourceEnv) => {
       const env = { ...sourceEnv };
       delete env.NODE_TEST_CONTEXT;
@@ -359,19 +526,42 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
         t.diagnostic(`owned command=${pids.command}, grandchild=${pids.grandchild}; unrelated sibling=${pids.sibling}`);
         controller.abort("fixture interrupt");
         controller.abort("crossed second interrupt");
-        // Expose the race where the command closes during teardown. The
-        // grandchild has a separate barrier and cannot exit through this one.
+        // The owner can observe either event first. This only releases the
+        // command; the grandchild must still be reaped by the owner.
         tree.release("command");
         const result = await running;
         assert.equal(gone(pids.grandchild), true,
           `launcher returned with its real grandchild ${pids.grandchild} still alive`);
         assert.equal(gone(pids.sibling), false, "an unrelated process must survive");
-        assert.equal(result.state, "failed", "interrupt is never a passing run");
-        assert.equal(result.stages[0].interrupted, true);
-        assert.equal(result.stages[0].cleanup.state, "reaped");
-        assert.equal(result.stages[0].pid, pids.command);
-        assert.match(result.stages[0].cleanup.trigger, /interrupt/u);
-        assert.equal(json(join(runDir, "results.json")).state, "failed");
+        const [stage] = result.stages;
+        const owner = json(stage.processOwner.ledger);
+        assert.equal(owner.nonce, stage.processOwner.nonce);
+        assert.equal(owner.pid, pids.command);
+        assert.equal(stage.pid, pids.command);
+        assert.equal(owner.cleanup.state, "reaped");
+        assert.equal(stage.cleanup.state, "reaped");
+
+        const exitedFirst = owner.cleanup.trigger === "command-exit";
+        if (!exitedFirst) {
+          assert.match(owner.cleanup.trigger, /^interrupt(?:$|: fixture interrupt$)/u);
+          assert.equal(stage.cleanup.ownerTrigger, owner.cleanup.trigger);
+        }
+        const expectedState = exitedFirst ? "passed" : "failed";
+        const expectedCode = exitedFirst ? 0 : 1;
+        assert.equal(owner.interrupted, !exitedFirst);
+        assert.equal(owner.code, expectedCode);
+        assert.equal(stage.interrupted, !exitedFirst);
+        assert.equal(stage.code, expectedCode);
+        assert.equal(stage.state, expectedState);
+        assert.equal(stage.cleanup.trigger, exitedFirst ? "command-exit" : "interrupt: fixture interrupt");
+        assert.equal(result.state, expectedState);
+        assert.equal(result.exitCode, expectedCode);
+
+        const saved = json(join(runDir, "results.json"));
+        assert.equal(saved.state, expectedState);
+        assert.equal(saved.exitCode, expectedCode);
+        assert.deepEqual(saved.stages[0].cleanup, stage.cleanup);
+        assert.equal(saved.stages[0].interrupted, !exitedFirst);
         assert.match(await summarize(runDir), /cleanup=reaped/u);
       } finally {
         tree.release("command");
@@ -440,6 +630,250 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
         tree.release("command");
         tree.release("grandchild");
         await running;
+        await tree.cleanup();
+      }
+    });
+  });
+
+  const cancellationWitnesses = [
+    ["launcher cancel ends a real stalled child tree and records cancellation", true],
+    ["launcher plain cancel ends a live child tree without waiting for a stall", false],
+  ];
+  const settledWitnesses = [
+    ["launcher late cancellation preserves a settled command failure (ledger only)", false, false],
+    ["launcher late cancellation preserves a settled command failure (finished delivered)", true, false],
+    ["launcher stalled cancellation leaves later stages after its command settled", true, true],
+  ];
+  for (const [title, finishedDelivered, stalled] of settledWitnesses) {
+    test(title, async (t) => {
+      await lifecycleRepository(t, async (root, env) => {
+        const stages = [stage("focused")];
+        if (stalled) stages.push(stage("next"));
+        const runDir = await createRun({ root, stages }, env);
+        const request = json(join(runDir, "request.json"));
+        const controller = new AbortController();
+        const key = randomBytes(32).toString("hex");
+        const published = Promise.withResolvers();
+        let clock = 0;
+        let ownerSignal;
+        t.mock.timers.enable({ apis: ["setInterval"] });
+        const running = executeRun(runDir, env, {
+          cancellationController: controller, cancellationKey: key,
+          progress: { now: () => clock, stallAfterMs: 5000, notify: () => {} },
+          ownedCommand: (command, args, options) => {
+            if (options.log.endsWith("next.log")) return runOwnedCommand(command, args, options);
+            ownerSignal = options.signal;
+            return runOwnedCommand(command, args, options, {
+              platform: "linux",
+              spawnOwner: (_program, ownerArgs) => {
+                const { nonce, ledger } = json(ownerArgs.at(-1));
+                const owner = new EventEmitter();
+                owner.pid = 2;
+                owner.connected = true;
+                owner.stderr = new PassThrough();
+                owner.send = (_message, callback) => callback();
+                const result = { nonce, code: stalled ? 0 : 7, signal: null, interrupted: false,
+                  cleanup: { state: "reaped", trigger: "command-exit", pids: [] } };
+                const finish = () => owner.emit("message", { type: "finished", nonce, result });
+                queueMicrotask(() => {
+                  if (stalled) {
+                    owner.emit("message", { type: "started", nonce, pid: 3 });
+                    clock = 5000;
+                    t.mock.timers.tick(1000);
+                  }
+                  writeFileSync(ledger, JSON.stringify(result));
+                  if (finishedDelivered) finish();
+                  published.resolve(() => {
+                    if (!finishedDelivered) finish();
+                    owner.emit("close", 0, null);
+                  });
+                });
+                return owner;
+              },
+            });
+          },
+        });
+        const close = await Promise.race([published.promise, running.then((result) => {
+          throw new Error("launcher ended before owner settlement: " + result.error);
+        })]);
+        let result;
+        try {
+          requestRunCancellation(runDir, request, json(join(runDir, "results.json")), key, stalled);
+          t.mock.timers.tick(250);
+          assert.equal(ownerSignal.aborted, true, "cancellation must cross the owner close");
+          assert.equal(controller.signal.aborted, !stalled);
+        } finally {
+          close();
+          result = await running;
+          t.mock.timers.reset();
+        }
+        assert.equal(result.exitCode, stalled ? 0 : 7);
+        assert.equal(result.stages[0].code, stalled ? 0 : 7);
+        assert.equal(result.stages[0].interrupted, false);
+        assert.equal(result.stages[0].cleanup.trigger, "command-exit");
+        assert.equal(result.cancelled, undefined);
+        assert.equal(result.interrupted, undefined);
+        const summary = await summarize(runDir);
+        if (stalled) {
+          assert.equal(result.stages[1].state, "passed");
+          assert.match(summary, /^PASS /u);
+          assert.doesNotMatch(summary, /INVESTIGATION REQUIRED/u);
+        } else {
+          assert.match(summary, /^FAIL /u);
+          assert.match(summary, /INVESTIGATION REQUIRED/u);
+        }
+      });
+    });
+  }
+  for (const [title, useStall] of cancellationWitnesses) test(title, async (t) => {
+    await lifecycleRepository(t, async (root, sourceEnv) => {
+      const env = { ...sourceEnv };
+      delete env.NODE_TEST_CONTEXT;
+      const tree = processTree(t, root, env);
+      const runDir = await createRun({ root, stages: [{
+        name: "cancellation-witness", command: process.execPath, args: [tree.command],
+      }] }, env);
+      const launcher = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
+      const key = randomBytes(32).toString("hex");
+      const probe = tree.path("check-cancel-git-env.mjs");
+      const gitSeen = tree.path("cancel-git-seen");
+      writeFileSync(probe, [
+        'import child from "node:child_process";',
+        'import { appendFileSync } from "node:fs";',
+        'import { syncBuiltinESMExports } from "node:module";',
+        'const original = child.spawnSync;',
+        'child.spawnSync = (command, args, options) => {',
+        '  if (command === "git") {',
+        `    if (Object.keys(options.env).some((name) => name.toUpperCase() === ${JSON.stringify(cancelKeyEnvironment)})) throw new Error("Git inherited cancellation authority");`,
+        `    appendFileSync(${JSON.stringify(gitSeen)}, "git\\n");`,
+        '  }',
+        '  return original(command, args, options);',
+        '};',
+        'syncBuiltinESMExports();',
+      ].join("\n"));
+      const request = (providedKey, ...options) => spawnSync(process.execPath,
+        [launcher, "cancel", ...options, runDir], {
+          cwd: root, env: { ...env, [cancelKeyEnvironment]: providedKey,
+            NODE_OPTIONS: `${env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(probe).href}`.trim() },
+          encoding: "utf8",
+        });
+      let clock = 0;
+      const controller = new AbortController();
+      let markWatching;
+      const watching = new Promise((done) => { markWatching = done; });
+      t.mock.timers.enable({ apis: ["setInterval"] });
+      const running = executeRun(runDir, env, {
+        cancellationController: controller,
+        cancellationKey: key,
+        progress: {
+          now: () => clock, stallAfterMs: 5000, pollMs: 1000,
+          onWatching: markWatching, notify: () => {},
+        },
+      });
+      try {
+        const pids = await tree.ready(running);
+        await watching;
+        const publicDigest = json(join(runDir, "results.json")).cancellationKeyDigest;
+        assert.notEqual(publicDigest, key);
+        const outsider = request(publicDigest);
+        assert.equal(outsider.status, 1);
+        assert.match(outsider.stderr, /requires the launch key/u);
+        const controlPath = join(runDir, "cancel-request.json");
+        mkdirSync(controlPath);
+        t.mock.timers.tick(250);
+        assert.equal(controller.signal.aborted, false, "a non-regular control entry is ignored");
+        const obstructed = request(key);
+        assert.equal(obstructed.status, 1);
+        assert.match(obstructed.stderr, /non-regular entry obstructs cancellation/u);
+        rmdirSync(controlPath);
+        writeFileSync(controlPath, "x".repeat(4096));
+        t.mock.timers.tick(250);
+        assert.equal(existsSync(controlPath), false);
+        assert.equal(controller.signal.aborted, false, "an oversized control entry is discarded");
+        writeFileSync(controlPath, JSON.stringify({ mac: publicDigest }));
+        t.mock.timers.tick(250);
+        assert.equal(controller.signal.aborted, false, "an artifact writer cannot authorize cancellation");
+        if (useStall) {
+          const early = request(key, "--stalled");
+          assert.equal(early.status, 1);
+          assert.match(early.stderr, /no current stalled command/u);
+          t.mock.timers.tick(1000);
+          clock = 6000;
+          t.mock.timers.tick(5000);
+          writeFileSync(tree.path("request-progress"), "progress");
+          await waitForFile(tree.path("progress-written"), t.signal);
+          const stale = request(key, "--stalled");
+          assert.equal(stale.status, 0, stale.stderr);
+          t.mock.timers.tick(250);
+          assert.equal(controller.signal.aborted, false, "new output invalidates a posted stall request");
+          clock = 7000;
+          t.mock.timers.tick(1000);
+          assert.equal(json(join(runDir, "results.json")).stages[0].stall.state, "resumed");
+          clock = 12000;
+          t.mock.timers.tick(5000);
+        }
+        const accepted = request(key, ...(useStall ? ["--stalled"] : []));
+        assert.equal(accepted.status, 0, accepted.stderr);
+        assert.match(readFileSync(gitSeen, "utf8"), /git/u);
+        t.mock.timers.tick(250);
+        const result = await running;
+        assert.equal(result.cancelled, true);
+        assert.equal(result.reason, "cancelled");
+        assert.equal(result.stages[0].cleanup.state, "reaped");
+        assert.equal(gone(pids.command), true);
+        assert.equal(gone(pids.grandchild), true);
+        assert.equal(gone(pids.sibling), false);
+        const summary = await summarize(runDir);
+        assert.match(summary, /^CANCELLED /u);
+        assert.doesNotMatch(summary, /INVESTIGATION REQUIRED/u);
+        assert.equal(request(key).status, 1);
+      } finally {
+        t.mock.timers.reset();
+        tree.release("command");
+        tree.release("grandchild");
+        await running;
+        await tree.cleanup();
+      }
+    });
+  });
+
+  test("launcher cancel ends an owned detached child tree", async (t) => {
+    await lifecycleRepository(t, async (root, sourceEnv) => {
+      const env = { ...sourceEnv };
+      delete env.NODE_TEST_CONTEXT;
+      const tree = processTree(t, root, env);
+      const runDir = await createRun({ root, detached: true, stages: [{
+        name: "focused", command: process.execPath, args: [tree.command],
+      }] }, env);
+      const key = randomBytes(32).toString("hex");
+      const launcher = fileURLToPath(new URL("./test-launcher.mjs", import.meta.url));
+      const worker = await startDetachedRun(runDir, env, key);
+      const waitForExit = async () => {
+        let timer;
+        try {
+          return await Promise.race([worker.completion, new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("detached fixture did not exit within 15 seconds")), 15000);
+          })]);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      try {
+        const pids = await tree.ready(worker.completion);
+        const posted = spawnSync(process.execPath, [launcher, "cancel", runDir], {
+          cwd: root, env: { ...env, [cancelKeyEnvironment]: key }, encoding: "utf8",
+        });
+        assert.equal(posted.status, 0, posted.stderr);
+        const exit = await waitForExit();
+        assert.equal(exit.code, 1);
+        assert.equal(json(join(runDir, "results.json")).cancelled, true);
+        assert.equal(gone(pids.command), true);
+        assert.equal(gone(pids.grandchild), true);
+        assert.equal(gone(pids.sibling), false);
+      } finally {
+        tree.release("command");
+        tree.release("grandchild");
+        await waitForExit();
         await tree.cleanup();
       }
     });
@@ -520,6 +954,9 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
           cwd: root, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"],
         });
         worker.on("message", (message) => {
+          if (message?.type === "CANCELLATION_KEY_REQUEST") {
+            worker.send({ type: "CANCELLATION_KEY", key: randomBytes(32).toString("hex") });
+          }
           if (message?.type === "READY" && worker.connected) worker.disconnect();
         });
         let output = "";
@@ -597,6 +1034,7 @@ export function registerLauncherLifecycleTests({ repository, stage, json }) {
         assert.equal(outcome.interrupted, true);
         assert.equal(outcome.code, 1);
         assert.equal(outcome.pid, null, "native command must not have been created");
+        assert.equal(existsSync(outcome.ownerLedger), false, "an unadmitted native owner cannot publish a ledger");
         assert.equal(outcome.cleanup.state, "reaped", JSON.stringify(outcome));
         assert.equal(existsSync(marker), false);
         t.diagnostic(`bootstrap-cancel owner=${outcome.ownerPid} exited; no command admitted`);
