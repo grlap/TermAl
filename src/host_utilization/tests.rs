@@ -128,6 +128,60 @@ fn utilization_shape_units_and_validation_are_explicit() {
     assert!(!bad.validate(&identity()));
 }
 
+/// A long JSON array that counts the elements it has serialized, so a test
+/// can see where encoding stopped.
+struct CountedArray {
+    len: usize,
+    serialized: std::cell::Cell<usize>,
+}
+
+impl Serialize for CountedArray {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.len))?;
+        for _ in 0..self.len {
+            self.serialized.set(self.serialized.get() + 1);
+            seq.serialize_element("0123456789abcdef0123456789abcdef")?;
+        }
+        seq.end()
+    }
+}
+
+#[test]
+fn an_over_limit_cached_response_is_refused_before_it_is_fully_encoded() {
+    let value = CountedArray {
+        len: 100_000,
+        serialized: std::cell::Cell::new(0),
+    };
+    let error = runtime::cached_response(
+        &value,
+        std::time::Instant::now(),
+        Duration::from_secs(60),
+        4 * 1024,
+    )
+    .unwrap_err();
+    assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+    // Each element encodes to 35 bytes, so 4 KiB holds about 117 of them.
+    assert!(
+        value.serialized.get() <= 4 * 1024 / 35 + 2,
+        "encoding must stop at the limit, not after {} elements",
+        value.serialized.get()
+    );
+
+    let snapshot = snapshot();
+    let response = runtime::cached_response(
+        &snapshot,
+        std::time::Instant::now(),
+        Duration::from_secs(60),
+        RESPONSE_BYTES,
+    )
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 #[test]
 fn utilization_receipt_never_revives_source_stale_or_uses_remote_wall_time() {
     let now = std::time::Instant::now();

@@ -416,7 +416,7 @@ pub(crate) async fn serve_pair(
         RESPONSE_BYTES,
     )
 }
-fn cached_response<T: Serialize>(
+pub(super) fn cached_response<T: Serialize>(
     value: &T,
     started: std::time::Instant,
     budget: Duration,
