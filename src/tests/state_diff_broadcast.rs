@@ -40,6 +40,7 @@ fn cut(revision: u64, sessions: &[&Arc<StateSessionSummary>]) -> ImmutableStateS
             .iter()
             .map(|session| Arc::clone(*session))
             .collect(),
+        pending_sessions: None,
         request_generation: 0,
         before_materialize: None,
     }
@@ -359,6 +360,173 @@ fn state_diff_through_the_cache_reports_a_reverted_session_captured_in_between()
     );
     assert_eq!(ids(&diff["sessions"]["changed"], "id"), [session]);
     assert_eq!(diff["sessions"]["changed"][0], base_session);
+}
+
+#[test]
+fn state_diff_of_an_older_cut_is_unchanged_by_a_newer_cut_projected_first() {
+    let (state, first, mailbox) = cached_state();
+    let second = test_session_id(&state, Agent::Codex);
+    let mut receiver = state.subscribe_stream_events();
+    let mut producer = StateDiffProducer::default();
+    mailbox.take_pending_for_test();
+    let base_revision = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    producer.forward(pending.pop().unwrap(), &state.state_broadcast_senders);
+    assert_eq!(kinds(&emitted(&mut receiver)), ["state"]);
+    let rename = |session: &str, name: &str| {
+        let mut inner = state.inner.lock().unwrap();
+        inner.session_mut(session).unwrap().session.name = name.to_owned();
+    };
+
+    // B changes only `first` and waits in the mailbox.
+    rename(&first, "First renamed");
+    let older_revision = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    assert_eq!(pending.len(), 1);
+    let older = pending.pop().unwrap();
+    // C changes `second` and is projected first, as a full-state answer
+    // taken before the broadcaster reaches B would be.
+    rename(&second, "Second renamed");
+    drop(current_cut(&state));
+
+    producer.forward(older, &state.state_broadcast_senders);
+    let diff = only_diff(&mut receiver);
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(base_revision), Some(older_revision))
+    );
+    assert_eq!(
+        ids(&diff["sessions"]["changed"], "id"),
+        [first.clone()],
+        "a newer cut's projection must not turn B's unchanged rows into changed rows"
+    );
+
+    // The next cut still reuses B's rows and reports only C's change.
+    let latest = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    producer.forward(pending.pop().unwrap(), &state.state_broadcast_senders);
+    let diff = only_diff(&mut receiver);
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(older_revision), Some(latest))
+    );
+    assert_eq!(ids(&diff["sessions"]["changed"], "id"), [second]);
+}
+
+/// Captures a cut under StateInner without projecting it, as a full-state
+/// reader does before it releases the lock.
+fn unprojected_cut(state: &AppState) -> ImmutableStateSnapshot {
+    let inner = state.inner.lock().unwrap();
+    state.immutable_state_snapshot_locked(&inner)
+}
+
+#[test]
+fn state_diff_resends_a_row_another_capture_showed_whatever_the_projection_order() {
+    let (state, session, mailbox) = cached_state();
+    let mut receiver = state.subscribe_stream_events();
+    let mut producer = StateDiffProducer::default();
+    mailbox.take_pending_for_test();
+    let base_revision = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    producer.forward(pending.pop().unwrap(), &state.state_broadcast_senders);
+    assert_eq!(kinds(&emitted(&mut receiver)), ["state"]);
+    let rename = |name: &str| {
+        // Unstamped on purpose: only the cache's value check tells A from B.
+        state.inner.lock().unwrap().sessions[0].session.name = name.to_owned();
+    };
+
+    // 1 = A goes to the broadcaster; 2 = B and 3 = A are full-state reads.
+    rename("A");
+    let first = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    assert_eq!(pending.len(), 1);
+    let broadcast = pending.pop().unwrap();
+    rename("B");
+    let mut shown_b = unprojected_cut(&state);
+    rename("A");
+    let mut shown_a = unprojected_cut(&state);
+
+    // The newest read projects first, then the broadcaster, then the B read.
+    shown_a.project_pending_sessions();
+    producer.forward(broadcast, &state.state_broadcast_senders);
+    let diff = only_diff(&mut receiver);
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(base_revision), Some(first))
+    );
+    assert_eq!(ids(&diff["sessions"]["changed"], "id"), [session.clone()]);
+    shown_b.project_pending_sessions();
+    let shown_b = shown_b.materialize();
+    assert_eq!(shown_b.sessions[0].name, "B");
+
+    // A client may hold B from that read: the next diff must send A again.
+    let latest = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    producer.forward(pending.pop().unwrap(), &state.state_broadcast_senders);
+    let diff = only_diff(&mut receiver);
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(first), Some(latest))
+    );
+    assert_eq!(ids(&diff["sessions"]["changed"], "id"), [session.clone()]);
+    assert_eq!(diff["sessions"]["changed"][0]["name"], "A");
+
+    // Later read first, an earlier read, then the broadcaster's cut taken
+    // between them: the broadcaster must still resend the earlier read's row.
+    rename("W");
+    let mut early_read = unprojected_cut(&state);
+    rename("A");
+    let between = metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    let broadcast = pending.pop().unwrap();
+    rename("W");
+    let mut late_read = unprojected_cut(&state);
+    late_read.project_pending_sessions();
+    early_read.project_pending_sessions();
+    producer.forward(broadcast, &state.state_broadcast_senders);
+    let diff = only_diff(&mut receiver);
+    assert_eq!(
+        (diff["baseRevision"].as_u64(), diff["revision"].as_u64()),
+        (Some(latest), Some(between))
+    );
+    assert_eq!(ids(&diff["sessions"]["changed"], "id"), [session]);
+    assert_eq!(diff["sessions"]["changed"][0]["name"], "A");
+}
+
+#[test]
+fn state_diff_skips_a_reverted_value_whose_capture_nobody_projected() {
+    let (state, session, mailbox) = cached_state();
+    let mut receiver = state.subscribe_stream_events();
+    let mut producer = StateDiffProducer::default();
+    mailbox.take_pending_for_test();
+    metadata_commit(&state);
+    let mut pending = mailbox.take_pending_for_test();
+    producer.forward(pending.pop().unwrap(), &state.state_broadcast_senders);
+    assert_eq!(kinds(&emitted(&mut receiver)), ["state"]);
+    let original = state.inner.lock().unwrap().sessions[0].session.name.clone();
+    let rename = |name: &str| {
+        state.inner.lock().unwrap().sessions[0].session.name = name.to_owned();
+    };
+    let mut forward_commit = || {
+        metadata_commit(&state);
+        let mut pending = mailbox.take_pending_for_test();
+        producer.forward(pending.pop().unwrap(), &state.state_broadcast_senders);
+        only_diff(&mut receiver)
+    };
+
+    // Captured but dropped unprojected: no reader saw the intermediate value.
+    rename("Intermediate");
+    drop(unprojected_cut(&state));
+    rename(&original);
+    let diff = forward_commit();
+    assert!(ids(&diff["sessions"]["changed"], "id").is_empty());
+
+    // Projected (a reader may hold it): the reverted value goes out again.
+    rename("Intermediate");
+    unprojected_cut(&state).project_pending_sessions();
+    rename(&original);
+    let diff = forward_commit();
+    assert_eq!(ids(&diff["sessions"]["changed"], "id"), [session]);
 }
 
 #[test]

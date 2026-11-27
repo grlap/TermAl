@@ -283,10 +283,15 @@ fn engram_apply_claude_hazards(
         return;
     }
     let mut changed_sources = Vec::new();
-    for (index, record) in inner.sessions.iter_mut().enumerate() {
-        if consumer.is_some_and(|consumer| consumer != index) {
-            continue;
-        }
+    // Detach only rows this pass can write (`matching_indexed_mut`): a
+    // pending immutable state cut shares every other session row.
+    for (index, record) in inner.sessions.matching_indexed_mut(|index, record| {
+        consumer.is_none_or(|consumer| consumer == index)
+            && (!record.engram.active_turn_checks.is_empty()
+                || !record.engram.carried_checks.is_empty()
+                || record.engram.unadmitted_active_turn.is_some()
+                || !record.engram.unadmitted_closing_jobs.is_empty())
+    }) {
         for check in &mut record.engram.active_turn_checks {
             let subject = EngramInterferenceSubject {
                 session: index,

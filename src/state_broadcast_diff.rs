@@ -530,6 +530,8 @@ impl StateDiffProducer {
         mut snapshot: ImmutableStateSnapshot,
         senders: &StateBroadcastSenders,
     ) {
+        // The worker holds no StateInner guard here.
+        snapshot.project_pending_sessions();
         snapshot.prepare_test_run_activity();
         // The same consumer hooks as the full-state path, which a diff skips.
         #[cfg(test)]

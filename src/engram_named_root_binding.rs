@@ -1337,13 +1337,13 @@ impl AppState {
                             .map(|_| record.session.id.clone())
                     })
                     .collect::<Vec<_>>();
-                for record in &mut inner.sessions {
-                    if record.engram.work_binding.as_ref().is_some_and(|bound| {
+                // Detach only the rows written (`matching_mut`).
+                for (_, record) in inner.sessions.matching_mut(|record| {
+                    record.engram.work_binding.as_ref().is_some_and(|bound| {
                         bound.claim_id == response.claim_id && bound.run_id == response.run_id
                     }) && same_store_sessions.contains(&record.session.id)
-                    {
-                        record.engram.named_root = Some(response.named_root.clone());
-                    }
+                }) {
+                    record.engram.named_root = Some(response.named_root.clone());
                 }
             }
         }

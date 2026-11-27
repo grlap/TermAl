@@ -56,6 +56,18 @@ impl<E: Clone + 'static> SharedSequence<E> {
             .filter(move |(_, body)| predicate(body))
             .map(|(index, body)| (index, Arc::make_mut(body)))
     }
+    /// `matching_mut` whose predicate also sees the row index. Rows it
+    /// rejects are never detached from another holder of the same row.
+    pub(super) fn matching_indexed_mut(
+        &mut self,
+        mut predicate: impl FnMut(usize, &E) -> bool,
+    ) -> impl DoubleEndedIterator<Item = (usize, &mut E)> {
+        self.bodies
+            .iter_mut()
+            .enumerate()
+            .filter(move |(index, body)| predicate(*index, body))
+            .map(|(index, body)| (index, Arc::make_mut(body)))
+    }
     pub(super) fn iter_mut(
         &mut self,
     ) -> impl DoubleEndedIterator<Item = &mut E> + ExactSizeIterator {

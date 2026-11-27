@@ -1271,14 +1271,32 @@ impl AppState {
     }
 
     pub(crate) fn pending_engram_mcp_revocation_session_ids(inner: &StateInner) -> Vec<String> {
-        let mut session_ids = inner
-            .sessions
-            .iter()
+        Self::pending_engram_mcp_revocation_session_ids_from(inner.sessions.iter())
+    }
+
+    pub(crate) fn pending_engram_mcp_revocation_session_ids_from<'a>(
+        records: impl Iterator<Item = &'a SessionRecord>,
+    ) -> Vec<String> {
+        let mut session_ids = records
             .filter(|record| record.engram_mcp_revocation_pending)
             .map(|record| record.session.id.clone())
             .collect::<Vec<_>>();
         session_ids.sort();
         session_ids
+    }
+
+    pub(crate) fn queue_pause_reasons_from<'a>(
+        records: impl Iterator<Item = &'a SessionRecord>,
+    ) -> BTreeMap<String, QueuePauseReason> {
+        records
+            .filter(|record| !record.hidden && record.orchestrator_auto_dispatch_blocked)
+            .filter_map(|record| {
+                record
+                    .queue_pause_reason
+                    .clone()
+                    .map(|reason| (record.session.id.clone(), reason))
+            })
+            .collect()
     }
 
     fn snapshot_from_inner_with_agent_readiness(
@@ -1313,6 +1331,22 @@ impl AppState {
         &self,
         inner: &StateInner,
         agent_readiness: Vec<AgentReadiness>,
+        sessions: Vec<StateSessionSummary>,
+    ) -> StateResponse {
+        let mut header =
+            self.snapshot_header_without_session_scans(inner, agent_readiness, sessions);
+        header.queue_pause_reasons = Self::queue_pause_reasons_from(inner.sessions.iter());
+        header.pending_engram_mcp_revocation_session_ids =
+            Self::pending_engram_mcp_revocation_session_ids_from(inner.sessions.iter());
+        header
+    }
+
+    /// The header without its two session-derived fields. An immutable cut
+    /// fills them from its captured rows after StateInner is released.
+    pub(crate) fn snapshot_header_without_session_scans(
+        &self,
+        inner: &StateInner,
+        agent_readiness: Vec<AgentReadiness>,
         mut sessions: Vec<StateSessionSummary>,
     ) -> StateResponse {
         let projection = self.test_run_history_projection_locked(inner);
@@ -1322,17 +1356,6 @@ impl AppState {
         }
         let mirrored_delegation_child_ids = mirrored_delegation_child_ids(&sessions)
             .map(str::to_owned)
-            .collect();
-        let queue_pause_reasons = inner
-            .sessions
-            .iter()
-            .filter(|record| !record.hidden && record.orchestrator_auto_dispatch_blocked)
-            .filter_map(|record| {
-                record
-                    .queue_pause_reason
-                    .clone()
-                    .map(|reason| (record.session.id.clone(), reason))
-            })
             .collect();
         StateResponse {
             remote_transport_statuses: self.remote_registry.transport_statuses(),
@@ -1346,7 +1369,7 @@ impl AppState {
             workspaces: collect_workspace_layout_summaries(inner.workspace_layouts.values()),
             sessions,
             mirrored_delegation_child_ids,
-            queue_pause_reasons,
+            queue_pause_reasons: BTreeMap::new(),
             delegations: inner
                 .delegations
                 .iter()
@@ -1355,8 +1378,7 @@ impl AppState {
             delegation_waits: inner.delegation_waits.clone(),
             test_run_overview: TestRunOverviewSnapshot::captured(projection),
             test_run_waits: inner.test_run_waits.clone(),
-            pending_engram_mcp_revocation_session_ids:
-                Self::pending_engram_mcp_revocation_session_ids(inner),
+            pending_engram_mcp_revocation_session_ids: Vec::new(),
         }
     }
 

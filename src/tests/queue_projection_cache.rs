@@ -103,8 +103,10 @@ fn warm_cuts_reuse_queue_hashes_and_only_rebuild_changed_summaries() {
     let (state, session, mailbox) = cached_state();
     let count = Arc::new(AtomicUsize::new(0));
     let _observer = HashObserver::install(count.clone());
+    // A cut projects when it is consumed, so each commit's cut is consumed.
     for _ in 0..3 {
         metadata_commit(&state);
+        materialize(mailbox.take_pending_for_test().pop().unwrap());
     }
     assert_eq!(
         count.load(Ordering::SeqCst),
@@ -121,11 +123,12 @@ fn warm_cuts_reuse_queue_hashes_and_only_rebuild_changed_summaries() {
             .push(prompt("new"));
         state.commit_locked(&mut inner).unwrap();
     }
+    materialize(mailbox.take_pending_for_test().pop().unwrap());
     let rebuilt = count.load(Ordering::SeqCst);
     assert!(rebuilt > 0, "changed queues must construct a new hash");
     metadata_commit(&state);
-    assert_eq!(count.load(Ordering::SeqCst), rebuilt);
     let cached = materialize(mailbox.take_pending_for_test().pop().unwrap());
+    assert_eq!(count.load(Ordering::SeqCst), rebuilt);
     let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
     assert!(
         count.load(Ordering::SeqCst) > rebuilt,

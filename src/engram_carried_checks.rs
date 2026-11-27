@@ -585,10 +585,10 @@ pub(crate) fn engram_fence_carried_for_other_session(
             format!("{who} reported a file edit that TermAl could not place"),
         ),
     };
-    for (other, record) in inner.sessions.iter_mut().enumerate() {
-        if other == writer {
-            continue;
-        }
+    // Detach only rows with an open carried check (`matching_indexed_mut`).
+    for (_, record) in inner.sessions.matching_indexed_mut(|other, record| {
+        other != writer && record.engram.carried_checks.iter().any(open)
+    }) {
         for carried in &mut record.engram.carried_checks {
             if !open(carried) {
                 continue;
@@ -2008,7 +2008,11 @@ impl AppState {
             .collect::<Vec<_>>();
         let mut diagnostics = Vec::new();
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        for record in inner.sessions.iter_mut() {
+        // Detach only rows this pass can write: carried checks, and turn
+        // checks of a full gate still being launched (`matching_mut`).
+        for (_, record) in inner.sessions.matching_mut(|record| {
+            !record.engram.carried_checks.is_empty() || !record.engram.active_turn_checks.is_empty()
+        }) {
             for (worktree, candidate) in &cargo_candidates {
                 // A Cargo sibling is judged by `target/` at terminal
                 // settlement, whenever it was notified, so it takes no
@@ -2162,12 +2166,19 @@ impl AppState {
         let now = chrono::Utc::now();
         let pending: Vec<Pending> = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
-            for index in 0..inner.sessions.len() {
-                if engram_retire_launcher_checks(&mut inner.sessions[index], now) {
-                    // Removing a carried entry removes its durable restart
-                    // marker, including when the launching session is idle.
-                    let _ = inner.session_mut_by_index(index);
-                }
+            // Only a row that carries checks can retire one; others stay
+            // shared with any pending immutable state cut.
+            let retired = inner
+                .sessions
+                .matching_mut(|record| !record.engram.carried_checks.is_empty())
+                .filter_map(|(index, record)| {
+                    engram_retire_launcher_checks(record, now).then_some(index)
+                })
+                .collect::<Vec<_>>();
+            for index in retired {
+                // Removing a carried entry removes its durable restart
+                // marker, including when the launching session is idle.
+                let _ = inner.session_mut_by_index(index);
             }
             inner
                 .sessions

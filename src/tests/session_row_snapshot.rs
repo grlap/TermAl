@@ -196,15 +196,65 @@ fn session_row_housekeeping_detaches_only_one_pending_local_row_once() {
 }
 
 #[test]
+fn a_watcher_batch_beside_a_pending_cut_detaches_only_the_rows_it_writes() {
+    let mut state = test_app_state();
+    // The normal broadcaster queues the cut; this test does not run a worker.
+    state.state_broadcast_mailbox = Some(Arc::new(StateBroadcastMailbox::default()));
+    let mut inner = state.inner.lock().unwrap();
+    populate_rows(&mut inner);
+    // Row 0 owns an active turn, so the batch captures (writes) only it.
+    inner.sessions[0].active_turn_start_message_count = Some(0);
+    state.commit_locked(&mut inner).unwrap();
+    {
+        let pending = state
+            .state_broadcast_mailbox
+            .as_ref()
+            .unwrap()
+            .pending
+            .lock()
+            .unwrap();
+        assert!(matches!(
+            pending.work.back(),
+            Some(StateBroadcastWork::ImmutableSnapshot(cut)) if cut.pending_sessions.is_some()
+        ));
+    }
+    let held = inner.sessions.clone();
+    drop(inner);
+
+    state.record_active_turn_file_changes(&[WorkspaceFileChangeEvent {
+        path: "src/lib.rs".to_owned(),
+        kind: WorkspaceFileChangeKind::Modified,
+        root_path: None,
+        session_id: None,
+        mtime_ms: None,
+        size_bytes: None,
+    }]);
+
+    let inner = state.inner.lock().unwrap();
+    assert!(!inner.sessions.shares_body(0, &held, 0));
+    for index in 1..held.len() {
+        assert!(
+            inner.sessions.shares_body(index, &held, index),
+            "the watcher batch detached unwritten row {index}"
+        );
+    }
+}
+
+#[test]
 fn session_row_mutable_and_owned_accesses_cannot_change_a_retained_cut() {
     // Each path gets a fresh shared cut, so an earlier detachment cannot
     // conceal a later mutable-access escape.
-    let mutators: [fn(&mut SessionSequence); 5] = [
+    let mutators: [fn(&mut SessionSequence); 6] = [
         |rows| rows[0].session.preview = "index".to_owned(),
         |rows| rows.get_mut(0).unwrap().session.preview = "get mut".to_owned(),
         |rows| {
             for (_, row) in rows.matching_mut(|row| row.session.name == "first") {
                 row.session.preview = "matching mut".to_owned();
+            }
+        },
+        |rows| {
+            for (_, row) in rows.matching_indexed_mut(|index, _| index == 0) {
+                row.session.preview = "matching indexed mut".to_owned();
             }
         },
         |rows| {

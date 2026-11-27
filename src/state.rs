@@ -535,18 +535,45 @@ impl StateBroadcastWork {
 
 pub(crate) const STATE_BROADCAST_MAILBOX_CAPACITY: usize = 256;
 
+/// The most replaced or evicted snapshots kept for the consumer to dispose of.
+pub(crate) const STATE_BROADCAST_RETIRED_LIMIT: usize = 4;
+
 #[derive(Default)]
 pub(crate) struct StateBroadcastPending {
     pub(crate) work: VecDeque<StateBroadcastWork>,
+    // Replaced or evicted snapshots. Producers hold StateInner while they
+    // publish, and an unprojected cut may own the last handle to detached
+    // session rows, so the consumer drops these after releasing the mailbox.
+    pub(crate) retired: Vec<StateBroadcastWork>,
     pub(crate) lagged: bool,
     pub(crate) closing: bool,
     pub(crate) stopped: bool,
 }
 
 impl StateBroadcastPending {
+    /// Keeps a replaced or evicted snapshot for off-lock disposal, within
+    /// `STATE_BROADCAST_RETIRED_LIMIT`. Past it, while the consumer is held
+    /// up, the producer drops the oldest itself: that costs only the rows
+    /// written since its capture, which their writers already copied.
+    /// Deltas and markers own no rows and are dropped here.
+    fn retire(&mut self, work: StateBroadcastWork) {
+        if !matches!(
+            work,
+            StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_)
+        ) {
+            return;
+        }
+        if self.retired.len() >= STATE_BROADCAST_RETIRED_LIMIT {
+            self.retired.remove(0);
+        }
+        self.retired.push(work);
+    }
+
     pub(crate) fn enqueue(&mut self, work: StateBroadcastWork) {
         if self.work.len() >= STATE_BROADCAST_MAILBOX_CAPACITY {
-            self.work.pop_front();
+            if let Some(evicted) = self.work.pop_front() {
+                self.retire(evicted);
+            }
             // Kept outside the bounded queue: further overflow cannot evict
             // the recovery signal. The consumer sees it before retained work.
             self.lagged = true;
@@ -586,7 +613,8 @@ impl StateBroadcastMailbox {
             pending.work.back(),
             Some(StateBroadcastWork::Snapshot(_) | StateBroadcastWork::ImmutableSnapshot(_))
         ) {
-            *pending.work.back_mut().unwrap() = work;
+            let replaced = std::mem::replace(pending.work.back_mut().unwrap(), work);
+            pending.retire(replaced);
         } else {
             pending.enqueue(work);
         }
@@ -608,11 +636,27 @@ impl StateBroadcastMailbox {
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
         loop {
+            // The consumer holds no StateInner guard: dispose of retired work
+            // here, after the mailbox is released.
+            let retired = std::mem::take(&mut pending.retired);
             if let Some(work) = pending.pop_front() {
+                drop(pending);
+                drop(retired);
                 return work;
             }
             if pending.closing {
+                drop(pending);
+                drop(retired);
                 return StateBroadcastWork::Drain;
+            }
+            if !retired.is_empty() {
+                drop(pending);
+                drop(retired);
+                pending = self
+                    .pending
+                    .lock()
+                    .expect("state broadcast mailbox mutex poisoned");
+                continue;
             }
             pending = self
                 .work_available
@@ -627,10 +671,13 @@ impl StateBroadcastMailbox {
             .pending
             .lock()
             .expect("state broadcast mailbox mutex poisoned");
+        let retired = std::mem::take(&mut pending.retired);
         let mut drained = Vec::new();
         while let Some(work) = pending.pop_front() {
             drained.push(work);
         }
+        drop(pending);
+        drop(retired);
         drained
     }
 }
@@ -1796,7 +1843,8 @@ pub(crate) struct StateInner {
     pub(crate) metadata_predecessor: Arc<std::sync::atomic::AtomicU64>,
     pub(crate) metadata_watermarks: Arc<Mutex<PersistMetadataWatermarks>>,
     /// Process-local projections; a restored/replaced StateInner starts cold.
-    /// Access only under StateInner, never from the broadcaster worker.
+    /// Lock only under StateInner. Its session summary handle is the one part
+    /// cut consumers use after release (`state_broadcast_worker.rs`).
     pub(crate) state_projection_cache: Mutex<StateProjectionCache>,
     // Runtime identity of this whole value, refreshed by construction/restore.
     // Never persisted; replacing it cannot join observations across reloads.

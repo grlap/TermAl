@@ -69,7 +69,12 @@ pub(crate) fn retire_engram_retained_history_repair_lines_locked(
     if engram_authority_work_unresolved(inner, store, work) {
         return;
     }
-    for record in &mut inner.sessions {
+    // A row with no repair origin has nothing to retire; leave it shared with
+    // any pending immutable state cut (`matching_mut`).
+    for (_, record) in inner
+        .sessions
+        .matching_mut(|record| !record.engram.retained_history_repair_origins.is_empty())
+    {
         record
             .engram
             .retire_retained_history_repair_lines(store, work);
@@ -1657,18 +1662,18 @@ impl AppState {
                 .map(|history| (history.work_id.clone(), history.recovery_reason.clone()))
                 .collect::<Vec<_>>();
             for (work, reason) in repairs {
-                for record in &mut inner.sessions {
-                    if record
+                // Detach only the rows written (`matching_mut`).
+                for (_, record) in inner.sessions.matching_mut(|record| {
+                    record
                         .engram
                         .work_binding
                         .as_ref()
                         .is_some_and(|binding| binding.work_id == work)
-                    {
-                        record.engram.set_pending_retained_history_repair_line(format!(
-                            "{ENGRAM_RETAINED_HISTORY_REPAIR_LINE_PREFIX} {}. Source, test and evaluation evidence remain withheld; current absence cannot erase unexplained historical naming.",
-                            reason.as_deref().unwrap_or("the original canonical association is unavailable")),
-                            &store, &work);
-                    }
+                }) {
+                    record.engram.set_pending_retained_history_repair_line(format!(
+                        "{ENGRAM_RETAINED_HISTORY_REPAIR_LINE_PREFIX} {}. Source, test and evaluation evidence remain withheld; current absence cannot erase unexplained historical naming.",
+                        reason.as_deref().unwrap_or("the original canonical association is unavailable")),
+                        &store, &work);
                 }
             }
             let mut runs = inner
@@ -2603,8 +2608,9 @@ impl AppState {
                     .as_deref()
                     .unwrap_or("retained canonical history is unresolved")
             );
-            for record in &mut inner.sessions {
-                if record
+            // Detach only the rows written (`matching_mut`).
+            for (_, record) in inner.sessions.matching_mut(|record| {
+                record
                     .engram
                     .work_binding
                     .as_ref()
@@ -2616,15 +2622,14 @@ impl AppState {
                         .is_some_and(|(active_store, work)| {
                             active_store == store && work == &owner.binding.work_id
                         })
-                {
-                    record.engram.queue_source_root_notice(
-                        EngramSourceRootNoticeKind::AuthorityRecovery {
-                            store: store.clone(),
-                            work_id: owner.binding.work_id.clone(),
-                            line: line.clone(),
-                        },
-                    );
-                }
+            }) {
+                record.engram.queue_source_root_notice(
+                    EngramSourceRootNoticeKind::AuthorityRecovery {
+                        store: store.clone(),
+                        work_id: owner.binding.work_id.clone(),
+                        line: line.clone(),
+                    },
+                );
             }
         }
         // Published is an already-acknowledged marker. Either durable side of

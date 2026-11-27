@@ -116,8 +116,12 @@ fn metadata_commit(state: &AppState) -> u64 {
 }
 
 fn current_cut(state: &AppState) -> ImmutableStateSnapshot {
-    let inner = state.inner.lock().unwrap();
-    state.immutable_state_snapshot_locked(&inner)
+    let mut cut = {
+        let inner = state.inner.lock().unwrap();
+        state.immutable_state_snapshot_locked(&inner)
+    };
+    cut.project_pending_sessions();
+    cut
 }
 
 fn materialize(work: StateBroadcastWork) -> StateResponse {
@@ -157,7 +161,9 @@ fn general_commit_rebuilds_only_changed_summaries_and_matches_fresh_projection()
     mailbox.take_pending_for_test();
     let count = Arc::new(AtomicUsize::new(0));
     let observer = SummaryObserver::install(count.clone());
+    // A cut projects when it is consumed, so each commit's cut is consumed.
     metadata_commit(&state);
+    materialize(mailbox.take_pending_for_test().pop().unwrap());
     assert_eq!(
         count.load(Ordering::SeqCst),
         0,
@@ -170,15 +176,16 @@ fn general_commit_rebuilds_only_changed_summaries_and_matches_fresh_projection()
         record.orchestrator_auto_dispatch_blocked = true;
         state.commit_locked(&mut inner).unwrap();
     }
+    materialize(mailbox.take_pending_for_test().pop().unwrap());
     assert_eq!(
         count.load(Ordering::SeqCst),
         1,
         "one changed session rebuilds once, not all six"
     );
     metadata_commit(&state);
+    let cut = materialize(mailbox.take_pending_for_test().pop().unwrap());
     assert_eq!(count.load(Ordering::SeqCst), 1);
     drop(observer);
-    let cut = materialize(mailbox.take_pending_for_test().pop().unwrap());
     let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
     assert_eq!(
         serde_json::to_string(&cut).unwrap(),
@@ -343,6 +350,218 @@ fn unstamped_metadata_writers_cannot_reuse_stale_cached_summaries() {
 }
 
 #[test]
+fn summary_snapshot_projects_changed_metadata_after_releasing_state_lock() {
+    let (state, session, _mailbox) = cached_state();
+    // A rename through `session_mut` stamps the record, so the cache misses
+    // and the summary must be rebuilt.
+    {
+        let mut inner = state.inner.lock().unwrap();
+        inner.session_mut(&session).unwrap().session.name = "Renamed off-stamp".to_owned();
+    }
+    let projected = Arc::new(AtomicUsize::new(0));
+    let projected_under_lock = Arc::new(AtomicUsize::new(0));
+    let observer = {
+        let observed = state.clone();
+        let projected = projected.clone();
+        let projected_under_lock = projected_under_lock.clone();
+        TEST_BEFORE_SESSION_SUMMARY_PROJECT.with(|hook| {
+            assert!(hook.borrow().is_none());
+            *hook.borrow_mut() = Some(Box::new(move || {
+                projected.fetch_add(1, Ordering::SeqCst);
+                if !observed.inner.is_not_held_by_current_thread_for_test() {
+                    projected_under_lock.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        });
+        SummaryObserver
+    };
+    let snapshot = state.summary_snapshot();
+    drop(observer);
+    let summary = snapshot
+        .sessions
+        .iter()
+        .find(|summary| summary.id == session)
+        .expect("the renamed session is in the snapshot");
+    assert_eq!(summary.name, "Renamed off-stamp");
+    assert_eq!(
+        projected.load(Ordering::SeqCst),
+        1,
+        "the renamed session must be projected exactly once (a real cache miss)"
+    );
+    assert_eq!(
+        projected_under_lock.load(Ordering::SeqCst),
+        0,
+        "summary_snapshot projected changed session metadata while holding StateInner"
+    );
+}
+
+#[test]
+fn coalesced_cuts_wait_for_off_lock_disposal_within_a_bound() {
+    let (state, _session, mailbox) = cached_state();
+    mailbox.take_pending_for_test();
+    // No consumer runs: every commit coalesces into the single queued cut.
+    for _ in 0..STATE_BROADCAST_RETIRED_LIMIT + 3 {
+        metadata_commit(&state);
+    }
+    let latest = state.inner.lock().unwrap().revision;
+    {
+        let pending = mailbox.pending.lock().unwrap();
+        assert_eq!(pending.work.len(), 1, "adjacent cuts coalesce");
+        assert_eq!(pending.retired.len(), STATE_BROADCAST_RETIRED_LIMIT);
+    }
+    let pending = mailbox.take_pending_for_test();
+    assert!(matches!(
+        pending.as_slice(),
+        [StateBroadcastWork::ImmutableSnapshot(cut)] if cut.header.revision == latest
+    ));
+    assert!(mailbox.pending.lock().unwrap().retired.is_empty());
+}
+
+#[test]
+fn dead_captures_behind_a_held_cut_are_compacted_in_order() {
+    let (state, session, mailbox) = cached_state();
+    mailbox.take_pending_for_test();
+    let projector = state
+        .inner
+        .lock()
+        .unwrap()
+        .state_projection_cache
+        .lock()
+        .unwrap()
+        .session_summaries
+        .clone();
+    // A full-state reader holds its cut before projecting it.
+    let mut held = {
+        let inner = state.inner.lock().unwrap();
+        state.immutable_state_snapshot_locked(&inner)
+    };
+    // Coalesced commits leave dead captures behind the live front.
+    let commits = CAPTURE_QUEUE_COMPACT_FLOOR * 8;
+    for _ in 0..commits {
+        metadata_commit(&state);
+    }
+    let live = 2 + STATE_BROADCAST_RETIRED_LIMIT;
+    let queued = projector.queued_captures_for_test();
+    assert!(
+        queued <= CAPTURE_QUEUE_COMPACT_FLOOR.max(2 * live) + 1,
+        "{queued} captures queued after {commits} commits with {live} live cuts"
+    );
+    // The held cut and the newest queued cut still project in capture order.
+    state.inner.lock().unwrap().sessions[0].session.name = "Renamed later".to_owned();
+    let mut pending = mailbox.take_pending_for_test();
+    held.project_pending_sessions();
+    assert_ne!(held.sessions[0].name, "Renamed later");
+    let StateBroadcastWork::ImmutableSnapshot(mut newest) = pending.pop().unwrap() else {
+        panic!("expected the coalesced cut")
+    };
+    newest.project_pending_sessions();
+    assert_eq!(newest.sessions[0].id, session);
+    assert!(Arc::ptr_eq(&held.sessions[0], &newest.sessions[0]));
+}
+
+#[test]
+fn warm_commits_validate_cached_summaries_only_after_releasing_state_lock() {
+    let (state, _session, mailbox) = cached_state();
+    struct ValidationObserver;
+    impl Drop for ValidationObserver {
+        fn drop(&mut self) {
+            TEST_BEFORE_SESSION_SUMMARY_VALIDATION.with(|hook| {
+                hook.borrow_mut().take();
+            });
+        }
+    }
+    let validated = Arc::new(AtomicUsize::new(0));
+    let validated_under_lock = Arc::new(AtomicUsize::new(0));
+    let observer = {
+        let observed = state.clone();
+        let validated = validated.clone();
+        let validated_under_lock = validated_under_lock.clone();
+        TEST_BEFORE_SESSION_SUMMARY_VALIDATION.with(|hook| {
+            assert!(hook.borrow().is_none());
+            *hook.borrow_mut() = Some(Box::new(move || {
+                validated.fetch_add(1, Ordering::SeqCst);
+                if !observed.inner.is_not_held_by_current_thread_for_test() {
+                    validated_under_lock.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        });
+        ValidationObserver
+    };
+    // Nothing changed: every row is a cache hit, which still validates.
+    metadata_commit(&state);
+    assert_eq!(
+        validated.load(Ordering::SeqCst),
+        0,
+        "a warm commit validated cached summaries while holding StateInner"
+    );
+    let mut producer = StateDiffProducer::default();
+    for work in mailbox.take_pending_for_test() {
+        producer.forward(work, &state.state_broadcast_senders);
+    }
+    drop(observer);
+    assert_eq!(validated.load(Ordering::SeqCst), 1);
+    assert_eq!(validated_under_lock.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn a_captured_cut_projects_its_capture_time_rows_after_later_writes() {
+    let (state, session, _mailbox) = cached_state();
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session).unwrap();
+        record.engram_mcp_revocation_pending = true;
+        record.pause_auto_dispatch_for_turn(
+            QueuePauseCause::TurnFailed,
+            Some("Capture-time failure".to_owned()),
+        );
+    }
+    // Capture without projecting, next to the full snapshot of the same cut.
+    let (cut, at_capture) = {
+        let inner = state.inner.lock().unwrap();
+        (
+            state.immutable_state_snapshot_locked(&inner),
+            state.snapshot_from_inner(&inner),
+        )
+    };
+    assert!(cut.sessions.is_empty(), "capture defers the projection");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let record = inner.session_mut(&session).unwrap();
+        record.session.name = "Renamed after capture".to_owned();
+        record.set_auto_dispatch_blocked(false);
+        record.queue_pause_reason = None;
+        record.engram_mcp_revocation_pending = false;
+        state.commit_locked(&mut inner).unwrap();
+    }
+    // Projected after the later commit, the earlier cut still shows its own
+    // rows and its own session-derived header fields.
+    let old = cut.materialize();
+    assert_eq!(
+        serde_json::to_string(&old).unwrap(),
+        serde_json::to_string(&at_capture).unwrap()
+    );
+    assert_eq!(
+        old.pending_engram_mcp_revocation_session_ids,
+        vec![session.clone()]
+    );
+    assert_eq!(
+        old.queue_pause_reasons.keys().collect::<Vec<_>>(),
+        [&session]
+    );
+    assert!(old.sessions[0].queue_paused);
+    let new = current_cut(&state).materialize();
+    let fresh = state.snapshot_from_inner(&state.inner.lock().unwrap());
+    assert_eq!(
+        serde_json::to_string(&new).unwrap(),
+        serde_json::to_string(&fresh).unwrap()
+    );
+    assert_eq!(new.sessions[0].name, "Renamed after capture");
+    assert!(!new.sessions[0].queue_paused);
+    assert!(new.queue_pause_reasons.is_empty());
+    assert!(new.pending_engram_mcp_revocation_session_ids.is_empty());
+}
+
+#[test]
 fn immutable_cuts_keep_exact_commit_order_and_cannot_change_in_flight() {
     let (state, session, mailbox) = cached_state();
     let first = metadata_commit(&state);
@@ -389,6 +608,10 @@ fn cache_prunes_hidden_and_deleted_records_and_restamps_recreated_ids() {
             .lock()
             .unwrap()
             .state_projection_cache
+            .lock()
+            .unwrap()
+            .session_summaries
+            .cache
             .lock()
             .unwrap()
             .sessions
@@ -463,9 +686,10 @@ fn warm_projection_scan_reports_measurement_at_live_session_count() {
     for _ in 0..3 {
         let inner = state.inner.lock().unwrap();
         let started = std::time::Instant::now();
-        let cut = state.immutable_state_snapshot_locked(&inner);
+        let mut cut = state.immutable_state_snapshot_locked(&inner);
         micros.push(started.elapsed().as_micros());
         drop(inner);
+        cut.project_pending_sessions();
         assert_eq!(cut.sessions.len(), 6793);
         cuts.push(cut);
     }

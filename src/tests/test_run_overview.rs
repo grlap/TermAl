@@ -401,9 +401,10 @@ fn active_session_diffs_reuse_unchanged_rows_but_emit_a_recaptured_equal_row() {
         "unchanged activity cannot turn every metadata publication into a changed row"
     );
 
-    // Capture an intermediate name without emitting it, then restore the
-    // exact old value without stamping. The existing metadata owner mints a
-    // new Arc for this recapture: value equality must not erase that signal.
+    // Capture and project an intermediate name without emitting it (as a
+    // full-state answer would), then restore the exact old value without
+    // stamping. The existing metadata owner mints a new Arc for this
+    // recapture: value equality must not erase that signal.
     let original = {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&owner).unwrap();
@@ -411,7 +412,9 @@ fn active_session_diffs_reuse_unchanged_rows_but_emit_a_recaptured_equal_row() {
         inner.sessions[index].session.name = "Intermediate name".to_owned();
         name
     };
-    drop(capture());
+    let mut intermediate = capture();
+    intermediate.project_pending_sessions();
+    drop(intermediate);
     {
         let mut inner = fixture.state.inner.lock().unwrap();
         let index = inner.find_session_index(&owner).unwrap();

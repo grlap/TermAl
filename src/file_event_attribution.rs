@@ -408,19 +408,27 @@ impl AppState {
             .filter(|project| project.remote_id == LOCAL_REMOTE_ID)
             .map(|project| normalize_user_facing_path(FsPath::new(&project.root_path)))
             .collect::<Vec<_>>();
-        for record in &mut inner.sessions {
-            diagnostic.visited_sessions += 1;
-            if !record.is_local_session() || record.hidden {
-                continue;
-            }
-            if record.active_turn_start_message_count.is_none()
-                && !record
+        // Detach only rows this scan writes: a pending immutable state cut
+        // shares every session row, so an unconditional mutable pass would
+        // copy every session under StateInner.
+        diagnostic.visited_sessions += inner.sessions.len();
+        let candidate = |record: &SessionRecord| record.is_local_session() && !record.hidden;
+        for (_, record) in inner.sessions.matching_mut(|record| {
+            candidate(record)
+                && record.active_turn_start_message_count.is_none()
+                && record
                     .active_turn_file_change_grace_deadline
-                    .is_some_and(|deadline| now <= deadline)
-            {
-                record.active_turn_file_change_grace_deadline = None;
-                continue;
-            }
+                    .is_some_and(|deadline| now > deadline)
+        }) {
+            record.active_turn_file_change_grace_deadline = None;
+        }
+        for (_, record) in inner.sessions.matching_mut(|record| {
+            candidate(record)
+                && (record.active_turn_start_message_count.is_some()
+                    || record
+                        .active_turn_file_change_grace_deadline
+                        .is_some_and(|deadline| now <= deadline))
+        }) {
             diagnostic.eligible_sessions += 1;
             // Direct access: runtime bookkeeping must not stamp persist inputs.
             owners.push(FileChangeOwnerCapture::from_record(record, now));
