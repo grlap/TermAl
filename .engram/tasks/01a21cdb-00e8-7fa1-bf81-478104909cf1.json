@@ -1,0 +1,28 @@
+{
+  "id": "01a21cdb-00e8-7fa1-bf81-478104909cf1",
+  "external_ref": null,
+  "title": "Exact native relay message read hides confirmed association loss behind generic 404",
+  "outcome": "After a live member's exact relay message is found, missing home association metadata produces a distinct, bounded refusal on local and authenticated remote reads.",
+  "acceptance": [
+    "After exact-message lookup proves current membership, missing home association metadata is distinguished from unknown locator and transport failure without disclosing membership to another caller.",
+    "Local and enrolled satellite fixtures cover proven association loss on exact read and unchanged cursor/receipt state."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

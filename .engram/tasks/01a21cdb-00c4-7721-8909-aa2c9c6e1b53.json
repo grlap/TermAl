@@ -1,0 +1,28 @@
+{
+  "id": "01a21cdb-00c4-7721-8909-aa2c9c6e1b53",
+  "external_ref": null,
+  "title": "Relay page recovery fails when a different mailbox is missing its home association",
+  "outcome": "Cold-cache native relay page recovery resolves the requested mailbox independently of association loss in other mailboxes visible to the same caller.",
+  "acceptance": [
+    "On the authenticated original home, a cold-cache page read for a known mailbox works when another mailbox of the same caller has proven association loss.",
+    "A cold-cache page read for an unknown locator returns the typed unknown-locator refusal in the same fixture. The other mailbox is neither repaired nor disclosed."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

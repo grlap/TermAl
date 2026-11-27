@@ -1,0 +1,28 @@
+{
+  "id": "01a21c74-ddf9-7c03-8a35-427a6c8787ca",
+  "external_ref": null,
+  "title": "Fence possible remote writes skipped by a bounded transcript tail",
+  "outcome": "Preserve ordinary-check and carried-launch overlap when an admitted bounded remote tail skips newly added transcript slots and reports an already-idle session.",
+  "acceptance": [
+    "An admitted tail whose suffix begins past the prior transcript count records conservative overlap for a locally placed or unproven remote writer before the transcript watermark advances. Unchanged, previously unloaded history does not fence."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "check-credit",
+    "engram",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

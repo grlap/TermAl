@@ -1,0 +1,27 @@
+{
+  "id": "01a21c7c-3f13-72c2-abb4-cb4995fecded",
+  "external_ref": null,
+  "title": "Avoid detaching session rows when remote writer scope cannot overlap",
+  "outcome": "A remote observation with no possible local worktree overlap leaves unrelated session rows shared, while required ordinary and carried overlap marks still apply.",
+  "acceptance": [
+    "For remote observations whose writer scope cannot match, read-only shared session rows are retained and no overlap state changes. Matching writers still fence ordinary and carried checks."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "engram",
+    "performance"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
