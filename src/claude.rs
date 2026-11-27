@@ -1506,10 +1506,11 @@ pub(crate) fn claude_bash_tokens_are_read_only(
 }
 
 fn claude_engram_source_is_read_only(tokens: &[&str], cwd: &str) -> bool {
-    let ["engram", "source", "--root", root, "--json"] = tokens else {
-        return false;
+    let root = match tokens {
+        ["engram", "source", "--root", root, "--json"]
+        | ["engram", "source", "--json", "--root", root] => FsPath::new(root),
+        _ => return false,
     };
-    let root = FsPath::new(root);
     let review_root = FsPath::new(cwd);
     if !root.is_absolute() || !review_root.is_absolute() {
         return false;

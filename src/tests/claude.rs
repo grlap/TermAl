@@ -1723,7 +1723,9 @@ fn read_only_engram_source_checks_review_root_and_options_when_dirty() {
 
     let cwd = review_root.to_str().unwrap();
     let allowed = format!("engram source --root '{cwd}' --json");
+    let json_first = format!("engram source --json --root '{cwd}'");
     assert!(claude_bash_is_read_only_for_test(&allowed, cwd));
+    assert!(claude_bash_is_read_only_for_test(&json_first, cwd));
 
     fs::write(&tracked, "staged change\n").unwrap();
     run_git_test_command(&review_root, &["add", "tracked.txt"]);
@@ -1733,10 +1735,14 @@ fn read_only_engram_source_checks_review_root_and_options_when_dirty() {
         "MM tracked.txt"
     );
     assert!(claude_bash_is_read_only_for_test(&allowed, cwd));
+    assert!(claude_bash_is_read_only_for_test(&json_first, cwd));
 
     for denied in [
         format!("engram work --root '{cwd}' --json"),
+        "engram work claim w-review-fixture".to_owned(),
         format!("engram source --root '{}' --json", outside_root.display()),
+        format!("engram source --json --root '{}'", outside_root.display()),
+        format!("{json_first} --json"),
         format!("{allowed} --timeout-ms 1000"),
         format!("engram source --root '{cwd}'"),
         format!("{allowed} > source.json"),
