@@ -139,8 +139,9 @@ descriptors with member counts, and independently addressable members. See
 [incremental metadata](persistence-metadata-units.md) for the exact format,
 predecessor checks, migration and offline rollback contracts.
 `app_state.metadataState` is retained only as pre-upgrade provenance and is not
-updated by current writers. Metadata units may be absent only in a freshly
-initialized, never-persisted database with no other normalized authority rows.
+updated by current writers. Current-format databases initialize and require
+complete metadata units even when empty. Only supported predecessor migration
+may accept their absence in a proven uninitialized store.
 `sessions.value_json` stores one serialized
 metadata record with an empty `messages` array. `messages.value_json` stores one
 message payload. The composite primary key answers ordered
