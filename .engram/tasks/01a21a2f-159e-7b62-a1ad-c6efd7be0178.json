@@ -2,11 +2,12 @@
   "id": "01a21a2f-159e-7b62-a1ad-c6efd7be0178",
   "external_ref": null,
   "title": "Relay mailbox receipt ACK with the exact listed mailboxId returns 409 \"no saved native mailbox association for this exact mailboxId and caller\"",
-  "outcome": "Relay mailbox receipt ACK with the exact listed mailboxId returns 409 \"no saved native mailbox association for this exact mailboxId and caller\"",
+  "outcome": "Native relay read, acknowledgement and exact message read give the same specific refusal when a well-formed locator matches none of the caller's mailboxes. Both participant cursors and issued receipts are preserved.",
   "acceptance": [
-    "A participant that reads a native relay mailbox and receives an issued receipt can acknowledge that unchanged receipt with the same exact mailboxId. The read, the listing and the acknowledgement resolve the caller's association the same way.",
-    "If an acknowledgement is refused, the error names the actual cause. Examples: a caller identity that differs from the one that read the page (native vs domain principal), or a missing association with the identity it was looked up under. The error is not a generic association refusal for a mailboxId the same caller just read and listed.",
-    "A behavioural test reproduces read -> receipt -> acknowledge on a relay mailbox by a caller that is a participant there, under the same principal form as the reported case, and asserts the acknowledgement is accepted."
+    "When an authorized lookup establishes that a well-formed native relay locator matches no mailbox or message visible to the caller, read, acknowledgement and exact message read return the same HTTP 404 refusal. It says that the locator does not match any of the caller's mailboxes.",
+    "The unknown-locator refusal leaves both cursors and any previously issued receipt intact. Valid locators retain their current behavior, and malformed locators, unavailable homes, home or store conflicts, and invalid receipts retain distinct refusals.",
+    "A behavioral test creates a Central-homed native relay mailbox shared with an enrolled satellite participant, changes the UUID tail in the mailbox locator for read and acknowledgement and in the message locator for exact message read, and verifies the same refusal and unchanged cursors. The original locators and unchanged issued receipt still work. The test asserts the refusal's status and typed reason, not its prose; no text-pinning test.",
+    "The independent review pair has no outstanding Medium or higher finding and the full gate passes on the exact committed tree."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,

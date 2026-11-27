@@ -1,0 +1,28 @@
+{
+  "id": "01a21c7c-3f3b-7990-aac6-0e850e5a4f00",
+  "external_ref": null,
+  "title": "Fence possible writes from newly discovered remote proxy transcript summaries",
+  "outcome": "Handle summary-only discovery of a local or unproven proxy whose remote turn may have written while checks were open.",
+  "acceptance": [
+    "When an admitted summary is the first observation of a newly created proxy with fresh transcript entries, possible local writes fence affected checks, while old historical hydration is handled consistently."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "engram",
+    "federation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

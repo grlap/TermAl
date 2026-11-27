@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "engram-data-divergent-planning-route-c-2026-11-27",
+    "revision_id": "70f33745ecdc4f61b31bbe1fbdcdeda0",
+    "previous": "f51c934652c34cb59432f27bfda2d8fe",
+    "body_sha256": "28f4cf0f0cea104bd70543e223a1dfe5adfcb16883e39bcb42ec49dfd35b3dc1",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-c39164e2c07b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T06:52:00.026207Z"
+    }
+  },
+  "body": "Recovery recipe, proven on TermAl's WinB on 2026-11-27 (Engram defect w-c39164e2c07b, route by Engram::Opus, approved by Engram::Fable).\n\nSymptom: ordinary import refuses with task_sync_divergent_planning on an item the LOCAL host REVISED. Cause: a reconciliation HOLD (reconciliation/holds.rs, ancestor_binding) in the same graph component makes import re-read the locally revised item. This is NOT a live claim: ordinary import does not read live claims (Engram::Fable, ebe242f7 #9006). Never release claims to try to clear it. Export refuses with task_sync_incremental_basis_unavailable because data HEAD isn't the admitted basis. Engram's printed set-aside remedy LOOPS in that state.\n\nROUTE C, which only moves forward:\n0. Capture read-only diagnostics: import --dry-run --json and the envelope.\n1. The item's holder saves `show <item> --full`.\n2. `git revert --no-edit <set-aside>`, if one was made.\n3. The holder revises the item back to its text at the basis commit.\n4. Run an ordinary import.\n5. The holder re-applies the saved revise exactly.\n6. Ordinary export, commit, confirm-import, a net check against the incoming tip (zero deletions, disclosure clean), HTTPS fast-forward push.\n\nNOT approved: a branch reset, export --rebuild, or releasing claims.\n\nCOMPLETION VARIANT (2026-11-27 06:46Z, WinB, w-7e7c completed locally): Route C does NOT apply, because a seal can't be revised back. Take the route from Engram::Opus (owner of w-c391) only. If its set-aside refuses, stop and wait for w-c391 (candidate aee7d7cf) to land and be installed on the affected host, then import and export normally. The completion stays sealed locally; nobody redoes it elsewhere.\n\nPrevention: until w-c391 lands, run criteria revises on Central, or sync before revising."
+}

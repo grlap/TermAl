@@ -1,0 +1,30 @@
+{
+  "id": "01a21c08-53e2-7e00-96ac-82e2bb4f0ff4",
+  "external_ref": null,
+  "title": "Agents mis-copy long relay mailbox locators (base64 JSON); give mailbox calls a form that is hard to corrupt and detects corruption",
+  "outcome": "An agent addressing a relay mailbox in read, acknowledge or read-message calls cannot silently reach a different or nonexistent mailbox by mis-copying part of the locator. Either the call accepts a short form scoped to the caller (for example, the listed mailbox id within the caller's own mailboxes) that is unambiguous, or a corrupted locator is detected as corrupted (for example, by an embedded check value) and refused with a message that names the caller's listed mailboxes it most closely matches.",
+  "acceptance": [
+    "A relay mailbox call that carries a locator differing from every mailbox listed for the caller is refused with one uniform, specific reason on the read, acknowledge and read-message routes. The reason states that the locator does not match any of the caller's mailboxes and points to the listed candidates, and it does not imply association loss.",
+    "A supported short or check-protected locator form lets an agent address its own listed relay mailbox without copying the full base64 JSON, with an exact resolution rule and refusal of ambiguous or forged forms. Existing full locators keep working.",
+    "Behavioural tests cover a locator altered in its mailbox UUID tail, the short or check-protected form, and ambiguity refusal. No text-pinning test. The independent review pair has no outstanding Medium or higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "agent-workflow",
+    "cross-machine",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
