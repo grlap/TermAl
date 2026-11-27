@@ -1,0 +1,30 @@
+{
+  "id": "01a21adf-94d4-7421-9121-c4a13cdf08cf",
+  "external_ref": null,
+  "title": "Test-run history projection validates or traverses session rows under StateInner during summary snapshot builds",
+  "outcome": "Test-run history projection validates or traverses session rows under StateInner during summary snapshot builds",
+  "acceptance": [
+    "The cost of test_run_history_projection_locked's per-session validation or traversal under StateInner during a summary snapshot build is established from source and a measurement on a representative state; if it holds the lock for 100 ms or more, its session inputs are captured as immutable rows (through the existing cut owner from w-7e7cc49528b9) and the traversal runs after release.",
+    "Tests show the materialized test-run overview and history projection are equal to the current implementation's for representative states, including cache-hit, cache-miss and concurrent-mutation cases; no text-pinning test.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
