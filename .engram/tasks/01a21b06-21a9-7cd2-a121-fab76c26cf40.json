@@ -1,0 +1,29 @@
+{
+  "id": "01a21b06-21a9-7cd2-a121-fab76c26cf40",
+  "external_ref": null,
+  "title": "WinB-to-Central native relay send returned 503 \"native mailbox relay response unavailable\" (outcome unknown) on the running Central build",
+  "outcome": "WinB-to-Central native relay send returned 503 \"native mailbox relay response unavailable\" (outcome unknown) on the running Central build",
+  "acceptance": [
+    "After Central runs a build that includes 11d1d110 (w-32ed: a definite relay writer-admission refusal instead of UNKNOWN), WinB-to-Central native relay sends are observed: either no 'response unavailable / outcome may be unknown' 503 recurs over the observation, or each recurrence's cause is identified from source and logs (home writer admission, link change, timeout or other).",
+    "If a cause other than writer admission remains, it is fixed so the sender gets a definite outcome, or the documented unknown outcome is shown to be unavoidable for that cause. A behavioural test covers the fixed path."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
