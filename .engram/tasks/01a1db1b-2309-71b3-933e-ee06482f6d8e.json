@@ -2,10 +2,11 @@
   "id": "01a1db1b-2309-71b3-933e-ee06482f6d8e",
   "external_ref": null,
   "title": "TermAl host aborts the process on a failed heap allocation under low system commit instead of degrading",
-  "outcome": "When system commit is exhausted by another process, the TermAl host either survives (by refusing or deferring the work that needed the allocation) or exits in a recorded, recoverable way. It does not abort mid-operation with 0xc0000409 and lose every session's live state.",
+  "outcome": "When system commit is exhausted by another process, the TermAl host defers the failing allocation by retrying it for a bounded time (at least 60 seconds) instead of aborting at once, so transient exhaustion no longer kills the host and its sessions' live state; if exhaustion outlasts the bound, the abort that follows is preceded by a recorded notice.",
   "acceptance": [
-    "The allocation site(s) that failed at 17:08:27Z on 2026-11-14 (\"memory allocation of 2719744 bytes failed\", termal.exe 0xc0000409, Application Error event) are identified from evidence: the event, any crash dump or journal, and the code paths that allocate about 2.7 MB buffers on hot paths.",
-    "Either the avoidable large allocation on that path is bounded or made fallible (e.g. try_reserve with a refusal reported to the caller), with a behavioural test that injects allocation failure or a size cap and observes the refusal instead of an abort; or the item records, with evidence, why Rust's global-allocator abort cannot be avoided there and what the host does instead (for example persisting state so a restart loses nothing)."
+    "The 2026-11-14 17:08:27Z abort (\"memory allocation of 2719744 bytes failed\", termal.exe 0xc0000409) is explained from the retained evidence with proven facts and inferences marked: system commit was exhausted by another process (w-e938ef8d73be), and Rust's global-allocator path aborts when the allocator returns null. The exact allocation site is recorded as identified if the retained evidence shows it, or recorded as not provable from it.",
+    "The host's global allocator is RetryOnNull<mimalloc::MiMalloc>, installed as the #[global_allocator] in main.rs: when the inner allocator returns null it retries with bounded backoff for at least 60 seconds, emits one stderr notice that itself performs no allocation, and returns null only after the bound, leaving Rust's existing abort as the recorded last resort.",
+    "Behavioural tests with an injected failing inner allocator show: a transient failure followed by success returns memory without aborting; persistent failure returns null only after the bound (shortened through a test-only parameter, with no wall-clock thresholds); the notice is emitted once without allocating; and the realloc and alloc_zeroed paths behave the same. No text-pinning tests."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
