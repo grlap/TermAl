@@ -1,0 +1,28 @@
+{
+  "id": "01a21b01-461f-7ff3-ad6b-c657ab129970",
+  "external_ref": null,
+  "title": "Align pending wake vocabulary across native relay pages and exact reads",
+  "outcome": "Align pending wake vocabulary across native relay pages and exact reads",
+  "acceptance": [
+    "A relay page and exact read describe the same pending wake consistently, including with a legacy home, or the public contract explicitly documents why their dispositions differ. Preserve known admissions and declines."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "federation",
+    "mailbox-relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a219c0-d85f-7a71-83e9-0d2af77bed60",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

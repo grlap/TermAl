@@ -1,0 +1,28 @@
+{
+  "id": "01a21b31-7317-7ff1-a445-f32a20ebec30",
+  "external_ref": null,
+  "title": "Cache-pruning test takes the summary cache under StateInner, against the projector lock order",
+  "outcome": "The deferred-snapshot cache-pruning test inspects the session summary cache only after its StateInner and projection-cache guards are released, matching the production lock order.",
+  "acceptance": [
+    "The cache-pruning test in src/tests/deferred_state_snapshot.rs clones the session summary projector handle in a scope that releases StateInner and the projection-cache guard, then locks the summary cache, so no test takes the summary cache under StateInner.",
+    "The test still checks that the cache is empty after the hidden or removed sessions are projected out."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 4,
+  "labels": [
+    "review-low",
+    "tests"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

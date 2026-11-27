@@ -1,0 +1,26 @@
+{
+  "id": "01a21b3d-0823-7252-9ab4-65212f12740d",
+  "external_ref": null,
+  "title": "Standalone registered launcher cannot take a clone-local user temp without inherited environment",
+  "outcome": "A runner can keep the documented standalone committed-input launcher form while using a validated, separate clone-local user temp for the launcher, Rust wrapper and non-Cargo stages, without user or global configuration changes.",
+  "acceptance": [
+    "A supported clone-local setting lets a bare registered full or focused launcher invocation select a separate repository-local user temp without an inline environment assignment, a shell wrapper, or a global configuration edit.",
+    "The launcher and its relevant preflights and stages honor the selected temp root, preserve existing temp-containment checks, and retain configured behavior for callers that use the environment variable.",
+    "Behavior tests cover the supported standalone invocation and show the selected directory is used without altering committed source identity."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

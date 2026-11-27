@@ -1,0 +1,28 @@
+{
+  "id": "01a21ae9-c4d9-7180-8985-551bcce1ce44",
+  "external_ref": null,
+  "title": "Cold-transcript trim liveness counts file-change tracking Arcs held by pending state cuts",
+  "outcome": "The cold-transcript trim decision tells a live watcher capture of a session's file-change tracking apart from a copy held only by a pending immutable state cut, so a pending cut no longer delays trimming.",
+  "acceptance": [
+    "The cold-transcript trim decision no longer reads Arc::strong_count of the record's file_change_tracking as evidence of a live watcher capture; a copy held only by a pending immutable state cut does not hold the session resident.",
+    "A test shows a session whose row is retained by a pending state cut, with no live capture and a closed grace window, is trimmed; and one with a live capture is still retried."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "performance",
+    "review-low"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

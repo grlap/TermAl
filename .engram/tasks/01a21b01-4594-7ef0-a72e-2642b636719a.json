@@ -1,0 +1,28 @@
+{
+  "id": "01a21b01-4594-7ef0-a72e-2642b636719a",
+  "external_ref": null,
+  "title": "Document native relay wake states in the general mailbox field reference",
+  "outcome": "Document native relay wake states in the general mailbox field reference",
+  "acceptance": [
+    "The agent-mailboxes field reference directs consumers to the native relay wake states. The native relay contract distinguishes immutable send receipts, current stored disposition, and exact-read target inspection."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "federation",
+    "mailbox-relay"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a219c0-d85f-7a71-83e9-0d2af77bed60",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
