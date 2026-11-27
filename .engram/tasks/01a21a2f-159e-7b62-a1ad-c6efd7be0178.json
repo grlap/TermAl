@@ -1,0 +1,30 @@
+{
+  "id": "01a21a2f-159e-7b62-a1ad-c6efd7be0178",
+  "external_ref": null,
+  "title": "Relay mailbox receipt ACK with the exact listed mailboxId returns 409 \"no saved native mailbox association for this exact mailboxId and caller\"",
+  "outcome": "Relay mailbox receipt ACK with the exact listed mailboxId returns 409 \"no saved native mailbox association for this exact mailboxId and caller\"",
+  "acceptance": [
+    "A participant that reads a native relay mailbox and receives an issued receipt can acknowledge that unchanged receipt with the same exact mailboxId. The read, the listing and the acknowledgement resolve the caller's association the same way.",
+    "If an acknowledgement is refused, the error names the actual cause. Examples: a caller identity that differs from the one that read the page (native vs domain principal), or a missing association with the identity it was looked up under. The error is not a generic association refusal for a mailboxId the same caller just read and listed.",
+    "A behavioural test reproduces read -> receipt -> acknowledge on a relay mailbox by a caller that is a participant there, under the same principal form as the reported case, and asserts the acknowledgement is accepted."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "cross-machine",
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

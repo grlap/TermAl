@@ -1,0 +1,29 @@
+{
+  "id": "01a21a5e-9932-74a0-acd1-408873de9a32",
+  "external_ref": null,
+  "title": "Federation fixture probe failure at 0 ms: on the first recurrence, tell the fixture preface-timeout race from an OS-level loopback connect failure",
+  "outcome": "Federation fixture probe failure at 0 ms: on the first recurrence, tell the fixture preface-timeout race from an OS-level loopback connect failure",
+  "acceptance": [
+    "On the first recurrence of the onboarding-probe transport failure (controlTaskDropped at 0 ms), or a deterministic reproduction, the preserved run's diagnostics (the RPC diagnostics from b35c79d1 and the preface-drop line from the w-2f9db62028e0 fix) identify which remaining candidate occurred: the fixture preface-timeout race or an OS/product loopback connect failure.",
+    "If the candidate is not one the w-2f9db62028e0 fix addresses, it is fixed where it lives, with a deterministic behaviour test, no wall-clock thresholds and no retries. If it is the addressed candidate, the item records why that fix did not hold, and fixes that."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "federation",
+    "follow-up",
+    "test-fixture"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
