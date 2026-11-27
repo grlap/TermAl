@@ -86,7 +86,9 @@ retry after reset",
         row["queuePauseReason"]["failureKind"],
         "provider_usage_limit"
     );
-    assert!(row["queuePauseReason"]["pausedAt"].is_string());
+    let paused_at = row["queuePauseReason"]["pausedAt"]
+        .as_str()
+        .expect("the listing shows when the queue paused");
     // The failure's one-line summary: its first line, with everything after
     // the key's label redacted.
     assert_eq!(
@@ -99,24 +101,30 @@ retry after reset",
         .append_mailbox_message_and_notify(&sender_id, send_request(&target_id, "pause-2"))
         .expect("the second wake is stored");
     assert_eq!(held.notification_disposition, "heldBehindPausedQueue");
-    let read = read_mailbox_message(
-        AxumPath((sender_id.clone(), held.message_id.clone())),
-        State(state.clone()),
-    )
-    .await
-    .expect("the sender reads its message")
-    .0;
-    let status = read
-        .current_status
-        .expect("an exact read has a current status");
-    let pause = status
-        .recipient_queue_pause
-        .expect("the held wake's sender sees why the queue is paused");
-    assert_eq!(pause.cause, QueuePauseCause::TurnFailed);
-    assert_eq!(
-        pause.failure_kind,
-        Some(TurnFailureKind::ProviderUsageLimit)
-    );
+    let read_held_message = || {
+        read_mailbox_message(
+            AxumPath((sender_id.clone(), held.message_id.clone())),
+            State(state.clone()),
+        )
+    };
+    for _ in 0..2 {
+        let read = read_held_message()
+            .await
+            .expect("the sender reads its message")
+            .0;
+        let status = read
+            .current_status
+            .expect("an exact read has a current status");
+        let pause = status
+            .recipient_queue_pause
+            .expect("each exact read shows why the recipient queue is paused");
+        assert_eq!(pause.cause, QueuePauseCause::TurnFailed);
+        assert_eq!(
+            pause.failure_kind,
+            Some(TurnFailureKind::ProviderUsageLimit)
+        );
+        assert_eq!(pause.paused_at, paused_at);
+    }
 
     // Resuming lifts the pause and its reason with it.
     {
@@ -127,6 +135,14 @@ retry after reset",
     let row = listed_row(&state, &target_id);
     assert_eq!(row["queuePaused"], false);
     assert!(row["queuePauseReason"].is_null());
+    let read = read_held_message()
+        .await
+        .expect("the sender reads its message")
+        .0;
+    let status = read
+        .current_status
+        .expect("an exact read has a current status");
+    assert!(status.recipient_queue_pause.is_none());
 }
 
 #[test]
