@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "legal-window-quiet-central-2026-11-27",
+    "revision_id": "4f0049c4a8bc40248b409154db7cc69d",
+    "previous": "414e49f829ae49b7b78b9d4502e49f2f",
+    "body_sha256": "e0828745f17f98b0cbb1267872fb8f8a442ad2e04d0eb4ffc4f83ff70eafd869",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T08:17:07.453533300Z"
+    }
+  },
+  "body": "Rule (Fable2, 2026-11-27, rev 2 ~08:17Z) on Greg's priority (Asistant #2938): Legal has ~8 cold -j1 builds of 20-45 min on Central. Legal asked for FV >= 30,000,000 KiB, but Central's idle baseline with NOTHING running is ~28.0-28.4M, so 30M can never be admitted (Opus2 #8226). Measured draw: S0 --lib ~1.7M, the heavier R-LIB8 test build ~5.1M.\n\nPER LEGAL BUILD (READY→END, which Legal sends to Opus2), per Fable2 #8227:\n1. Admission at FV >= 22,020,096, read at launch.\n2. No Central cargo during a build; Engram release builds run only in gaps Opus2 names.\n3. NEW LLM spawns are allowed during a build only while FV >= 25,165,824. A running pair half finishes, and the next half waits. One Engram pair at a time.\n4. FV < 15,728,640: tell Legal and Fable2, admit no new spawns or rows, kill nothing.\n5. Each build's END reports admission, lowest and END FV plus the active pair halves. If any lowest goes under 15.7M, the floor is withdrawn and re-ruled.\n\nREVIEW LOAD: WinB-held items keep their pairs on WinB. No new coding starts on Central. Central-queued pairs (e638 first, then a15b, w-2704, 55BC, c6ef) run between builds or within rule 3. w-c6efd7be0178 STAYS on Central (#8229), because WinB can't import Central's engram-data until w-c391 lands.\n\nLIMIT, told to Greg (#2940): the hard 30M is reachable only by Greg's levers (closing or moving resident Central sessions, or running Legal's builds on WinB)."
+}
