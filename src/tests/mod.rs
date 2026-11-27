@@ -27,6 +27,7 @@ mod acp_permission_modes;
 mod acp_tool_status;
 mod agent_commands;
 mod agent_readiness;
+mod alloc_retry;
 mod bounded_read_cleanup;
 mod bounded_read_cleanup_budget;
 mod bounded_read_process;
