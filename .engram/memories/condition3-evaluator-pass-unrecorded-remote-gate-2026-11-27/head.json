@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "condition3-evaluator-pass-unrecorded-remote-gate-2026-11-27",
+  "head": {
+    "state": "active",
+    "chain": [
+      "eaa9c869954245db90208cfaa4617f43"
+    ]
+  }
+}

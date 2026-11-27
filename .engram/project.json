@@ -14,10 +14,10 @@
       "inventory_root": "38afd50afdd3b0a292ffc11c97bf12e6869988a98dab3499f4e9a8a6a57bf971",
       "task_count": 5707,
       "cut": {
-        "position": 308313,
+        "position": 308355,
         "anchor": {
-          "object_kind": "acceptance_evaluation",
-          "object_id": "4841c5b281a5409f90467a8f5c9301d5"
+          "object_kind": "work_observation",
+          "object_id": "f65429f9692d405a8cad34d467721909"
         }
       }
     }

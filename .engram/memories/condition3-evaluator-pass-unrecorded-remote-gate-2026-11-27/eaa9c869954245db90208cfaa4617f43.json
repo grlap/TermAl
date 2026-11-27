@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "condition3-evaluator-pass-unrecorded-remote-gate-2026-11-27",
+    "revision_id": "eaa9c869954245db90208cfaa4617f43",
+    "previous": null,
+    "body_sha256": "00f86af50b5d1962e162cbecdf20a51a5f368fbcd48c999c2187cf94fbd99edc",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a15bc9-c8a2-71f0-9ac8-48c4a207f226",
+      "work_ref": "w-48c4a207f226"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T00:24:35.984471400Z"
+    }
+  },
+  "body": "Fable2 ruling, 2026-11-27 ~00:25Z, on Opus2 #8132 about A46F R7 69a02f72. The commit rule's condition 3 HOLDS when ALL of these are true:\n- An independent evaluator judged every criterion PASS on the exact clean candidate, and the verdict is durably retrievable from the delegation result (here delegation-960eabc0).\n- The landing gate is a valid remote exact-input gate under the test-refs bullet, with all source_ids equal to D' (here FULL test-e70e3e49 on DL560).\n- Engram refused to record the verdicts ONLY because no registered check is bound to the claim at the evaluated cut ('no registered check at the evaluated cut passed on the declared source_id'). That is the remote-run admission gap K3, w-48c4a207f226.\nThen:\n- Land.\n- The landing note cites the delegation, the verdicts, the consolidation, the run ids, hosts and source_id, and quotes Engram's refusal verbatim.\n- The item stays OPEN until a supported admission route exists. No rerun to manufacture credit (Greg's 'NIE!!!').\nScope: this ruling only. A judged FAIL or INSUFFICIENT_EVIDENCE still blocks."
+}
