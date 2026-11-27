@@ -1,0 +1,41 @@
+{
+  "id": "01a21ab2-8e76-7741-bdf7-41baf5ab0709",
+  "external_ref": null,
+  "title": "Expand boundary coverage for explicit prior committed-run admission",
+  "outcome": "Add behavioral coverage after the prior-committed route lands. Exercise invalid priorCommittedRunId values and incompatible request combinations through the API, actual MCP forwarding, an unheld requester, a current-fence run, a native prior receipt, and structurally valid dirty or distinct same-format source IDs. Keep missing or pending original-receipt cases fail-closed. Reuse any tests added by the parent correction and avoid assertions that pin message text.",
+  "acceptance": [
+    "Expand boundary coverage for explicit prior committed-run admission is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "check-credit",
+    "cross-project",
+    "greg-directed",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a218ee-ff40-7b62-aac5-d2f002382205",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [
+    {
+      "blocker_id": "01a21ab2-c369-71c3-bd58-86713fbaff85",
+      "kind": "manual",
+      "detail": "The explicit prior committed-run route is still unlanded. Resume this optional coverage item once the parent fix is on master.",
+      "created_by": {
+        "actor_id": "greg/codex",
+        "actor_kind": "agent"
+      },
+      "created_at": "2026-11-27T01:50:52.773188300Z"
+    }
+  ],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

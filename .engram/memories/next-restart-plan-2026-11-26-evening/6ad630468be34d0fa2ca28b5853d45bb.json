@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "next-restart-plan-2026-11-26-evening",
+    "revision_id": "6ad630468be34d0fa2ca28b5853d45bb",
+    "previous": "79f3777aa7b14eca9d74e71f3d32a7da",
+    "body_sha256": "803b7e7ca704d8a12e1e91b2272f15b1fe5f0a04a2d5ec44efdaf8327ce1c13d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T01:39:29.593731800Z"
+    }
+  },
+  "body": "Restart plan, revision 3 (Termal::Fable2, 2026-11-27 ~01:16Z).\nStatus: POSTPONED. At 00:53Z Greg was sent \"restart now\" for master 69a02f72, after Legal R-LIB8 ended and Central was quiet. He answered via Asistant #2903: „Nie mogę przez najbliższe kilka godzin.” The Central hold is lifted and all held work resumed.\nNot yet installed on the running Central build:\n- 22781ce1: w-3346 detach scan.\n- 641b9bc1: w-e12f.\n- 11d1d110: w-32ed, definite relay writer-admission refusal instead of UNKNOWN.\n- 69a02f72: w-a46f, one-line delivery row.\n- Later landings will add to this.\nNext attempt: when Greg says he is available.\n- Opus2 gives a fresh quiet check: no cargo, FULL, evaluator or reviewer child running on Central, including other projects' runs that are background children of TermAl sessions (for example Legal's).\n- Mail Engram::Fable 15 minutes before \"restart now\".\n- Hold spawns and landings from \"restart now\" until Greg says it's done.\n- Named roots are lost on restart (w-8f74); owners re-name them afterwards.\n- Engram's bd4b is a CLI change and needs no TermAl restart.\n\nUpdate (01:39Z): master is now f8560ab1f6d2607f596997e4a413ff8dde987969, which adds w-2f9d (listener preface deadline on the control clock, landed from WinB). The restart content is master f8560ab1 plus any later landings."
+}

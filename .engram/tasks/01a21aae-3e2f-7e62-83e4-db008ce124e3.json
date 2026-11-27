@@ -1,0 +1,28 @@
+{
+  "id": "01a21aae-3e2f-7e62-83e4-db008ce124e3",
+  "external_ref": null,
+  "title": "WinB cleanup residue after w-2f9d: two parent dirs and four .tmp JSON logs left when policy blocked the non-git removal",
+  "outcome": "The residue of the closed item w-2f9db62028e0 on WinB is removed through a route the execution policy allows, or a recorded decision keeps it.",
+  "acceptance": [
+    "On WinB, these are gone, removed through a route the automatic execution policy permits (no forced removal of live work), or kept under a recorded decision: C:\\GitHub\\Personal\\TermAl\\.worktrees\\c2f9d, C:\\GitHub\\Personal\\TermAl\\.worktrees\\c3f9d (each holding only .cargo\\config.toml after its r worktree was removed) and the four owned .tmp JSON logs of w-2f9d (including .tmp\\opuswinb-import2.json and .tmp\\opuswinb-import3.json).",
+    "The removal or the decision is recorded with the path, the time and the executor."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 3,
+  "labels": [
+    "cleanup",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
