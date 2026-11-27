@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "bara1-review-pair-only-on-spawn-now",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d37d6e1c578a41ddbe1681e68573082a"
+    ]
+  }
+}

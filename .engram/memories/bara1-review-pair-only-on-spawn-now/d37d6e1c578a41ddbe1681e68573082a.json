@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "bara1-review-pair-only-on-spawn-now",
+    "revision_id": "d37d6e1c578a41ddbe1681e68573082a",
+    "previous": null,
+    "body_sha256": "c67df7a04ea67ef311b68d025973ffbe553671b7b8a6cacafa434ea165de83c2",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T03:25:37.104774300Z"
+    }
+  },
+  "body": "Worker rule (Termal::BarA1, 2026-11-27 03:25Z; my own slip on w-270432962caf candidate a9d9d282, corrected by Opus2 #86).\nA dispatch that says \"run the review pair EARLY\" does NOT authorize spawning it. Review pairs run through the Central pair slot, one pair at a time, and start only on Opus2's named SPAWN NOW for that exact commit. When the candidate may still change (for example a new regression test that could fail and pull in a product fix), wait for the focused result first, since a failure changes the reviewed input. I spawned Codex and Claude reviewers right after READY-FOCUSED and had to cancel both about a minute later. After READY-FOCUSED, end the turn and wait."
+}

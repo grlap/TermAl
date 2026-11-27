@@ -1,0 +1,30 @@
+{
+  "id": "01a21b20-55e9-7160-94f3-089221790b26",
+  "external_ref": null,
+  "title": "Synchronous action responses and the stopped-mailbox fallback build a full StateResponse via snapshot_from_inner while holding StateInner",
+  "outcome": "Synchronous action responses and the stopped-mailbox fallback build a full StateResponse via snapshot_from_inner while holding StateInner",
+  "acceptance": [
+    "Every production path that builds a full StateResponse through snapshot_from_inner while holding StateInner is inventoried from source. That covers the synchronous action responses (session_config, project_environment, codex_thread_actions, session_crud, session_lifecycle, orchestrator_lifecycle, remote_create_proxies, remote_session_proxies, remote_routes, acceptance_settings, session_stop_idle_wait and any others) and the stopped-mailbox fallback in sse_broadcast. Each site either captures an immutable cut under its guard and materializes the response after release, through the existing immutable-cut owner, or is recorded with measured evidence that its hold stays under 100 ms on a representative state.",
+    "Tests show each converted response is equal to the current implementation's for representative states, and that response ordering relative to the action's state change, revision cuts and SSE ordering are unchanged; no text-pinning test.",
+    "The independent review pair has no outstanding Medium-or-higher finding and the full gate passes on the exact committed tree."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "greg-reported",
+    "performance",
+    "state-lock"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
