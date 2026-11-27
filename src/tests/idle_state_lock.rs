@@ -103,6 +103,7 @@ fn registered_history(count: usize) -> RunFixture {
                 validated_unbound: true,
                 monitoring_interrupted_at: None,
                 verification_record: None,
+                retired_check_disposition: None,
                 settlement_notice_undelivered: false,
             }
         });

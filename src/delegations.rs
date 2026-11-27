@@ -448,7 +448,7 @@ impl AppState {
         parent_session_id: &str,
         request: CreateDelegationRequest,
     ) -> Result<DelegationResponse, ApiError> {
-        self.create_delegation_with_evaluation_target(parent_session_id, request, None, None)
+        self.create_delegation_with_evaluation_target(parent_session_id, request, None, None, None)
     }
 
     /// The one creation path. `evaluation` is supplied only by the host's
@@ -460,6 +460,7 @@ impl AppState {
         request: CreateDelegationRequest,
         evaluation: Option<AcceptanceEvaluationTargetSeed>,
         rejected_selection: Option<&AcceptanceRejectedCheckSelection>,
+        retired_snapshot: Option<&AcceptanceRetiredCheckSnapshot>,
     ) -> Result<DelegationResponse, ApiError> {
         self.inner
             .lock()
@@ -682,6 +683,10 @@ impl AppState {
         self.invalidate_agent_readiness_cache();
         let _ = self.agent_readiness_snapshot();
 
+        #[cfg(test)]
+        if evaluation.is_some() {
+            acceptance_test_before_attempt_install(false);
+        }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let parent_index = inner
             .find_visible_session_index(&parent_session_id)
@@ -707,6 +712,11 @@ impl AppState {
         // still the project's, and no other evaluator of the task is active.
         if let Some(seed) = evaluation.as_ref() {
             acceptance_evaluation_spawn_admission_locked(&inner, &parent_session_id, seed)?;
+            if let Some(snapshot) = retired_snapshot {
+                snapshot
+                    .require_unchanged_locked(&inner)
+                    .map_err(|refusal| refusal.into_api_error(&seed.work_ref))?;
+            }
             if let Some(selection) = rejected_selection {
                 selection.require_unchanged_locked(&inner, &seed.work_ref)?;
             }

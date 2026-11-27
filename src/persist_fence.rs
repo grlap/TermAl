@@ -78,6 +78,10 @@ pub(crate) enum PersistFenceTarget {
     TestRunRegistration(TestRunRegistration),
     /// Verification replay custody requires the registration in committed SQLite.
     TestRunRegistrationReadback(TestRunRegistration),
+    RetiredCheckDisposition {
+        run_id: String,
+        receipt: AcceptanceRetiredCheckReceipt,
+    },
     TestRunObservation(Box<TestRunCommandObservation>),
     // Later terminal fields may change while the immutable start is flushed.
     DeclaredRunReservation(Box<DeclaredRunReservation>),
@@ -122,6 +126,25 @@ pub(crate) enum PersistFenceTarget {
         prompt_id: String,
         write_ahead: String,
     },
+}
+
+fn retired_check_disposition_in_metadata(
+    metadata: &PersistedState,
+    run_id: &str,
+    receipt: &AcceptanceRetiredCheckReceipt,
+) -> bool {
+    let matches =
+        |row: &TestRunRegistration| row.retired_check_disposition.as_ref() == Some(receipt);
+    metadata
+        .test_run_registrations
+        .get(run_id)
+        .is_some_and(matches)
+        || metadata
+            .test_run_compacted
+            .get(run_id)
+            .filter(|row| row.compacted)
+            .and_then(|row| row.registration.as_ref())
+            .is_some_and(matches)
 }
 
 impl PersistFenceTarget {
@@ -178,6 +201,9 @@ impl PersistFenceTarget {
                 .get(&expected.run_id)
                 .is_some_and(|actual| actual.matches_registration_snapshot(expected)),
             Self::TestRunRegistrationReadback(_) => false,
+            Self::RetiredCheckDisposition { run_id, receipt } => {
+                retired_check_disposition_in_metadata(&delta.metadata, run_id, receipt)
+            }
             Self::TestRunObservation(expected) => {
                 delta
                     .metadata
@@ -412,6 +438,16 @@ impl PersistFenceTarget {
                         },
                     ),
                 )
+            }
+            Self::RetiredCheckDisposition { run_id, receipt } => {
+                for field in ["testRunRegistrations", "testRunCompacted"] {
+                    if read_metadata_for_fence(connection, &[field])?.is_some_and(|metadata| {
+                        retired_check_disposition_in_metadata(&metadata, run_id, receipt)
+                    }) {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
             }
             Self::TestRunObservation(expected) => Ok(read_metadata_for_fence(
                 connection,

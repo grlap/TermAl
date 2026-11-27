@@ -675,6 +675,8 @@ impl PersistedState {
                     (id, registration)
                 })
                 .collect(),
+            pending_retired_check_receipts: HashMap::new(),
+            retired_check_note_writes: HashSet::new(),
             // The map is written with the metadata, but a card's transcript
             // row can be deferred to a later persist tick, so after a restart
             // the transcript is the authority: the flags are re-derived by the

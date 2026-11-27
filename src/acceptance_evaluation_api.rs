@@ -9,6 +9,24 @@
 
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_ACCEPTANCE_AFTER_RETIRED_REFERENCES: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+    pub(crate) static TEST_ACCEPTANCE_BEFORE_ATTEMPT_INSTALL: std::cell::RefCell<Option<Box<dyn FnOnce(bool)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn acceptance_test_before_attempt_install(reused: bool) {
+    TEST_ACCEPTANCE_BEFORE_ATTEMPT_INSTALL.with(|slot| {
+        let step = slot.borrow_mut().take();
+        if let Some(step) = step {
+            step(reused);
+        }
+    });
+}
+
 pub(crate) const TERMAL_EVALUATE_ACCEPTANCE_TOOL_NAME: &str = "termal_evaluate_acceptance";
 pub(crate) const TERMAL_EVALUATE_ACCEPTANCE_TOOL_DESCRIPTION: &str = "Ask TermAl to produce the acceptance evaluation an Engram task needs before it can be completed. Call this when the tracker refuses completion for a missing acceptance evaluation, or before `done` on a task that has acceptance criteria. Supply reuseDelegationId to explicitly prefer a previous eligible evaluator; omission preserves fresh spawning. Reuse permits at most three host-issued attempt keys and requires settled prior submission and brief delivery. Supply the task's workRef; agent (Claude or Codex) and model override the project's evaluator defaults. Supplying model requires an explicit agent; otherwise the request is refused before any tracker read. Without an agent default, a Claude/Codex parent prefers the other ready, nonblocking vendor, otherwise its own vendor. Other parents prefer ready, nonblocking Codex, then Claude, and fall back to Codex when neither is ready. TermAl reads the task and the project policy, selects the evaluation mode, and for an independent evaluation spawns a read-only evaluator child that records its verdicts in the tracker under its own identity: wait for it with termal_resume_after_delegations, then read the status or result for what was recorded. One evaluator runs per task: a request made while one is running is refused and names that delegation and its parent session, so wait on it or ask that session. For an undeclared same_session evaluation nothing is spawned and the returned brief tells you how to record it yourself. A complete owner source identity requires a persisted child attempt: a saved same_session preference falls back to another policy-admitted mode. A task pin or a same_session-only policy instead receives a refusal naming the required unpin or policy change.";
 pub(crate) const TERMAL_SUBMIT_ACCEPTANCE_EVALUATION_TOOL_NAME: &str =
@@ -29,11 +47,29 @@ pub(crate) const ACCEPTANCE_EVALUATION_SUBMIT_LABEL: &str = "acceptance-evaluati
 pub(crate) const ACCEPTANCE_EVALUATION_POLICY_READ_TIMEOUT: Duration = ENGRAM_MIN_CALL_TIMEOUT;
 pub(crate) const ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR: &str = "the project's tracker store changed since this evaluation was requested; request a new evaluation";
 
+fn require_acceptance_disposition_reader(
+    current: &WorkReadTarget,
+    recorded: Option<&WorkReadTarget>,
+) -> Result<(), ApiError> {
+    if let Some(recorded) = recorded {
+        if current.store != recorded.store {
+            return Err(ApiError::conflict(
+                ACCEPTANCE_EVALUATION_STORE_CHANGED_ERROR,
+            ));
+        }
+        if current != recorded {
+            return Err(ApiError::conflict(
+                "check disposition source authority changed",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Lock retry and its delay spend the same absolute operation budget.
 fn acceptance_evaluation_call_worst_case(timeout: Duration) -> Duration {
     timeout
 }
-
 // Optional notes and assessment continuations share two operation windows of
 // actual I/O time. Before each call, one complete window and the mandatory
 // tail must fit. Fast pages can share the phase; an issued call is never cut.
@@ -188,8 +224,8 @@ pub(crate) fn acceptance_evaluation_request_tool_definition() -> Value {
                 },
                 "model": { "type": "string", "description": "Evaluator model override. Requires an explicit agent so Auto cannot send a vendor-specific model to another vendor." },
                 "retiredCheckDispositions": {
-                    "type": "array", "maxItems": ACCEPTANCE_RETIRED_CHECKS_MAX,
-                    "description": "Explicitly exclude exact acknowledged checks on a retired root from this evaluation request admission. Each reason is recorded under your identity before the fresh evidence cut. The original result remains disclosed and earns no credit. Current-root checks cannot be excluded. Not carried to later evaluation requests; incompatible with reuseDelegationId.",
+                    "type": "array",
+                    "description": "Exclude exact acknowledged checks on retired roots from admission on this claim. Include all run IDs listed by registered_check_root_rebound. For registered_check_same_path_holder_required, ask the current holder to request evaluation with a confirmed binding. Each reason is recorded under your identity before the fresh evidence cut. Acknowledged exclusions carry to later requests on the same claim. The attributed note records the exclusion and any available result. The result is recorded as unknown when the original artifact is unavailable. Exclusions grant no verification credit. Current-root checks cannot be excluded. New dispositions require a fresh request without reuseDelegationId.",
                     "items": {"type": "object", "additionalProperties": false, "required": ["runId", "reason"],
                         "properties": {"runId": {"type": "string", "minLength": 1, "maxLength": 256},
                             "reason": {"type": "string", "minLength": 1, "maxLength": 1024}}}
@@ -983,6 +1019,7 @@ impl AppState {
         ) -> std::result::Result<Value, EngramTransportError>,
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
+        recorded_reader: Option<&WorkReadTarget>,
     ) -> Result<(), ApiError> {
         let target = {
             let inner = self.inner.lock().expect("state mutex poisoned");
@@ -990,6 +1027,7 @@ impl AppState {
                 .find_visible_session_index(parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let target = acceptance_evaluation_host_target_locked(&inner, parent_session_id)?;
+            require_acceptance_disposition_reader(&target, recorded_reader)?;
             if !inner.engram_work_naming_history.iter().any(|history| {
                 history.store == target.store
                     && history.transition.as_ref().is_some_and(|transition| {
@@ -1064,7 +1102,7 @@ impl AppState {
         now: impl Fn() -> std::time::Instant,
         automatic: bool,
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
-        validate_acceptance_retired_check_requests(&request.retired_check_dispositions)?;
+        validate_acceptance_check_requests(&request.retired_check_dispositions, "retired")?;
         if let Some(rejected) = &request.rejected_check_disposition {
             validate_acceptance_check_requests(std::slice::from_ref(rejected), "rejected")?;
             if request
@@ -1092,7 +1130,7 @@ impl AppState {
             deadline,
             &now,
             automatic,
-            &[],
+            None,
         )
     }
 
@@ -1111,7 +1149,7 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
         automatic: bool,
-        dispositions: &[AcceptanceRetiredCheckDisposition],
+        recorded_dispositions: Option<(&WorkReadTarget, &RecordedAcceptanceCheckDispositions)>,
     ) -> Result<AcceptanceEvaluationRequestResponse, ApiError> {
         let reuse =
             self.reserve_acceptance_evaluation_reuse(parent_session_id, &request, automatic)?;
@@ -1160,12 +1198,14 @@ impl AppState {
         let optional = AcceptanceOptionalEvidenceBudget(std::cell::Cell::new(
             ACCEPTANCE_OPTIONAL_EVIDENCE_BUDGET,
         ));
+        let recorded_reader = recorded_dispositions.map(|(reader, _)| reader);
         self.recover_acceptance_request_candidate_until(
             parent_session_id,
             &work_ref,
             &read,
             recovery_deadline,
             &now,
+            recorded_reader,
         )?;
         let (
             target,
@@ -1181,6 +1221,7 @@ impl AppState {
                 .find_visible_session_index(parent_session_id)
                 .ok_or_else(ApiError::local_session_missing)?;
             let target = acceptance_evaluation_host_target_locked(&inner, parent_session_id)?;
+            require_acceptance_disposition_reader(&target, recorded_reader)?;
             let mut held_connection = target.connection.clone();
             let record = &inner.sessions[index];
             let (actor_id, actor_context) =
@@ -1642,6 +1683,20 @@ impl AppState {
             &now,
         );
         let mut obligation_assessments = std::mem::take(&mut task.obligation_assessments);
+        // A receipt enters this cut only if it was already effective before the
+        // closing basis read. Its attributed note must then be covered by the
+        // same canonical bracket as the rest of the brief.
+        let retired_snapshot = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            engram_evaluation_source_root(
+                &inner.engram_work_source_roots,
+                &target.store,
+                requested_claim.as_ref(),
+                &task.work_ref,
+                task.canonical_work_id(),
+            )
+            .map(|root| AcceptanceRetiredCheckSnapshot::capture_locked(&inner, &target.store, root))
+        };
         // Request-local standing from the same closing canonical read, not a
         // separate executor mirror. Missing/null is unknown, not ineligibility.
         let mut closing_executor = None;
@@ -1852,7 +1907,7 @@ impl AppState {
         // (`acceptance_committed_input.rs`).
         if (!request.retired_check_dispositions.is_empty()
             || request.rejected_check_disposition.is_some())
-            && dispositions.is_empty()
+            && recorded_dispositions.is_none()
         {
             let recorded = self.record_acceptance_check_dispositions(
                 parent_session_id,
@@ -1866,8 +1921,8 @@ impl AppState {
                 deadline,
                 now,
             )?;
-            // The note changed the evidence basis. Discard every preliminary
-            // task/evidence read and judge a new fully bracketed cut.
+            // A new note or a re-confirmed receipt can change the evidence
+            // used for admission. Take one fresh bracket after recording.
             return self.prepare_acceptance_evaluation_with_dispositions_until(
                 parent_session_id,
                 request,
@@ -1875,9 +1930,11 @@ impl AppState {
                 deadline,
                 now,
                 automatic,
-                &recorded,
+                Some((&target, &recorded)),
             );
         }
+        let dispositions =
+            recorded_dispositions.map_or(&[][..], |(_, recorded)| recorded.disclosures.as_slice());
         self.validate_acceptance_check_dispositions(
             parent_session_id,
             connection,
@@ -1886,17 +1943,28 @@ impl AppState {
             source_root.as_ref(),
             dispositions,
         )?;
-        let (retired, rejected): (Vec<_>, Vec<_>) = dispositions
+        let (inline_retired, rejected): (Vec<_>, Vec<_>) = dispositions
             .iter()
             .partition(|row| row.rejected_source.is_none());
-        if !retired.is_empty() {
-            let rows = retired
-                .iter()
-                .map(|row| &row.disclosure)
-                .collect::<Vec<_>>();
-            selection_notice.push_str(&format!("Host-recorded retired check dispositions (context only, no verification credit):\n{}\n\n",
-                serde_json::to_string(&rows).map_err(|e| ApiError::internal(e.to_string()))?));
+        let retired_snapshot = source_root
+            .as_ref()
+            .map(|root| {
+                retired_snapshot
+                    .as_ref()
+                    .filter(|snapshot| &snapshot.root == root)
+                    .ok_or_else(|| {
+                        AcceptanceCommittedInputRefusal::RetiredChecksChanged
+                            .into_api_error(&task.work_ref)
+                    })
+            })
+            .transpose()?;
+        if let Some((_, recorded)) = recorded_dispositions {
+            recorded.require_unchanged(&task, source_root.as_ref(), retired_snapshot)?;
         }
+        let retired_references =
+            retired_snapshot.map_or_else(Vec::new, AcceptanceRetiredCheckSnapshot::references);
+        let retired_notices =
+            acceptance_retired_context_notices(&inline_retired, &retired_references)?;
         if let Some(row) = rejected.first() {
             selection_notice.push_str(&format!(
                 "Host-recorded rejected check disposition (context only, no verification credit):\n{}\n\n\
@@ -1904,6 +1972,12 @@ impl AppState {
                 row.disclosure
             ));
         }
+        #[cfg(test)]
+        TEST_ACCEPTANCE_AFTER_RETIRED_REFERENCES.with(|slot| {
+            if let Some(step) = slot.borrow_mut().take() {
+                step();
+            }
+        });
         let (committed_admission, rejected_selection) = self
             .require_acceptance_source_preflight_excluding(
                 parent_session_id,
@@ -1914,7 +1988,13 @@ impl AppState {
                 deadline,
                 &now,
                 dispositions,
+                retired_snapshot,
             )?;
+        if let Some(recorded_reader) = recorded_reader {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let current = acceptance_evaluation_host_target_locked(&inner, parent_session_id)?;
+            require_acceptance_disposition_reader(&current, Some(recorded_reader))?;
+        }
         self.validate_acceptance_check_dispositions(
             parent_session_id,
             connection,
@@ -2082,11 +2162,18 @@ impl AppState {
                 };
                 let brief_bytes = MAX_ACCEPTANCE_BRIEF_BYTES
                     .saturating_sub(header_bytes + selection_notice.len() + unfinished.len());
-                let base = build_acceptance_evaluator_brief_for_agent(
-                    &task,
-                    &evaluator_dir,
-                    agent,
+                let (base, retired_notice, brief_bytes) = acceptance_brief_with_retired_context(
                     brief_bytes,
+                    &retired_notices,
+                    |budget| {
+                        build_acceptance_evaluator_brief_for_agent(
+                            &task,
+                            &evaluator_dir,
+                            agent,
+                            budget,
+                        )
+                    },
+                    |brief| brief.prompt.len(),
                 )?;
                 // Assessments take only the room the finished brief leaves, or
                 // room that uncited evidence gives way for a names line.
@@ -2099,7 +2186,7 @@ impl AppState {
                         &mut obligation_assessments,
                         brief_bytes,
                     );
-                let prompt = format!("{selection_notice}{unfinished}{prompt}");
+                let prompt = format!("{selection_notice}{retired_notice}{unfinished}{prompt}");
                 let mut reuse_notice = None;
                 if let Some(reservation) = reuse.as_ref() {
                     let reason = self
@@ -2124,8 +2211,12 @@ impl AppState {
                         }
                         reuse_notice = Some(format!("A fresh evaluator was selected: {reason}."));
                     } else {
-                        let brief =
-                            self.install_reused_acceptance_evaluation(reservation, seed, prompt)?;
+                        let brief = self.install_reused_acceptance_evaluation(
+                            reservation,
+                            seed,
+                            prompt,
+                            retired_snapshot,
+                        )?;
                         self.offer_acceptance_evaluation_brief(reservation, &brief)?;
                         let delegation =
                             self.delegation_response_from_state(&reservation.previous.id)?;
@@ -2165,6 +2256,7 @@ impl AppState {
                     // active evaluator of this task, under its own lock.
                     Some(seed),
                     rejected_selection.as_ref(),
+                    retired_snapshot,
                 )?;
                 let notice = acceptance_evaluation_notices([
                     self.acceptance_evaluation_open_write_notice(
@@ -2222,6 +2314,11 @@ impl AppState {
                 task.judged_workspace = judged_workspace;
                 {
                     let inner = self.inner.lock().expect("state mutex poisoned");
+                    if let Some(snapshot) = retired_snapshot {
+                        snapshot
+                            .require_unchanged_locked(&inner)
+                            .map_err(|refusal| refusal.into_api_error(&task.work_ref))?;
+                    }
                     if let Some(selection) = &rejected_selection {
                         selection.require_unchanged_locked(&inner, &task.work_ref)?;
                     }
@@ -2254,10 +2351,17 @@ impl AppState {
                 }
                 let unmeasured = unmeasured(&source_fingerprint);
                 let brief_bytes = MAX_ACCEPTANCE_BRIEF_BYTES.saturating_sub(selection_notice.len());
-                let base = build_same_session_acceptance_brief_with_plan(
-                    &task,
-                    source_fingerprint.as_deref(),
+                let (base, retired_notice, brief_bytes) = acceptance_brief_with_retired_context(
                     brief_bytes,
+                    &retired_notices,
+                    |budget| {
+                        build_same_session_acceptance_brief_with_plan(
+                            &task,
+                            source_fingerprint.as_deref(),
+                            budget,
+                        )
+                    },
+                    |brief| brief.0.len(),
                 )?;
                 let (brief, cuts) = acceptance_same_session_brief_with_obligations(
                     &task,
@@ -2266,7 +2370,7 @@ impl AppState {
                     &mut obligation_assessments,
                     brief_bytes,
                 );
-                let brief = format!("{selection_notice}{brief}");
+                let brief = format!("{selection_notice}{retired_notice}{brief}");
                 Ok(AcceptanceEvaluationRequestResponse::SameSession {
                     mode,
                     brief,

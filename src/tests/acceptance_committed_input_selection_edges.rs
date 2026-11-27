@@ -246,7 +246,7 @@ fn a_running_result_before_input_capture_does_not_supersede_a_terminal_pass() {
     assert_eq!(sighting_reads(&transport), 0);
 }
 
-fn retain_registration(state: &AppState, newer: &TestRunRegistration) {
+pub(super) fn retain_registration(state: &AppState, newer: &TestRunRegistration) {
     state.refresh_test_runs();
     {
         let mut inner = state.inner.lock().unwrap();

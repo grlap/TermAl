@@ -97,6 +97,10 @@ pub(crate) struct TestRunRegistration {
     // informational mirror and never stands in for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) verification_record: Option<TestRunVerificationAck>,
+    // An acknowledged exclusion for acceptance admission only. It follows
+    // the original registration into compacted history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) retired_check_disposition: Option<AcceptanceRetiredCheckReceipt>,
     // The Settled record's notice was put in the owning session's pending
     // lines, which live in memory only, and no accepted prompt has carried
     // it yet; a load presents it again (src/engram_received_check_notice.rs).
@@ -115,6 +119,8 @@ impl TestRunRegistration {
     pub(crate) fn matches_registration_snapshot(&self, expected: &Self) -> bool {
         let mut identity = self.clone();
         identity.settlement_notice_undelivered = expected.settlement_notice_undelivered;
+        // This note does not change registration or verification identity.
+        identity.retired_check_disposition = expected.retired_check_disposition.clone();
         if expected.native_completion.is_some() {
             return &identity == expected;
         }
@@ -1130,6 +1136,7 @@ impl AppState {
                 validated_unbound: project.engram.is_none(),
                 monitoring_interrupted_at: None,
                 verification_record: None,
+                retired_check_disposition: None,
                 settlement_notice_undelivered: false,
             };
             if let Some(compacted) = inner.test_run_compacted.get(&request.run_id) {

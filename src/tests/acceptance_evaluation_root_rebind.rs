@@ -14,7 +14,7 @@ mod retired_check_disposition;
 #[path = "acceptance_retired_check_audit.rs"]
 mod retired_check_audit;
 
-/// Arrange the completed second naming and publish its canonical proof.
+/// Arrange the next completed naming and publish its canonical proof.
 /// The registration is deliberately untouched: its root is historical fact.
 fn rename_same_workspace(state: &AppState, parent: &str, store: &EngramAuthorityStoreKey) {
     rename_same_workspace_with_binding(state, parent, store, named_parent_binding());
@@ -29,15 +29,14 @@ fn rename_same_workspace_with_binding(
     let entry = {
         let mut inner = state.inner.lock().unwrap();
         let entry = &mut inner.engram_work_source_roots[0];
-        assert_eq!(entry.generation, 1);
-        entry.generation = 2;
+        entry.generation += 1;
         entry.claim_fence = binding.claim_fence;
-        entry.named_at = "2026-09-27T00:01:00.000Z".into();
+        entry.named_at = format!("2026-09-27T00:{:02}:00.000Z", entry.generation - 1);
         let entry = entry.clone();
         let index = inner.find_session_index(parent).unwrap();
         inner.sessions[index].engram.named_root = Some(EngramNamedRootState::Bound {
             workspace_id: entry.root,
-            generation: 2,
+            generation: i64::try_from(entry.generation).expect("fixture generation fits i64"),
             named_at: entry.named_at,
         });
         inner.sessions[index].engram.work_binding = Some(binding.clone());
@@ -45,16 +44,21 @@ fn rename_same_workspace_with_binding(
     };
     // Supply the new naming's canonical read explicitly. Registration can
     // retain other historical reads, including an unbound proof at index 0.
+    let event = if entry.generation == 2 {
+        "fixture-renamed-event".to_owned()
+    } else {
+        format!("fixture-renamed-event-{}", entry.generation)
+    };
     let proof: EngramNamedRootReadResponse = serde_json::from_value(json!({
         "project_id":store.project_id,"work_id":binding.work_id,"run_id":binding.run_id,
         "claim_id":binding.claim_id,"root_execution_id":binding.root_execution_id,
         "run":{"state":"open","generation":2},
         "named_root":{"state":"bound","workspace_id":entry.root,
-            "generation":2,"named_at":entry.named_at},
-        "latest_event":{"event":"fixture-renamed-event",
-            "position":{"feed":{"kind":"run_execution","id":binding.run_id},"position":2},
-            "kind":"bound","workspace_id":entry.root,"generation":2,"named_at":entry.named_at},
-        "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},"position":2}
+            "generation":entry.generation,"named_at":entry.named_at},
+        "latest_event":{"event":event,
+            "position":{"feed":{"kind":"run_execution","id":binding.run_id},"position":entry.generation},
+            "kind":"bound","workspace_id":entry.root,"generation":entry.generation,"named_at":entry.named_at},
+        "read_cut":{"feed":{"kind":"run_execution","id":binding.run_id},"position":entry.generation}
     }))
     .unwrap();
     let owner = state

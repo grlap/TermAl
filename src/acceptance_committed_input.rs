@@ -57,6 +57,10 @@ thread_local! {
     // Counts the runs' results files the decision reads on this thread.
     pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_RESULTS_READS: std::cell::Cell<usize> =
         const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_BODY_READS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+    pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_AFTER_CENSUS_OUTCOME: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
     // A test changes a result between the start scan and terminal selection.
     pub(crate) static TEST_ACCEPTANCE_COMMITTED_INPUT_BEFORE_SELECTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
@@ -90,8 +94,12 @@ pub(crate) enum AcceptanceCommittedInputDecision {
 pub(crate) enum AcceptanceCommittedInputRefusal {
     /// An acknowledged check belongs to a different name of this claim's root.
     RootRebound {
-        run_id: String,
-        checked: TestRunNamedRoot,
+        checks: Vec<(String, TestRunNamedRoot)>,
+        current: TestRunNamedRoot,
+    },
+    /// An older same-path run requires the holder's authority to resolve.
+    SamePathHolderRequired {
+        checks: Vec<(String, TestRunNamedRoot)>,
         current: TestRunNamedRoot,
     },
     /// The owner cannot establish the named root as clean at a commit.
@@ -135,6 +143,8 @@ pub(crate) enum AcceptanceCommittedInputRefusal {
     /// The tracker, the named root or the admitting run changed while it was
     /// checked.
     Changed,
+    /// A retired exclusion changed since this request bracketed its evidence.
+    RetiredChecksChanged,
     /// The check could not finish: the claim's registrations held more runs
     /// than one request reads without finding a deciding result, a newer
     /// run's results cannot be classified coherently, or the
@@ -147,6 +157,7 @@ impl AcceptanceCommittedInputRefusal {
     pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::RootRebound { .. } => "registered_check_root_rebound",
+            Self::SamePathHolderRequired { .. } => "registered_check_same_path_holder_required",
             Self::NotClean => "committed_input_not_clean",
             Self::NativeLocalChanges { .. } => "native_input_local_changes",
             Self::NoEligibleRun { .. } => "committed_input_no_eligible_run",
@@ -158,22 +169,38 @@ impl AcceptanceCommittedInputRefusal {
             Self::RejectedCheckEvidenceMismatch { .. } => "rejected_check_evidence_mismatch",
             Self::UnclassifiedStages { .. } => "verification_record_unclassified_stages",
             Self::Changed => "committed_input_changed",
+            Self::RetiredChecksChanged => "committed_input_retired_checks_changed",
             Self::ScanIncomplete => "committed_input_scan_incomplete",
         }
     }
 
     pub(crate) fn into_api_error(self, work_ref: &str) -> ApiError {
         let detail = match &self {
-            Self::RootRebound {
-                run_id,
-                checked,
-                current,
-            } => format!(
-                "registered check {run_id} for `{work_ref}` belongs to root `{}` generation {}; \
-                 the current root is `{}` generation {}. Run a new registered check in the \
-                 current root, then request evaluation again",
-                checked.workspace_id, checked.generation, current.workspace_id, current.generation,
-            ),
+            Self::RootRebound { checks, current }
+            | Self::SamePathHolderRequired { checks, current } => {
+                let runs = checks
+                    .iter()
+                    .map(|(run_id, checked)| {
+                        format!(
+                            "registered check {run_id} on root `{}` generation {}",
+                            checked.workspace_id, checked.generation,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let remedy = if matches!(&self, Self::SamePathHolderRequired { .. }) {
+                    "Ask the current claim holder to request evaluation using their confirmed binding \
+                     or to run a new registered check in the current root before requesting again"
+                } else {
+                    "Name the blocking run IDs with reasons in retiredCheckDispositions, \
+                     or run a new registered check in the current root and request evaluation again"
+                };
+                format!(
+                    "retired checks block evaluation of `{work_ref}`: {runs}. The current root is `{}` \
+                     generation {}. {remedy}",
+                    current.workspace_id, current.generation,
+                )
+            }
             Self::NotClean => format!(
                 "`{work_ref}`'s named source root is not clean at a commit; commit or remove \
                  its changes, run the gate on that commit, and request again"
@@ -240,6 +267,9 @@ impl AcceptanceCommittedInputRefusal {
             Self::Changed => format!(
                 "`{work_ref}`'s named source root or its committed-input run changed during \
                  the check; request again"
+            ),
+            Self::RetiredChecksChanged => format!(
+                "`{work_ref}`'s effective retired-check exclusions changed during evidence capture; request a fresh acceptance evaluation"
             ),
             Self::ScanIncomplete => format!(
                 "the committed-input check of `{work_ref}` did not finish: its claim has more \
@@ -600,6 +630,8 @@ pub(crate) fn acceptance_committed_input_record_acknowledged(
             return Err(unacknowledged(state));
         }
     };
+    #[cfg(test)]
+    TEST_ACCEPTANCE_COMMITTED_INPUT_BODY_READS.with(|reads| reads.set(reads.get() + 1));
     let Some(frozen) = engram_verification_record_frozen(run_dir, run_id) else {
         return Err(unacknowledged(
             "acknowledged, but its frozen body cannot be read back".to_owned(),
@@ -658,6 +690,16 @@ impl AcceptanceCurrentClaim {
     /// Recovery changes the claim's fence, not the identity that named the root.
     fn same_claim(&self, entry: &EngramWorkSourceRoot) -> bool {
         entry.claim_id == self.claim_id
+    }
+
+    pub(crate) fn can_dispose_same_path(&self, entry: &EngramWorkSourceRoot) -> bool {
+        self.same_claim(entry)
+            && self.claim_fence >= entry.claim_fence
+            && self.binding.as_ref().is_some_and(|binding| {
+                binding.work_id == entry.work_id
+                    && binding.claim_id == entry.claim_id
+                    && binding.claim_fence == self.claim_fence
+            })
     }
 }
 
@@ -756,7 +798,7 @@ fn acceptance_committed_registration_order(
         .then_with(|| left.run_id.cmp(&right.run_id))
 }
 
-fn acceptance_published_registrations<'a>(
+pub(crate) fn acceptance_published_registrations<'a>(
     inner: &'a StateInner,
     indexed: &'a HashSet<&'a str>,
 ) -> impl Iterator<Item = &'a TestRunRegistration> + Clone {
@@ -805,10 +847,12 @@ impl AcceptanceRejectedCheckSelection {
                 acceptance_committed_candidate(row, &self.store, entry, self.claim.as_ref())
             })
             .filter(|row| {
-                !self
-                    .retired
-                    .iter()
-                    .any(|old| acceptance_committed_input_registration_unchanged(old, row))
+                acceptance_effective_retired_check_receipt(inner, row, &self.store, &self.root)
+                    .is_none()
+                    && !self
+                        .retired
+                        .iter()
+                        .any(|old| acceptance_committed_input_registration_unchanged(old, row))
             })
             .all(|row| {
                 count += 1;
@@ -894,6 +938,7 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
         dispositions: &[AcceptanceRetiredCheckDisposition],
+        retired_snapshot: Option<&AcceptanceRetiredCheckSnapshot>,
     ) -> Result<
         (
             Option<AcceptanceCommittedInputAdmission>,
@@ -912,6 +957,7 @@ impl AppState {
                 deadline,
                 now,
                 dispositions,
+                retired_snapshot,
                 rejected.map(|d| &d.registration),
                 false,
             )
@@ -994,7 +1040,9 @@ impl AppState {
     /// `deadline` (as `now` tells the time); Git reads the root under the
     /// same deadline. Selection re-reads started and pending candidates, so
     /// a pending run that has since finished decides in the same order.
-    /// Unknown results before the selected terminal result, an exhausted
+    /// If a commit-only predecessor already refused admission, the refused
+    /// history can be read beyond the bound to enumerate disposition targets.
+    /// That census can never admit a run. Unknown results before the selected terminal result, an exhausted
     /// truncated scan, or an expired deadline refuse as `ScanIncomplete`.
     /// Only a complete scan of coherent never-started runs selects `Legacy`.
     #[allow(clippy::too_many_arguments)]
@@ -1018,6 +1066,7 @@ impl AppState {
             now,
             &[],
             None,
+            None,
             false,
         )
         .map(|(decision, _)| decision)
@@ -1034,6 +1083,7 @@ impl AppState {
         deadline: std::time::Instant,
         now: &impl Fn() -> std::time::Instant,
         dispositions: &[AcceptanceRetiredCheckDisposition],
+        retired_snapshot: Option<&AcceptanceRetiredCheckSnapshot>,
         rejected: Option<&TestRunRegistration>,
         defer_source_recheck: bool,
     ) -> Result<
@@ -1068,13 +1118,7 @@ impl AppState {
                 )
                 .is_some_and(|entry| claim.is_none_or(|claim| claim.same_claim(entry)))
         };
-        let excluded = |row: &TestRunRegistration| {
-            dispositions.iter().any(|d| {
-                d.rejected_source.is_none()
-                    && acceptance_committed_input_registration_unchanged(&d.registration, row)
-            })
-        };
-        let (candidates, rebound) = {
+        let (candidates, rebound, can_dispose_same_path) = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             if !current(&inner) {
                 return Ok((Decision::Legacy, None));
@@ -1087,13 +1131,29 @@ impl AppState {
             ) else {
                 return Ok((Decision::Legacy, None));
             };
+            if let Some(snapshot) = retired_snapshot {
+                snapshot.require_unchanged_locked(&inner)?;
+            }
             let indexed = test_run_indexed_ids(&inner.test_runs);
+            let excluded = |row: &TestRunRegistration| {
+                if let Some(snapshot) = retired_snapshot {
+                    return snapshot.excludes(&row.run_id);
+                }
+                acceptance_effective_retired_check_receipt(&inner, row, store, root).is_some()
+                    || dispositions.iter().any(|d| {
+                        d.rejected_source.is_none()
+                            && acceptance_committed_input_registration_unchanged(
+                                &d.registration,
+                                row,
+                            )
+                    })
+            };
             let registrations =
                 acceptance_published_registrations(&inner, &indexed).filter(|row| !excluded(row));
             // Filtering by the new name must not erase an acknowledged check
             // and turn it into a legacy request. A current-name run still has
             // its ordinary admission rules; this guard only closes fallback.
-            let rebound = registrations
+            let mut rebound = registrations
                 .clone()
                 .filter(|registration| {
                     registration.authority_store.as_ref() == Some(store)
@@ -1114,24 +1174,12 @@ impl AppState {
                                 ) && ack.body_digest().is_some()
                             })
                 })
-                .max_by(|a, b| {
-                    a.registered_at
-                        .cmp(&b.registered_at)
-                        .then_with(|| b.run_id.cmp(&a.run_id))
-                })
-                .and_then(|registration| {
-                    registration
-                        .named_root
-                        .as_ref()
-                        .map(|checked| Refusal::RootRebound {
-                            run_id: registration.run_id.clone(),
-                            checked: checked.clone(),
-                            current: TestRunNamedRoot {
-                                workspace_id: entry.root.clone(),
-                                generation: entry.generation,
-                            },
-                        })
-                });
+                .collect::<Vec<_>>();
+            rebound.sort_by(|a, b| acceptance_committed_registration_order(a, b));
+            let rebound = rebound
+                .into_iter()
+                .filter_map(|row| Some((row.run_id.clone(), row.named_root.clone()?)))
+                .collect::<Vec<_>>();
             let mut candidates = registrations
                 .filter(|registration| {
                     acceptance_committed_candidate(registration, store, entry, claim)
@@ -1142,7 +1190,26 @@ impl AppState {
             // finish in another order. Engram rechecks its newest result at
             // evaluation submission and completion.
             candidates.sort_by(acceptance_committed_registration_order);
-            (candidates, rebound)
+            (
+                candidates,
+                rebound,
+                claim.is_some_and(|claim| claim.can_dispose_same_path(entry)),
+            )
+        };
+        let rebound_refusal = |checks: Vec<(String, TestRunNamedRoot)>| {
+            let current = TestRunNamedRoot {
+                workspace_id: root.root.clone(),
+                generation: root.generation,
+            };
+            if !can_dispose_same_path
+                && checks.iter().any(|(_, checked)| {
+                    checked.workspace_id == root.root && checked.generation < root.generation
+                })
+            {
+                Refusal::SamePathHolderRequired { checks, current }
+            } else {
+                Refusal::RootRebound { checks, current }
+            }
         };
         // Only a run that started on a clean checkout selects the committed
         // flow; a refused or never-started one leaves the task where it was.
@@ -1158,10 +1225,11 @@ impl AppState {
         let mut scanned = 0;
         let mut observed = Vec::new();
         let mut any_started = false;
-        for registration in candidates {
-            if scanned == ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX || now() >= deadline {
+        let mut candidates = candidates.into_iter();
+        while scanned < ACCEPTANCE_COMMITTED_INPUT_CANDIDATES_MAX && now() < deadline {
+            let Some(registration) = candidates.next() else {
                 break;
-            }
+            };
             scanned += 1;
             let start = acceptance_registered_input_start(&registration);
             if start != AcceptanceCommittedInputRunStart::NotStarted {
@@ -1173,10 +1241,13 @@ impl AppState {
             // The legacy flow only when every matching run was read and each
             // was shown never to have started; an incomplete scan, or a run
             // whose results show neither, never decides it.
-            return if scanned == total && observed.is_empty() {
-                rebound.map_or(Ok((Decision::Legacy, None)), Err)
+            if scanned != total || !observed.is_empty() {
+                return Err(Refusal::ScanIncomplete);
+            }
+            return if rebound.is_empty() {
+                Ok((Decision::Legacy, None))
             } else {
-                Err(Refusal::ScanIncomplete)
+                Err(rebound_refusal(rebound))
             };
         }
         let source = match self.acceptance_judged_clean_source(
@@ -1202,14 +1273,20 @@ impl AppState {
                 step();
             }
         });
-        for (registration, start) in observed {
+        let mut observed = observed.into_iter();
+        let mut skipped_newer = false;
+        while let Some((registration, start)) = observed.next() {
             if now() >= deadline {
                 return Err(Refusal::ScanIncomplete);
             }
             if start == AcceptanceCommittedInputRunStart::Unknown {
                 return Err(Refusal::ScanIncomplete);
             }
-            let admits = match acceptance_registered_input_outcome(&registration, &source)? {
+            let outcome = acceptance_registered_input_outcome(&registration, &source);
+            if now() >= deadline {
+                return Err(Refusal::ScanIncomplete);
+            }
+            let admits = match outcome? {
                 Outcome::Terminal(admits) => admits,
                 Outcome::Pending
                     if rejected.is_some_and(|requested| {
@@ -1220,7 +1297,10 @@ impl AppState {
                         run_id: registration.run_id,
                     });
                 }
-                Outcome::Pending | Outcome::NotApplicable => continue,
+                Outcome::Pending | Outcome::NotApplicable => {
+                    skipped_newer = true;
+                    continue;
+                }
             };
             if !admits {
                 return Err(Refusal::NoEligibleRun { commit });
@@ -1277,14 +1357,84 @@ impl AppState {
                     .as_ref()
                     .filter(|checked| checked.generation < root.generation)
             {
-                return Err(Refusal::RootRebound {
-                    run_id: registration.run_id.clone(),
-                    checked: checked.clone(),
-                    current: TestRunNamedRoot {
-                        workspace_id: root.root.clone(),
-                        generation: root.generation,
-                    },
+                let mut checks = vec![(registration.run_id, checked.clone())];
+                // Admission is already refused. Enumerate the blockers in
+                // selection order, including beyond the ordinary admission
+                // limit, without admitting any run from this extended scan.
+                // A skipped newer candidate still prevents legacy fallback.
+                let mut remaining_started = skipped_newer;
+                let older_candidates = candidates.map(|older| {
+                    let start = if now() < deadline {
+                        acceptance_registered_input_start(&older)
+                    } else {
+                        AcceptanceCommittedInputRunStart::Unknown
+                    };
+                    (older, start)
                 });
+                for (older, start) in observed.chain(older_candidates) {
+                    if now() >= deadline {
+                        return Err(Refusal::ScanIncomplete);
+                    }
+                    if start == AcceptanceCommittedInputRunStart::NotStarted {
+                        continue;
+                    }
+                    if start == AcceptanceCommittedInputRunStart::Unknown {
+                        remaining_started = true;
+                        break;
+                    }
+                    match acceptance_registered_input_outcome(&older, &source) {
+                        Ok(Outcome::Pending | Outcome::NotApplicable) => {
+                            remaining_started = true;
+                            continue;
+                        }
+                        Ok(Outcome::Terminal(true)) => {
+                            #[cfg(test)]
+                            TEST_ACCEPTANCE_COMMITTED_INPUT_AFTER_CENSUS_OUTCOME.with(|slot| {
+                                if let Some(step) = slot.borrow_mut().take() {
+                                    step();
+                                }
+                            });
+                        }
+                        _ => {
+                            remaining_started = true;
+                            break;
+                        }
+                    }
+                    let Some(checked) = older
+                        .named_root
+                        .as_ref()
+                        .filter(|checked| checked.generation < root.generation)
+                    else {
+                        remaining_started = true;
+                        break;
+                    };
+                    if now() >= deadline {
+                        return Err(Refusal::ScanIncomplete);
+                    }
+                    match acceptance_committed_input_record_acknowledged(&older, &commit) {
+                        Ok(body)
+                            if !matches!(
+                                body.input,
+                                EngramVerificationRecordInput::SourceId { .. }
+                            ) =>
+                        {
+                            checks.push((older.run_id, checked.clone()));
+                        }
+                        _ => {
+                            remaining_started = true;
+                            break;
+                        }
+                    }
+                }
+                if now() >= deadline {
+                    return Err(Refusal::ScanIncomplete);
+                }
+                if !remaining_started {
+                    // With all of those predecessors excluded the legacy
+                    // fallback also needs every other acknowledged old root.
+                    checks = rebound;
+                }
+                return Err(rebound_refusal(checks));
             }
             admitting = Some(registration);
             break;

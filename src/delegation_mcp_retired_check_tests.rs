@@ -2,8 +2,16 @@ use super::*;
 
 #[test]
 fn retired_check_disposition_crosses_the_real_evaluation_post_without_replay() {
+    let dispositions = (1..=6)
+        .map(|n| {
+            json!({
+                "runId": format!("test-old-{n}"),
+                "reason": "The old worktree was retired."
+            })
+        })
+        .collect::<Vec<_>>();
     let expected = json!({"workRef":"work", "agent":"Codex",
-        "retiredCheckDispositions":[{"runId":"test-old", "reason":"The old worktree was retired."}]});
+        "retiredCheckDispositions":dispositions});
     let wire = expected.clone();
     let (url, requests, server) = spawn_test_mcp_http_server(1, move |request| {
         assert_eq!(request.method, "POST");
@@ -53,7 +61,7 @@ fn retired_check_request_is_closed_and_refuses_invalid_selections() {
             "workRef":"work", "retiredCheckDispositions":entries}))
         .unwrap();
         assert!(
-            validate_acceptance_retired_check_requests(&request.retired_check_dispositions)
+            validate_acceptance_check_requests(&request.retired_check_dispositions, "retired")
                 .is_err()
         );
     }

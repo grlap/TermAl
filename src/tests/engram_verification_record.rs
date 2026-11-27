@@ -262,6 +262,7 @@ fn record_run(fixture: &RunFixture, run_id: &str, request: Value, results: Value
         validated_unbound: false,
         monitoring_interrupted_at: None,
         verification_record: None,
+        retired_check_disposition: None,
         settlement_notice_undelivered: false,
     };
     RecordRun {

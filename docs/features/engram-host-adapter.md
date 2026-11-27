@@ -2304,25 +2304,45 @@ and the [API table](../architecture.md).
 **Request.** `termal_evaluate_acceptance`, or
 `POST /api/sessions/{id}/acceptance-evaluations` with
 `{ "workRef", "agent"?, "model"?, "criterionEvidence"?, "retiredCheckDispositions"?, "rejectedCheckDisposition"? }`.
-An explicit fresh request may include up to four retired-check dispositions,
-each `{ "runId": "test-…", "reason": "…" }`. These apply only to exact,
+The `registered_check_root_rebound` refusal names every blocking run and its
+named-root generation. An explicit fresh request can dispose of the listed
+runs together using one `{ "runId": "test-…", "reason": "…" }` per run. These apply only to exact,
 acknowledged registrations on the same claim's retired root. A current-root
-check cannot be excluded; an older generation on the same path must actually
-fail the existing root-rebound boundary, rather than qualify for unchanged
-source admission. Reasons must be nonempty and at most 1024 UTF-8 bytes.
+check cannot be excluded. A new exclusion on an older generation of the same
+path requires the current holder's confirmed claim binding and must fail the
+root-rebound boundary for that holder. If a same-path run blocks a request
+without that authority, `registered_check_same_path_holder_required` asks the
+holder to request evaluation with their confirmed binding or calls for a new
+registered check in the current root. A different admission refusal can still
+require a current-root check after the listed exclusions. Reasons must be
+nonempty and at most 1024 UTF-8 bytes.
 
 Before admitting that request, the host writes an ordinary attributed note
 under the requester's identity, retaining the original check, root, input,
-result, acknowledgement and reason. Missing artifacts are disclosed as unknown;
-an inconsistent historical receipt is disclosed alongside the original result.
-An unreadable or changed acknowledged body refuses the disposition. A failed,
-unknown or unacknowledged note write starts no evaluator. After acknowledgement,
-the host discards the preliminary reads and takes a fresh canonical evidence
-bracket. The complete disposition and note locator are mandatory context in the
-evaluator's brief. They grant no passed check, criterion waiver or test credit.
-Normal current-root sighting, source and criterion checks still apply. A later
-evaluation must name the dispositions again or obtain a current-root check;
-they are incompatible with `reuseDelegationId` and never carry automatically.
+result, acknowledgement and reason. An inconsistent historical receipt is
+disclosed alongside the original result. If a different-path retired check's
+frozen body is missing, the exclusion records the run ID, generation,
+acknowledged digest and reason, with the artifact unavailable and the result
+unknown. A present body must be readable and match its acknowledgement. A failed,
+unknown or unacknowledged note write starts no evaluator. The host saves each
+acknowledged exclusion with its registration and waits for durable confirmation
+before applying it. When the original record is too large to inline, the
+note retains its exact acknowledged digest, the host run and artifact name,
+and available tracker record identifiers. The same authentication applies.
+If confirmation fails or is still pending, the run remains
+eligible to block admission. Repeating that run's disposition confirms the
+existing note without writing it again. Overlapping attempts to record a new
+exclusion for the same run are refused while the first request records it.
+Later evaluations on the same claim
+inherit confirmed exclusions, including after run-history compaction. After
+writing notes the host discards the preliminary reads and takes a fresh
+canonical evidence bracket. Attempt installation checks the same effective
+exclusions used for admission and audit references. After reserving space for
+the complete criteria and selected proof, the brief includes the audit details
+or a reference to the attributed notes where space permits.
+The notes and exclusions confer no test credit or criterion waiver. Normal
+current-root sighting, source and criterion checks still apply. New dispositions
+require a fresh request without `reuseDelegationId`.
 
 An explicit fresh request can also name one current-root
 `rejectedCheckDisposition` with the same `runId` and `reason` fields. The run

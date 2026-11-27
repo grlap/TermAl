@@ -2090,6 +2090,10 @@ pub(crate) struct StateInner {
     // Retained history with maintained candidate indexes
     // (test_run_history_store.rs); mutations go through their helpers.
     pub(crate) test_run_registrations: TestRunRegistrationStore,
+    // Live markers for acknowledged notes whose exact registration update
+    // has not been confirmed durable. Loaded registrations are already durable.
+    pub(crate) pending_retired_check_receipts: HashMap<String, AcceptanceRetiredCheckReceipt>,
+    pub(crate) retired_check_note_writes: HashSet<String>,
     pub(crate) test_run_observations: TestRunObservationStore,
     pub(crate) test_run_compacted: TestRunCompactedStore,
     /// Process-local: run id to the body digest of a held receipt whose
@@ -2276,6 +2280,8 @@ impl StateInner {
             engram_source_root_validations_live: Arc::default(),
             test_runs: TestRunIndex::default(),
             test_run_registrations: TestRunRegistrationStore::default(),
+            pending_retired_check_receipts: HashMap::new(),
+            retired_check_note_writes: HashSet::new(),
             test_run_observations: TestRunObservationStore::default(),
             test_run_compacted: TestRunCompactedStore::default(),
             test_run_unassociated_receipts: HashMap::new(),

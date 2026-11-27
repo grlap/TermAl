@@ -162,6 +162,7 @@ impl AppState {
         reservation: &AcceptanceEvaluationReuseReservation,
         seed: AcceptanceEvaluationTargetSeed,
         prompt: String,
+        retired_snapshot: Option<&AcceptanceRetiredCheckSnapshot>,
     ) -> Result<String, ApiError> {
         let previous = &reservation.previous;
         let old = previous.acceptance_evaluation.as_ref().unwrap();
@@ -215,6 +216,8 @@ impl AppState {
             prompt: prompt.clone(),
             offered: false,
         });
+        #[cfg(test)]
+        acceptance_test_before_attempt_install(true);
         let (written, dispatch) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             let index = inner
@@ -251,6 +254,11 @@ impl AppState {
                 &seed,
                 Some(&previous.id),
             )?;
+            if let Some(snapshot) = retired_snapshot {
+                snapshot
+                    .require_unchanged_locked(&inner)
+                    .map_err(|refusal| refusal.into_api_error(&seed.work_ref))?;
+            }
             history.attempt_sequence = next_acceptance_attempt_sequence(&inner);
             let recovery = seed.evidence_recovery.clone();
             let mut target = seed.into_target(key, &previous.parent_session_id);

@@ -3418,7 +3418,7 @@ impl AppState {
     /// registration in a committed SQLite snapshot after the fallback.
     /// Every failure, including the deadline, leaves confirmation pending.
     /// Blocking: the caller holds no state lock.
-    fn confirm_engram_fence_target_until(
+    pub(crate) fn confirm_engram_fence_target_until(
         &self,
         target: PersistFenceTarget,
         clock: EngramBudgetClock,
