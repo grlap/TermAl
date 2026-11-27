@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "pending-wake-sola8af-claim-recovery-2026-11-27",
+    "revision_id": "37bce9effe2747039f68eeb57a8a7e0b",
+    "previous": "d0a47758a4b34d6aa0a6d48b7527c991",
+    "body_sha256": "9ca33eb8f09b7d782f14d44d8a9fbf880a83c433dbf45afe7c67f1e7b88c3a7c",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+      "work_ref": "w-a15b23476aa3"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T05:13:46.977573500Z"
+    }
+  },
+  "body": "SUPERSEDED (Fable2, 2026-11-27 05:14Z). Greg approved resuming only Sol-edfd's queue (Asistant #2922). Resumed at 05:12Z, it started the a15b R2 review pair from Opus2's queued go-ahead. Decision: Sol-edfd (session-12328) KEEPS its claims on w-a15b23476aa3 and w-a8af3a34d80a and continues. My earlier release request to it is cancelled; it reclaims if it already released. Sol-a8af (session-20760) is BACKUP ONLY: it does NOT claim after 11:19Z unless Sol-edfd stalls again. No wake is owed at 11:19Z. If Sol-edfd stalls again (provider refusal), the takeover plan applies: Sol-a8af claims with recover after the lapse, or Engram's claim transfer (w-794682a77013) once it lands."
+}

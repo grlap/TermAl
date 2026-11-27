@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "pending-wake-sola8af-claim-recovery-2026-11-27",
+    "revision_id": "d0a47758a4b34d6aa0a6d48b7527c991",
+    "previous": null,
+    "body_sha256": "a598b371fbdebffe67df8a515a95c4138287aba43bdeaf4bd46460e2d462aeea",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+      "work_ref": "w-a15b23476aa3"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T05:07:31.048990500Z"
+    }
+  },
+  "body": "Fable2 owes this, 2026-11-27. On the first turn after 11:19:01Z, mail Sol-a8af (session-20760) to run `claim --recover` on w-a15b23476aa3 (Sol-edfd's lease expires 11:18:43Z) and w-a8af3a34d80a (11:19:01Z). Reason: Sol-edfd (session-12328) is stuck after a provider refusal at 04:01Z; Greg asked for the takeover (Asistant #2917).\nAlso relay Sol-8e1f's a15b R2 pair results (candidate 50fb5920) to Sol-a8af when they arrive.\nIf Greg resumes Sol-edfd earlier, ask Sol-edfd to hand off both items to Sol-a8af.\nRetire this memory once both claims are recovered."
+}

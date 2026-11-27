@@ -1,0 +1,30 @@
+{
+  "id": "01a21b69-2e2b-77e0-a6af-485444ed2049",
+  "external_ref": null,
+  "title": "Claude read-only reviewer is refused `engram source --root … --json`, so it cannot cite the native source_id at its boundaries",
+  "outcome": "A read-only /review-code child (Claude) can run the read-only `engram source --root <worktree> --json` at its start and end boundaries, or the review brief and policy name a supported read-only way to obtain the same native source_id, so reviewers do not fall back to Git commit/tree/porcelain only.",
+  "acceptance": [
+    "The read-only delegation policy for Claude reviewers either admits `engram source --root <path> --json` (a read-only command) or the refusal is documented with the supported alternative that yields the same complete source_id; the decision and its reason are recorded on this item.",
+    "If admitted: a behavioural test of the read-only command classifier shows `engram source --root <path> --json` allowed while mutating engram subcommands stay refused. If not admitted: /review-code and the review brief name the alternative, and a test shows that alternative is permitted under writePolicy readOnly.",
+    "The review pair is clean and the full gate passes on the exact landed input (or a doc-only change passes the Markdown link check)."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "read-only-policy",
+    "review",
+    "source-identity"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

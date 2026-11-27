@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "pending-wake-sola8af-claim-recovery-2026-11-27",
+  "head": {
+    "state": "active",
+    "chain": [
+      "d0a47758a4b34d6aa0a6d48b7527c991",
+      "37bce9effe2747039f68eeb57a8a7e0b"
+    ]
+  }
+}
