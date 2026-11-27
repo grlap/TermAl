@@ -48,6 +48,129 @@ fn refusal(fixture: &RunFixture, run: &RecordRun) -> String {
     }
 }
 
+fn focused_record_run(
+    fixture: &RunFixture,
+    run_id: &str,
+    planned: &[&str],
+    finished: Value,
+) -> RecordRun {
+    let mut request = commit_request(&fixture.root);
+    request["full"] = json!(false);
+    request["detached"] = json!(false);
+    request["stages"] = json!([{
+        "name": "focused", "command": planned[0], "args": &planned[1..]
+    }]);
+    let mut results = commit_results();
+    results["state"] = finished["state"].clone();
+    results["exitCode"] = json!(if finished["code"].as_i64() == Some(0) {
+        0
+    } else {
+        1
+    });
+    results["stages"] = json!([finished]);
+    let mut run = record_run(fixture, run_id, request, results);
+    run.registration.preset = TestRunPreset::Focused;
+    run.registration.stage_names = vec!["focused".to_owned()];
+    run
+}
+
+#[test]
+fn recognized_focused_cargo_test_records_crash_failure_and_pass() {
+    let fixture = RunFixture::new("focused-cargo-outcomes");
+    let argv = ["cargo", "test", "--bin", "termal"];
+    let cases = [
+        (
+            "test-focused-cargo-crash",
+            "failed",
+            101,
+            None,
+            EngramVerificationRecordCheckOutcome::Failed,
+        ),
+        (
+            "test-focused-cargo-failure",
+            "failed",
+            101,
+            Some(json!({"passed": 2, "failed": 1})),
+            EngramVerificationRecordCheckOutcome::Failed,
+        ),
+        (
+            "test-focused-cargo-pass",
+            "passed",
+            0,
+            Some(json!({"passed": 3, "failed": 0})),
+            EngramVerificationRecordCheckOutcome::Passed,
+        ),
+    ];
+    for (run_id, state, code, counts, expected) in cases {
+        let mut finished = stage("focused", state, code, &argv, 1);
+        // Cargo reports the child crash with a failing exit and no libtest totals.
+        let has_counts = counts.is_some();
+        if let Some(counts) = counts {
+            finished["tests"] = counts;
+        }
+        let run = focused_record_run(&fixture, run_id, &argv, finished);
+
+        let frozen = ready(&run.registration);
+        let [check] = frozen.body.checks.as_slice() else {
+            panic!("{run_id}: expected one verification check");
+        };
+        assert_eq!(
+            check.check_kind,
+            EngramVerificationRecordCheckKind::Test,
+            "{run_id}"
+        );
+        assert_eq!(check.outcome, expected, "{run_id}");
+        assert_eq!(check.counts.is_some(), has_counts, "{run_id}");
+    }
+}
+
+fn failed_focused_powershell_run(fixture: &RunFixture, planned: &[&str]) -> RecordRun {
+    let mut observed = planned.to_vec();
+    observed[0] = r"C:\Program Files\PowerShell\7\pwsh.exe";
+    let mut finished = stage("focused", "failed", 1, &observed, 1);
+    finished["signal"] = Value::Null;
+    focused_record_run(fixture, "test-focused-powershell-crash", planned, finished)
+}
+
+#[test]
+fn failed_focused_powershell_test_rust_ordinary_stays_unclassified() {
+    let fixture = RunFixture::new("focused-powershell-test-rust-ordinary");
+    let run = failed_focused_powershell_run(
+        &fixture,
+        &[
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            "scripts/test-rust.ps1",
+            "--phase",
+            "ordinary",
+        ],
+    );
+
+    assert_eq!(
+        pending_of(&run.registration),
+        EngramVerificationRecordPending::UnclassifiedStages {
+            stages: vec!["focused".to_owned()]
+        }
+    );
+}
+
+#[test]
+fn failed_focused_powershell_inline_command_stays_unclassified() {
+    let fixture = RunFixture::new("focused-powershell-inline");
+    let run = failed_focused_powershell_run(
+        &fixture,
+        &["pwsh", "-NoProfile", "-Command", "cargo test --bin termal"],
+    );
+
+    assert_eq!(
+        pending_of(&run.registration),
+        EngramVerificationRecordPending::UnclassifiedStages {
+            stages: vec!["focused".to_owned()]
+        }
+    );
+}
+
 #[test]
 fn completed_unindexed_wrapper_is_finally_refused_and_tells_only_its_requester() {
     let mut fixture = RunFixture::new("unclassified-final-refusal");
