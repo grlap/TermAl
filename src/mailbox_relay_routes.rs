@@ -116,6 +116,11 @@ fn public_mailbox_relay_receipt(
     home: &MailboxRelayHome,
     mut receipt: MailboxAppendReceipt,
 ) -> Result<MailboxAppendReceipt, ApiError> {
+    // Older relay homes returned the append row's default before trying a
+    // wake. That value cannot establish that the target declined admission.
+    if receipt.notification_disposition == "durableButNotWoken" {
+        receipt.notification_disposition = "relayWakePending".to_owned();
+    }
     receipt.mailbox_id = MailboxRelayLocator::encode(home, &receipt.mailbox_id, false)?;
     receipt.message_id = MailboxRelayLocator::encode(home, &receipt.message_id, true)?;
     // The home's own line names its local id; the send route writes the line
@@ -856,6 +861,9 @@ impl AppState {
             return Err(ApiError::conflict(
                 "native mailbox exact read returned another message",
             ));
+        }
+        if remote_home {
+            project_mailbox_relay_home_wake(&mut message);
         }
         self.attach_native_mailbox_relay_progress(
             &actor,

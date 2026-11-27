@@ -189,10 +189,13 @@ impl MailboxStore {
             |_, authority| authorize_new(authority),
         )?;
         let MailboxAppendResult {
-            receipt,
+            mut receipt,
             finalization,
         } = appended;
         drop(finalization);
+        // The durable wake is attempted by the executor after the append.
+        // Exact retries describe that same append, not a later wake attempt.
+        receipt.notification_disposition = "relayWakePending".to_owned();
         Ok(receipt)
     }
 

@@ -39,6 +39,11 @@ pub(crate) fn mailbox_wake_state_sentence(notification_state: &str) -> String {
         "waitingForProviderCapacity" => {
             "Wake held; it waits for provider capacity.".to_owned()
         }
+        "relayWakePending" => "The home has no confirmed wake outcome yet.".to_owned(),
+        "relayWakeAdmitted" => "The home recorded target queue admission.".to_owned(),
+        "relayWakeNotAdmitted" => {
+            "The target did not admit the wake on the last confirmed attempt.".to_owned()
+        }
         "durableButNotWoken" => "No wake confirmed; the message remains stored.".to_owned(),
         other => format!(
             "Wake state `{other}` is not one this host recognises; the message remains stored."
@@ -103,15 +108,19 @@ pub(crate) fn mailbox_current_status_summary_with_cause(
     format!("As of {observed_at}: {wake_summary} {acknowledgement}")
 }
 
-/// Relay admission and target handoff are independent observations. The home
-/// disposition remains conservative, so it cannot describe the combined read.
+/// Describe confirmed admission or refusal at the home, separately from the
+/// target's current queue and provider handoff observations.
 pub(crate) fn mailbox_relay_current_status_summary(
     observed_at: &str,
+    notification_state: &str,
     progress: &MailboxRelayProgress,
     recipient_acknowledged: bool,
 ) -> String {
     let home = match progress.home_queue_admission_confirmed {
         Some(true) => "The home recorded target queue admission.",
+        Some(false) if notification_state == "relayWakeNotAdmitted" => {
+            "The target did not admit the wake on the last confirmed attempt."
+        }
         Some(false) => "The home has not recorded target queue admission.",
         None => "The home's queue-admission observation is unavailable.",
     };

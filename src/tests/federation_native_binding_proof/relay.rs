@@ -191,7 +191,7 @@ async fn mailbox_relay_rpc_home_send_read_ack_and_opposite_direction_share_one_c
     .await
     .unwrap();
     let receipt: MailboxAppendReceipt = serde_json::from_value(response.value).unwrap();
-    assert_eq!(receipt.notification_disposition, "durableButNotWoken");
+    assert_eq!(receipt.notification_disposition, "relayWakePending");
     let duplicate: MailboxAppendReceipt = serde_json::from_value(
         request(
             &reverse,

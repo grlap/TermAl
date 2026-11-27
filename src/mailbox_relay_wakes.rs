@@ -1130,10 +1130,10 @@ impl AppState {
                 }
                 Err(error) => {
                     self.note_mailbox_relay_home_wake_refusal(&wake, error.status, &error.message);
-                    false
+                    continue;
                 }
             };
-            if queued {
+            {
                 let worker = self.clone();
                 let id = wake.message_id;
                 let _ = run_blocking_api(move || {
@@ -1144,15 +1144,27 @@ impl AppState {
                             Duration::from_secs(2),
                         )
                         .map_err(mailbox_api_error)?;
-                    worker
+                    let mut connection = worker
                         .mailbox_store
                         .connection()
-                        .map_err(mailbox_api_error)?
-                        .execute(
-                            "UPDATE mailbox_relay_wakes SET delivered=1 WHERE message_id=?1",
-                            [id],
-                        )
-                        .map_err(|error| mailbox_api_error(error.into()))?;
+                        .map_err(mailbox_api_error)?;
+                    let transaction = begin_mailbox_write(&mut connection, "settling relay notification")
+                        .map_err(mailbox_api_error)?;
+                    if queued {
+                        transaction.execute("UPDATE mailbox_relay_wakes SET delivered=1 WHERE message_id=?1", [&id])
+                            .map_err(|error| mailbox_api_error(error.into()))?;
+                        transaction.execute(
+                            "UPDATE mailbox_messages SET notification_disposition='relayWakeAdmitted' WHERE id=?1",
+                            [&id],
+                        ).map_err(|error| mailbox_api_error(error.into()))?;
+                    } else {
+                        transaction.execute(
+                            "UPDATE mailbox_messages SET notification_disposition='relayWakeNotAdmitted'
+                         WHERE id=?1 AND EXISTS(
+                             SELECT 1 FROM mailbox_relay_wakes WHERE message_id=?1 AND delivered=0
+                         )", [&id]).map_err(|error| mailbox_api_error(error.into()))?;
+                    }
+                    transaction.commit().map_err(|error| mailbox_api_error(error.into()))?;
                     Ok(())
                 })
                 .await;

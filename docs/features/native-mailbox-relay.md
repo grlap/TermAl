@@ -137,10 +137,12 @@ The existing 404 distinction is unchanged: a structured resource/membership
 refusal stays 404, while an unstructured missing-capability response becomes
 409. Existing 5xx outcome-uncertainty handling also remains unchanged.
 
-`noContinuation` is refused for relay mailboxes. Relay receipts conservatively
-report `durableButNotWoken`: commitment is not proof that a native agent ran.
-The home's message notification field also remains conservative; native wake
-handoff metadata is not a replicated mailbox cursor or an executor result.
+`noContinuation` is refused for relay mailboxes. Initial sends and exact
+retries report `relayWakePending` while the home has no wake result at append
+time. The receipt describes that original append. An exact read can later
+report `relayWakeAdmitted` when the home records target queue admission or
+`relayWakeNotAdmitted` after a confirmed refusal. Queue admission, provider
+handoff and the recipient's mailbox cursor are separate observations.
 
 An exact `relay-message-*` read adds `currentStatus.relayProgress`. Its
 `homeObservedAt` and `homeQueueAdmissionConfirmed` describe the home's recorded
