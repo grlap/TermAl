@@ -1,0 +1,30 @@
+{
+  "id": "01a21bb4-7eea-7551-af5f-90b970631601",
+  "external_ref": null,
+  "title": "Confirm who may create standing different-worktree retired-check exclusions",
+  "outcome": "Record the intended authority for claim-wide exclusions of retired checks on another worktree and align the documented contract with that decision.",
+  "acceptance": [
+    "Confirm who may create standing different-worktree retired-check exclusions is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "research",
+  "priority": 4,
+  "labels": [
+    "acceptance-evaluation",
+    "blocks-engram-p0",
+    "check-credit",
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a20683-b4b5-7eb3-9aef-e638e92ffc11",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
