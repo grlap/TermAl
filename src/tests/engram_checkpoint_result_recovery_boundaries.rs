@@ -3,10 +3,20 @@
 use super::*;
 
 fn storage_image(connection: &rusqlite::Connection) -> Value {
+    let mut statement = connection
+        .prepare("SELECT key, value_json FROM app_state ORDER BY key")
+        .unwrap();
+    let legacy_rows = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
     json!({"header":required_state_meta_value(connection, "schema_version").unwrap(),
         "generation":metadata_unit_generation(connection).unwrap(),
         "units":format!("{:?}", read_metadata_units_unchecked(connection).unwrap()),
-        "rows":raw_session_rows(connection)})
+        "rows":raw_session_rows(connection), "legacy":legacy_rows})
 }
 
 #[test]
@@ -90,10 +100,7 @@ fn historical_checkpoint_mirror_refuses_orphan_changed_original_and_wrong_sessio
     }
 }
 
-#[test]
-fn adopted_historical_checkpoint_requires_exact_owner_generation_authority_and_original() {
-    let root = TestTempRoot::create("checkpoint-adopted-data");
-    let operation = passive_checkpoint(root.path(), "historical-session");
+fn adopted_checkpoint_entry(operation: &EngramCheckpointOperation) -> EngramSessionObligation {
     let mut entry = operation.protection.clone();
     entry.kind = EngramSessionObligationKind::CheckpointContainment;
     entry.basis = EngramSessionObligationBasis::ControlStateUnsettled;
@@ -104,6 +111,14 @@ fn adopted_historical_checkpoint_requires_exact_owner_generation_authority_and_o
         "checkpointInProgress":true,"existingCheckpoint":operation,"runtimeRunning":false,
         "queuedPrompts":[],"beginRequested":null,"dispatchGeneration":0});
     entry.validate().unwrap();
+    entry
+}
+
+#[test]
+fn adopted_historical_checkpoint_requires_exact_owner_generation_authority_and_original() {
+    let root = TestTempRoot::create("checkpoint-adopted-data");
+    let operation = passive_checkpoint(root.path(), "historical-session");
+    let entry = adopted_checkpoint_entry(&operation);
     for changed in ["generation", "authority", "token", "original"] {
         let mut invalid = serde_json::to_value(&entry).unwrap();
         match changed {
@@ -121,6 +136,106 @@ fn adopted_historical_checkpoint_requires_exact_owner_generation_authority_and_o
         }
         let invalid: EngramSessionObligation = serde_json::from_value(invalid).unwrap();
         assert!(invalid.validate().is_err(), "{changed}");
+    }
+}
+
+fn set_checkpoint_result_predecessor(connection: &rusqlite::Connection) {
+    assert_eq!(
+        connection
+            .execute(
+                "DELETE FROM state_metadata_units WHERE field_name='remoteTestRunFacts'",
+                [],
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        connection
+            .execute(
+                "UPDATE meta SET value=?1 WHERE key='schema_version'",
+                [SQLITE_CHECKPOINT_RESULT_PREDECESSOR],
+            )
+            .unwrap(),
+        1
+    );
+}
+
+fn open_checkpoint_storage(connection: &rusqlite::Connection, for_load: bool) -> Result<()> {
+    if for_load {
+        ensure_sqlite_state_schema_for_load(connection).map(|_| ())
+    } else {
+        ensure_sqlite_state_schema(connection)
+    }
+}
+
+#[test]
+fn checkpoint_reader_floor_rejects_refusal_only_in_the_adopted_frozen_checkpoint() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let (_root, path, mut inner, _session, canonical) =
+        passive_state("checkpoint-frozen-refused-floor");
+    let mut adopted = canonical.clone();
+    append_historical_result(
+        &mut adopted,
+        EngramCheckpointAttemptResult::Refused {
+            response: json!({"decision":"refuse","code":"evidence_rejected"}),
+        },
+    );
+    let entry = adopted_checkpoint_entry(&adopted);
+    inner.engram_session_obligations.entries.push(entry.clone());
+    persist_state(&path, &inner).unwrap();
+
+    // The current reader accepts the image and the canonical operation remains Unknown.
+    let loaded = load_state(&path).unwrap().unwrap();
+    assert_historical_operation(&loaded, &canonical);
+    assert_eq!(
+        serde_json::to_value(&loaded.engram_session_obligations.entries[0]).unwrap(),
+        serde_json::to_value(&entry).unwrap()
+    );
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    set_checkpoint_result_predecessor(&connection);
+    let before = storage_image(&connection);
+    for for_load in [true, false] {
+        let error = open_checkpoint_storage(&connection, for_load).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("checkpoint Refused result under predecessor floor"),
+            "for_load={for_load}: {error:#}"
+        );
+        assert_eq!(storage_image(&connection), before, "for_load={for_load}");
+    }
+}
+
+#[test]
+fn checkpoint_reader_floor_rolls_back_a_failed_header_update_for_both_openers() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    for for_load in [true, false] {
+        let (_root, path, _inner, _session, _canonical) =
+            passive_state("checkpoint-header-update-fault");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_state (key,value_json) VALUES (?1,?2)",
+                rusqlite::params![SQLITE_METADATA_KEY, " {\"projects\":[]} \n"],
+            )
+            .unwrap();
+        set_checkpoint_result_predecessor(&connection);
+        // FAIL leaves the statement's update in the transaction. The opener
+        // must roll back the transaction to retain the old schema header.
+        connection
+            .execute_batch(&format!(
+                "CREATE TEMP TRIGGER reject_checkpoint_header AFTER UPDATE OF value ON meta
+                 WHEN old.key='schema_version' AND old.value='{SQLITE_CHECKPOINT_RESULT_PREDECESSOR}'
+                 BEGIN SELECT RAISE(FAIL, 'checkpoint-header-fault'); END;"
+            ))
+            .unwrap();
+        let before = storage_image(&connection);
+        let error = open_checkpoint_storage(&connection, for_load).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("checkpoint-header-fault"),
+            "for_load={for_load}: {error:#}"
+        );
+        assert!(connection.is_autocommit(), "for_load={for_load}");
+        assert_eq!(storage_image(&connection), before, "for_load={for_load}");
     }
 }
 
