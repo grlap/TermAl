@@ -513,6 +513,104 @@ fn evaluator_custody_uses_the_earliest_active_request_in_either_order() {
     assert!(inner.engram_named_root_journal.is_empty());
 }
 
+/// Evaluator custody ends with the evaluator's last open reference, not with
+/// its process. A queued evaluator holds the entry. So does a stopped one whose
+/// tracker write is still Pending or Unconfirmed. Once that write settles, the
+/// entry is reclaimed.
+#[test]
+fn evaluator_custody_holds_while_queued_or_its_write_is_open_then_reclaims() {
+    use EngramRootJournalRetention as Keep;
+    let label = "journal-evaluator-open-write";
+    let turn = EOCheckedTurn::idle(label, true);
+    let worktree = naming_worktree(&turn.root);
+    request_naming(&turn, label, Some(&worktree), vec![naming_claim(label)]).unwrap();
+    crate::tests::acceptance_evaluation::install_evaluator_delegation(
+        &turn.state,
+        &turn.session_id,
+        None,
+        worktree.to_str().unwrap(),
+        1,
+    );
+    let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
+    let mut journal = inner.engram_named_root_journal[0].clone();
+    journal.claim_id = "later-claim".into();
+    let (event, _) = journal.confirmed.as_mut().unwrap();
+    event.kind = EngramNamedRootKind::Ended;
+    event.root.generation += 10;
+    let root = event.root.clone();
+    inner.engram_work_source_roots.clear();
+    inner.sessions.clear();
+    assert_eq!(inner.delegations.len(), 1);
+    {
+        let target = inner.delegations[0].acceptance_evaluation.as_mut().unwrap();
+        target.store = Some(journal.store.clone());
+        target.source_root = None;
+        target.source_claim = Some(AcceptanceEvaluationSourceClaim {
+            work_id: root.work_id.clone(),
+            claim_id: "request-claim".into(),
+            named_generation_at_request: Some(root.generation - 1),
+        });
+    }
+    inner.engram_named_root_journal = vec![journal.clone()].into();
+    let pending = AcceptanceEvaluationSubmission::Pending {
+        payload_digest: "open-write".into(),
+        started_at: "2026-11-27T00:00:00Z".into(),
+        original: AcceptanceEvaluationOpenWrite::default(),
+    };
+    let unconfirmed = AcceptanceEvaluationSubmission::Unconfirmed {
+        payload_digest: "open-write".into(),
+        reason: "readback lost".into(),
+        at: "2026-11-27T00:00:01Z".into(),
+        original: AcceptanceEvaluationOpenWrite::default(),
+    };
+    for (status, submission, case) in [
+        (
+            DelegationStatus::Queued,
+            AcceptanceEvaluationSubmission::None,
+            "queued",
+        ),
+        (
+            DelegationStatus::Completed,
+            pending,
+            "stopped, write pending",
+        ),
+        (
+            DelegationStatus::Completed,
+            unconfirmed,
+            "stopped, write unconfirmed",
+        ),
+    ] {
+        inner.delegations[0].status = status;
+        inner.delegations[0]
+            .acceptance_evaluation
+            .as_mut()
+            .unwrap()
+            .submission = submission;
+        let census = engram_root_journal_census(&inner);
+        assert_eq!(
+            census.primary_reasons.get(&Keep::Evaluator),
+            Some(&1),
+            "{case}: the evaluator holds the entry"
+        );
+        assert_eq!(census.reclaimable, 0, "{case}");
+        engram_compact_root_journal(&mut inner);
+        assert_eq!(
+            inner.engram_named_root_journal.len(),
+            1,
+            "{case}: compaction keeps a held entry"
+        );
+    }
+    // Settling the write releases the entry.
+    inner.delegations[0]
+        .acceptance_evaluation
+        .as_mut()
+        .unwrap()
+        .submission = AcceptanceEvaluationSubmission::None;
+    assert_eq!(engram_root_journal_census(&inner).reclaimable, 1);
+    engram_compact_root_journal(&mut inner);
+    assert!(inner.engram_named_root_journal.is_empty());
+}
+
 #[test]
 fn runtime_custody_priority_is_independent_of_session_insertion_order() {
     use EngramRootJournalRetention as Keep;
