@@ -5,7 +5,7 @@ use crate::engram_remote_verification::{Association, IntendedUse, Purpose, Reque
 
 fn source(root: &FsPath) -> EngramSourceId {
     let git = |arg: &str| {
-        let output = Command::new("git")
+        let output = git_command()
             .arg("-C")
             .arg(root)
             .args(["rev-parse", arg])

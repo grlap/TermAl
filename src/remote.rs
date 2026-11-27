@@ -1217,8 +1217,7 @@ impl RemoteConnection {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        let child = command
-            .spawn()
+        let child = spawn_remote_ssh(&mut command)
             .map_err(|err| local_ssh_start_error(&remote.name, err))?;
         Ok(RemoteProcessHandle { child, mode })
     }

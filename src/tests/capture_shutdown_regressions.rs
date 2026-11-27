@@ -155,7 +155,7 @@ fn unresolved_unix_child_keeps_capture_shutdown_incomplete_and_retains_root() {
     let (child_tx, child_rx) = mpsc::channel();
     lifetime
         .spawn("unresolved-unix-cleanup-control", move || {
-            let mut command = Command::new("git");
+            let mut command = git_command();
             command
                 .arg("--version")
                 .current_dir(directory)

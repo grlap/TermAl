@@ -168,9 +168,7 @@ pub(crate) fn start_federation_ssh(
     // Allocate diagnostics before spawn. Once spawn returns, publish the exact
     // guard before stdio setup, thread creation or other post-spawn work.
     let diagnostic = Arc::new(Mutex::new(FederationSshDiagnostic::default()));
-    let child = command
-        .spawn()
-        .map_err(|_| federation_transport_unavailable())?;
+    let child = spawn_remote_ssh(&mut command).map_err(|_| federation_transport_unavailable())?;
     *owned = Some(Box::new(FederationSshProcess::retain_child(
         child, diagnostic,
     )));

@@ -28,6 +28,71 @@
 
 use super::*;
 
+#[test]
+fn failed_remote_health_probe_uses_non_network_ssh_starter() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let health_listener = listener.try_clone().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut stream = accept_test_connection(&health_listener, "failed health probe");
+        let request = read_test_http_request(&mut stream);
+        assert_eq!(request.request_line, "GET /api/health HTTP/1.1");
+        stream
+            .write_all(
+                b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+    });
+
+    let state = test_app_state();
+    let remote = RemoteConfig {
+        id: "ssh-failed-health-fixture".to_owned(),
+        name: "Failed health fixture".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("127.0.0.1".to_owned()),
+        port: Some(port),
+        user: Some("test".to_owned()),
+    };
+    create_test_remote_project(&state, &remote, "/remote/repo", "Failed health", "remote-1");
+    insert_test_remote_connection(
+        &state,
+        &remote,
+        port,
+        TestRemoteBridgeOwnership::RequestOnly,
+    );
+
+    let before = TEST_REMOTE_SSH_START_ATTEMPTS.with(std::cell::Cell::get);
+    let result = state.remote_registry.request_json::<Value>(
+        &remote,
+        Method::POST,
+        "/api/terminal/run",
+        &[],
+        Some(json!({"command": "echo fixture", "workdir": "/remote/repo"})),
+    );
+    join_test_server(server);
+    listener.set_nonblocking(true).unwrap();
+    assert_eq!(
+        listener
+            .accept()
+            .expect_err("unexpected request after the health probe")
+            .kind(),
+        io::ErrorKind::WouldBlock
+    );
+    let error = result.expect_err("the failed health probe must not reach the terminal");
+    assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(error.message, local_ssh_start_issue_message(&remote.name));
+    assert!(matches!(
+        error.kind,
+        Some(ApiErrorKind::RemoteConnectionUnavailable)
+    ));
+    assert_eq!(
+        TEST_REMOTE_SSH_START_ATTEMPTS.with(std::cell::Cell::get),
+        before + 1,
+        "the request must stop at the non-network test starter"
+    );
+}
+
 // Pins that update_app_settings round-trips a remote config list through
 // the preferences and the persistence layer with the SSH transport and
 // its host/port/user preserved.

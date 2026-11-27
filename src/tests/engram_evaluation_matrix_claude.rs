@@ -140,7 +140,7 @@ impl ClaudeFrames {
             json!({"command":
             "git add -- README.md && git commit --quiet -m 'fixture intended source'"}),
         );
-        let add = Command::new("git")
+        let add = git_command()
             .current_dir(&matrix.fixture.root)
             .args(["add", "--", "README.md"])
             .output()
@@ -150,7 +150,7 @@ impl ClaudeFrames {
             "{}",
             String::from_utf8_lossy(&add.stderr)
         );
-        let commit = Command::new("git")
+        let commit = git_command()
             .current_dir(&matrix.fixture.root)
             .args(["commit", "--quiet", "-m", "fixture intended source"])
             .output()

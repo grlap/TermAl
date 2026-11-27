@@ -964,7 +964,7 @@ const PANIC_JOURNAL_BACKTRACE_LINES = 12;
 // variable is kept. On Windows an existing name in another case is replaced,
 // never duplicated.
 export function runEnvironment(env, runDir, platform = process.platform) {
-  const childEnv = scrubCancellationEnvironment({ ...env });
+  const childEnv = isolatedGitEnvironment(scrubCancellationEnvironment({ ...env }));
   const panicBacktrace = cargoOutputEnvironment(env, "RUST_BACKTRACE", platform);
   const libraryBacktrace = cargoOutputEnvironment(env, "RUST_LIB_BACKTRACE", platform);
   if (panicBacktrace === undefined) {

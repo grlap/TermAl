@@ -1851,6 +1851,36 @@ fn git_diff_worktree_reader_allows_non_utf8_symlink_targets() {
     fs::remove_dir_all(repo_root).unwrap();
 }
 
+#[test]
+fn git_test_commands_refuse_network_push_urls() {
+    let root = TestTempRoot::create("git-test-push-transport");
+    init_git_document_test_repo(&root);
+    run_git_test_command(&root, &["commit", "--allow-empty", "-m", "init"]);
+    run_git_test_command(&root, &["remote", "add", "origin", "."]);
+    run_git_test_command(
+        &root,
+        &["config", "remote.origin.pushurl", "ssh://127.0.0.1:1/repo"],
+    );
+    run_git_test_command(
+        &root,
+        &[
+            "config",
+            "core.sshCommand",
+            "printf invoked > .git/transport-ran; exit 1",
+        ],
+    );
+
+    let output = git_command()
+        .current_dir(&root)
+        .args(["push", "origin", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("transport 'ssh' not allowed"), "{stderr}");
+    assert!(!root.join(".git/transport-ran").exists());
+}
+
 // Pins that `push_git_repo` advances the tracking branch so the
 // remote HEAD matches the local HEAD and the response reports
 // ahead=0/behind=0 with a "Pushed " summary. Guards against reporting

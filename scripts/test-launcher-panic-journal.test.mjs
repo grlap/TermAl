@@ -67,6 +67,26 @@ test("a run's commands get panic backtraces only, and the run's journal path", (
   assert.equal(env.PATH, "/bin");
 });
 
+test("a run's Git children can use local file transport without inheriting host configuration", () => {
+  const env = runEnvironment({
+    PATH: "/bin",
+    git_allow_protocol: "ssh:ext",
+    GIT_SSH_COMMAND: "host-supplied-client",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "remote.origin.pushurl",
+    GIT_CONFIG_VALUE_0: "ssh://fixture.invalid/repo",
+  }, "/runs/run-1");
+  assert.equal(env.GIT_ALLOW_PROTOCOL, "file");
+  assert.equal(env.GIT_CONFIG_NOSYSTEM, "1");
+  assert.notEqual(env.GIT_CONFIG_GLOBAL, undefined);
+  assert.equal(env.git_allow_protocol, undefined);
+  assert.equal(env.GIT_SSH_COMMAND, undefined);
+  assert.equal(env.GIT_CONFIG_COUNT, undefined);
+  assert.equal(env.GIT_CONFIG_KEY_0, undefined);
+  assert.equal(env.GIT_CONFIG_VALUE_0, undefined);
+  assert.equal(env.PATH, "/bin");
+});
+
 test("a caller's own backtrace variables are kept, in any case on Windows", () => {
   const panicOnly = runEnvironment({ RUST_BACKTRACE: "0" }, "/r", "linux");
   assert.equal(panicOnly.RUST_BACKTRACE, "0");

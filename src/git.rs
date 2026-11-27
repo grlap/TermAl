@@ -1132,7 +1132,23 @@ pub(crate) fn git_command() -> Command {
     // Disposable fixtures can live inside this checkout's ignored .tmp tree.
     // A fixture with no repository must not discover the enclosing checkout.
     #[cfg(test)]
-    command.env("GIT_CEILING_DIRECTORIES", test_temp_dir());
+    {
+        for (name, _) in std::env::vars_os() {
+            if name
+                .to_string_lossy()
+                .to_ascii_uppercase()
+                .starts_with("GIT_")
+            {
+                command.env_remove(name);
+            }
+        }
+        let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        command
+            .env("GIT_CONFIG_GLOBAL", null)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_ALLOW_PROTOCOL", "file")
+            .env("GIT_CEILING_DIRECTORIES", test_temp_dir());
+    }
     command
 }
 

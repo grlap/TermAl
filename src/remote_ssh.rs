@@ -38,6 +38,28 @@
 
 use super::*;
 
+#[cfg(not(test))]
+pub(crate) fn spawn_remote_ssh(command: &mut Command) -> io::Result<Child> {
+    command.spawn()
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_REMOTE_SSH_START_ATTEMPTS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+// A fixture's failed loopback probe must not launch an external SSH client.
+// Test builds select this non-network starter with no real spawn fallback.
+#[cfg(test)]
+pub(crate) fn spawn_remote_ssh(_command: &mut Command) -> io::Result<Child> {
+    TEST_REMOTE_SSH_START_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+    Err(io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "system SSH process start is disabled in tests",
+    ))
+}
+
 /// Appends the scope's session or project id to a query string list the
 /// caller is building for a forwarded remote request.
 pub(crate) fn apply_remote_scope_to_query(scope: &RemoteScope, query: &mut Vec<(String, String)>) {
@@ -806,13 +828,14 @@ fn run_remote_ssh_script_child(
     action: &str,
     script: &RemoteActionScript,
 ) -> Result<RemoteScriptOutput, ApiError> {
-    let mut child = Command::new("ssh")
+    let mut command = Command::new("ssh");
+    command
         .args(script.command_args(remote)?)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| local_ssh_start_error(&remote.name, err))?;
+        .stderr(Stdio::piped());
+    let mut child =
+        spawn_remote_ssh(&mut command).map_err(|err| local_ssh_start_error(&remote.name, err))?;
     let stdout_handle = child
         .stdout
         .take()

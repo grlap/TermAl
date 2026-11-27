@@ -19,6 +19,7 @@ fn git_command() -> Command {
         .env("GIT_CONFIG_GLOBAL", null)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_ATTR_NOSYSTEM", "1")
+        .env("GIT_ALLOW_PROTOCOL", "file")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
         .env("LANG", "C")
@@ -232,12 +233,10 @@ fn pinned_git_missing_promisor_object_never_invokes_transport() {
     assert!(error.to_string().contains("Git verification"), "{error:#}");
     assert!(!root.join(".git/transport-ran").exists());
     assert!(!object.exists(), "missing object must not be fetched");
-    // Negative control: the same fixture really attempts the configured local
-    // transport when both guards are removed. The sentinel exits before SSH.
+    // The unpinned control reaches the configured local upload-pack sentinel.
     let output = git_command()
         .current_dir(&root)
         .env_remove("GIT_NO_LAZY_FETCH")
-        .env_remove("GIT_ALLOW_PROTOCOL")
         .args(["cat-file", "-p", &oid])
         .output()
         .unwrap();
@@ -256,16 +255,12 @@ fn missing_promisor_fixture() -> (TestTempRoot, String, PathBuf) {
     assert!(object.is_file());
     fs::remove_file(&object).unwrap();
     for args in [
-        [
-            "config",
-            "remote.origin.url",
-            "ssh://invalid.example/review",
-        ],
+        ["config", "remote.origin.url", "."],
         ["config", "remote.origin.promisor", "true"],
         ["config", "extensions.partialClone", "origin"],
         [
             "config",
-            "core.sshCommand",
+            "remote.origin.uploadpack",
             "printf invoked > .git/transport-ran; exit 1",
         ],
     ] {
@@ -321,7 +316,7 @@ fn read_only_git_permission_and_execution_do_not_fetch_missing_promisor_objects(
     ));
 
     // A writable parent's command remains unaffected, and proves the fixture
-    // actually reaches the local transport sentinel before attempting SSH.
+    // actually reaches the local upload-pack sentinel.
     let mut control = git_command();
     apply_read_only_git_environment(false, &mut control);
     assert!(
@@ -340,7 +335,7 @@ fn read_only_git_permission_and_execution_do_not_fetch_missing_promisor_objects(
         let mut command = git_command();
         command
             .env("GIT_NO_LAZY_FETCH", "0")
-            .env("GIT_ALLOW_PROTOCOL", "ssh");
+            .env("GIT_ALLOW_PROTOCOL", "file");
         if codex {
             let (config, _) = state
                 .termal_delegation_mcp_codex_config_for_shared_runtime(

@@ -3,11 +3,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 
 test("the consumer root and initialized direct children remain at the supplied commits", () => {
   const expected = JSON.parse(process.env.TERMAL_TEST_CONSUMER_PIN_PROBE);
   const git = (root, ...args) => execFileSync("git", args, {
-    cwd: root, encoding: "utf8", windowsHide: true,
+    cwd: root, env: isolatedGitEnvironment(), encoding: "utf8", windowsHide: true,
   }).trim();
   assert.equal(git(process.cwd(), "rev-parse", "HEAD"), expected.commit);
   assert.equal(git(process.cwd(), "-c", "status.showUntrackedFiles=all", "status",

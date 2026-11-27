@@ -13,6 +13,7 @@ import { StringDecoder } from "node:string_decoder";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { isolatedGitEnvironment } from "./git-environment.mjs";
 
 const markerName = ".termal-test-run";
 // A Rust fixture root `<name>` names its creating test in `<name>.owner`
@@ -236,7 +237,7 @@ export async function runInTestTemp(command, args, {
         stdio: "inherit",
         windowsHide: true,
         env: {
-          ...process.env,
+          ...isolatedGitEnvironment(),
           TERMAL_TEST_USER_TEMP: userTemp,
           TERMAL_TEST_RUN_ROOT: runRoot,
           NODE_COMPILE_CACHE: compileCache,
