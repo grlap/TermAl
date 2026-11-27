@@ -70,7 +70,9 @@ fn retired_check_on_replacement(
             head,
         ],
     );
-    let current_root = engram_exact_path_key(&replacement);
+    // Match the evaluator's stored cwd so the witness reaches reuse on each platform.
+    let current_root = resolve_session_workdir(replacement.to_str().unwrap())
+        .expect("the replacement worktree resolves as an evaluator cwd");
     {
         let mut inner = state.inner.lock().unwrap();
         inner.engram_work_source_roots[0].root = current_root.clone();
