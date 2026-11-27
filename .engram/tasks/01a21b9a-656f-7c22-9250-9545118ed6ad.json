@@ -1,0 +1,37 @@
+{
+  "id": "01a21b9a-656f-7c22-9250-9545118ed6ad",
+  "external_ref": null,
+  "title": "Isolate the direct-prompt promotion guard in its regression fixture",
+  "outcome": "Distinguish the remote-specific promotion refusal from the ordinary refusal of an entry still Pending.",
+  "acceptance": [
+    "A behavioral test proves an otherwise promotable acknowledged HandingOff delivery passes with the remote association absent and refuses with that association present. The existing real Pending reload case still verifies local durability, absent coordination receipt and zero attempts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

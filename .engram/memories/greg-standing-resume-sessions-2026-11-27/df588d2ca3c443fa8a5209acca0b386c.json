@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "greg-standing-resume-sessions-2026-11-27",
+    "revision_id": "df588d2ca3c443fa8a5209acca0b386c",
+    "previous": null,
+    "body_sha256": "a23c8eca3b0386c8d3c533259e8d60973c9a6120d39ab7bc14805d2d4697f46a",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T06:17:49.451531100Z"
+    }
+  },
+  "body": "Greg's standing word (2026-11-27 ~06:17Z, via Engram::Asistant 588693a8 #2930), verbatim: „moga wznawiac sesje jak chca, jak przestana niech utworza nowa i mnie poinformuja” (\"they can resume sessions as they want; if they stop, let them create a new one and inform me\").\nMeaning:\n- TermAl and Engram coordinators may resume paused session queues themselves (POST /api/queues/resume-paused with sessionIds, one session at a time, on the host that owns the session) without asking each time.\n- If resuming doesn't help, create a new session (POST /api/sessions, same agent, model and project) and INFORM Greg.\n- Limits, also from Greg: never work around a provider refusal; report a repeating refusal with its reason; don't move a refused action to another session just to get past the check.\n- Still covered by \"nobody stops the host\": this grants no host restart or kill."
+}

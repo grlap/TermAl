@@ -1,0 +1,31 @@
+{
+  "id": "01a21b88-9070-7a02-8bec-b90ae6537553",
+  "external_ref": null,
+  "title": "Recognize `pwsh -NoProfile -File scripts/test-rust.ps1 [--phase …]` as a test stage, as the scripts/test-rust.sh form already is",
+  "outcome": "Recognize `pwsh -NoProfile -File scripts/test-rust.ps1 [--phase …]` as a test stage, as the scripts/test-rust.sh form already is",
+  "acceptance": [
+    "A focused or full launcher stage whose argv is `pwsh` or `pwsh.exe` with `-NoProfile -File scripts/test-rust.ps1` and optional `--phase <name>` arguments is recognized as a Rust test stage with the same rules, scope and safety limits as the existing scripts/test-rust.sh recognition; other PowerShell argv shapes (inline -Command, other scripts, extra pre/post commands) stay unrecognized.",
+    "A recognized pwsh stage records passed, failed (including a crash without a libtest summary) and its counts exactly as the .sh stage does, so native verification is granted or refused on the outcome, not the argv.",
+    "Behavioural tests cover the recognized pwsh form (pass, normal fail, crash-shaped fail) and representative unrecognized PowerShell forms, using the existing verification preparation path; no text-pinning tests."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "check-credit",
+    "cross-project",
+    "test-recognition",
+    "windows"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

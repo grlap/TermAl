@@ -1,0 +1,31 @@
+{
+  "id": "01a21b93-bdcc-73f0-b922-3841094cc9aa",
+  "external_ref": null,
+  "title": "Move remote writer resolution out of engram_turn_checks.rs",
+  "outcome": "Keep proxy path resolution, SSH writer evidence and writer marking with the remote writer module. Preserve local mutation stamping, ordinary overlap decisions and carried-launch fencing.",
+  "acceptance": [
+    "Remote-specific writer lookup and marking live in src/engram_remote_writer.rs, with existing ordinary check and carried-launch behavior preserved."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "chore",
+  "priority": 4,
+  "labels": [
+    "architecture",
+    "credit",
+    "engram",
+    "federation",
+    "host-recording",
+    "rust"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a15a41-cbbd-7bd2-af40-f5f89e7eed42",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -2,11 +2,11 @@
   "id": "01a21b36-ebb6-7fd0-b5d4-bc0d5f404026",
   "external_ref": null,
   "title": "Verification record for a focused run whose first stage crashed is rejected as \"unclassified_stages: no recognized check\" instead of recorded as a failed check",
-  "outcome": "Verification record for a focused run whose first stage crashed is rejected as \"unclassified_stages: no recognized check\" instead of recorded as a failed check",
+  "outcome": "The unclassified refusal for the crashed WinB focused run is explained (an unsupported PowerShell stage argv, refused by design before the outcome is considered), and behavioural tests pin that recognized focused stages record crash-shaped and normal failures as failed and passes as passed, while unsupported commands stay unclassified.",
   "acceptance": [
-    "The cause is identified from source: why a completed focused launcher run whose first test stage exited abnormally (for example 0xc0000374) produces a verification record rejected as `unclassified_stages: completed run has no recognized check for focused` rather than a recognized check with a failed result.",
-    "A focused run whose recognized test stage exits abnormally is recorded as a recognized check with a failed (or crashed) result, so it is visible as a failure for credit and evaluation purposes; a run with genuinely no recognized test stage keeps a refusal that names that cause.",
-    "Behavioural tests cover a crashed first stage, a normal failure and a pass for a focused run; no text-pinning test."
+    "The original focused WinB run is diagnosed from the literal planned and observed stage argv and the verifier source. The PowerShell stage ended in a real failure; its unsupported command explains the unclassified native-verification refusal.",
+    "A recognized focused test stage that terminates unsuccessfully without a libtest summary is recorded as a failed Test. A recognized normal failure is recorded as failed and a recognized pass as passed. An unsupported focused command remains unclassified for native verification even when it fails.",
+    "Behavioral tests use the committed-input verification preparation path to cover the observed wrapper and the recognized crash-shaped, normal-fail and pass cases."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
