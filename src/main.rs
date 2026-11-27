@@ -19,7 +19,8 @@ src/orchestrators.rs, and the Telegram relay modules named below.
 */
 
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: alloc_retry::RetryOnNull<mimalloc::MiMalloc> =
+    alloc_retry::RetryOnNull::new(mimalloc::MiMalloc);
 
 // Every `eprintln!` in the crate, in every module,
 // goes through the host console log (host_log.rs): in server mode each line
@@ -34,6 +35,7 @@ macro_rules! eprintln {
 }
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+mod alloc_retry;
 mod engram_host;
 use engram_host::{EngramHost, EngramRecorderObservation};
 mod host_command;
@@ -89,8 +91,12 @@ const MAX_JSON_REQUEST_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_FILE_CONTENT_BYTES: usize = 10 * 1024 * 1024;
 
 /// Starts the backend entrypoint. A delegation's Codex keeper is selected
-/// first, before any runtime thread exists, and leaves without one.
+/// before any runtime thread exists and leaves without one; the only thread
+/// that precedes it is the allocation-notice writer, which stays idle.
 fn main() {
+    // Started while allocation still succeeds, so a later failed allocation
+    // can hand its notice off without allocating or blocking.
+    alloc_retry::start_wait_notice_writer();
     #[cfg(target_os = "linux")]
     if let Some(code) = codex_keeper::run_codex_keeper_if_requested() {
         std::process::exit(code);
