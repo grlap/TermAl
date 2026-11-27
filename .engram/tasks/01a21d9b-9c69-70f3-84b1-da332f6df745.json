@@ -1,0 +1,30 @@
+{
+  "id": "01a21d9b-9c69-70f3-84b1-da332f6df745",
+  "external_ref": null,
+  "title": "Rust test fixture can invoke the real system ssh (terminal_run_route_proxies_valid_remote_multibyte_commands) when its loopback health probe fails",
+  "outcome": "No TermAl test can start a real ssh (or scp) process on any host, so full gates run without any risk of a real outbound SSH connection, as Greg's standing ban requires.",
+  "acceptance": [
+    "Every test path that can reach RemoteConnection::start_process (or any other system ssh/scp invocation) uses an injected, non-network process starter or is otherwise proven unable to spawn a real ssh/scp, with a test that fails if a real ssh would be spawned.",
+    "terminal_run_route_proxies_valid_remote_multibyte_commands keeps its behavioural assertions, and a failed or timed-out /api/health probe in that fixture can no longer lead to a real ssh invocation.",
+    "Focused runs of the affected test modules pass on Linux and Windows, without retries or larger timeouts."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "gate-blocker",
+    "ssh-ban",
+    "test-isolation"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

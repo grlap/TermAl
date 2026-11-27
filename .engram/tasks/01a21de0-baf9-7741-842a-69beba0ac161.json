@@ -1,0 +1,31 @@
+{
+  "id": "01a21de0-baf9-7741-842a-69beba0ac161",
+  "external_ref": null,
+  "title": "Old boot path can initialize or migrate the primary store before the coordination store refuses an unsupported (one-way) schema",
+  "outcome": "Before any one-way coordination-store schema is activated, a host (including an older binary on rollback) cannot change the primary store when the paired coordination store is at a schema it does not support: the coordination check refuses before any primary initialization or migration, or a guard proves no primary mutation happens.",
+  "acceptance": [
+    "The boot path checks the coordination store's schema version (or reader floor) before it initializes or migrates the primary store, or an equivalent guard prevents any primary-store mutation when the coordination store is unsupported.",
+    "A test with disposable paired stores shows that an unsupported coordination schema leaves the primary store byte-for-byte unchanged and the host refuses to start with a typed error.",
+    "The activation item for the a15b compact-retention successor schema lists this item as a prerequisite."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 1,
+  "labels": [
+    "activation-blocker",
+    "boot-path",
+    "one-way-migration",
+    "schema"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-full-hold-ssh-fallback-2026-11-27",
+    "revision_id": "d2002eeeddd245bfbc136a50f052aad5",
+    "previous": "fb5c3395d8c843f588ff348ff0437b4b",
+    "body_sha256": "0972a00b13fcc28f31bfccedbbc11b1d69125bc5c6cf585753defa6dc3a4cfc3",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a21d9b-9c69-70f3-84b1-da332f6df745",
+      "work_ref": "w-da332f6df745"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T15:50:53.817648600Z"
+    }
+  },
+  "body": "HOLD (Fable2, 2026-11-27 15:26Z, Opus2 #8265/#8266). All TermAl FULL gates on EVERY host are held until P0 w-da332f6df745 lands. The test terminal_run_route_proxies_valid_remote_multibyte_commands configures an enabled SSH remote (example.com:22, alice) on loopback. If its /api/health probe fails or times out, ensure_available (src/remote.rs ~1139-1167) calls start_process, which runs the system ssh. Under Greg's absolute ssh ban, an agent-launched FULL that can run ssh isn't allowed.\n- Focused runs that demonstrably exclude the test or module may continue.\n- No filtered \"full\" gate.\n- w-da33's fix candidate's own FULL runs UNFILTERED, because the candidate removes the path by construction. The pair must first confirm (a) an injected non-network starter for ALL tests reaching start_process with an enabled remote, all audited, and (b) a behavioural test that a failed probe never spawns ssh.\n- After it lands: w-1f9d R2, then ee06's Windows FULL, then the rest.\n- Greg was informed (Asistant #2953).\nLift this hold when w-da33 lands.\n\nUPDATE 15:46Z (round 1 Codex review, Opus2 #8274): the Git push fixtures (src/tests/git.rs:1884/:1934) can also reach Git's own ssh through inherited transport configuration. Focused runs on any commit other than w-da33's fix candidate must now exclude BOTH remote_terminal AND tests::git::. w-da33's scope includes a harness-level, fail-closed Git transport (no ssh/ext, independent of user Git config). The failed-probe witness must be unambiguous, not a shared 502.\n\nUPDATE 15:50Z: ACTUAL ssh launches were confirmed in two older WinB focused runs (test-cf2e07b1 on 419e7385, test-ea33a7b5 on 6f682e8d), both \"ssh: Could not resolve hostname build.example\", from the \"Build host\" fixture in src/tests/engram_overlap_cause.rs. Focused runs on other commits must now exclude remote_terminal, tests::git:: AND tests::engram_overlap_cause. w-da33's scope covers every SSH-remote fixture through a harness-level fail-closed starter. Both logs are kept as evidence until w-da33 closes. Greg was told plainly (Asistant #2956).\n\nFILTER CORRECTION (Opus2 #8281): on master the overlap_cause tests are mounted as tests::engram_host_adapter::turn_checks::carried_checks::overlap_cause:: (file src/tests/engram_overlap_cause.rs), so the exact skip flags sent to all runners and owners are `--skip remote_terminal --skip tests::git:: --skip overlap_cause`. On master that file has no build.example, but it sets remote_id 'ssh-test' (line 148), so w-da33's audit covers it. The build.example fixture exists only on the unlanded commits 419e7385 and 6f682e8d."
+}

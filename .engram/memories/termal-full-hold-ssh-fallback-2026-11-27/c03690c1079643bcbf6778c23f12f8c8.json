@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "termal-full-hold-ssh-fallback-2026-11-27",
+    "revision_id": "c03690c1079643bcbf6778c23f12f8c8",
+    "previous": null,
+    "body_sha256": "561d848d1ec18faebed7d2f4d7e309d151acf403290fce196ff4873b0afe7eac",
+    "retiring_target": {
+      "kind": "local",
+      "work_id": "01a21d9b-9c69-70f3-84b1-da332f6df745",
+      "work_ref": "w-da332f6df745"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T15:25:16.874463800Z"
+    }
+  },
+  "body": "HOLD (Fable2, 2026-11-27 15:26Z, Opus2 #8265/#8266). All TermAl FULL gates on EVERY host are held until P0 w-da332f6df745 lands. The test terminal_run_route_proxies_valid_remote_multibyte_commands configures an enabled SSH remote (example.com:22, alice) on loopback. If its /api/health probe fails or times out, ensure_available (src/remote.rs ~1139-1167) calls start_process, which runs the system ssh. Under Greg's absolute ssh ban, an agent-launched FULL that can run ssh isn't allowed.\n- Focused runs that demonstrably exclude the test or module may continue.\n- No filtered \"full\" gate.\n- w-da33's fix candidate's own FULL runs UNFILTERED, because the candidate removes the path by construction. The pair must first confirm (a) an injected non-network starter for ALL tests reaching start_process with an enabled remote, all audited, and (b) a behavioural test that a failed probe never spawns ssh.\n- After it lands: w-1f9d R2, then ee06's Windows FULL, then the rest.\n- Greg was informed (Asistant #2953).\nLift this hold when w-da33 lands."
+}
