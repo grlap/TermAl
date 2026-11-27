@@ -60,23 +60,21 @@ pub(super) fn test_run_registration_confirmation(
 }
 
 /// Encodes a registration confirmation within `limit` bytes, or refuses it
-/// with 413.
+/// with 413. The shared bounded writer stops at the limit, so an over-limit
+/// value is never encoded in full.
 fn encode_test_run_confirmation<T: Serialize + ?Sized>(
     value: &T,
     limit: usize,
 ) -> Result<Vec<u8>, ApiError> {
-    let bytes = serde_json::to_vec(value).map_err(|error| {
-        ApiError::internal(format!(
-            "test run confirmation serialization failed: {error}"
-        ))
-    })?;
-    if bytes.len() > limit {
-        return Err(ApiError::from_status(
+    encode_json_bounded(value, limit).map_err(|error| match error {
+        OutputEncodingError::Limit { .. } => ApiError::from_status(
             StatusCode::PAYLOAD_TOO_LARGE,
             "test run registration metadata exceeds the confirmation response bound",
-        ));
-    }
-    Ok(bytes)
+        ),
+        OutputEncodingError::Serialize(error) => ApiError::internal(format!(
+            "test run confirmation serialization failed: {error}"
+        )),
+    })
 }
 
 pub(crate) fn serialize_test_run_detail_summary<S: serde::Serializer>(

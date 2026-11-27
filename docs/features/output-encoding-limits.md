@@ -3,6 +3,9 @@
 HTTP response bodies and individual SSE frames have a 67,108,864-byte encoded
 ceiling. Smaller route and protocol limits still apply. This bounds response
 encoding; it does not truncate domain records, retained transcripts or commands.
+The ceiling applies to the encoded body before transport compression
+(`Content-Encoding`). Compression runs after the finite-body guard and adds only
+the codec's bounded per-block overhead; it builds no larger single buffer.
 
 JSON uses one bounded writer. It checks the next byte count before reserving or
 appending, counts UTF-8 and JSON escapes, and abandons partial output on failure.
@@ -55,6 +58,8 @@ not an estimate of the complete output. Payload contents are never logged.
 | --- | --- |
 | Generic `Json<T>` responses, including errors and mutations | Shared bounded writer; request extraction still delegates to Axum. |
 | Manual state, session-tail and history JSON | Shared writer in the blocking response owner; revision/session diagnostics retained. |
+| Test-run registration confirmation JSON | Shared writer with the route's smaller 64 KiB limit; over-limit metadata is refused with 413 before it is encoded in full. |
+| Host utilization JSON (local, aggregate and federation pair responses, and the sample cache) | Shared writer with the route's smaller response limit; an over-limit response is refused as unavailable, and an over-limit sample is not cached, before it is encoded in full. |
 | Other finite HTTP responses and static files | Response publication guard checks the body's own length or collects unknown-length streams through the bounded writer before publishing headers. It does not trust Content-Length. |
 | HTTP status/header decoration | Internal output-failure marker restores the error envelope before compression or signing. |
 | Federation responses | The lesser of the existing response allowance and 64 MiB; final replacement bytes/status are signed. Existing 32 KiB/64 KiB protocol limits stay smaller. |
@@ -65,6 +70,7 @@ not an estimate of the complete output. Payload contents are never logged.
 | Terminal output/completion/error SSE | Shared writer; bounded command error, with no automatic command replay. Existing command capture limits remain in force. |
 | Remote and MCP proxy errors | Typed output failure retained for the caller; no implicit mutation replay. |
 | Session-history materialization | Existing MessageSequence shared ownership and pinned SQLite/cursor behavior retained; no whole-history clone is reintroduced. |
+| Transport compression (`CompressionLayer`) | Runs after the finite-body guard on an already bounded body. The ceiling applies before compression; gzip (the only codec enabled) adds only bounded per-block overhead and builds no larger single buffer. |
 
 The existing zero-copy HTTP write chunker remains a separate protection against
 an individual native vectored-write buffer exceeding its platform representation.

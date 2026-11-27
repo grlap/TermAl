@@ -217,9 +217,7 @@ pub(super) fn sample_loop_with_probe(
                 observed: std::time::Instant::now(),
                 received_at: utc_now(),
             };
-            if serde_json::to_vec(&stored.snapshot)
-                .is_ok_and(|bytes| bytes.len() <= RESPONSE_BYTES - 256)
-            {
+            if encode_json_bounded(&stored.snapshot, RESPONSE_BYTES - 256).is_ok() {
                 let mut image = app
                     .host_utilization
                     .image
@@ -422,9 +420,15 @@ pub(super) fn cached_response<T: Serialize>(
     budget: Duration,
     limit: usize,
 ) -> Result<Response, ApiError> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|_| unavailable("host utilization encoding unavailable"))?;
-    if bytes.len() > limit || started.elapsed() > budget {
+    // The shared bounded writer stops at the limit, so an over-limit value is
+    // never encoded in full.
+    let bytes = encode_json_bounded(value, limit).map_err(|error| match error {
+        OutputEncodingError::Limit { .. } => {
+            unavailable("host utilization cached response budget exceeded")
+        }
+        OutputEncodingError::Serialize(_) => unavailable("host utilization encoding unavailable"),
+    })?;
+    if started.elapsed() > budget {
         return Err(unavailable(
             "host utilization cached response budget exceeded",
         ));
