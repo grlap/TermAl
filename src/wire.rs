@@ -106,6 +106,9 @@ pub(crate) enum ApiErrorKind {
     FederationMailboxReadNotFound,
     /// A public domain mailbox 404 after the original native route missed.
     NativeMailboxRouteMiss,
+    /// An authorized native relay lookup found no matching resource for its caller.
+    UnknownNativeMailboxLocator,
+    NativeMailboxHomeAssociationMissing,
     /// Retirement is observed, not inferred from a missing row. Only the
     /// initial capture boundary can certify that no page was selected.
     MailboxParticipantRetiredDuringRead {
@@ -361,6 +364,22 @@ impl IntoResponse for ApiError {
             return (
                 self.status,
                 Json(json!({ "error": self.message, "code": "native_mailbox_route_miss" })),
+            )
+                .into_response();
+        }
+        let relay_code = match self.kind {
+            Some(ApiErrorKind::UnknownNativeMailboxLocator) => {
+                Some(UNKNOWN_NATIVE_MAILBOX_LOCATOR_CODE)
+            }
+            Some(ApiErrorKind::NativeMailboxHomeAssociationMissing) => {
+                Some(NATIVE_MAILBOX_HOME_ASSOCIATION_MISSING_CODE)
+            }
+            _ => None,
+        };
+        if let Some(code) = relay_code {
+            return (
+                self.status,
+                Json(json!({ "error": self.message, "code": code })),
             )
                 .into_response();
         }

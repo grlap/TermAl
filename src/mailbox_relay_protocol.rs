@@ -362,6 +362,12 @@ pub(crate) enum MailboxRelayOperation {
         actor: MailboxRelayPrincipal,
         home: MailboxRelayHome,
     },
+    /// Confirm one mailbox at its home without issuing a receipt.
+    LookupMailbox {
+        actor: MailboxRelayPrincipal,
+        home: MailboxRelayHome,
+        mailbox_id: String,
+    },
     Read {
         actor: MailboxRelayPrincipal,
         conversation: MailboxRelayConversation,

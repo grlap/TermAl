@@ -52,6 +52,333 @@ fn cursors(state: &AppState, mailbox: &str) -> Vec<(String, u64)> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn altered_relay_locator_returns_the_same_refusal_without_spending_a_receipt() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy.send(&fixture, "altered-locator").await;
+    let central = &fixture.central;
+    let mailbox = MailboxRelayLocator::decode(&sent.mailbox_id, false)
+        .unwrap()
+        .unwrap();
+    let satellite = &fixture.satellite;
+    let satellite_actor = satellite
+        .native_mailbox_relay_descriptor(&fixture.native)
+        .unwrap()
+        .principal;
+    assert!(
+        satellite
+            .mailbox_store
+            .mailbox_relay_association(&satellite_actor, &mailbox.id)
+            .unwrap()
+            .is_none()
+    );
+    let cold_error = read_mailbox_message(
+        AxumPath((fixture.native.clone(), sent.message_id.clone())),
+        State(satellite.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(cold_error.status, StatusCode::NOT_FOUND);
+    assert_eq!(cold_error.kind, None);
+
+    let reply = fixture
+        .satellite
+        .send_native_mailbox_relay(
+            &fixture.native,
+            &SendMailboxMessageRequest {
+                target_session_id: format!("host:{}::{}", mailbox.home.host.host_id, proxy.caller),
+                message: "unread reply for the original receipt".to_owned(),
+                idempotency_key: "altered-locator-reply".to_owned(),
+                topic: None,
+                state_stamp: None,
+                class: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reply.mailbox_id, sent.mailbox_id);
+    let page = issued_page(&fixture, &proxy, &sent.mailbox_id).await;
+    assert!(page.processed_through < reply.sequence);
+    let receipt = page.receipt.unwrap();
+    let remote_receipt = read_relay_page(satellite, &fixture.native, &sent.mailbox_id)
+        .await
+        .unwrap()
+        .receipt
+        .unwrap();
+    let before = cursors(central, &mailbox.id);
+    let altered_locator = |encoded: &str, message: bool| {
+        let locator = MailboxRelayLocator::decode(encoded, message)
+            .unwrap()
+            .unwrap();
+        let mut id = locator.id;
+        let tail = id.pop().unwrap();
+        id.push(if tail == '0' { '1' } else { '0' });
+        MailboxRelayLocator::encode(&locator.home, &id, message).unwrap()
+    };
+    let wrong_mailbox = altered_locator(&sent.mailbox_id, false);
+    let wrong_message = altered_locator(&reply.message_id, true);
+    let set_home_store = |id: &str| {
+        assert_eq!(
+            central
+                .mailbox_store
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE mailbox_relay_store SET store_id=?1 WHERE singleton=1",
+                    [id],
+                )
+                .unwrap(),
+            1
+        );
+    };
+    set_home_store(&Uuid::new_v4().to_string());
+    let replaced_store_error = read_mailbox_message(
+        AxumPath((fixture.native.clone(), wrong_message.clone())),
+        State(satellite.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(replaced_store_error.status, StatusCode::CONFLICT);
+    assert_eq!(replaced_store_error.kind, None);
+    set_home_store(&mailbox.home.store_id);
+    assert_eq!(cursors(central, &mailbox.id), before);
+
+    let read_error = read_relay_page(central, &proxy.caller, &wrong_mailbox)
+        .await
+        .unwrap_err();
+    let ack_error = ack(central, &proxy.caller, &wrong_mailbox, receipt.clone())
+        .await
+        .unwrap_err();
+    let message_error = read_mailbox_message(
+        AxumPath((proxy.caller.clone(), wrong_message.clone())),
+        State(central.clone()),
+    )
+    .await
+    .unwrap_err();
+    let remote_message_error = read_mailbox_message(
+        AxumPath((fixture.native.clone(), wrong_message)),
+        State(satellite.clone()),
+    )
+    .await
+    .unwrap_err();
+    let remote_read_error = read_relay_page(satellite, &fixture.native, &wrong_mailbox)
+        .await
+        .unwrap_err();
+    let remote_ack_error = ack(
+        satellite,
+        &fixture.native,
+        &wrong_mailbox,
+        remote_receipt.clone(),
+    )
+    .await
+    .unwrap_err();
+    for error in [
+        &read_error,
+        &ack_error,
+        &message_error,
+        &remote_message_error,
+        &remote_read_error,
+        &remote_ack_error,
+    ] {
+        assert_unknown_relay_locator(error);
+    }
+    assert_eq!(cursors(central, &mailbox.id), before);
+
+    // A retained satellite association can route a stale ID to the actual
+    // home. Move only the cache key so the real mailbox and receipts survive.
+    let stale_mailbox = MailboxRelayLocator::decode(&wrong_mailbox, false)
+        .unwrap()
+        .unwrap();
+    let move_cache_key = |from: &str, to: &str| {
+        assert_eq!(
+            satellite
+                .mailbox_store
+                .connection()
+                .unwrap()
+                .execute(
+                    "UPDATE mailbox_relay_associations SET mailbox_id=?2 WHERE mailbox_id=?1",
+                    [from, to],
+                )
+                .unwrap(),
+            1
+        );
+    };
+    move_cache_key(&mailbox.id, &stale_mailbox.id);
+    let home_read_error = read_relay_page(satellite, &fixture.native, &wrong_mailbox)
+        .await
+        .unwrap_err();
+    let home_ack_error = ack(
+        satellite,
+        &fixture.native,
+        &wrong_mailbox,
+        remote_receipt.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert_unknown_relay_locator(&home_read_error);
+    assert_unknown_relay_locator(&home_ack_error);
+
+    let missing_cache = ack(
+        satellite,
+        &fixture.native,
+        &sent.mailbox_id,
+        remote_receipt.clone(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(missing_cache.status, StatusCode::NOT_FOUND);
+    assert_ne!(
+        missing_cache.kind,
+        Some(ApiErrorKind::UnknownNativeMailboxLocator)
+    );
+    assert_eq!(cursors(central, &mailbox.id), before);
+    move_cache_key(&stale_mailbox.id, &mailbox.id);
+    let acknowledged = ack(satellite, &fixture.native, &sent.mailbox_id, remote_receipt)
+        .await
+        .unwrap();
+    let remote_caller = satellite
+        .native_mailbox_relay_descriptor(&fixture.native)
+        .unwrap()
+        .principal
+        .participant_key();
+    assert_eq!(
+        acknowledged
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == remote_caller)
+            .unwrap()
+            .processed_through,
+        reply.sequence
+    );
+
+    let valid_message = read_mailbox_message(
+        AxumPath((proxy.caller.clone(), reply.message_id.clone())),
+        State(central.clone()),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(valid_message.id, reply.message_id);
+    assert_eq!(valid_message.mailbox_id, sent.mailbox_id);
+    let summary = ack(central, &proxy.caller, &sent.mailbox_id, receipt)
+        .await
+        .unwrap();
+    let caller = central
+        .native_mailbox_relay_descriptor(&proxy.caller)
+        .unwrap()
+        .principal
+        .participant_key();
+    assert_eq!(
+        summary
+            .participants
+            .iter()
+            .find(|participant| participant.session_id == caller)
+            .unwrap()
+            .processed_through,
+        reply.sequence
+    );
+    proxy.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cold_relay_ack_scopes_its_lookup_and_preserves_the_home_loss_reason() {
+    let _scope = TestTempRootDirectoryScope::repository_local();
+    let fixture = Fixture::production_shape().await;
+    let proxy = ProxySend::new(&fixture).await;
+    let sent = proxy
+        .send(&fixture, "home-association-loss-for-satellite")
+        .await;
+    let locator = MailboxRelayLocator::decode(&sent.mailbox_id, false)
+        .unwrap()
+        .unwrap();
+    let satellite = &fixture.satellite;
+    let central = &fixture.central;
+    let receipt = read_relay_page(satellite, &fixture.native, &sent.mailbox_id)
+        .await
+        .unwrap()
+        .receipt
+        .unwrap();
+    let before = cursors(central, &locator.id);
+    assert_eq!(
+        central
+            .mailbox_store
+            .connection()
+            .unwrap()
+            .execute(
+                "DELETE FROM mailbox_relay_associations WHERE mailbox_id=?1",
+                [&locator.id],
+            )
+            .unwrap(),
+        1
+    );
+    let warm_read = read_relay_page(satellite, &fixture.native, &sent.mailbox_id)
+        .await
+        .unwrap_err();
+    let warm_ack = ack(
+        satellite,
+        &fixture.native,
+        &sent.mailbox_id,
+        receipt.clone(),
+    )
+    .await
+    .unwrap_err();
+
+    let absent =
+        MailboxRelayLocator::encode(&locator.home, &format!("mailbox-{}", Uuid::new_v4()), false)
+            .unwrap();
+    let absent_ack = ack(satellite, &fixture.native, &absent, receipt.clone())
+        .await
+        .unwrap_err();
+    assert_unknown_relay_locator(&absent_ack);
+
+    assert_eq!(
+        satellite
+            .mailbox_store
+            .connection()
+            .unwrap()
+            .execute(
+                "DELETE FROM mailbox_relay_associations WHERE mailbox_id=?1",
+                [&locator.id],
+            )
+            .unwrap(),
+        1
+    );
+    let cold_ack = ack(
+        satellite,
+        &fixture.native,
+        &sent.mailbox_id,
+        receipt.clone(),
+    )
+    .await
+    .unwrap_err();
+    for error in [warm_read, warm_ack, cold_ack] {
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(
+            error.kind,
+            Some(ApiErrorKind::NativeMailboxHomeAssociationMissing)
+        );
+    }
+    assert_eq!(cursors(central, &locator.id), before);
+
+    let replay = proxy
+        .send(&fixture, "home-association-loss-for-satellite")
+        .await;
+    assert!(replay.duplicate);
+    assert_eq!(replay.mailbox_id, sent.mailbox_id);
+    read_relay_page(satellite, &fixture.native, &sent.mailbox_id)
+        .await
+        .unwrap();
+    ack(satellite, &fixture.native, &sent.mailbox_id, receipt)
+        .await
+        .unwrap();
+    proxy.finish().await;
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn local_receipt_ack_after_association_loss_recovers_only_through_original_send() {
     association_loss_ack(false).await;
 }
@@ -135,6 +462,11 @@ async fn association_loss_ack(list_first: bool) {
             }
         );
     }
+    let read_error = read_relay_page(&fixture.central, &proxy.caller, &sent.mailbox_id)
+        .await
+        .unwrap_err();
+    assert_eq!(read_error.status, StatusCode::CONFLICT);
+    assert_eq!(cursors(&fixture.central, &locator.id), before);
     let result = ack(
         &fixture.central,
         &proxy.caller,
@@ -168,7 +500,6 @@ async fn association_loss_ack(list_first: bool) {
         "{}",
         error.message
     );
-    assert_unverified_ack_locator(&error);
     assert!(absent, "a refused ACK cannot invent an association");
     assert_eq!(
         after, before,
@@ -374,7 +705,7 @@ async fn absent_association_does_not_prove_the_locator_store_or_caller_was_valid
         let error = ack(&fixture.central, &proxy.caller, &mailbox, receipt.clone())
             .await
             .unwrap_err();
-        assert_unverified_ack_locator(&error);
+        assert_unknown_relay_locator(&error);
         assert_eq!(cursors(&fixture.central, &locator.id), before);
         assert!(
             fixture
@@ -417,7 +748,7 @@ async fn absent_association_does_not_prove_the_locator_store_or_caller_was_valid
     )
     .await
     .unwrap_err();
-    assert_unverified_ack_locator(&error);
+    assert_unknown_relay_locator(&error);
     assert_eq!(cursors(&fixture.central, &locator.id), before);
     let stranger = fixture
         .central
@@ -444,34 +775,7 @@ async fn absent_association_does_not_prove_the_locator_store_or_caller_was_valid
     fixture.finish().await;
 }
 
-fn assert_unverified_ack_locator(error: &ApiError) {
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert!(
-        error
-            .message
-            .contains("no saved native mailbox association"),
-        "{}",
-        error.message
-    );
-    assert!(
-        error
-            .message
-            .contains("Verify mailboxId was copied exactly"),
-        "{}",
-        error.message
-    );
-    assert!(
-        error
-            .message
-            .contains("does not establish metadata loss or membership"),
-        "{}",
-        error.message
-    );
-    assert!(
-        !error
-            .message
-            .contains("metadata is missing at its original local home"),
-        "{}",
-        error.message
-    );
+fn assert_unknown_relay_locator(error: &ApiError) {
+    assert_eq!(error.status, StatusCode::NOT_FOUND);
+    assert_eq!(error.kind, Some(ApiErrorKind::UnknownNativeMailboxLocator));
 }

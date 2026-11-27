@@ -979,6 +979,8 @@ pub(crate) fn git_diff_document_enrichment_note(error: &ApiError) -> Option<Stri
             | ApiErrorKind::FederationMailboxReadConflict
             | ApiErrorKind::FederationMailboxReadNotFound
             | ApiErrorKind::NativeMailboxRouteMiss
+            | ApiErrorKind::UnknownNativeMailboxLocator
+            | ApiErrorKind::NativeMailboxHomeAssociationMissing
             | ApiErrorKind::MailboxParticipantRetiredDuringRead { .. }
             | ApiErrorKind::RemoteConnectionUnavailable
             | ApiErrorKind::FederationSshCleanupUnknown

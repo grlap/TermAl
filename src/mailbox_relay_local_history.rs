@@ -114,7 +114,7 @@ impl AppState {
                         issue_receipt,
                         || authority.lock(),
                     )
-                    .map_err(mailbox_api_error)?;
+                    .map_err(mailbox_relay_locator_lookup_error)?;
                 page.reader_session_id = Some(actor.participant_key());
                 serde_json::to_value(page)
             }
@@ -131,7 +131,7 @@ impl AppState {
                 let mut message = self
                     .mailbox_store
                     .read_message(&actor.participant_key(), &message_id)
-                    .map_err(mailbox_api_error)?;
+                    .map_err(mailbox_relay_locator_lookup_error)?;
                 let conversation = self
                     .mailbox_store
                     .mailbox_relay_association(actor, &message.mailbox_id)
@@ -167,7 +167,7 @@ impl AppState {
                         0,
                         || authority.lock(),
                     )
-                    .map_err(mailbox_api_error)?;
+                    .map_err(mailbox_relay_locator_lookup_error)?;
                 serde_json::to_value(summary)
             }
             _ => {

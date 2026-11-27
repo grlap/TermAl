@@ -8,6 +8,24 @@ use super::*;
 
 pub(crate) const MAILBOX_RELAY_ERROR_BYTES: usize = 512;
 pub(crate) const MAILBOX_RELAY_RAW_ERROR_BYTES: usize = 4096;
+pub(crate) const NATIVE_MAILBOX_HOME_ASSOCIATION_MISSING_CODE: &str =
+    "native_mailbox_home_association_missing";
+
+pub(crate) fn native_mailbox_home_association_missing() -> ApiError {
+    ApiError::conflict(
+        "no saved native mailbox association for this exact mailboxId and caller; \
+         this request stopped before acknowledgement and does not establish the current cursor. \
+         Verify mailboxId was copied exactly from the original notification or mailbox list. \
+         This refusal does not establish metadata loss or membership. If the exact mailbox, \
+         original home and participant are confirmed but their association is unavailable, \
+         refreshing the same locator cannot restore it. An original sender retaining the \
+         identical committed send request and idempotency key can replay that exact send \
+         under its current identity and enrollment, then retry the unchanged page receipt. \
+         Otherwise report the unverified locator or unavailable association to the original \
+         home owner; do not reconstruct membership from the locator or receipt",
+    )
+    .with_kind(ApiErrorKind::NativeMailboxHomeAssociationMissing)
+}
 
 // Process-local home observations, separate from the peer's refusal envelope.
 // No response body is inspected or retained by this diagnostic.
@@ -175,6 +193,7 @@ pub(crate) fn mailbox_relay_diagnostic_metadata(request: &[u8]) -> (&'static str
         Some("describe") => "describe",
         Some("send") => "send",
         Some("list") => "list",
+        Some("lookupMailbox") => "lookupMailbox",
         Some("read") => "read",
         Some("readMessage") => "readMessage",
         Some("acknowledge") => "acknowledge",
@@ -272,6 +291,7 @@ enum MailboxRelayRefusalReason {
     ReceiptInvalid,
     ReceiptGap,
     AuthorityChanged,
+    AssociationMissing,
     UpgradeRequired,
     ReasonUnavailable,
 }
@@ -283,9 +303,10 @@ impl MailboxRelayRefusalReason {
             Self::PersistenceSettling => status == StatusCode::LOCKED,
             Self::RpcLimitReached => status == StatusCode::TOO_MANY_REQUESTS,
             Self::ReceiptInvalid => status == StatusCode::BAD_REQUEST,
-            Self::ReceiptGap | Self::AuthorityChanged | Self::UpgradeRequired => {
-                status == StatusCode::CONFLICT
-            }
+            Self::ReceiptGap
+            | Self::AuthorityChanged
+            | Self::AssociationMissing
+            | Self::UpgradeRequired => status == StatusCode::CONFLICT,
             Self::ReasonUnavailable => status.is_client_error() && status != StatusCode::NOT_FOUND,
         }
     }
@@ -309,6 +330,9 @@ impl MailboxRelayRefusalReason {
             }
             Self::AuthorityChanged => {
                 "native_mailbox_home_authority_changed; reconcile the original operation with its original identity and home"
+            }
+            Self::AssociationMissing => {
+                "native_mailbox_home_association_missing; the original sender can replay the identical committed send with the same idempotency key, then the caller can retry the unchanged receipt"
             }
             Self::UpgradeRequired => {
                 "native_mailbox_home_upgrade_required; both hosts must support the native relay protocol; no local fallback"
@@ -350,21 +374,30 @@ fn mailbox_relay_refusal_reason(status: StatusCode, bytes: &[u8]) -> MailboxRela
     if bytes.len() > MAILBOX_RELAY_RAW_ERROR_BYTES {
         return ReasonUnavailable;
     }
-    let Ok(body) = serde_json::from_slice::<ErrorResponse>(bytes) else {
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: String,
+        code: Option<String>,
+    }
+    let Ok(body) = serde_json::from_slice::<Refusal>(bytes) else {
         return ReasonUnavailable;
     };
-    let reason = match body.error.as_str() {
-        "federation persistence is settling; retry" => PersistenceSettling,
-        "federation peer RPC limit reached" => RpcLimitReached,
-        "mailbox receipt was not issued to this participant and mailbox; read again" => {
-            ReceiptInvalid
+    let reason = if body.code.as_deref() == Some(NATIVE_MAILBOX_HOME_ASSOCIATION_MISSING_CODE) {
+        AssociationMissing
+    } else {
+        match body.error.as_str() {
+            "federation persistence is settling; retry" => PersistenceSettling,
+            "federation peer RPC limit reached" => RpcLimitReached,
+            "mailbox receipt was not issued to this participant and mailbox; read again" => {
+                ReceiptInvalid
+            }
+            "mailbox receipt skips an unacknowledged page; read from the current cursor and process it first" => {
+                ReceiptGap
+            }
+            FEDERATION_STALE_AUTHORITY | NATIVE_MAILBOX_RELAY_LINK_CHANGED => AuthorityChanged,
+            "native mailbox relay upgrade required" => UpgradeRequired,
+            _ => ReasonUnavailable,
         }
-        "mailbox receipt skips an unacknowledged page; read from the current cursor and process it first" => {
-            ReceiptGap
-        }
-        FEDERATION_STALE_AUTHORITY | NATIVE_MAILBOX_RELAY_LINK_CHANGED => AuthorityChanged,
-        "native mailbox relay upgrade required" => UpgradeRequired,
-        _ => ReasonUnavailable,
     };
     if reason.accepts_status(status) {
         reason
@@ -421,6 +454,21 @@ pub(crate) fn mailbox_relay_verified_refusal(
 ) -> ApiError {
     let reason = mailbox_relay_decode_refusal(request, request_body, status, bytes)
         .unwrap_or(MailboxRelayRefusalReason::ReasonUnavailable);
+    if matches!(reason, MailboxRelayRefusalReason::AssociationMissing) {
+        if matches!(
+            request.operation,
+            MailboxRelayOperation::Read { .. }
+                | MailboxRelayOperation::Acknowledge { .. }
+                | MailboxRelayOperation::LookupMailbox { .. }
+        ) {
+            return ApiError::from_status(status, reason.advice())
+                .with_kind(ApiErrorKind::NativeMailboxHomeAssociationMissing);
+        }
+        return ApiError::from_status(
+            status,
+            MailboxRelayRefusalReason::ReasonUnavailable.advice(),
+        );
+    }
     ApiError::from_status(status, reason.advice())
 }
 

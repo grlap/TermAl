@@ -1237,6 +1237,8 @@ fn git_diff_document_enrichment_note_suppresses_non_document_recovery_kinds() {
     for kind in [
         ApiErrorKind::LocalSessionMissing,
         ApiErrorKind::RemoteConnectionUnavailable,
+        ApiErrorKind::UnknownNativeMailboxLocator,
+        ApiErrorKind::NativeMailboxHomeAssociationMissing,
         ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page: true },
         ApiErrorKind::MailboxParticipantRetiredDuringRead { before_page: false },
     ] {

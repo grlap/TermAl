@@ -225,6 +225,19 @@ impl MailboxStore {
         Ok(Some(conversation))
     }
 
+    pub(crate) fn has_native_relay_mailbox_participant(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        mailbox_id: &str,
+    ) -> Result<bool> {
+        Ok(self.connection()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM mailbox_participants \
+             WHERE mailbox_id=?1 AND session_id=?2 AND left_at IS NULL)",
+            rusqlite::params![mailbox_id, actor.participant_key()],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn remember_mailbox_relay<G>(
         &self,
         conversation: &MailboxRelayConversation,

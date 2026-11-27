@@ -87,6 +87,25 @@ pub(crate) fn mailbox_relay_current_status_unavailable(error: ApiError) -> ApiEr
     error
 }
 
+pub(crate) const UNKNOWN_NATIVE_MAILBOX_LOCATOR_CODE: &str = "unknown_native_mailbox_locator";
+
+pub(crate) fn unknown_native_mailbox_locator() -> ApiError {
+    ApiError::not_found(format!(
+        "{UNKNOWN_NATIVE_MAILBOX_LOCATOR_CODE}: This relay locator matches no mailbox or message \
+         visible to the caller. Copy it exactly from the TermAl tool output or original host wake."
+    ))
+    .with_kind(ApiErrorKind::UnknownNativeMailboxLocator)
+}
+
+pub(crate) fn mailbox_relay_locator_lookup_error(error: anyhow::Error) -> ApiError {
+    let error = mailbox_api_error(error);
+    if error.status == StatusCode::NOT_FOUND {
+        unknown_native_mailbox_locator()
+    } else {
+        error
+    }
+}
+
 fn mailbox_relay_page_unavailable(error: ApiError) -> ApiError {
     if mailbox_relay_home_unavailable(&error) || mailbox_relay_recovery_link_changed(&error) {
         let cause = error
@@ -660,18 +679,28 @@ impl AppState {
         })
     }
 
-    pub(crate) async fn recover_native_mailbox_relay_association(
+    pub(crate) fn missing_native_mailbox_relay_association(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        mailbox: &str,
+    ) -> ApiError {
+        // Only live membership for this caller distinguishes missing metadata
+        // from an unknown locator. It cannot authorize a read or an ACK.
+        match self
+            .mailbox_store
+            .has_native_relay_mailbox_participant(actor, mailbox)
+        {
+            Ok(true) => native_mailbox_home_association_missing(),
+            Ok(false) => unknown_native_mailbox_locator(),
+            Err(error) => mailbox_api_error(error),
+        }
+    }
+
+    fn remote_native_mailbox_recovery_peer(
         &self,
         actor: &MailboxRelayPrincipal,
         locator: &MailboxRelayLocator,
-    ) -> Result<MailboxRelayConversation, ApiError> {
-        if locator.home.host == actor.host {
-            return Err(ApiError::not_found(
-                "unknown_native_mailbox_locator: native mailbox locator is not recognized \
-                 at this local home for this caller; copy mailboxId exactly from \
-                 termal_list_mailboxes or the original host wake; do not reconstruct or retype it",
-            ));
-        }
+    ) -> Result<(Arc<FederationPeerHandle>, FederationLinkLease), ApiError> {
         // A locator alone grants no new topology or membership. Distinguish an
         // unsupported home from a configured connection that can reconnect.
         let peer = self.federation_peer_snapshot(&locator.home.host.host_id)?;
@@ -684,49 +713,71 @@ impl AppState {
                 "native mailbox recovery requires its configured central home; retry alone will not change that configuration",
             ));
         }
-        let (lease, rows) = async {
-            let handle = self
-                .federation_peer_handle(&locator.home.host.host_id)
-                .ok_or_else(|| {
-                    ApiError::conflict(NATIVE_MAILBOX_RELAY_RECOVERY_PEER_UNAVAILABLE)
-                })?;
-            let lease = handle.channel.current_lease()?;
-            lease.with_current(self, |_, peer| {
-                if peer.local != actor.host
-                    || peer.peer != locator.home.host
-                    || peer.central != locator.home.host
-                    || peer.local_role != FederationRole::Satellite
-                {
-                    return Err(ApiError::conflict(
-                        "native mailbox recovery requires its configured central home",
-                    ));
-                }
-                Ok(())
-            })?;
-            let rows: Vec<MailboxRelaySummary> = self
-                .request_mailbox_relay(
-                    &handle,
-                    &lease,
-                    MailboxRelayOperation::List {
-                        actor: actor.clone(),
-                        home: locator.home.clone(),
-                    },
-                )
-                .await?;
-            Ok::<_, ApiError>((lease, rows))
-        }
-        .await
-        .map_err(mailbox_relay_page_unavailable)?;
+        let handle = self
+            .federation_peer_handle(&locator.home.host.host_id)
+            .ok_or_else(|| ApiError::conflict(NATIVE_MAILBOX_RELAY_RECOVERY_PEER_UNAVAILABLE))?;
+        let lease = handle.channel.current_lease()?;
+        lease.with_current(self, |_, peer| {
+            if peer.local != actor.host
+                || peer.peer != locator.home.host
+                || peer.central != locator.home.host
+                || peer.local_role != FederationRole::Satellite
+            {
+                return Err(ApiError::conflict(
+                    "native mailbox recovery requires its configured central home",
+                ));
+            }
+            Ok(())
+        })?;
+        Ok((handle, lease))
+    }
+
+    async fn find_remote_native_mailbox_relay_association(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        locator: &MailboxRelayLocator,
+    ) -> Result<(FederationLinkLease, MailboxRelaySummary), ApiError> {
+        let (handle, lease) = self.remote_native_mailbox_recovery_peer(actor, locator)?;
+        let rows: Vec<MailboxRelaySummary> = self
+            .request_mailbox_relay(
+                &handle,
+                &lease,
+                MailboxRelayOperation::List {
+                    actor: actor.clone(),
+                    home: locator.home.clone(),
+                },
+            )
+            .await?;
         let row = rows
             .into_iter()
             .find(|row| row.summary.id == locator.id)
-            .ok_or_else(|| {
-                ApiError::not_found(
-                    "native mailbox is not owned by this recipient at its original home",
-                )
-            })?;
+            .ok_or_else(unknown_native_mailbox_locator)?;
         row.conversation.require_home(&locator.home)?;
         row.conversation.require_member(actor)?;
+        Ok((lease, row))
+    }
+
+    pub(crate) async fn recover_native_mailbox_relay_association(
+        &self,
+        actor: &MailboxRelayPrincipal,
+        locator: &MailboxRelayLocator,
+    ) -> Result<MailboxRelayConversation, ApiError> {
+        if locator.home.host == actor.host {
+            if locator.home.store_id != actor.store_id {
+                return Err(unknown_native_mailbox_locator());
+            }
+            let app = self.clone();
+            let actor = actor.clone();
+            let mailbox = locator.id.clone();
+            return run_blocking_api(move || {
+                Err(app.missing_native_mailbox_relay_association(&actor, &mailbox))
+            })
+            .await;
+        }
+        let (lease, row) = self
+            .find_remote_native_mailbox_relay_association(actor, locator)
+            .await
+            .map_err(mailbox_relay_page_unavailable)?;
         let names = row.participant_names();
         let conversation = row.conversation;
         let authority = MailboxRelayAuthority {
@@ -772,7 +823,7 @@ impl AppState {
         let conversation = run_blocking_api(move || {
             app.mailbox_store
                 .mailbox_relay_association(&captured, &mailbox)
-                .map_err(mailbox_api_error)
+                .map_err(mailbox_relay_locator_lookup_error)
         })
         .await?;
         let conversation = match conversation {
@@ -893,32 +944,41 @@ impl AppState {
         let app = self.clone();
         let captured = actor.clone();
         let mailbox = locator.id.clone();
+        let local_home = locator.home.host == actor.host;
+        let at_local_store = local_home && locator.home.store_id == actor.store_id;
         let conversation = run_blocking_api(move || {
-            app.mailbox_store
+            let association = app
+                .mailbox_store
                 .mailbox_relay_association(&captured, &mailbox)
-                .map_err(mailbox_api_error)
-        })
-        .await?
-        .ok_or_else(|| {
-            if locator.home.host == actor.host {
-                // The locator and receipt do not reconstruct membership. Keep
-                // this distinct from an existing association's owner denial.
-                ApiError::conflict(
-                    "no saved native mailbox association for this exact mailboxId and caller; \
-                     this request stopped before acknowledgement and does not establish the current cursor. \
-                     Verify mailboxId was copied exactly from the original notification or mailbox list. \
-                     This refusal does not establish metadata loss or membership. If the exact mailbox, \
-                     original home and participant are confirmed but their association is unavailable, \
-                     refreshing the same locator cannot restore it. An original sender retaining the \
-                     identical committed send request and idempotency key can replay that exact send \
-                     under its current identity and enrollment, then retry the unchanged page receipt. \
-                     Otherwise report the unverified locator or unavailable association to the original \
-                     home owner; do not reconstruct membership from the locator or receipt",
-                )
-            } else {
-                ApiError::not_found("native mailbox association not found")
+                .map_err(mailbox_relay_locator_lookup_error)?;
+            if association.is_none() && at_local_store {
+                return Err(app.missing_native_mailbox_relay_association(&captured, &mailbox));
             }
-        })?;
+            Ok(association)
+        })
+        .await?;
+        let conversation = match conversation {
+            Some(conversation) => conversation,
+            None if local_home => return Err(unknown_native_mailbox_locator()),
+            None => {
+                // Confirm absence at the home without saving an association
+                // or acknowledging anything on the strength of this lookup.
+                let (handle, lease) = self.remote_native_mailbox_recovery_peer(&actor, &locator)?;
+                self.request_mailbox_relay::<()>(
+                    &handle,
+                    &lease,
+                    MailboxRelayOperation::LookupMailbox {
+                        actor,
+                        home: locator.home,
+                        mailbox_id: locator.id,
+                    },
+                )
+                .await?;
+                return Err(ApiError::not_found(
+                    "native mailbox association not found on this satellite; try reading the same mailbox locator to recover its route, then retry the unchanged receipt",
+                ));
+            }
+        };
         conversation.require_home(&locator.home)?;
         let summary: MailboxSummary = self
             .call_native_mailbox_home(

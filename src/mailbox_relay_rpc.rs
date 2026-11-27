@@ -291,16 +291,18 @@ impl AppState {
         mailbox: &str,
         conversation: &MailboxRelayConversation,
     ) -> Result<(), ApiError> {
+        conversation.require_member(actor)?;
         let actual = self
             .mailbox_store
             .mailbox_relay_association(actor, mailbox)
-            .map_err(mailbox_api_error)?;
-        if actual.as_ref() != Some(conversation) {
-            return Err(ApiError::not_found(
+            .map_err(mailbox_relay_locator_lookup_error)?;
+        match actual {
+            Some(actual) if &actual == conversation => Ok(()),
+            Some(_) => Err(ApiError::not_found(
                 "native mailbox conversation membership not found",
-            ));
+            )),
+            None => Err(self.missing_native_mailbox_relay_association(actor, mailbox)),
         }
-        Ok(())
     }
 
     pub(crate) fn execute_mailbox_relay(
@@ -390,6 +392,33 @@ impl AppState {
                 let _guard = authority.lock().map_err(mailbox_api_error)?;
                 serde_json::to_value(rows)
             }
+            MailboxRelayOperation::LookupMailbox {
+                actor,
+                home,
+                mailbox_id,
+            } => {
+                actor.require_origin(authenticated_origin)?;
+                if !valid_mailbox_relay_id(&mailbox_id) {
+                    return Err(ApiError::bad_request("invalid native mailbox id"));
+                }
+                let authority =
+                    self.mailbox_relay_home_authority(lease, &home, std::slice::from_ref(&actor))?;
+                if !self
+                    .mailbox_store
+                    .has_native_relay_mailbox_participant(&actor, &mailbox_id)
+                    .map_err(mailbox_api_error)?
+                {
+                    return Err(unknown_native_mailbox_locator());
+                }
+                let conversation = self
+                    .mailbox_store
+                    .mailbox_relay_association(&actor, &mailbox_id)
+                    .map_err(mailbox_relay_locator_lookup_error)?
+                    .ok_or_else(native_mailbox_home_association_missing)?;
+                conversation.require_home(&home)?;
+                let _guard = authority.lock().map_err(mailbox_api_error)?;
+                serde_json::to_value(())
+            }
             MailboxRelayOperation::Read {
                 actor,
                 conversation,
@@ -411,12 +440,12 @@ impl AppState {
                         before_association();
                     }
                 }
-                self.require_mailbox_relay_conversation(&actor, &mailbox_id, &conversation)?;
                 let authority = self.mailbox_relay_home_authority(
                     lease,
                     &conversation.home,
                     std::slice::from_ref(&actor),
                 )?;
+                self.require_mailbox_relay_conversation(&actor, &mailbox_id, &conversation)?;
                 let mut page = self
                     .mailbox_store
                     .read_range_authorized(
@@ -427,7 +456,7 @@ impl AppState {
                         issue_receipt,
                         || authority.lock(),
                     )
-                    .map_err(mailbox_api_error)?;
+                    .map_err(mailbox_relay_locator_lookup_error)?;
                 page.reader_session_id = Some(actor.participant_key());
                 serde_json::to_value(page)
             }
@@ -437,10 +466,12 @@ impl AppState {
                 message_id,
             } => {
                 actor.require_origin(authenticated_origin)?;
+                let authority =
+                    self.mailbox_relay_home_authority(lease, &home, std::slice::from_ref(&actor))?;
                 let mut message = self
                     .mailbox_store
                     .read_message(&actor.participant_key(), &message_id)
-                    .map_err(mailbox_api_error)?;
+                    .map_err(mailbox_relay_locator_lookup_error)?;
                 let conversation = self
                     .mailbox_store
                     .mailbox_relay_association(&actor, &message.mailbox_id)
@@ -450,8 +481,6 @@ impl AppState {
                 self.mailbox_store
                     .attach_mailbox_relay_home_progress(&mut message)
                     .map_err(mailbox_api_error)?;
-                let authority =
-                    self.mailbox_relay_home_authority(lease, &home, std::slice::from_ref(&actor))?;
                 let _guard = authority.lock().map_err(mailbox_api_error)?;
                 serde_json::to_value(message)
             }
@@ -462,12 +491,12 @@ impl AppState {
                 receipt,
             } => {
                 actor.require_origin(authenticated_origin)?;
-                self.require_mailbox_relay_conversation(&actor, &mailbox_id, &conversation)?;
                 let authority = self.mailbox_relay_home_authority(
                     lease,
                     &conversation.home,
                     std::slice::from_ref(&actor),
                 )?;
+                self.require_mailbox_relay_conversation(&actor, &mailbox_id, &conversation)?;
                 let summary = self
                     .mailbox_store
                     .acknowledge_authorized(
@@ -478,7 +507,7 @@ impl AppState {
                         0,
                         || authority.lock(),
                     )
-                    .map_err(mailbox_api_error)?;
+                    .map_err(mailbox_relay_locator_lookup_error)?;
                 serde_json::to_value(summary)
             }
             MailboxRelayOperation::Wake { wake } => {

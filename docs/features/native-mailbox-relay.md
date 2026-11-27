@@ -108,14 +108,15 @@ home store; the exact handle or the normal metadata wake supplies that location.
 A remote page read returns 503 `mailbox page unavailable` when its configured
 home connection is missing or changes, or the transport returns no usable
 answer. The read does not reconnect the peer; retry after the connection
-recovers. When the mailbox's home is this host and its exact locator is not
-recognized for the caller, the read returns 404 with
-`unknown_native_mailbox_locator`. This does not establish that a mailbox was
-deleted or that association metadata was lost. Copy `mailboxId` exactly from
-the list or original host wake; do not reconstruct or retype it. Recovery accepts
-only the configured central home and current native membership. A busy local
-association writer retains its separate storage error and safe-replay advice;
-it does not imply that the home or connection is unavailable.
+recovers. When a lookup finds no mailbox or message visible to the caller at
+the supplied relay locator, read, acknowledgement and exact message read
+return 404 with `unknown_native_mailbox_locator`. This result describes what
+the caller could see. Copy the locator exactly from the TermAl tool output or
+original host wake. A missing route and confirmed association loss have
+separate refusals.
+Recovery accepts only the configured central home and current native membership.
+A busy local association writer retains its separate storage error and
+safe-replay advice.
 
 Reads do not acknowledge. MCP/CLI request issuance; acknowledgements accept
 only the unchanged issued receipt, never a numeric boundary or `readKey`.

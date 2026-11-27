@@ -1509,33 +1509,7 @@ async fn mailbox_relay_unknown_local_locator_names_the_exact_handle_source() {
         .err()
         .expect("an unowned mailbox locator cannot create membership");
     assert_eq!(error.status, StatusCode::NOT_FOUND);
-    assert!(
-        error.message.starts_with("unknown_native_mailbox_locator:"),
-        "{}",
-        error.message
-    );
-    assert!(
-        error.message.contains("this local home for this caller"),
-        "{}",
-        error.message
-    );
-    assert!(
-        error.message.contains("copy mailboxId exactly"),
-        "{}",
-        error.message
-    );
-    assert!(
-        error
-            .message
-            .contains("termal_list_mailboxes or the original host wake"),
-        "{}",
-        error.message
-    );
-    assert!(
-        error.message.contains("do not reconstruct or retype"),
-        "{}",
-        error.message
-    );
+    assert_eq!(error.kind, Some(ApiErrorKind::UnknownNativeMailboxLocator));
     assert!(
         !error.message.contains("association metadata"),
         "an unknown id does not establish metadata loss"
@@ -1626,11 +1600,7 @@ async fn mailbox_relay_corrupted_local_locator_does_not_change_the_original_mail
             .err()
             .expect("a corrupted locator must not select the original mailbox");
         assert_eq!(error.status, StatusCode::NOT_FOUND);
-        assert!(
-            error.message.starts_with("unknown_native_mailbox_locator:"),
-            "{}",
-            error.message
-        );
+        assert_eq!(error.kind, Some(ApiErrorKind::UnknownNativeMailboxLocator));
         assert!(
             association.is_none(),
             "a rejected locator must not create an association"

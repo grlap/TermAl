@@ -533,9 +533,21 @@ impl FederationRpcClient {
                         if status == StatusCode::NOT_FOUND
                             && serde_json::from_slice::<ErrorResponse>(&bytes).is_ok()
                         {
-                            ApiError::not_found(
-                                "authenticated native mailbox resource or membership not found",
-                            )
+                            if matches!(
+                                &relay_request.operation,
+                                MailboxRelayOperation::Read { .. }
+                                    | MailboxRelayOperation::Acknowledge { .. }
+                                    | MailboxRelayOperation::ReadMessage { .. }
+                                    | MailboxRelayOperation::LookupMailbox { .. }
+                            ) && serde_json::from_slice::<Value>(&bytes).is_ok_and(|body| {
+                                body["code"].as_str() == Some(UNKNOWN_NATIVE_MAILBOX_LOCATOR_CODE)
+                            }) {
+                                unknown_native_mailbox_locator()
+                            } else {
+                                ApiError::not_found(
+                                    "authenticated native mailbox resource or membership not found",
+                                )
+                            }
                         } else if status == StatusCode::NOT_FOUND {
                             ApiError::conflict(
                                 "native mailbox relay capability or membership unavailable; both hosts must support the relay protocol; no local fallback",
