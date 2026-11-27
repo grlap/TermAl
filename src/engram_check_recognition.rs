@@ -16,7 +16,7 @@ pub(crate) struct EngramCheckCommand {
     /// One command has one verification kind; output cannot relabel it.
     pub(crate) kind: EngramVerificationKind,
     /// The command line with one shell wrapper removed and whitespace runs
-    /// collapsed, except qualified pipe text keeps its Bash escapes intact;
+    /// collapsed, except qualified text keeps its Bash escapes intact;
     /// its SHA-256 is the check fingerprint.
     pub(crate) normalized: String,
     /// Whether the exit status is the check's own: one simple command with
@@ -28,10 +28,11 @@ pub(crate) struct EngramCheckCommand {
     /// The argument vector recognition used. Verification consumers must use
     /// this same reading instead of choosing another shell's decoder.
     pub(crate) argv: Vec<String>,
-    /// A literal pipe qualified by known runtime Bash on an unwrapped line.
-    /// Retained for end/description association; a wrapper never grants it.
+    /// A literal pipe, or another quoted shell operator (`&`, `;`, `<`, `>`),
+    /// qualified by known runtime Bash on an unwrapped line. Retained for
+    /// end/description association; a wrapper never grants it.
     pub(crate) literal_pipe: bool,
-    /// The wrapper dialect, or known runtime Bash for a qualified pipe.
+    /// The wrapper dialect, or known runtime Bash for a qualified line.
     pub(crate) dialect: EngramShellDialect,
     /// The absolute directory a one-call line changes to before its test
     /// (`pushd "DIR" && TEST`, `engram_one_call_prefix`): the test runs
@@ -69,7 +70,69 @@ pub(crate) fn engram_check_command_in(
     command: &str,
     runtime: EngramShellDialect,
 ) -> Option<EngramCheckCommand> {
+    let mut runtime = runtime;
+    if runtime == EngramShellDialect::Bash {
+        // Bash may end the line elsewhere than trimming does: it removes a
+        // final line continuation, keeps an escaped trailing blank in the
+        // last word, and runs whatever a later line holds. Trimming would
+        // leave a dangling backslash or drop a later command, so such a line
+        // qualifies only as bash ends it; read otherwise, its quotes prove
+        // nothing, as on an unknown runtime.
+        let ended = engram_bash_line_end(command.trim_start());
+        if ended != command.trim() {
+            if let Some(check) = engram_check_command_read(ended, |line| {
+                engram_plain_check_command_read(line.trim_start(), runtime)
+            })
+            .filter(|check| check.literal_pipe)
+            {
+                return Some(check);
+            }
+            runtime = EngramShellDialect::Unknown;
+        }
+    }
     engram_check_command_with(command, |line| engram_plain_check_command_in(line, runtime))
+}
+
+/// `line` ended as bash ends it. Trailing whitespace only separates words,
+/// except the one character an odd run of backslashes escapes, which stays
+/// in the last word; when that character is a line break, it is a line
+/// continuation, removed with its backslash. What follows a line break is
+/// another command unless it holds only spaces, tabs and line breaks: such a
+/// line is returned whole, line breaks included.
+pub(crate) fn engram_bash_line_end(line: &str) -> &str {
+    let body = line.trim_end();
+    let rest = &line[body.len()..];
+    // After a line break, bash reads only spaces, tabs and line breaks as
+    // nothing to run.
+    let runs_nothing = |after_break: &str| {
+        after_break
+            .chars()
+            .all(|character| matches!(character, ' ' | '\t' | '\n'))
+    };
+    let backslashes = body.len() - body.trim_end_matches('\\').len();
+    if backslashes % 2 == 0 {
+        return if rest
+            .split_once('\n')
+            .is_none_or(|(_, after)| runs_nothing(after))
+        {
+            body
+        } else {
+            line
+        };
+    }
+    match rest.chars().next() {
+        Some('\n') if runs_nothing(&rest[1..]) => engram_bash_line_end(&body[..body.len() - 1]),
+        Some(escaped)
+            if rest[escaped.len_utf8()..]
+                .split_once('\n')
+                .is_none_or(|(_, after)| runs_nothing(after))
+                && escaped != '\n' =>
+        {
+            &line[..body.len() + escaped.len_utf8()]
+        }
+        Some(_) => line,
+        None => body,
+    }
 }
 
 /// A supported Dart SDK launch supplies run custody. Its registered report
@@ -89,7 +152,15 @@ fn engram_check_command_with(
     command: &str,
     parse_plain: impl FnOnce(&str) -> Option<EngramCheckCommand>,
 ) -> Option<EngramCheckCommand> {
-    let command = command.trim();
+    engram_check_command_read(command.trim(), parse_plain)
+}
+
+/// `engram_check_command_with` for a line whose ends are already where its
+/// shell ends it.
+fn engram_check_command_read(
+    command: &str,
+    parse_plain: impl FnOnce(&str) -> Option<EngramCheckCommand>,
+) -> Option<EngramCheckCommand> {
     if let Some((directory, test)) = engram_one_call_prefix(command) {
         // The test after the change is one simple command of its own: a
         // wrapper would start another shell, and a pipe or a list could mask
@@ -132,7 +203,15 @@ pub(crate) fn engram_plain_check_command_in(
     command: &str,
     runtime: EngramShellDialect,
 ) -> Option<EngramCheckCommand> {
-    let command = command.trim();
+    engram_plain_check_command_read(command.trim(), runtime)
+}
+
+/// `engram_plain_check_command_in` for a line whose ends are already where
+/// its shell ends it: a qualified line keeps an escaped trailing blank.
+fn engram_plain_check_command_read(
+    command: &str,
+    runtime: EngramShellDialect,
+) -> Option<EngramCheckCommand> {
     let (line, dialect) = engram_unwrap_shell_command(command);
     // A script of several lines is several commands; read as one, the
     // lines after the first would pass for the test's arguments.
@@ -141,16 +220,25 @@ pub(crate) fn engram_plain_check_command_in(
     }
     // Wrapper text can be transformed by an outer shell or by cmd's /c
     // quote removal. It never proves containment. Unknown runtime text also
-    // cannot choose between incompatible shell quoting rules.
-    let has_pipe = line.contains('|');
-    let pipe_words = (has_pipe && dialect == EngramShellDialect::Unknown
+    // cannot choose between incompatible shell quoting rules. Known runtime
+    // Bash reads a quoted `|`, `&`, `;`, `<` or `>` as a literal character of
+    // its argument, so such a line is one simple command when no operator is
+    // left unquoted.
+    let has_operator = line.contains(['|', '&', ';', '<', '>']);
+    let operator_words = (has_operator && dialect == EngramShellDialect::Unknown
         && runtime == EngramShellDialect::Bash
-        // Variables, ANSI-C and locale quotes are outside this bounded
-        // grammar; path admission already refuses these expansion values.
-        && !line.contains('$'))
+        // Variables, substitutions, ANSI-C and locale quotes are outside this
+        // bounded grammar; path admission already refuses these expansion
+        // values. A line break is another command.
+        && !line.contains(['$', '`', '\n', '\r']))
     .then(|| engram_scan_shell_words(&line, EngramShellDialect::Bash))
     .flatten()
-    .filter(|scan| !scan.unquoted_pipe && !scan.ambiguous_quote_escape && !scan.unquoted_expression)
+    .filter(|scan| {
+        !scan.unquoted_pipe
+            && !scan.unquoted_command_operator
+            && !scan.ambiguous_quote_escape
+            && !scan.unquoted_expression
+    })
     .map(|scan| {
         scan.words
             .into_iter()
@@ -158,25 +246,27 @@ pub(crate) fn engram_plain_check_command_in(
             .collect::<Vec<_>>()
     })
     .filter(|words| engram_pipe_argv_keeps_native_boundary(words));
-    let simple = (!has_pipe || pipe_words.is_some())
-        && !(line.contains(['&', ';', '<', '>', '`', '\n', '\r']) || line.contains("$("));
-    let literal_pipe = has_pipe && simple;
+    let simple = operator_words.is_some()
+        || !(has_operator || line.contains(['`', '\n', '\r']) || line.contains("$("));
+    let literal_pipe = has_operator && simple;
     // Keep qualified text intact: the legacy whitespace normalizer has no
     // Bash escape model, while argv above was read from the original bytes.
+    // Its ends are already where the shell ends it, an escaped trailing blank
+    // included.
     let normalized = if literal_pipe {
-        line.trim().to_owned()
+        line.clone()
     } else {
         engram_collapse_whitespace(&line)
     };
     // The first command of the line decides what runs as the test; what
     // follows it can only mask its exit status, which `simple` records.
     let words = if literal_pipe {
-        pipe_words?
+        operator_words?
     } else {
         // An explicit Bash wrapper may still be observed as a compound Test;
         // decoding its tokens supplies no eligible exit or pipe exemption.
         let prefix = engram_check_line(&normalized, simple);
-        if has_pipe && dialect == EngramShellDialect::Bash {
+        if line.contains('|') && dialect == EngramShellDialect::Bash {
             // Prefix truncation may leave a dangling Bash escape. Keep the
             // legacy observation in that case; `simple` is already false,
             // so neither reading can lend the command an eligible exit.

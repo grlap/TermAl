@@ -1020,6 +1020,7 @@ fn another_sessions_outstanding_work_fences_checks_only_in_the_worktree_it_may_w
                     "another-worktree".to_owned()
                 })],
                 registered_at: EngramHost::interference_tick(),
+                launcher_command: None,
             });
         }
         let mut recorder = turn.recorder();
@@ -1203,6 +1204,7 @@ fn deleting_or_collecting_a_session_keeps_its_work_fencing_the_workspace() {
                     self_gate: false,
                     locations: vec![Some(root_key.clone())],
                     registered_at: EngramHost::interference_tick(),
+                    launcher_command: None,
                 });
             if collect {
                 inner.retain_sessions(|record| record.session.id != other);
@@ -1281,6 +1283,7 @@ fn outstanding_work_keeps_every_place_it_may_write_until_it_ends() {
         self_gate: false,
         locations,
         registered_at: EngramHost::interference_tick(),
+        launcher_command: None,
     };
     let mut work = ClaudeOutstandingWork::default();
     // Registered where its session worked and its independently named root.
@@ -1382,7 +1385,14 @@ fn a_command_moved_to_the_background_fences_its_trace_before_partial_output_can_
 
 #[test]
 fn only_a_top_level_simple_full_gate_call_is_its_own_gate() {
-    let started = |frame: Value, nested: bool| claude_frame_work(&frame, nested).started;
+    // Key, background and self gate; the launcher command is not this rule.
+    let started = |frame: Value, nested: bool| {
+        claude_frame_work(&frame, nested)
+            .started
+            .into_iter()
+            .map(|(key, background, self_gate, _)| (key, background, self_gate))
+            .collect::<Vec<_>>()
+    };
     let bash = |command: &str| {
         json!({"type": "assistant", "message": {"content": [{"type": "tool_use",
             "id": "call", "name": "Bash", "input": {"command": command,
@@ -1454,6 +1464,7 @@ fn an_adopted_turns_own_foreground_command_is_its_own_and_nothing_else_is() {
         self_gate: false,
         locations: vec![Some("workdir".to_owned())],
         registered_at: EngramHost::interference_tick(),
+        launcher_command: None,
     };
     let own = ClaudeWorkOrigin::Adopted { turn_generation: 4 };
     assert!(

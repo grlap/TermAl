@@ -318,8 +318,8 @@ const ENGRAM_LAUNCH_DROP_FAILED: &str = "its detached launch failed, so no run s
 
 /// Generic full-run stages do not validate a qualified invocation's argv.
 pub(crate) const ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE: &str = concat!(
-    "its qualified pipe argv has no full-gate validator; launch the gate without ",
-    "a pipe argument, two minutes or more after this launch"
+    "its argv with a quoted shell operator has no full-gate validator; launch the ",
+    "gate without a quoted |, &, ;, < or > argument, two minutes or more after this launch"
 );
 
 /// A reused command key cannot transfer a different invocation's start.

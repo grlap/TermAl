@@ -148,10 +148,9 @@ fn unquoted_and_mixed_pipeline_operators_stay_ineligible() {
         "--test-name-pattern='a|b' fixture.test.mjs; echo done",
         "--test-name-pattern='a|b' fixture.test.mjs \\",
         "--test-name-pattern='a$|b$' fixture.test.mjs",
-        "--test-name-pattern='a|b' 'semi;colon' fixture.test.mjs",
-        "--test-name-pattern='a|b' 'a&b' fixture.test.mjs",
-        "--test-name-pattern='a|b' 'a<b' fixture.test.mjs",
-        "--test-name-pattern='a|b' 'a>b' fixture.test.mjs",
+        "--test-name-pattern='a;b' fixture.test.mjs; echo done",
+        "--test-name-pattern=\"a&b\" fixture.test.mjs & echo done",
+        "--test-name-pattern='a>b' fixture.test.mjs > output.txt",
     ] {
         assert_not_eligible(&format!("{PREFIX} {arguments}"), true);
     }
@@ -163,6 +162,110 @@ fn unquoted_and_mixed_pipeline_operators_stay_ineligible() {
     assert_not_eligible(
         &format!("bash -lc '{PREFIX} --test-name-pattern=a\\|b fixture.test.mjs'"),
         true,
+    );
+}
+
+#[test]
+fn known_bash_quoted_operators_are_one_simple_command() {
+    for (arguments, pattern) in [
+        ("--test-name-pattern='a;b' fixture.test.mjs", "a;b"),
+        ("--test-name-pattern=\"a&b\" fixture.test.mjs", "a&b"),
+        ("--test-name-pattern='a<b' fixture.test.mjs", "a<b"),
+        ("--test-name-pattern=a'>'b fixture.test.mjs", "a>b"),
+        ("--test-name-pattern='a|b;c' fixture.test.mjs", "a|b;c"),
+    ] {
+        let command = format!("{PREFIX} {arguments}");
+        let check = engram_check_command_in(&command, EngramShellDialect::Bash)
+            .expect("the known Bash focused Node test is recognized");
+        assert!(check.simple && check.literal_pipe, "{command}");
+        assert_eq!(check.dialect, EngramShellDialect::Bash, "{command}");
+        assert!(
+            check
+                .argv
+                .contains(&format!("--test-name-pattern={pattern}")),
+            "{command}: {:?}",
+            check.argv
+        );
+        // Without a known dialect the quotes prove nothing, as for a pipe.
+        let unknown = engram_check_command_in(&command, EngramShellDialect::Unknown)
+            .expect("the Test remains observable");
+        assert!(!unknown.simple && !unknown.literal_pipe, "{command}");
+    }
+}
+
+#[test]
+fn known_bash_final_continuation_joins_a_qualified_line() {
+    // Bash removes the backslash and the break, and what follows them is
+    // only spaces, tabs and empty lines, so the line it runs is the
+    // quoted-operator line. An escaped trailing space stays in the last word.
+    for (tail, last) in [
+        ("\\\n", "fixture.test.mjs"),
+        ("\\\n ", "fixture.test.mjs"),
+        (" \\\n\t", "fixture.test.mjs"),
+        ("\\\n\n  \n", "fixture.test.mjs"),
+        ("\\ ", "fixture.test.mjs "),
+        ("\\ \\\n ", "fixture.test.mjs "),
+    ] {
+        let command = format!("{PREFIX} --test-name-pattern='a;b' fixture.test.mjs{tail}");
+        let check = engram_check_command_in(&command, EngramShellDialect::Bash)
+            .expect("the known Bash focused Node test is recognized");
+        assert!(check.simple && check.literal_pipe, "{command:?}");
+        assert_eq!(
+            check.argv.last().map(String::as_str),
+            Some(last),
+            "{command:?}: {:?}",
+            check.argv
+        );
+        // The same line read again at its end is the same command.
+        assert_eq!(
+            engram_check_command_like(&command, &check).as_ref(),
+            Some(&check),
+            "{command:?}"
+        );
+        let unknown = engram_check_command_in(&command, EngramShellDialect::Unknown)
+            .expect("the Test remains observable");
+        assert!(!unknown.simple, "{command:?}");
+    }
+}
+
+#[test]
+fn known_bash_line_with_a_later_command_is_not_one_simple_command() {
+    // After a line break bash runs what follows as another command. A no-break
+    // space is no blank to bash, so a line holding one is a second command,
+    // whose status, not the test's, the call would end with.
+    for tail in ["\n\u{a0}", "\\\n\n\u{a0}", "\n\necho done"] {
+        let command = format!("{PREFIX} --test-name-pattern='a;b' fixture.test.mjs{tail}");
+        assert!(
+            engram_check_command_in(&command, EngramShellDialect::Bash)
+                .is_none_or(|check| !check.simple && !check.literal_pipe),
+            "{command:?}"
+        );
+    }
+}
+
+#[test]
+fn known_bash_escaped_operators_other_than_a_pipe_are_literal() {
+    // Bash passes `a\;b` as the word `a;b`, as it passes `'a;b'`; an escaped
+    // `|` stays refused.
+    for (escaped, word) in [
+        ("a\\;b", "a;b"),
+        ("a\\&b", "a&b"),
+        ("a\\<b", "a<b"),
+        ("a\\>b", "a>b"),
+    ] {
+        let command = format!("{PREFIX} --test-name-pattern={escaped} fixture.test.mjs");
+        let check = engram_check_command_in(&command, EngramShellDialect::Bash)
+            .expect("the known Bash focused Node test is recognized");
+        assert!(check.simple && check.literal_pipe, "{command}");
+        assert!(
+            check.argv.contains(&format!("--test-name-pattern={word}")),
+            "{command}: {:?}",
+            check.argv
+        );
+    }
+    let piped = format!("{PREFIX} --test-name-pattern=a\\|b fixture.test.mjs");
+    assert!(
+        engram_check_command_in(&piped, EngramShellDialect::Bash).is_none_or(|check| !check.simple)
     );
 }
 

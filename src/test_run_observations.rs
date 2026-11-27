@@ -68,6 +68,10 @@ pub(crate) struct TestRunCommandObservation {
     /// A successful command result acknowledged only a detached/background launch.
     #[serde(default)]
     pub(crate) launch_only: bool,
+    /// What the row's command ran: the test launcher in a mode, or a test
+    /// runner directly. Absent on a row recorded before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) launcher: Option<TestRunCommandLauncher>,
     // Minted only at the original execution's terminal provider boundary,
     // after positive host checks of both binding and reporting absence.
     #[serde(default)]
@@ -91,6 +95,31 @@ impl TestRunCommandObservation {
         self.launch_only
             && self.summary.ended_at.is_none()
             && self.summary.state == TestRunState::Running
+    }
+}
+
+/// What a recognised test command runs (`TestRunCommandObservation::launcher`).
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TestRunCommandLauncher {
+    /// A test runner run directly, such as `cargo test`: no launcher run.
+    Direct,
+    /// The test launcher in this mode.
+    Launcher(TestRunPreset),
+}
+
+impl TestRunCommandLauncher {
+    /// What `command` runs: the launcher mode it names, or a direct runner.
+    pub(crate) fn of(command: &EngramCheckCommand) -> Self {
+        let mode = EngramHost::launcher_arguments(command).and_then(|words| {
+            match words.get(2).map(String::as_str) {
+                Some("full") => Some(TestRunPreset::Full),
+                Some("focused") => Some(TestRunPreset::Focused),
+                Some("live") => Some(TestRunPreset::Live),
+                _ => None,
+            }
+        });
+        mode.map_or(Self::Direct, Self::Launcher)
     }
 }
 
@@ -853,6 +882,7 @@ impl AppState {
             declared_artifact: declared
                 .map(|binding| test_run_display_path(FsPath::new(&binding.artifact_canonical))),
             launch_only,
+            launcher: Some(TestRunCommandLauncher::of(command)),
             summary: TestRunSummary {
                 registration: TestRunRegistrationView::default(),
                 run_id: execution_id.clone(),

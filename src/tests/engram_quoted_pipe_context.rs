@@ -125,6 +125,75 @@ fn known_bash_unwrapped_quotes_keep_native_results() {
     }
 }
 
+#[test]
+fn known_bash_quoted_operators_keep_native_results_as_a_quoted_pipe_does() {
+    // The turn's check reader takes a quoted `;`, `&` or `>` as it takes a
+    // quoted `|`: the focused run's own exit decides, in either line form.
+    for (label, pattern, argument, one_call) in [
+        ("semicolon", "'a;b'", "--test-name-pattern=a;b", false),
+        ("ampersand", "\"a&b\"", "--test-name-pattern=a&b", false),
+        ("redirect", "a'>'b", "--test-name-pattern=a>b", false),
+        (
+            "semicolon-one-call",
+            "'a;b'",
+            "--test-name-pattern=a;b",
+            true,
+        ),
+    ] {
+        let command = format!("{PREFIX} --test-name-pattern={pattern} fixture.test.mjs");
+        for native in [0, 1] {
+            let fixture = FocusedNodeFixture::with_bash_test(
+                &format!("direct-bash-operator-{label}-{native}"),
+                native,
+                one_call,
+                &command,
+                &["--test", argument, "fixture.test.mjs"],
+            );
+            fixture.assert_started();
+            one_node_test(
+                &fixture.finish(EngramCommandExit::Code(native)),
+                if native == 0 { "passed" } else { "failed" },
+            );
+            assert!(
+                node_refs(&fixture.turn).contains(&format!("exit:{native}")),
+                "{label}"
+            );
+            eprintln!("known Bash quoted operator validated: {label}, native={native}");
+        }
+    }
+}
+
+#[test]
+fn a_quoted_operator_launcher_still_running_ends_as_a_quoted_pipe_does() {
+    // A reply while the launcher still runs keeps only an unqualified simple
+    // launcher open; a qualified line, quoted `|` or quoted `;`, ends there.
+    let ended = |label: &str, pattern: &str| {
+        let command = format!("{PREFIX} --test-name-pattern={pattern} fixture.test.mjs");
+        let fixture = FocusedNodeFixture::with_bash_test(label, 0, false, &command, &ARGS);
+        fixture.assert_started();
+        let observation = fixture.finish(EngramCommandExit::NotFinished);
+        observation["occurrence"]["observed_checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|check| {
+                (
+                    check["check_kind"].clone(),
+                    check["observed_result"].clone(),
+                    check.get("finished_at").is_some(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let pipe = ended("still-running-quoted-pipe", "'a|b'");
+    assert_eq!(pipe.len(), 1, "{pipe:?}");
+    assert_eq!(
+        ended("still-running-quoted-semicolon", "'a;b'"),
+        pipe,
+        "a quoted `;` must end where a quoted `|` ends"
+    );
+}
+
 const ESCAPED_TEST: &str = r#"node scripts/test-launcher.mjs focused -- node --te\st --test-name-pattern="a|b" fixture.test.mjs"#;
 
 #[test]

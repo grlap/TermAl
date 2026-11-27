@@ -1557,6 +1557,8 @@ mod test_run_evidence;
 use test_run_evidence::*;
 mod test_run_artifacts;
 use test_run_artifacts::*;
+mod test_run_claude_launcher_locators;
+use test_run_claude_launcher_locators::*;
 mod test_run_compaction;
 use test_run_compaction::*;
 mod test_runs_disk;

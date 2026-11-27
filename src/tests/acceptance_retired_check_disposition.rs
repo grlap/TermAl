@@ -987,6 +987,7 @@ fn retain_rejected_check_terminal(state: &AppState, registration: &TestRunRegist
         declared_binding: None,
         declared_native: None,
         launch_only: true,
+        launcher: None,
         final_unbound_proof: None,
         declared_verdict_pending: false,
     };

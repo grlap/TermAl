@@ -121,6 +121,17 @@ impl RegisteredLauncherTurn {
         committed: bool,
         args: &[&str],
     ) -> Self {
+        Self::after_start_with_program(turn, recorder, committed, "node", args)
+    }
+
+    /// As `after_start_with_stage`, with the focused stage's own program.
+    fn after_start_with_program(
+        turn: EOCheckedTurn,
+        recorder: SessionRecorder,
+        committed: bool,
+        program: &str,
+        args: &[&str],
+    ) -> Self {
         turn.wait_for_snapshots();
         let open = turn.record(|record| {
             record
@@ -152,7 +163,7 @@ impl RegisteredLauncherTurn {
             "runId": run_id, "root": root.to_string_lossy(),
             "owner": turn.session_id, "creatorPid": std::process::id(),
             "started": started, "full": false, "detached": false,
-            "stages": [{ "name": "focused", "command": "node", "args": args }],
+            "stages": [{ "name": "focused", "command": program, "args": args }],
         });
         let source_id = committed.then(|| receipt_source_fixture(&root));
         if let Some(source) = &source_id {
@@ -3617,3 +3628,6 @@ fn a_settlement_whose_state_file_cannot_be_written_is_read_from_the_host_and_rep
     let (status, _) = read("/api/test-runs/test-unknown-run?view=verification".to_owned());
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[path = "engram_registered_launcher_claude_locators.rs"]
+mod claude_locators;

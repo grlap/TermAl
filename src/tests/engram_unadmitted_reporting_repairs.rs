@@ -136,6 +136,7 @@ fn a_retained_hazard_before_report_install_is_sticky_after_its_work_ends_and_rel
                 self_gate: false,
                 locations: vec![Some(engram_worktree_root(&fixture.turn.root))],
                 registered_at: EngramHost::interference_tick(),
+                launcher_command: None,
             });
     }
     first.release();

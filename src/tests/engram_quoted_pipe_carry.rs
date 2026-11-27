@@ -104,24 +104,26 @@ fn launch_bash_gate(turn: &EOCheckedTurn, worktree: &FsPath, started: &str, fini
 #[test]
 fn qualified_detached_full_cannot_borrow_generic_terminal_stages() {
     let _placement = TestTempRootDirectoryScope::repository_local();
-    let (turn, worktree) = quoted_turn("qualified-full-carry");
-    let command = format!("{DETACHED_GATE} --notify 'a|b'");
-    let check = engram_check_command_in(&command, EngramShellDialect::Bash).unwrap();
-    assert!(
-        check.literal_pipe && check.simple,
-        "the witness must reach qualification"
-    );
-    launch_bash_gate(&turn, &worktree, &command, &command);
-    let run = finish_run(&worktree, "passed", &"f".repeat(64));
-    turn.state.poll_engram_carried_runs();
-    assert_launch_fact(&turn, &turn.finish());
-    assert!(engram_terminal_record_digest(&run).is_some());
-    assert_quoted_launch_dropped(&turn, "qualified pipe");
-    assert_eq!(
-        turn.record(|record| record.engram.carried_unmatched_launches.len()),
-        1,
-        "a refused invocation may have launched a run; retain its ambiguity window"
-    );
+    for (label, notify) in [("pipe", "'a|b'"), ("semicolon", "'a;b'")] {
+        let (turn, worktree) = quoted_turn(&format!("qualified-full-carry-{label}"));
+        let command = format!("{DETACHED_GATE} --notify {notify}");
+        let check = engram_check_command_in(&command, EngramShellDialect::Bash).unwrap();
+        assert!(
+            check.literal_pipe && check.simple,
+            "the witness must reach qualification: {command}"
+        );
+        launch_bash_gate(&turn, &worktree, &command, &command);
+        let run = finish_run(&worktree, "passed", &"f".repeat(64));
+        turn.state.poll_engram_carried_runs();
+        assert_launch_fact(&turn, &turn.finish());
+        assert!(engram_terminal_record_digest(&run).is_some());
+        assert_quoted_launch_dropped(&turn, "quoted shell operator");
+        assert_eq!(
+            turn.record(|record| record.engram.carried_unmatched_launches.len()),
+            1,
+            "a refused invocation may have launched a run; retain its ambiguity window"
+        );
+    }
 }
 
 #[test]
@@ -145,19 +147,30 @@ fn detached_full_completion_must_match_the_started_argv() {
 
 #[test]
 fn qualified_full_is_never_carried_by_any_launch_exit() {
-    let command = format!("{DETACHED_GATE} --notify 'a|b'");
-    let check = engram_check_command_in(&command, EngramShellDialect::Bash).unwrap();
-    assert!(check.simple && check.literal_pipe);
-    for exit in [
-        EngramCommandExit::Code(0),
-        EngramCommandExit::ReportedSuccess,
-        EngramCommandExit::NotFinished,
-    ] {
-        assert_eq!(
-            engram_launch_disposition(&check, exit),
-            EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE)
-        );
+    for notify in ["'a|b'", "'a;b'", "\"a&b\"", "'a<b'", "a'>'b"] {
+        let command = format!("{DETACHED_GATE} --notify {notify}");
+        let check = engram_check_command_in(&command, EngramShellDialect::Bash).unwrap();
+        assert!(check.simple && check.literal_pipe, "{command}");
+        for exit in [
+            EngramCommandExit::Code(0),
+            EngramCommandExit::ReportedSuccess,
+            EngramCommandExit::NotFinished,
+        ] {
+            assert_eq!(
+                engram_launch_disposition(&check, exit),
+                EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE),
+                "{command}"
+            );
+        }
     }
+    // An unquoted operator is still a line that runs more than the gate.
+    let compound = format!("{DETACHED_GATE} --notify a; echo done");
+    let check = engram_check_command_in(&compound, EngramShellDialect::Bash).unwrap();
+    assert!(!check.simple);
+    assert_ne!(
+        engram_launch_disposition(&check, EngramCommandExit::Code(0)),
+        EngramLaunchDisposition::Drop(ENGRAM_LAUNCH_DROP_QUALIFIED_PIPE)
+    );
 }
 
 #[test]
@@ -324,5 +337,5 @@ fn a_qualified_full_is_dropped_even_with_an_acp_titleless_completion() {
     .unwrap();
     finish_run(&worktree, "passed", &"f".repeat(64));
     assert_launch_fact(&turn, &turn.finish());
-    assert_quoted_launch_dropped(&turn, "qualified pipe");
+    assert_quoted_launch_dropped(&turn, "quoted shell operator");
 }

@@ -5043,6 +5043,7 @@ fn retained_claude_work_without_a_new_frame_withholds_only_ordinary_source_attri
                     self_gate: false,
                     locations: vec![Some(engram_worktree_root(&hazard_root))],
                     registered_at: since,
+                    launcher_command: None,
                 });
         }
         turn.record(|record| {

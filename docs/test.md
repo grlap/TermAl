@@ -1583,17 +1583,23 @@ recognized Build commands retain their separate Build lifecycle.
 
 ### Quoted test filters
 
-A quoted pipe in a test filter qualifies only on an unwrapped command whose
+A quoted pipe in a test filter, or another quoted shell operator (`&`, `;`,
+`<` or `>`), qualifies only on an unwrapped command whose
 runtime dialect is known. Currently that is Claude's Bash tool, whose reader
 supplies Bash provenance; single, double and mixed quotes use that Bash
 argument reading, including the test in the supported one-call form. Codex
 and ACP observations do not establish a dialect. A `bash -c`, `pwsh -Command`
-or `cmd /c` wrapper containing a pipe remains ineligible, even when its text
+or `cmd /c` wrapper containing a pipe or another shell operator remains
+ineligible, even when its text
 looks quoted: an outer shell or wrapper may transform those quotes. Unknown
 runtime lines also remain ineligible. A `.cmd` or `.bat` program
 (case-insensitive, including a
-path-qualified runner) never qualifies: `cmd.exe` can parse the literal pipe
-again. Bare or executable `npm`, `pnpm`, `yarn`, and `npx` also stay ineligible
+path-qualified runner) never qualifies: `cmd.exe` can parse the literal
+operator again. The line ends where bash ends it: a final line continuation
+(a backslash before a line break followed only by spaces, tabs and line
+breaks) is removed with its backslash, an escaped trailing blank stays in
+the last argument, and a line that holds anything else after a line break
+runs another command and does not qualify. Bare or executable `npm`, `pnpm`, `yarn`, and `npx` also stay ineligible
 because their downstream script shell or shim is not established by Bash
 provenance. The same restriction applies to the wrapped runner after a
 test launcher's `focused --`. A native `cargo`/`cargo.exe` or the supported
@@ -1602,13 +1608,16 @@ package-manager version, or script-shell configuration is inferred here.
 The parsed argv is retained through recognition, placement and verification;
 focused Node evidence still needs
 its matching owner, argv, interval and input artifacts and cannot fall back to
-generic stage/count text. Full gates with a qualified pipe argument are not
+generic stage/count text. Full gates with a qualified argument (a quoted
+pipe or other quoted shell operator) are not
 carried, and a detached completion must match its started invocation.
-This bounded form refuses any `$`, `&`, `;`, `<`, `>`, backtick, CR or LF
-anywhere in the command, including inside quotes. It also refuses unquoted
-`*`, `?`, `[`, `]`, `{`, `}`, `(`, `)`, `^`, and word-leading `~` or `@`,
+This bounded form refuses any `$`, backtick, CR or LF anywhere in the
+command, including inside quotes, and any unquoted `|`, `&`, `;`, `<` or `>`.
+A backslash-escaped `&`, `;`, `<` or `>` is a literal character, as bash reads
+it; an escaped `|` stays refused. It also refuses unquoted
+`*`, `?`, `[`, `]`, `{`, `}`, `(`, `)`, `^`, and word-leading `~`, `@` or `#`,
 escaped unquoted pipes, incomplete escapes and unterminated quotes. Thus
-filters such as `'a$|b$'` and `'a;b|c'` do not qualify. Real pipelines and
+a filter such as `'a;b|c'` qualifies, while `'a$|b$'` does not. Real pipelines and
 unsupported ANSI-C/locale quotes remain refused. Use supported
 repeated filter flags or separate independent commands where this bounded
 form does not apply. This requires a host containing the recognition change.

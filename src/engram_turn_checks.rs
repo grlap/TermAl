@@ -2541,13 +2541,15 @@ impl AppState {
         } else {
             self.observe_test_command_end(session_id, provenance, key, exit)
         };
+        let (artifact_output, artifact_output_cut) =
+            test_command_artifact_output(provenance, command, output, runtime_output_cut);
         self.observe_test_command_artifact(
             session_id,
             provenance,
             key,
             command,
-            output,
-            runtime_output_cut,
+            &artifact_output,
+            artifact_output_cut,
         );
         // A test's output can be long, so its result lines are read before
         // the lock is taken, for the test the runtime says finished, and only
@@ -2679,11 +2681,13 @@ impl AppState {
                     .min(ENGRAM_WORK_BINDING_COMMAND_TIMEOUT),
             )
         });
+        let evidence_output =
+            test_command_end_evidence_output(provenance, output, runtime_output_cut);
         let reading = engram_read_check_end(
             starting_check.as_ref(),
             session_id,
             reported_command,
-            output,
+            &evidence_output,
             exit,
         );
         // Share only the existing owner's validated completion. A
@@ -2717,7 +2721,7 @@ impl AppState {
                 && if *use_reading {
                     reading.launcher_ran_no_stage
                 } else {
-                    engram_launcher_output_ran_no_stage(output)
+                    engram_launcher_output_ran_no_stage(&evidence_output)
                 }
         });
         // The session's worktree, resolved off the lock for overlap marking,

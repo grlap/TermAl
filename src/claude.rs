@@ -2684,7 +2684,9 @@ fn handle_claude_bash_result(
         detail,
     );
     // Persisted metadata describes an omitted tail, not a passing verdict.
-    // Never open its path or include it in the check-credit diagnostic.
+    // Never open its path or include it in the check-credit diagnostic. The
+    // one use of a cut output: the visible locator lines of an ordinary test
+    // launcher, validated on disk (`test_run_claude_launcher_locators.rs`).
     let runtime_output_cut = tool_use_result.is_some_and(|value| {
         value
             .get("persistedOutputPath")

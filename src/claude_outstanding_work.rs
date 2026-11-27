@@ -355,6 +355,11 @@ pub(crate) struct ClaudeOutstandingEntry {
     /// (`engram_claude_interference.rs`): it may have written from then on,
     /// wherever it is later found to run.
     pub(crate) registered_at: u64,
+    /// Its command line, kept only for a recognised ordinary test launcher,
+    /// simple or not: when it ends in the background, its run's artifact is
+    /// found from the host's registration, or its launch row records why not
+    /// (`test_run_claude_launcher_locators.rs`).
+    pub(crate) launcher_command: Option<String>,
 }
 
 impl ClaudeOutstandingEntry {
@@ -577,8 +582,9 @@ impl StateInner {
 pub(crate) struct ClaudeFrameWork {
     /// The frame starts a tool call, registered or not: new activity.
     starts_work: bool,
-    /// Tool calls to register: key, background, recognised simple full gate.
-    pub(crate) started: Vec<(String, bool, bool)>,
+    /// Tool calls to register: key, background, recognised simple full gate,
+    /// and the command line of a recognised ordinary test launcher.
+    pub(crate) started: Vec<(String, bool, bool, Option<String>)>,
     /// Tool results, by tool-use id, with whether the result says the call
     /// now runs in the background.
     pub(crate) results: Vec<(String, bool)>,
@@ -642,13 +648,16 @@ pub(crate) fn claude_frame_work(message: &Value, nested: bool) -> ClaudeFrameWor
                     .unwrap_or(false);
                 let name = content.get("name").and_then(Value::as_str);
                 if claude_tool_call_may_outlive_its_turn(name, nested, background) {
-                    let self_gate = !nested
-                        && name == Some("Bash")
-                        && content
-                            .pointer("/input/command")
-                            .and_then(Value::as_str)
-                            .is_some_and(EngramHost::is_simple_full_launcher_line);
-                    work.started.push((key.to_owned(), background, self_gate));
+                    let command = (name == Some("Bash"))
+                        .then(|| content.pointer("/input/command").and_then(Value::as_str))
+                        .flatten();
+                    let self_gate =
+                        !nested && command.is_some_and(EngramHost::is_simple_full_launcher_line);
+                    let launcher_command = command
+                        .filter(|line| claude_launcher_line(line))
+                        .map(str::to_owned);
+                    work.started
+                        .push((key.to_owned(), background, self_gate, launcher_command));
                 }
             }
         }
@@ -729,7 +738,7 @@ impl AppState {
         {
             let record = &mut inner.sessions[index];
             let locations = EngramHost::session_write_locations(record);
-            for (key, background, self_gate) in &work.started {
+            for (key, background, self_gate, launcher_command) in &work.started {
                 let entry = ClaudeOutstandingEntry {
                     token: provenance.token.clone(),
                     key: key.clone(),
@@ -739,6 +748,7 @@ impl AppState {
                     self_gate: *self_gate,
                     locations: locations.clone(),
                     registered_at: EngramHost::interference_tick(),
+                    launcher_command: launcher_command.clone(),
                 };
                 if entry.is_hazard(current.as_ref(), turn_generation, adopted_generation) {
                     changed.push(key.clone());
@@ -784,7 +794,8 @@ impl AppState {
     /// that moves its call to the background does so first, then the tool
     /// results and the terminal task notifications retire what they prove
     /// ended. Only the session's current runtime settles anything: a replaced
-    /// runtime's late frame retires no entry. One lock section.
+    /// runtime's late frame retires no entry. One lock section retires the
+    /// entries; a background launcher's run is attached before it.
     pub(crate) fn settle_claude_frame(
         &self,
         session_id: &str,
@@ -800,6 +811,38 @@ impl AppState {
         for (key, interrupted) in &work.ended {
             self.end_native_declared_task(session_id, token, key, *interrupted);
             self.end_observed_declared_task(session_id, token, key, *interrupted);
+        }
+        // A launcher that ended in the background printed its locator to no
+        // tool result; its run is found from the host's registration. That
+        // attachment is decided while the launcher's entry is still
+        // outstanding: once the entry is gone, the row carries the run or
+        // records why it does not, and nothing attaches it later.
+        let ended_launchers: Vec<(String, String)> = if work.ended.is_empty() {
+            Vec::new()
+        } else {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let Some(index) = inner.find_session_index(session_id) else {
+                return;
+            };
+            let record = &inner.sessions[index];
+            if !record.runtime.matches_runtime_token(token) {
+                return;
+            }
+            work.ended
+                .iter()
+                .filter_map(|(key, _)| {
+                    record
+                        .claude_outstanding
+                        .entries
+                        .iter()
+                        .find(|entry| entry.token == *token && entry.key == *key)
+                        .and_then(|entry| entry.launcher_command.clone())
+                        .map(|line| (key.clone(), line))
+                })
+                .collect()
+        };
+        for (key, line) in &ended_launchers {
+            self.attach_claude_background_launcher_artifact(session_id, token, key, line);
         }
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         let Some(index) = inner.find_session_index(session_id) else {

@@ -13,6 +13,20 @@ thread_local! {
     pub(crate) static TEST_TEST_RUN_TERMINAL_RETENTION_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// Where a launch row's run comes from: the launcher's own locator lines in a
+/// provider's output, or the run directory of the one host registration a
+/// Claude background end matched (src/test_run_claude_launcher_locators.rs),
+/// with that registration's request identity. Both reach the same on-disk
+/// validation; a registration's run must still hold its own request.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TestCommandArtifactLocator<'a> {
+    Output(&'a str),
+    Registration {
+        directory: &'a FsPath,
+        request_identity: &'a str,
+    },
+}
+
 pub(crate) fn test_run_observation_launch_unconfirmed(row: &mut TestRunCommandObservation) {
     row.summary.state = TestRunState::Unknown;
     row.summary.unknown_reason = Some(TestRunUnknownReason::ResultsUnreadable);
@@ -232,15 +246,54 @@ impl AppState {
         output: &str,
         output_cut: bool,
     ) {
-        if output_cut {
-            return;
-        }
-        let Some(command) = EngramHost::recognized_check(line)
+        self.observe_test_command_artifact_from(
+            session_id,
+            provenance,
+            key,
+            line,
+            TestCommandArtifactLocator::Output(output),
+            output_cut,
+        );
+    }
+
+    /// Associates the launch row of `key` with the run `locator` names: the
+    /// launcher locator lines of a provider's output, or the run directory of
+    /// the one host registration a Claude background end matched. Either is
+    /// validated on disk the same way.
+    pub(crate) fn observe_test_command_artifact_from(
+        &self,
+        session_id: &str,
+        provenance: &EngramObservationProvenance,
+        key: &str,
+        line: &str,
+        locator: TestCommandArtifactLocator<'_>,
+        output_cut: bool,
+    ) {
+        // A Claude line is read in the Bash dialect its launch row was
+        // recognised in, so a quoted `|` reads alike; other providers' lines
+        // keep the unknown dialect.
+        let claude = matches!(provenance, EngramObservationProvenance::Claude(_));
+        let recognized = if claude {
+            engram_check_command_in(line, EngramShellDialect::Bash)
+        } else {
+            EngramHost::recognized_check(line)
+        };
+        let Some(command) = recognized
             .or_else(|| engram_observed_dart_launcher(line, provenance))
-            .filter(|command| command.simple && EngramHost::launcher_arguments(command).is_some())
+            .filter(|command| EngramHost::launcher_arguments(command).is_some())
         else {
             return;
         };
+        // A Claude launcher line that is not one simple command attaches
+        // nothing, and its launch row records why; another provider's is
+        // passed over, as before.
+        let compound = !command.simple;
+        if compound && !(claude && claude_launcher_line(line)) {
+            return;
+        }
+        if output_cut && !compound {
+            return;
+        }
         let fingerprint = EngramHost::check_fingerprint(&command);
         let tool_identity = sha256_hex(key.as_bytes());
         let row = {
@@ -274,26 +327,38 @@ impl AppState {
         use TestRunNativeCompletionRefusalCode::*;
         let refuse =
             |code, facts: &[_]| self.retain_test_command_artifact_refusal(&row, code, facts);
-        let mut locators = std::collections::BTreeSet::new();
-        for line in output.lines() {
+        if compound {
+            if row.artifact.is_none() {
+                refuse(ArtifactRequestMismatch, &[(ObservationMatches, false)]);
+            }
+            return;
+        }
+        let (output, registered, registered_request) = match locator {
+            TestCommandArtifactLocator::Output(output) => (output, None, None),
+            TestCommandArtifactLocator::Registration {
+                directory,
+                request_identity,
+            } => ("", Some(directory.to_path_buf()), Some(request_identity)),
+        };
+        let console = output.lines().filter_map(|line| {
             let line = line.trim();
-            let directory = if let Some(directory) = line
+            if let Some(directory) = line
                 .strip_prefix("RUN ")
                 .or_else(|| line.strip_prefix("STARTED "))
             {
-                PathBuf::from(directory)
+                Some(PathBuf::from(directory))
             } else if let Some(results) = line.strip_prefix("results: ") {
                 let path = FsPath::new(results);
                 if path.file_name().and_then(|name| name.to_str()) != Some("results.json") {
-                    continue;
+                    return None;
                 }
-                let Some(directory) = path.parent() else {
-                    continue;
-                };
-                directory.to_path_buf()
+                path.parent().map(FsPath::to_path_buf)
             } else {
-                continue;
-            };
+                None
+            }
+        });
+        let mut locators = std::collections::BTreeSet::new();
+        for directory in registered.into_iter().chain(console) {
             if !directory.is_absolute()
                 || directory.to_string_lossy().len() > TEST_RUN_PATH_MAX_BYTES
                 || engram_network_path(&directory.to_string_lossy())
@@ -398,6 +463,14 @@ impl AppState {
             );
             return;
         }
+        // A registration's run is attached only while its directory still
+        // holds that registration's request, read here, once.
+        if registered_request
+            .is_some_and(|expected| disk.request_identity.as_deref() != Some(expected))
+        {
+            refuse(ArtifactRequestMismatch, &[(RegistrationMatches, false)]);
+            return;
+        }
         let mode = EngramHost::launcher_arguments(&command).and_then(|words| words.get(2).cloned());
         if (disk.preset == TestRunPreset::Full) != (mode.as_deref() == Some("full")) {
             refuse(ArtifactModeMismatch, &[(ModeMatches, false)]);
@@ -410,6 +483,21 @@ impl AppState {
         {
             refuse(ArtifactRequestMismatch, &[(ObservationMatches, false)]);
             return;
+        }
+        // A registration's focused run is bound the same way to the command
+        // its launch row planned, read as bash passes it, so another call's
+        // run is never this row's. It is compared with the whole focused
+        // command its request records, not the bounded summary; a request
+        // whose args cannot be read matches no command.
+        if let Some(expected) = registered_request
+            && mode.as_deref() == Some("focused")
+        {
+            let planned = claude_bash_focused_argv(line);
+            let recorded = test_run_request_focused_argv(&canonical, expected);
+            if planned.is_none() || planned != recorded {
+                refuse(ArtifactRequestMismatch, &[(ObservationMatches, false)]);
+                return;
+            }
         }
         // The locator is explicit; this interval is only an anti-replay guard,
         // never a way of choosing a nearby run from a directory scan.
@@ -459,6 +547,28 @@ impl AppState {
             .is_none_or(|current| !test_run_artifact_observation_matches_snapshot(current, &row))
         {
             return;
+        }
+        // The registration may have changed, or another launch row taken its
+        // run, while the request was read off the lock.
+        if let Some(expected) = registered_request {
+            let registration_changed = inner
+                .test_run_registrations
+                .get(run_id)
+                .is_none_or(|registration| registration.request_identity != expected);
+            let carried_elsewhere = inner
+                .test_run_observations
+                .index()
+                .artifact_run(run_id)
+                .any(|key| key != &row.execution_id);
+            if registration_changed || carried_elsewhere {
+                drop(inner);
+                if registration_changed {
+                    refuse(ArtifactRequestMismatch, &[(RegistrationMatches, false)]);
+                } else {
+                    refuse(ArtifactAlreadyAssociated, &[(ArtifactUnchanged, false)]);
+                }
+                return;
+            }
         }
         let mut updated = row.clone();
         if updated

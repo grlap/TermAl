@@ -1850,8 +1850,10 @@ counts and what fences it, and so what a turn's report says about a check.
   a `--bind N=test:FINGERPRINT` pin must equal, is the lowercase hex SHA-256
   of the UTF-8 bytes of the normalised command line: the wrapper removed,
   whitespace runs outside quotes collapsed to one space, trimmed. A qualified
-  known-Bash literal-pipe command instead preserves its original text after
-  trimming, including repeated spaces, tabs and Bash escapes. In the one-call
+  known-Bash command, one whose quoted `|`, `&`, `;`, `<` or `>` qualified
+  it, instead preserves its original text, including repeated spaces, tabs
+  and Bash escapes, ended where bash ends it: without a final line
+  continuation, and with an escaped trailing blank kept. In the one-call
   form, only the test text after `pushd "DIR" &&` is fingerprinted by this
   same rule. For a pipe-free example,
   `cargo test --test source_file_size -- --nocapture` hashes exactly that
@@ -1859,12 +1861,13 @@ counts and what fences it, and so what a turn's report says about a check.
 - **Outcome.** Only a simple command's own exit status can succeed or fail:
   a line with an unquoted pipe, a list, a redirection, a backtick or a `$(`
   substitution is reported as unknown, since `cargo test | tail` exits 0
-  when tests fail. A quoted pipe is eligible only on an unwrapped line with
+  when tests fail. A quoted pipe, or another quoted `&`, `;`, `<` or `>`, is
+  eligible only on an unwrapped line with
   known runtime Bash context, using one retained argv across the check's
-  consumers. Wrapper and unknown-runtime pipe forms stay unknown; see
+  consumers. Wrapper and unknown-runtime forms stay unknown; see
   [test filter quoting](../test.md#quoted-test-filters) for the supported form
   and workaround.
-  A full launcher invocation with a qualified pipe argument cannot be carried:
+  A full launcher invocation with a qualified argument cannot be carried:
   generic terminal stages do not validate that invocation's argv. A carried
   launch's explicitly reported completion command must match its start. If
   ACP omits command text at completion, the unchanged captured start and

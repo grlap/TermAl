@@ -337,6 +337,29 @@ pub(crate) fn test_run_argv(value: Option<&Value>) -> Option<Vec<String>> {
         .collect()
 }
 
+/// The whole focused command, program then arguments, that the request in
+/// `run_dir` records, read from that request rather than from a summary's
+/// bounded copy, when the request is still the one whose registration
+/// identity is `identity`. `None` when the request cannot be read whole, is
+/// another request, or its focused stage's `args` is not an array of strings,
+/// which no command matches.
+pub(crate) fn test_run_request_focused_argv(
+    run_dir: &FsPath,
+    identity: &str,
+) -> Option<Vec<String>> {
+    let TestRunJson::Parsed(request, _, _) = test_run_read_json(&run_dir.join("request.json"))
+    else {
+        return None;
+    };
+    if test_run_registration_identity(&request).ok()?.as_str() != identity {
+        return None;
+    }
+    let stage = request.get("stages")?.as_array()?.first()?;
+    let mut argv = vec![test_run_str(stage, "command")?];
+    argv.extend(test_run_argv(stage.get("args"))?);
+    Some(argv)
+}
+
 /// A positive pid, or nothing: a missing or non-positive pid names no process.
 fn test_run_pid(value: &Value, key: &str) -> Option<u32> {
     value
