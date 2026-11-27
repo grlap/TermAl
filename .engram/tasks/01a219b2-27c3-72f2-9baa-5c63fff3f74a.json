@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the behavioral regression coverage for provider usage-limit pauses. The listing and two exact reads of the same held message agree on the pause cause and timestamp. The listing and exact read both clear the pause reason after resuming. Two independent reviews found no issues, the registered Windows full gate passed on the landed source, and independent post-landing evaluation passed all three criteria.",
+    "completed_at": "2026-11-27T02:29:42.974723400Z",
+    "actor": {
+      "actor_id": "dev/codex",
+      "actor_kind": "agent"
+    }
+  }
 }
