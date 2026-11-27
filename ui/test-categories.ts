@@ -55,6 +55,7 @@ export const APP_TEST_FILES: readonly string[] = [
   "src/App.live-state.watchdog.test.tsx",
   "src/App.orchestrators.test.tsx",
   "src/App.preferences.test.tsx",
+  "src/App.scroll-arrow-detach.test.tsx",
   "src/App.scroll-behavior.test.tsx",
   "src/App.send-scroll.test.tsx",
   "src/App.session-lifecycle.test.tsx",
