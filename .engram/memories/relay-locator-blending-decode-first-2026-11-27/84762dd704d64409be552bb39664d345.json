@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "relay-locator-blending-decode-first-2026-11-27",
+    "revision_id": "84762dd704d64409be552bb39664d345",
+    "previous": null,
+    "body_sha256": "0d4cad2885205c2a0b45fd2470a80fe621b561a7889bf6f3f601cc0ca8616dfc",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T08:04:24.646578500Z"
+    }
+  },
+  "body": "Lesson (Fable2, 2026-11-27, w-c6efd7be0178): agents (an LLM's transcription) BLEND long relay mailbox locators, which are base64 JSON. They keep the leading part of one mailbox UUID and graft the tail of another mailbox they have seen, then report the result as \"copied exactly from the listing\". Engram::Merger's listed row was mailbox-6bce7178-25d7-4376-8047-af8c3db1a96a; it sent ...-5a13-4173-b197-23a332c42777 (the tail of another mailbox) and ...-5a13-4173-8047-af8c3db1a96e. TermAl correctly refused: READ gives 404 unknown_native_mailbox_locator, while ACK gives a misleading 409 \"no saved native mailbox association\".\nRULE: before diagnosing any relay mailbox 404 or 409 as association loss, decode every quoted locator (strip \"relay-mailbox-\", then base64 -d) and compare it with the verbatim LIST row. Never trust an agent's claim that two locators were \"the same exact string\".\nFollow-ups: w-c6efd7be0178 (a uniform, accurate refusal) and w-82e2bb4f0ff4 (a short or check-protected locator form)."
+}

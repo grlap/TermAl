@@ -1,0 +1,11 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "relay-locator-blending-decode-first-2026-11-27",
+  "head": {
+    "state": "active",
+    "chain": [
+      "84762dd704d64409be552bb39664d345"
+    ]
+  }
+}

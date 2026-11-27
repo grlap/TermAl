@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "legal-i2-s0-floor-measured-2026-11-27",
+    "revision_id": "8aaa6440113342f8b5a61f783a330568",
+    "previous": null,
+    "body_sha256": "f5a685283d060988f1d3f3f2323de869c3ed4732f6b42ce02a2f08fa34dc065d",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=default;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T07:58:29.166209700Z"
+    }
+  },
+  "body": "Legal I2 S0 on Central, 2026-11-27, recorded by Opus2. This adds to the LEGAL-WINDOW ENTRY in central-cargo-memory-budget-rev16-2026-11-22.\n\nFable2 #8224 set a ONE-OFF admission floor of 22,020,096 KiB for I2 S0 only, in place of ruling (c)'s 25,165,824. Two things prompted it:\n- the first window's row 1 was refused at 25,100,380 KiB, 07:33:10Z;\n- Central's busy baseline had drifted to about 24-26M with pairs running.\n\nMeasured in window 07:38:14Z-08:53:14Z, all three rows exit 0, no refusals:\n- cold one-job `cargo build --lib` of rincon-verify: 181 s; admitted at about 24.95M; low 23,242,080 KiB (a drawdown of about 1.7M);\n- direct rustc link: 7 s; low 22,156,668;\n- program run: 53 s; low 25,023,560.\n\nThe window's minimum was 22,156,668, so the 15,728,640 notice line was never approached.\n\nLesson: a plain --lib build draws about 1.7M, far less than R-LIB8's 5.14M test build. For the next Legal --lib-class row, propose a floor near 22M with this evidence rather than 25.1M. Fable2 rules each one; this was a one-off."
+}

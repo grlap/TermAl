@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "legal-window-quiet-central-2026-11-27",
+    "revision_id": "414e49f829ae49b7b78b9d4502e49f2f",
+    "previous": null,
+    "body_sha256": "a5b8f0d26b32eea980f071fa2b6778cd8a804631274a35afbda7c60d4c014058",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/claude",
+      "actor_kind": "agent",
+      "actor_context": "agent=claude;model=opus;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-27T08:16:16.275380400Z"
+    }
+  },
+  "body": "Rule (Fable2, 2026-11-27 ~08:16Z), set on Greg's priority (Asistant #2938). Legal has ~8 cold builds (-j1, 20-45 min each) and needs FV >= 30,000,000 KiB stable during its windows; Central measured 24.8M. Greg: „na centrali jest wiecznie za malo pamieci, mamy jeszcze legal, windows B ma 96GB ramu”.\n\nA. Legal window = quiet Central. From Legal READY to END (Legal sends both to Opus2):\n- no NEW LLM spawns on Central (pairs, evaluations, sessions);\n- no Central cargo, including Engram install builds;\n- no focused UI runs.\nRunning sessions continue and are never killed.\n\nB. Review load moves to WinB:\n- WinB-held items keep their pairs on WinB;\n- w-c6efd7be0178's new candidate goes to WinB as a whole task;\n- no new coding starts on Central;\n- Central-queued pairs (e638 R12 first, then a15b R4b, w-2704, 55BC) run only between Legal windows.\n\nC. Opus2 measures and reports: FV at READY, lowest and END, plus the active pairs and cargo at READY. A verdict goes to Greg after two windows.\n\nD. Limit, told to Greg: the ~25M baseline is resident sessions plus the host. If A and B don't reach 30M, the levers are Greg's (close or move resident sessions, or run Legal's builds on WinB). Agents don't stop sessions.\n\nSupersedes nothing; it sits alongside the one-off 22,020,096 I2 S0 floor (Opus2 #8223)."
+}

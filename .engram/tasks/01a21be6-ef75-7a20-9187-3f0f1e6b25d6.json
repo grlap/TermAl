@@ -1,0 +1,37 @@
+{
+  "id": "01a21be6-ef75-7a20-9187-3f0f1e6b25d6",
+  "external_ref": null,
+  "title": "Prove production direct queue receipt refusal precedes primary readback",
+  "outcome": "Make the receipt adapter's early Production refusal independently observable before the primary database can be opened.",
+  "acceptance": [
+    "A behavior test presents a valid in-memory direct-prompt queue entry with no primary database at the selected path, observes the Production validation refusal, and verifies the path remains absent with no authorization callback."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
