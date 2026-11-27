@@ -313,6 +313,7 @@ impl AppState {
                 &remote_state,
                 Some(&target.remote_session_id),
                 RemoteSnapshotApplyMode::GateBySnapshotRevision,
+                &EngramRemoteWriterWorkdirs::default(),
             );
             let removed = if let Some(index) = inner.find_session_index(&target.local_session_id) {
                 inner.remove_session_at(index).is_some()

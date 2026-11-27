@@ -133,36 +133,688 @@ fn a_writable_session_in_a_turn_elsewhere_not_yet_resolved_leaves_a_lone_launch_
     );
 }
 
-#[test]
-fn a_remote_proxy_in_a_turn_is_never_resolved_and_is_named_as_such() {
-    // A proxy's workdir is the other host's path: TermAl does not resolve it
-    // here, so the proxy keeps counting in every worktree, and the holder is
-    // told it was an unresolved remote proxy.
-    let (turn, worktree) = ordinary_carried_turn("overlap-remote-proxy");
+const FOREIGN_WORKDIR: &str = "/termal-fixture-other-host/checkout";
+// This ID is also the one served by the shared remote HTTP fixture.
+const PROXY_UPSTREAM_SESSION: &str = "remote-session-1";
+
+struct ProxyWriter {
+    session_id: String,
+    connection: Arc<RemoteConnection>,
+}
+
+impl Drop for ProxyWriter {
+    fn drop(&mut self) {
+        self.connection.disconnect();
+    }
+}
+
+fn active_proxy(turn: &EOCheckedTurn, workdir: &str, foreign_ssh_peer: bool) -> ProxyWriter {
+    let remote = RemoteConfig {
+        id: "ssh-test".to_owned(),
+        name: "Build host".to_owned(),
+        transport: RemoteTransport::Ssh,
+        enabled: true,
+        host: Some("build.example".to_owned()),
+        port: Some(22),
+        user: None,
+    };
     let project_id = turn.record(|record| record.session.project_id.clone().unwrap());
-    let elsewhere = sibling_worktree(&turn, "overlap-remote-proxy-sibling");
-    let proxy = create_test_project_session(&turn.state, Agent::Codex, &project_id, &elsewhere);
+    let proxy = create_test_project_session(&turn.state, Agent::Codex, &project_id, &turn.root);
+    let remotes = vec![RemoteConfig::local(), remote.clone()];
     {
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&proxy).expect("proxy session");
-        inner.sessions[index].remote_id = Some("ssh-test".to_owned());
+        inner.sessions[index].remote_id = Some(remote.id.clone());
+        inner.sessions[index].remote_session_id = Some(PROXY_UPSTREAM_SESSION.to_owned());
+        inner.sessions[index].session.workdir = workdir.to_owned();
+        inner.sessions[index].engram.workdir_worktree = None;
+        inner.preferences.remotes = remotes.clone();
     }
-    set_status(&turn, &proxy, SessionStatus::Active);
+    turn.state.remote_registry.reconcile(&remotes);
+    let connection = turn
+        .state
+        .remote_registry
+        .connection(&remote)
+        .unwrap()
+        .connection;
+    // Seed only the kernel observation. The test keeps a live child attached
+    // to the current route and exercises normal resolution and overlap.
+    *connection.process.lock().unwrap() = Some(RemoteProcessHandle {
+        child: phase_sync::spawn_parked_child(),
+        mode: RemoteProcessMode::TunnelOnly,
+        foreign_ssh_peer,
+        writer_process: Arc::new(()),
+    });
+    let writer = ProxyWriter {
+        session_id: proxy,
+        connection,
+    };
+    {
+        let mut inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&writer.session_id).unwrap();
+        note_engram_remote_writer_process(
+            &mut inner.sessions[index],
+            writer.connection.writer_process().as_ref(),
+        );
+    }
+    set_status(turn, &writer.session_id, SessionStatus::Active);
+    writer
+}
+
+#[test]
+fn an_unproven_proxy_outside_local_worktrees_still_blocks_check_credit() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-unproven-proxy");
+    let proxy = active_proxy(&turn, FOREIGN_WORKDIR, false);
     record_overlapping_launch(&turn, &worktree);
     let line = turn
         .record(|record| record.engram.pending_source_root_line.clone())
         .expect("the holder should be told");
     assert!(
-        line.contains(&proxy)
+        line.contains(&proxy.session_id)
             && line.contains("a remote proxy of remote ssh-test, has an UNRESOLVED workdir"),
         "{line}"
     );
-    let resolved = {
-        let inner = turn.state.inner.lock().expect("state mutex poisoned");
-        let index = inner.find_session_index(&proxy).expect("proxy session");
-        engram_session_worktree(&inner.sessions[index])
+}
+
+#[test]
+fn an_unproven_relative_proxy_workdir_still_overlaps() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-relative-proxy");
+    let proxy = active_proxy(&turn, ".", false);
+    record_overlapping_launch(&turn, &worktree);
+    let cause = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .expect("the holder should be told");
+    assert!(
+        cause.contains(&proxy.session_id) && cause.contains("UNRESOLVED"),
+        "{cause}"
+    );
+}
+
+#[test]
+fn inconclusive_proxy_path_lookup_cannot_be_overridden_by_peer_proof() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-inconclusive-proxy-path");
+    let malformed = format!("{}\0invalid", reported_directory(&worktree));
+    let proxy = active_proxy(&turn, &malformed, true);
+    record_overlapping_launch(&turn, &worktree);
+    let cause = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .unwrap();
+    assert!(
+        cause.contains(&proxy.session_id) && cause.contains("lookup was inconclusive"),
+        "{cause}"
+    );
+}
+
+#[test]
+fn an_admitted_remote_turn_inside_a_check_uses_writer_scope() {
+    for (foreign, idle_command) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (turn, worktree) = ordinary_carried_turn("overlap-short-remote-turn");
+        let proxy = active_proxy(&turn, FOREIGN_WORKDIR, foreign);
+        let remote = proxy.connection.config();
+        let lease = turn.state.remote_registry.connection(&remote).unwrap();
+        set_status(&turn, &proxy.session_id, SessionStatus::Idle);
+        start_check_in(&turn, &worktree);
+        assert_eq!(check_overlap(&turn), (false, None));
+
+        let opening_status = if idle_command {
+            SessionStatus::Idle
+        } else {
+            SessionStatus::Active
+        };
+        for (index, status) in [opening_status, SessionStatus::Idle]
+            .into_iter()
+            .enumerate()
+        {
+            let message_id = format!("remote-turn-message-{index}");
+            let message = if idle_command && index == 0 {
+                crate::tests::remote::remote_command_message(&message_id, "write changes", "")
+            } else {
+                crate::tests::remote::remote_text_message(&message_id, "Remote turn.")
+            };
+            turn.state
+                .apply_remote_delta_event_for_request(
+                    &lease,
+                    DeltaEvent::MessageCreated {
+                        revision: index as u64 + 1,
+                        session_id: PROXY_UPSTREAM_SESSION.to_owned(),
+                        message,
+                        message_id,
+                        message_index: index,
+                        message_count: index as u32 + 1,
+                        preview: "Remote turn.".to_owned(),
+                        status,
+                        session_queue: None,
+                        session_mutation_stamp: None,
+                        session_seq: None,
+                        body_seq_epoch: None,
+                    },
+                )
+                .unwrap();
+        }
+        let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&proxy.session_id).unwrap();
+        assert_eq!(inner.sessions[index].session.status, SessionStatus::Idle);
+        assert_eq!(inner.sessions[index].session.messages.len(), 2);
+        drop(inner);
+        let (overlapped, cause) = check_overlap(&turn);
+        assert_eq!(
+            overlapped, !foreign,
+            "foreign={foreign}, idle_command={idle_command}"
+        );
+        if !foreign {
+            assert!(cause.unwrap().contains(&proxy.session_id));
+        }
+    }
+}
+
+#[test]
+fn a_buffered_writer_delta_cannot_borrow_a_replacement_ssh_peer() {
+    for (replace, carried) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (turn, worktree) = ordinary_carried_turn("overlap-buffered-proxy-delta");
+        let proxy = active_proxy(&turn, FOREIGN_WORKDIR, !replace);
+        let remote = proxy.connection.config();
+        set_status(&turn, &proxy.session_id, SessionStatus::Idle);
+        if carried {
+            ordinary_launch_gate(&turn, &worktree, false);
+            assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_none()));
+        } else {
+            start_check_in(&turn, &worktree);
+            assert_eq!(check_overlap(&turn), (false, None));
+        }
+        let writer_process = proxy.connection.writer_process().unwrap();
+        let message_id = "buffered-remote-command".to_owned();
+        let delta = DeltaEvent::MessageCreated {
+            revision: 1,
+            session_id: PROXY_UPSTREAM_SESSION.to_owned(),
+            message: crate::tests::remote::remote_command_message(&message_id, "write", ""),
+            message_id,
+            message_index: 0,
+            message_count: 1,
+            preview: String::new(),
+            status: SessionStatus::Idle,
+            session_queue: None,
+            session_mutation_stamp: None,
+            session_seq: None,
+            body_seq_epoch: None,
+        };
+        if replace {
+            proxy.connection.disconnect();
+            *proxy.connection.process.lock().unwrap() = Some(RemoteProcessHandle {
+                child: phase_sync::spawn_parked_child(),
+                mode: RemoteProcessMode::TunnelOnly,
+                foreign_ssh_peer: true,
+                writer_process: Arc::new(()),
+            });
+        }
+        turn.state
+            .apply_remote_delta_event_for_bridge(
+                &remote,
+                &proxy.connection,
+                Some(&writer_process),
+                delta,
+            )
+            .unwrap();
+        let fenced = if carried {
+            turn.record(|record| record.engram.carried_checks[0].fence.is_some())
+        } else {
+            check_overlap(&turn).0
+        };
+        assert_eq!(fenced, replace, "carried={carried}, replace={replace}");
+    }
+}
+
+#[test]
+fn cached_active_state_needs_metadata_from_the_live_ssh_child() {
+    for refresh in [false, true] {
+        let (turn, worktree) = ordinary_carried_turn("overlap-cached-ssh-writer");
+        let proxy = active_proxy(&turn, FOREIGN_WORKDIR, false);
+        let remote = proxy.connection.config();
+        let mut summary = {
+            let inner = turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&proxy.session_id).unwrap();
+            AppState::wire_session_summary_from_record(
+                &turn.state.server_instance_id,
+                &inner.sessions[index],
+            )
+        };
+        summary.id = PROXY_UPSTREAM_SESSION.to_owned();
+        let apply_summary = |revision| {
+            let lease = turn.state.remote_registry.connection(&remote).unwrap();
+            turn.state
+                .apply_remote_state_snapshot_for_request(
+                    &lease,
+                    StateResponse {
+                        revision,
+                        sessions: vec![summary.clone()],
+                        orchestrators: Vec::new(),
+                        projects: Vec::new(),
+                        ..turn.state.snapshot()
+                    },
+                    RemoteSnapshotApplyMode::GateBySnapshotRevision,
+                )
+                .unwrap();
+        };
+        apply_summary(1);
+        let prior_child = proxy.connection.writer_process().unwrap();
+        proxy.connection.disconnect();
+        *proxy.connection.process.lock().unwrap() = Some(RemoteProcessHandle {
+            child: phase_sync::spawn_parked_child(),
+            mode: RemoteProcessMode::TunnelOnly,
+            foreign_ssh_peer: true,
+            writer_process: Arc::new(()),
+        });
+        let message_id = "buffered-active".to_owned();
+        turn.state
+            .apply_remote_delta_event_for_bridge(
+                &remote,
+                &proxy.connection,
+                Some(&prior_child),
+                DeltaEvent::MessageCreated {
+                    revision: 2,
+                    session_id: PROXY_UPSTREAM_SESSION.to_owned(),
+                    message: crate::tests::remote::remote_text_message(&message_id, "old child"),
+                    message_id,
+                    message_index: 0,
+                    message_count: 1,
+                    preview: String::new(),
+                    status: SessionStatus::Active,
+                    session_queue: None,
+                    session_mutation_stamp: None,
+                    session_seq: None,
+                    body_seq_epoch: None,
+                },
+            )
+            .unwrap();
+        if refresh {
+            apply_summary(3);
+        }
+        start_check_in(&turn, &worktree);
+        assert_eq!(check_overlap(&turn).0, !refresh, "refresh={refresh}");
+    }
+}
+
+#[test]
+fn an_admitted_remote_snapshot_marks_an_open_check_when_the_proxy_enters_a_turn() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-short-remote-snapshot-turn");
+    let proxy = active_proxy(&turn, &reported_directory(&worktree), false);
+    let remote = proxy.connection.config();
+    let lease = turn.state.remote_registry.connection(&remote).unwrap();
+    set_status(&turn, &proxy.session_id, SessionStatus::Idle);
+    start_check_in(&turn, &worktree);
+    assert_eq!(check_overlap(&turn), (false, None));
+    let mut summary = {
+        let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&proxy.session_id).unwrap();
+        AppState::wire_session_summary_from_record(
+            &turn.state.server_instance_id,
+            &inner.sessions[index],
+        )
     };
-    assert_eq!(resolved, None, "the proxy's workdir is never resolved");
+    summary.id = PROXY_UPSTREAM_SESSION.to_owned();
+    for (revision, status) in [(1, SessionStatus::Active), (2, SessionStatus::Idle)] {
+        summary.status = status;
+        turn.state
+            .apply_remote_state_snapshot_for_request(
+                &lease,
+                StateResponse {
+                    revision,
+                    sessions: vec![summary.clone()],
+                    orchestrators: Vec::new(),
+                    projects: Vec::new(),
+                    ..turn.state.snapshot()
+                },
+                RemoteSnapshotApplyMode::GateBySnapshotRevision,
+            )
+            .unwrap();
+    }
+    let (overlapped, cause) = check_overlap(&turn);
+    assert!(overlapped);
+    assert!(cause.unwrap().contains(&proxy.session_id));
+}
+
+#[test]
+fn an_active_text_delta_observes_a_turn_even_when_recovery_finishes_idle() {
+    use crate::tests::remote::{remote_text_message, spawn_remote_session_response_server};
+
+    for targeted in [true, false] {
+        let (turn, worktree) = ordinary_carried_turn("overlap-recovered-active-text");
+        let proxy = active_proxy(&turn, &reported_directory(&worktree), false);
+        let remote = proxy.connection.config();
+        set_status(&turn, &proxy.session_id, SessionStatus::Idle);
+        let mut repaired = {
+            let mut inner = turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&proxy.session_id).unwrap();
+            let record = &mut inner.sessions[index];
+            record.session.messages.clear();
+            record
+                .session
+                .messages
+                .push(remote_text_message("body", "before"));
+            record.session.messages_loaded = true;
+            record.session.message_count = 1;
+            record.session.session_mutation_stamp = Some(9);
+            record.apply_remote_body_sequence(Some(1), Some("remote-epoch".to_owned()));
+            record.session.clone()
+        };
+        start_check_in(&turn, &worktree);
+        assert_eq!(check_overlap(&turn), (false, None));
+        let delta = DeltaEvent::MessageUpdated {
+            revision: 3,
+            session_id: PROXY_UPSTREAM_SESSION.to_owned(),
+            message_id: "body".to_owned(),
+            message_index: 0,
+            message_count: 1,
+            message: remote_text_message("body", "during"),
+            preview: String::new(),
+            status: SessionStatus::Active,
+            session_mutation_stamp: Some(10),
+            session_seq: Some(3),
+            body_seq_epoch: Some("remote-epoch".to_owned()),
+        };
+        repaired.id = PROXY_UPSTREAM_SESSION.to_owned();
+        repaired.body_seq = Some(4);
+        repaired.session_mutation_stamp = Some(10);
+        let gap = turn
+            .state
+            .apply_remote_delta_event(&remote.id, delta.clone())
+            .expect_err("the sequence gap must require recovery");
+        assert!(
+            format!("{gap:#}").contains("remote body sequence discontinuity"),
+            "{gap:#}"
+        );
+        if targeted {
+            let (port, requests, server) = spawn_remote_session_response_server(SessionResponse {
+                revision: 4,
+                session: repaired,
+                server_instance_id: "remote-test-instance".to_owned(),
+            });
+            crate::tests::insert_test_remote_connection(
+                &turn.state,
+                &remote,
+                port,
+                crate::tests::TestRemoteBridgeOwnership::RequestOnly,
+            );
+            assert!(
+                turn.state
+                    .repair_remote_session_tail_after_delta_error(&remote.id, &delta)
+                    .expect("newer Idle tail should be admitted with matching mutation metadata")
+            );
+            crate::tests::join_test_server(server);
+            let requests = requests.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert!(requests[1].starts_with("GET /api/sessions/remote-session-1?tail="));
+        } else {
+            turn.state
+                .apply_remote_state_snapshot_with_authority(
+                    &remote.id,
+                    None,
+                    None,
+                    None,
+                    None,
+                    StateResponse {
+                        revision: 4,
+                        sessions: vec![crate::tests::test_state_session_summary_from_session(
+                            &repaired,
+                        )],
+                        orchestrators: Vec::new(),
+                        projects: Vec::new(),
+                        ..turn.state.snapshot()
+                    },
+                    RemoteSnapshotApplyMode::GateBySnapshotRevision,
+                    Some((&delta, None)),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            turn.state
+                .inner
+                .lock()
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|record| { record.session.id == proxy.session_id })
+                .unwrap()
+                .session
+                .status,
+            SessionStatus::Idle
+        );
+        let (overlapped, cause) = check_overlap(&turn);
+        assert!(overlapped, "targeted={targeted}");
+        assert!(cause.unwrap().contains(&proxy.session_id));
+    }
+}
+
+#[test]
+fn an_admitted_remote_tail_fences_carried_launches_for_fresh_actions() {
+    use crate::tests::remote::{remote_command_message, spawn_remote_session_response_server};
+
+    for (repair, append, summary_first) in [
+        (true, false, false),
+        (false, true, false),
+        (false, false, false),
+        (false, true, true),
+    ] {
+        let (turn, worktree) = ordinary_carried_turn("overlap-remote-tail-write");
+        let proxy = active_proxy(&turn, &reported_directory(&worktree), false);
+        let remote = proxy.connection.config();
+        set_status(&turn, &proxy.session_id, SessionStatus::Idle);
+        let mut tail = {
+            let mut inner = turn.state.inner.lock().unwrap();
+            let index = inner.find_session_index(&proxy.session_id).unwrap();
+            let record = &mut inner.sessions[index];
+            record.session.messages.clear();
+            record
+                .session
+                .messages
+                .push(remote_command_message("existing-command", "write", ""));
+            record.session.messages_loaded = true;
+            record.session.message_count = 1;
+            record.apply_remote_body_sequence(Some(1), Some("remote-epoch".to_owned()));
+            record.session.clone()
+        };
+        ordinary_launch_gate(&turn, &worktree, false);
+        if !summary_first {
+            set_status(&turn, &proxy.session_id, SessionStatus::Active);
+        }
+        assert_eq!(
+            turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+            None
+        );
+        tail.id = PROXY_UPSTREAM_SESSION.to_owned();
+        if !summary_first {
+            tail.status = SessionStatus::Active;
+        }
+        if append {
+            tail.messages
+                .push(remote_command_message("later-command", "write more", ""));
+            tail.message_count = 2;
+        }
+        tail.body_seq = Some(3);
+        if summary_first {
+            let lease = turn.state.remote_registry.connection(&remote).unwrap();
+            let summary = crate::tests::test_state_session_summary_from_session(&tail);
+            turn.state
+                .apply_remote_state_snapshot_for_request(
+                    &lease,
+                    StateResponse {
+                        revision: 2,
+                        sessions: vec![summary],
+                        orchestrators: Vec::new(),
+                        projects: Vec::new(),
+                        ..turn.state.snapshot()
+                    },
+                    RemoteSnapshotApplyMode::GateBySnapshotRevision,
+                )
+                .unwrap();
+            assert!(turn.record(|record| record.engram.carried_checks[0].fence.is_some()));
+        }
+        let (port, _, server) = spawn_remote_session_response_server(SessionResponse {
+            revision: 3,
+            session: tail,
+            server_instance_id: "remote-test-instance".to_owned(),
+        });
+        crate::tests::insert_test_remote_connection(
+            &turn.state,
+            &remote,
+            port,
+            crate::tests::TestRemoteBridgeOwnership::RequestOnly,
+        );
+        if repair {
+            // The sequence gap rejects ordinary delta apply. The retained
+            // command body is unchanged, so only the recovered act fences.
+            let delta = DeltaEvent::CommandUpdate {
+                revision: 3,
+                session_id: PROXY_UPSTREAM_SESSION.to_owned(),
+                message_id: "existing-command".to_owned(),
+                message_index: 0,
+                message_count: 1,
+                command: "write".to_owned(),
+                command_language: Some("shell".to_owned()),
+                output: String::new(),
+                output_language: Some("text".to_owned()),
+                status: CommandStatus::Running,
+                preview: String::new(),
+                session_mutation_stamp: None,
+                session_seq: Some(3),
+                body_seq_epoch: Some("remote-epoch".to_owned()),
+            };
+            dispatch_remote_event(
+                &turn.state,
+                &remote.id,
+                "delta",
+                &[serde_json::to_string(&delta).unwrap()],
+            )
+            .unwrap();
+        } else {
+            turn.state
+                .fetch_remote_session_tail_target(
+                    &RemoteSessionTarget {
+                        remote,
+                        remote_session_id: PROXY_UPSTREAM_SESSION.to_owned(),
+                        local_session_id: proxy.session_id.clone(),
+                    },
+                    20,
+                    None,
+                    None,
+                    REMOTE_REQUEST_TIMEOUT,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        crate::tests::join_test_server(server);
+        let fence = turn.record(|record| record.engram.carried_checks[0].fence.clone());
+        assert_eq!(
+            fence.is_some(),
+            repair || append,
+            "repair={repair}, append={append}, summary_first={summary_first}"
+        );
+        if let Some(fence) = fence {
+            assert!(
+                fence.contains(&proxy.session_id)
+                    && fence.contains(if summary_first {
+                        "transcript advanced"
+                    } else {
+                        "command"
+                    }),
+                "{fence}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_proven_foreign_proxy_does_not_overlap_a_central_check() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-proven-foreign-proxy");
+    let proxy = active_proxy(&turn, FOREIGN_WORKDIR, true);
+    let stamp = || {
+        let inner = turn.state.inner.lock().unwrap();
+        let index = inner.find_session_index(&proxy.session_id).unwrap();
+        inner.sessions[index].mutation_stamp
+    };
+    let before = stamp();
+    ordinary_launch_gate(&turn, &worktree, false);
+    assert_eq!(stamp(), before, "writer discovery is runtime metadata");
+    let root = engram_worktree_root(&worktree);
+    let overlaps = || {
+        let inner = turn.state.inner.lock().expect("state mutex poisoned");
+        let index = inner
+            .find_session_index(&proxy.session_id)
+            .expect("proxy session");
+        assert_eq!(
+            engram_writer_match(&inner, index, &root).is_some(),
+            engram_worktrees_may_hold(&engram_writer_worktrees(&inner, index), &root),
+        );
+        engram_writer_match(&inner, index, &root)
+    };
+    assert_eq!(overlaps(), None);
+    assert_eq!(
+        turn.record(|record| record.engram.carried_checks[0].fence.clone()),
+        None
+    );
+
+    // A retained old reference must not keep proving a route after its
+    // replacement, even while the old child is still alive.
+    let local = RemoteConfig::local();
+    let remotes = vec![local.clone(), proxy.connection.config()];
+    {
+        let mut inner = turn.state.inner.lock().unwrap();
+        let _retired = turn.state.remote_registry.publish_configs(&[local]);
+        inner.preferences.remotes = remotes.clone();
+        let _readded = turn.state.remote_registry.publish_configs(&remotes);
+    }
+    assert!(overlaps().unwrap().contains("counts in every worktree"));
+}
+
+#[test]
+fn a_proxy_in_a_local_worktree_still_overlaps_that_worktree() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-same-host-proxy");
+    let proxy = active_proxy(&turn, &reported_directory(&worktree), true);
+    record_overlapping_launch(&turn, &worktree);
+    let line = turn
+        .record(|record| record.engram.pending_source_root_line.clone())
+        .unwrap();
+    assert!(
+        line.contains(&proxy.session_id) && line.contains("works in this worktree"),
+        "{line}"
+    );
+    let sibling = sibling_worktree(&turn, "peer-proof-sibling");
+    let sibling_root = engram_worktree_root(&sibling);
+    let inner = turn.state.inner.lock().unwrap();
+    let index = inner.find_session_index(&proxy.session_id).unwrap();
+    assert!(engram_writer_match(&inner, index, &sibling_root).is_none());
+}
+
+#[test]
+fn a_proxy_whose_proven_connection_ended_overlaps_a_finishing_check() {
+    let (turn, worktree) = ordinary_carried_turn("overlap-proxy-exited-peer");
+    let proxy = active_proxy(&turn, FOREIGN_WORKDIR, true);
+    start_check_in(&turn, &worktree);
+    assert_eq!(check_overlap(&turn), (false, None));
+    {
+        let mut process = proxy.connection.process.lock().unwrap();
+        let child = &mut process.as_mut().unwrap().child;
+        child.kill().unwrap();
+        child.wait().unwrap();
+    }
+    turn.recorder()
+        .command_completed_with_exit(
+            "check",
+            SIZE_TEST,
+            "",
+            CommandStatus::Success,
+            EngramCommandExit::Code(0),
+        )
+        .unwrap();
+    turn.wait_for_snapshots();
+    let (overlapped, reason) = check_overlap(&turn);
+    assert!(overlapped);
+    let reason = reason.unwrap();
+    assert!(
+        reason.contains(&proxy.session_id) && reason.contains("counts in every worktree"),
+        "{reason}"
+    );
 }
 
 #[test]

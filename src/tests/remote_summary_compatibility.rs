@@ -420,7 +420,8 @@ fn http_resync(fields: Value, should_apply: bool) {
         port,
         TestRemoteBridgeOwnership::RequestOnly,
     );
-    let result = resync_remote_state_snapshot_with_authority(&state, &remote.id, None, false);
+    let result =
+        resync_remote_state_snapshot_with_authority(&state, &remote.id, None, false, None, None);
     join_test_server(server);
     assert_eq!(
         *requests.lock().expect("requests mutex poisoned"),

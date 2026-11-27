@@ -1311,6 +1311,7 @@ use engram_held_claims::*;
 mod engram_turn_checks;
 use engram_turn_checks::*;
 mod engram_carried_checks;
+mod engram_remote_writer;
 use engram_carried_checks::*;
 mod engram_watcher_order;
 use engram_watcher_order::*;

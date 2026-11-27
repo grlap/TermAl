@@ -104,6 +104,20 @@ pub(crate) struct RemoteRequestLease {
     /// bridge cleanup advances this epoch when it clears recovery watermarks,
     /// preventing a pre-cleanup response from mutating proxy state afterward.
     pub(crate) state_continuity_generation: u64,
+    pub(crate) writer_process: Option<Arc<()>>,
+}
+
+impl RemoteRequestLease {
+    /// Recovery combines a prior observation with a new response. It can
+    /// use foreign-peer evidence only when both used the same SSH child.
+    pub(crate) fn writer_process_for_recovery(
+        &self,
+        original: Option<&Arc<()>>,
+    ) -> Option<&Arc<()>> {
+        self.writer_process
+            .as_ref()
+            .filter(|process| original.is_some_and(|original| Arc::ptr_eq(original, process)))
+    }
 }
 
 /// Cloneable authority fence for consumers that buffer bytes after the HTTP
@@ -640,6 +654,7 @@ impl RemoteRegistry {
             state_continuity_generation: connection
                 .state_continuity_generation
                 .load(Ordering::SeqCst),
+            writer_process: connection.writer_process(),
             connection,
             pinned: current,
             config_generation,
@@ -819,7 +834,7 @@ impl RemoteRegistry {
 
     fn request_with_optional_timeout_for_lease(
         &self,
-        lease: RemoteRequestLease,
+        mut lease: RemoteRequestLease,
         method: Method,
         path: &str,
         query: &[(String, String)],
@@ -846,6 +861,7 @@ impl RemoteRegistry {
         // Availability checks can perform IO. Recheck the terminal latch at
         // the send boundary so a stopped mirror cannot accept new mutations.
         lease.connection.ensure_request_output_available()?;
+        lease.writer_process = lease.connection.writer_process();
         let response = match request.send() {
             Ok(response) => response,
             Err(err) => {
@@ -1050,6 +1066,35 @@ impl RemoteConnection {
         self.config.clone()
     }
 
+    /// Capture the installed transport before reading observations from it.
+    pub(crate) fn writer_process(&self) -> Option<Arc<()>> {
+        self.process
+            .try_lock()
+            .ok()?
+            .as_ref()
+            .map(|handle| handle.writer_process.clone())
+    }
+
+    /// Only the live child that supplied the observation can prove locality.
+    /// Called under the state lock, so contention leaves the writer unknown.
+    pub(crate) fn proves_writer_elsewhere(
+        &self,
+        current: &RemoteConfig,
+        observed: &Arc<()>,
+    ) -> bool {
+        if current.transport != RemoteTransport::Ssh || self.ensure_pinned_route(current).is_err() {
+            return false;
+        }
+        let Ok(mut process) = self.process.try_lock() else {
+            return false;
+        };
+        process.as_mut().is_some_and(|handle| {
+            Arc::ptr_eq(&handle.writer_process, observed)
+                && handle.foreign_ssh_peer
+                && matches!(handle.child.try_wait(), Ok(None))
+        }) && !self.retired.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn output_limited(&self) -> bool {
         self.event_stream_status.load(Ordering::SeqCst) == REMOTE_STREAM_OUTPUT_LIMIT
     }
@@ -1167,6 +1212,7 @@ impl RemoteConnection {
         let managed_attempt = self.start_process(pinned, RemoteProcessMode::ManagedServer)?;
         match wait_for_remote_health(client, &base_url, managed_attempt) {
             Ok(mut handle) => {
+                handle.capture_writer_peer(self.forwarded_port, pinned);
                 if let Err(err) = self.ensure_pinned_route(pinned) {
                     let _ = handle.child.kill();
                     let _ = handle.child.wait();
@@ -1180,6 +1226,7 @@ impl RemoteConnection {
                 let tunnel_attempt = self.start_process(pinned, RemoteProcessMode::TunnelOnly)?;
                 match wait_for_remote_health(client, &base_url, tunnel_attempt) {
                     Ok(mut handle) => {
+                        handle.capture_writer_peer(self.forwarded_port, pinned);
                         if let Err(err) = self.ensure_pinned_route(pinned) {
                             let _ = handle.child.kill();
                             let _ = handle.child.wait();
@@ -1204,12 +1251,15 @@ impl RemoteConnection {
     }
 
     /// Starts process.
+    #[cfg(not(test))]
     fn start_process(
         &self,
         remote: &RemoteConfig,
         mode: RemoteProcessMode,
     ) -> Result<RemoteProcessHandle, ApiError> {
         let mut command = Command::new("ssh");
+        #[cfg(windows)]
+        command.args(["-o", "LogLevel=DEBUG1"]);
         for arg in remote_ssh_command_args(remote, self.forwarded_port, mode)? {
             command.arg(arg);
         }
@@ -1220,7 +1270,35 @@ impl RemoteConnection {
         let child = command
             .spawn()
             .map_err(|err| local_ssh_start_error(&remote.name, err))?;
-        Ok(RemoteProcessHandle { child, mode })
+        #[cfg(windows)]
+        let mut child = child;
+        #[cfg(windows)]
+        let startup_diagnostics = child
+            .stderr
+            .take()
+            .and_then(crate::engram_remote_writer::SshStartupDiagnostics::drain);
+        Ok(RemoteProcessHandle {
+            child,
+            mode,
+            foreign_ssh_peer: false,
+            writer_process: Arc::new(()),
+            #[cfg(windows)]
+            startup_diagnostics,
+        })
+    }
+
+    #[cfg(test)]
+    fn start_process(
+        &self,
+        _remote: &RemoteConfig,
+        _mode: RemoteProcessMode,
+    ) -> Result<RemoteProcessHandle, ApiError> {
+        // Unit tests supply loopback endpoints or insert controlled child
+        // handles. An unavailable fixture must not start system SSH.
+        Err(
+            ApiError::bad_gateway("test remote has no available loopback fixture")
+                .with_kind(ApiErrorKind::RemoteConnectionUnavailable),
+        )
     }
 
     /// Starts a bridge whose ownership was claimed atomically by the registry.
@@ -1293,6 +1371,7 @@ impl RemoteConnection {
                     }
                 };
 
+                let writer_process = connection.writer_process();
                 let response = match client.get(format!("{base_url}/api/events")).send() {
                     Ok(response) => response,
                     Err(err) => {
@@ -1310,9 +1389,13 @@ impl RemoteConnection {
                     }
                 };
 
-                if let Err(err) =
-                    process_remote_event_stream(&state, &remote, &connection, response)
-                {
+                if let Err(err) = process_remote_event_stream(
+                    &state,
+                    &remote,
+                    &connection,
+                    writer_process,
+                    response,
+                ) {
                     if err.downcast_ref::<RemoteOutputLimitTerminal>().is_some() {
                         break;
                     }
@@ -1339,6 +1422,29 @@ pub(crate) fn local_ssh_start_error(remote_name: &str, err: std::io::Error) -> A
 pub(crate) struct RemoteProcessHandle {
     pub(crate) child: Child,
     pub(crate) mode: RemoteProcessMode,
+    pub(crate) foreign_ssh_peer: bool,
+    pub(crate) writer_process: Arc<()>,
+    #[cfg(all(windows, not(test)))]
+    pub(crate) startup_diagnostics: Option<crate::engram_remote_writer::SshStartupDiagnostics>,
+}
+
+impl RemoteProcessHandle {
+    fn capture_writer_peer(&mut self, forward_port: u16, remote: &RemoteConfig) {
+        #[cfg(all(windows, not(test)))]
+        let direct_peer = self
+            .startup_diagnostics
+            .as_ref()
+            .and_then(|diagnostics| diagnostics.direct_peer());
+        #[cfg(not(all(windows, not(test))))]
+        let direct_peer = None;
+        self.foreign_ssh_peer = direct_peer.is_some()
+            && crate::engram_remote_writer::has_direct_foreign_peer(
+                &self.child,
+                forward_port,
+                remote.port.unwrap_or(DEFAULT_SSH_REMOTE_PORT),
+                direct_peer,
+            );
+    }
 }
 
 /// Enumerates remote process modes.

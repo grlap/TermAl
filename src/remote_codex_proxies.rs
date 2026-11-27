@@ -89,6 +89,7 @@ impl AppState {
                 &remote_session,
                 local_project_id,
                 update_existing,
+                response_lease.writer_process.as_ref(),
             );
             if update_existing {
                 inner.note_remote_applied_revision(&target.remote.id, remote_response.revision);

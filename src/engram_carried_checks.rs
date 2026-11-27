@@ -493,6 +493,9 @@ pub(crate) enum EngramWriterAct<'a> {
     /// It reported a file edit, which TermAl does not place: it may have
     /// written wherever the session writes.
     Edit,
+    /// An admitted summary advanced an existing proxy's transcript without
+    /// supplying the new bodies. The advance may include a write.
+    RemoteTranscriptAdvance,
 }
 
 impl EngramWriterAct<'_> {
@@ -506,6 +509,9 @@ impl EngramWriterAct<'_> {
             EngramWriterAct::Command { .. } => "reported a command",
             EngramWriterAct::UnreportedCommand => "ended a command whose start TermAl was not told",
             EngramWriterAct::Edit => "reported an edit",
+            EngramWriterAct::RemoteTranscriptAdvance => {
+                "advanced its remote transcript without reporting the new actions"
+            }
         }
     }
 }
@@ -583,6 +589,13 @@ pub(crate) fn engram_fence_carried_for_other_session(
             writer_worktrees,
             format!("{who} reported a file edit there"),
             format!("{who} reported a file edit that TermAl could not place"),
+        ),
+        EngramWriterAct::RemoteTranscriptAdvance => (
+            writer_worktrees,
+            format!("{who} may have written there while its remote transcript advanced"),
+            format!(
+                "{who} may have written while its remote transcript advanced in an unresolved workdir"
+            ),
         ),
     };
     // Detach only rows with an open carried check (`matching_indexed_mut`).

@@ -2344,7 +2344,10 @@ pub(crate) struct EngramSessionState {
     /// overlap marking under the lock knows where the session writes without
     /// a process-wide cache that other sessions' paths could evict. In memory
     /// only.
-    pub(crate) workdir_worktree: Option<(String, String)>,
+    pub(crate) workdir_worktree: Option<(String, EngramWriterWorkdir)>,
+    /// SSH child that supplied the current remote session metadata. Path
+    /// refreshes cannot replace this with the child currently installed.
+    pub(crate) remote_writer_process: Option<Arc<()>>,
     /// Capture workers of the session's checks running now (source snapshots
     /// and toolchain probes, `EngramCapture::spawn`), counted by each worker
     /// until it finishes, whether or not its check is still kept. A new check
@@ -2500,6 +2503,7 @@ impl Default for EngramSessionState {
             running_command_keys: BTreeMap::new(),
             running_command_worktrees: Vec::new(),
             workdir_worktree: None,
+            remote_writer_process: None,
             capture_workers: Arc::default(),
             withheld_command_keys: BTreeSet::new(),
             uncredited_command_notice_keys: BTreeSet::new(),

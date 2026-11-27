@@ -377,11 +377,17 @@ pub(crate) fn wait_for_remote_health(
         }
         match handle.child.try_wait() {
             Ok(Some(status)) => {
+                let suffix = read_process_stderr_suffix(&mut handle.child);
+                #[cfg(all(windows, not(test)))]
+                let suffix = handle
+                    .startup_diagnostics
+                    .as_ref()
+                    .map_or(suffix, |diagnostics| diagnostics.failure_suffix());
                 return Err(format!(
                     "{} exited with {}{}",
                     handle.mode.label(),
                     status,
-                    read_process_stderr_suffix(&mut handle.child)
+                    suffix
                 ));
             }
             Ok(None) => {}

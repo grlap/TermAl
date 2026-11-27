@@ -219,6 +219,7 @@ fn assert_hydration_rejects_authority_change_before_target(restore_original: boo
         .apply_remote_delta_event_for_bridge(
             &original,
             &original_connection,
+            None,
             DeltaEvent::MessageCreated {
                 session_seq: None,
                 body_seq_epoch: None,
@@ -307,6 +308,7 @@ fn remote_delta_repair_rejects_post_decode_a_to_b_to_a_before_apply() {
         .repair_remote_session_tail_after_delta_error_for_bridge(
             &original,
             &original_connection,
+            None,
             &event,
         )
         .expect_err("pre-cycle bounded repair response must not localize after A -> B -> A");

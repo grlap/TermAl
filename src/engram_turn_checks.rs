@@ -3,6 +3,7 @@
 // registration owns verification evidence and its producer receipts.
 
 use super::*;
+use crate::engram_remote_writer::{ProxyWorktree, probe_proxy_worktrees};
 
 #[cfg(test)]
 thread_local! {
@@ -838,27 +839,57 @@ pub(crate) fn engram_note_turn_started(inner: &mut StateInner, index: usize) {
     engram_mark_checks_overlapped_by(inner, index, EngramWriterAct::Presence);
 }
 
-/// The key of the worktree the session in `record` works in, as last resolved
-/// for its current workdir (`workdir_worktree`), however long ago, without
-/// touching the file system: overlap marking runs under the state lock, where
-/// resolving a path on a slow or unreachable volume would stall every other
-/// session. `None` when it was never resolved for this workdir; such a
-/// worktree is taken to be the one a check ran in, which can only make the
-/// check unknown.
-pub(crate) fn engram_session_worktree(record: &SessionRecord) -> Option<String> {
+/// The last path resolution. A proxy outside local worktrees can name the
+/// connection observed at resolution, which may have retired by the count.
+#[derive(Clone, Debug)]
+pub(crate) enum EngramWriterWorkdir {
+    Worktree(String),
+    ProxyOutsideWorktrees(Option<(std::sync::Weak<RemoteConnection>, Arc<()>)>),
+    InconclusiveProxy,
+}
+
+fn engram_session_workdir_resolution(record: &SessionRecord) -> Option<&EngramWriterWorkdir> {
     record
         .engram
         .workdir_worktree
         .as_ref()
         .filter(|(workdir, _)| *workdir == record.session.workdir)
-        .map(|(_, key)| key.clone())
+        .map(|(_, resolution)| resolution)
+}
+
+/// The cached local worktree key, without touching the file system.
+pub(crate) fn engram_session_worktree(record: &SessionRecord) -> Option<String> {
+    match engram_session_workdir_resolution(record)? {
+        EngramWriterWorkdir::Worktree(key) => Some(key.clone()),
+        EngramWriterWorkdir::ProxyOutsideWorktrees(_) | EngramWriterWorkdir::InconclusiveProxy => {
+            None
+        }
+    }
+}
+
+fn engram_proxy_workdir_is_elsewhere(
+    inner: &StateInner,
+    record: &SessionRecord,
+    transport: Option<&(std::sync::Weak<RemoteConnection>, Arc<()>)>,
+) -> bool {
+    record
+        .remote_id
+        .as_deref()
+        .and_then(|remote_id| inner.find_remote(remote_id))
+        .zip(transport)
+        .is_some_and(|(remote, (connection, observed))| {
+            connection
+                .upgrade()
+                .is_some_and(|connection| connection.proves_writer_elsewhere(remote, observed))
+        })
 }
 
 /// Keeps on `record` the key of the worktree `workdir` lies in, resolved off
 /// the lock (`engram_worktree_root`), while that is still its workdir.
 fn engram_note_session_worktree(record: &mut SessionRecord, workdir: &str, key: String) {
-    if record.session.workdir == workdir {
-        record.engram.workdir_worktree = Some((workdir.to_owned(), key));
+    if record.remote_id.is_none() && record.session.workdir == workdir {
+        record.engram.workdir_worktree =
+            Some((workdir.to_owned(), EngramWriterWorkdir::Worktree(key)));
     }
 }
 
@@ -869,7 +900,15 @@ fn engram_note_session_worktree(record: &mut SessionRecord, workdir: &str, key: 
 /// was moved.
 pub(crate) fn engram_writer_worktrees(inner: &StateInner, index: usize) -> Vec<Option<String>> {
     let record = &inner.sessions[index];
-    std::iter::once(engram_session_worktree(record))
+    let workdir = match engram_session_workdir_resolution(record) {
+        Some(EngramWriterWorkdir::Worktree(key)) => Some(Some(key.clone())),
+        Some(EngramWriterWorkdir::ProxyOutsideWorktrees(connection)) => {
+            (!engram_proxy_workdir_is_elsewhere(inner, record, connection.as_ref())).then_some(None)
+        }
+        Some(EngramWriterWorkdir::InconclusiveProxy) | None => Some(None),
+    };
+    workdir
+        .into_iter()
         // A session whose turn works in its claim's named source root writes
         // there too; the root is added to, not put in place of, its workdir's.
         // The record keeps the root after the turn ends, until the next grant
@@ -934,8 +973,12 @@ pub(crate) fn engram_other_writer_cause(
 /// Whether the session in `record` is in a turn: running, awaiting approval
 /// or stopping.
 fn engram_session_in_turn(record: &SessionRecord) -> bool {
+    engram_writer_status_in_turn(record.session.status)
+}
+
+pub(crate) fn engram_writer_status_in_turn(status: SessionStatus) -> bool {
     matches!(
-        record.session.status,
+        status,
         SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
     )
 }
@@ -946,22 +989,35 @@ fn engram_session_in_turn(record: &SessionRecord) -> bool {
 /// them, each told as the reason it matched.
 pub(crate) fn engram_writer_match(inner: &StateInner, other: usize, root: &str) -> Option<String> {
     let record = &inner.sessions[other];
-    let why = match engram_session_worktree(record) {
-        // A proxy's workdir is the other host's path; TermAl never resolves
-        // it here (`engram_unresolved_writers`).
+    let why = match engram_session_workdir_resolution(record) {
+        Some(EngramWriterWorkdir::ProxyOutsideWorktrees(connection)) => {
+            (!engram_proxy_workdir_is_elsewhere(inner, record, connection.as_ref())).then(|| {
+                "has an UNRESOLVED workdir: it lies in no worktree here and no live direct SSH \
+                 peer is proven outside this host, so it counts in every worktree"
+                    .to_owned()
+            })
+        }
+        Some(EngramWriterWorkdir::InconclusiveProxy) => Some(
+            "has an UNRESOLVED workdir: local path lookup was inconclusive, so it counts in every worktree"
+                .to_owned(),
+        ),
         None if record.remote_id.is_some() => Some(
-            "has an UNRESOLVED workdir, which this count does not resolve, so it counts in \
-             every worktree"
+            "has an UNRESOLVED workdir, not resolved yet, so it counts in every worktree"
                 .to_owned(),
         ),
         None => Some(
             "has an UNRESOLVED worktree, not resolved yet, so it counts in every one".to_owned(),
         ),
-        // A proxy keeps the key an earlier turn start resolved for it.
-        Some(worktree) if worktree == root && record.remote_id.is_some() => Some(format!(
-            "works in this worktree (its resolved key {worktree})"
-        )),
-        Some(worktree) if worktree == root => Some("works in this worktree".to_owned()),
+        Some(EngramWriterWorkdir::Worktree(worktree))
+            if worktree == root && record.remote_id.is_some() =>
+        {
+            Some(format!(
+                "works in this worktree (its resolved key {worktree})"
+            ))
+        }
+        Some(EngramWriterWorkdir::Worktree(worktree)) if worktree == root => {
+            Some("works in this worktree".to_owned())
+        }
         Some(_) => None,
     }
     .or_else(|| {
@@ -992,59 +1048,203 @@ pub(crate) fn engram_writer_match(inner: &StateInner, other: usize, root: &str) 
     Some(format!("{who} {why}"))
 }
 
-/// The other sessions in a turn that may write but whose worktree was not
-/// resolved for their workdir yet, by id and workdir: a session whose state
-/// was rebuilt in its turn, say. Read under the lock, resolved off it
-/// (`engram_resolve_writer_worktrees`) and kept under it again
-/// (`engram_note_writer_worktrees`) before writers are counted, so such a
-/// session counts where it works rather than in every worktree. A remote
-/// proxy session is left out: its workdir is the other host's path, which
-/// a local path of the same spelling would match only by coincidence. A
-/// turn start may have resolved it already (`EngramHost::turn_starting`);
-/// one not resolved keeps counting in every worktree until its next turn
-/// start, and the line names it as such (`engram_writer_match`).
-fn engram_unresolved_writers(inner: &StateInner, except: usize) -> Vec<(String, String)> {
+struct EngramWriterProbe {
+    session_id: String,
+    workdir: String,
+    remote_id: Option<String>,
+    writer_process: Option<Arc<()>>,
+}
+
+impl EngramWriterProbe {
+    fn from_record(record: &SessionRecord) -> Self {
+        Self {
+            session_id: record.session.id.clone(),
+            workdir: record.session.workdir.clone(),
+            remote_id: record.remote_id.clone(),
+            writer_process: record.engram.remote_writer_process.clone(),
+        }
+    }
+
+    fn resolve(
+        &self,
+        remotes: &RemoteRegistry,
+        proxy_paths: &HashMap<String, ProxyWorktree>,
+    ) -> EngramWriterWorkdir {
+        let Some(remote_id) = self.remote_id.as_deref() else {
+            return EngramWriterWorkdir::Worktree(engram_worktree_root(FsPath::new(&self.workdir)));
+        };
+        let connection = engram_remote_writer_connection(remotes, remote_id);
+        resolve_engram_remote_writer_workdir(
+            proxy_paths.get(&self.workdir),
+            connection.as_ref(),
+            self.writer_process.as_ref(),
+        )
+    }
+}
+
+fn resolve_engram_remote_writer_workdir(
+    worktree: Option<&ProxyWorktree>,
+    connection: Option<&Arc<RemoteConnection>>,
+    writer_process: Option<&Arc<()>>,
+) -> EngramWriterWorkdir {
+    match worktree {
+        Some(ProxyWorktree::Local(key)) => return EngramWriterWorkdir::Worktree(key.clone()),
+        Some(ProxyWorktree::Outside) => {}
+        Some(ProxyWorktree::Inconclusive) | None => return EngramWriterWorkdir::InconclusiveProxy,
+    }
+    EngramWriterWorkdir::ProxyOutsideWorktrees(
+        connection
+            .zip(writer_process)
+            .map(|(connection, process)| (Arc::downgrade(connection), process.clone())),
+    )
+}
+
+fn engram_remote_writer_connection(
+    remotes: &RemoteRegistry,
+    remote_id: &str,
+) -> Option<Arc<RemoteConnection>> {
+    remotes
+        .connections
+        .try_lock()
+        .ok()
+        .and_then(|connections| connections.get(remote_id).cloned())
+}
+
+#[derive(Default)]
+pub(crate) struct EngramRemoteWriterWorkdirs {
+    paths: HashMap<String, EngramWriterWorkdir>,
+    pub(crate) writer_process: Option<Arc<()>>,
+}
+
+fn same_writer_process(a: Option<&Arc<()>>, b: Option<&Arc<()>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn note_engram_remote_writer_process(
+    record: &mut SessionRecord,
+    observed: Option<&Arc<()>>,
+) {
+    record.engram.remote_writer_process = observed.cloned();
+    record.engram.workdir_worktree = None;
+}
+
+/// A status-only frame cannot attest to a workdir last supplied by another child.
+pub(crate) fn note_engram_remote_writer_status(
+    record: &mut SessionRecord,
+    observed: Option<&Arc<()>>,
+) {
+    if !same_writer_process(record.engram.remote_writer_process.as_ref(), observed) {
+        note_engram_remote_writer_process(record, None);
+    }
+}
+
+pub(crate) fn engram_has_open_writer_checks(inner: &StateInner) -> bool {
+    inner.sessions.iter().any(|record| {
+        record
+            .engram
+            .active_turn_checks
+            .iter()
+            .any(|check| check.open_to_writes())
+            || record
+                .engram
+                .carried_checks
+                .iter()
+                .any(|check| check.fence.is_none() && !check.ended())
+    })
+}
+
+/// Called under the authority guard after applying the remote observation.
+/// An off-lock result is only usable for the workdir the proxy actually has.
+pub(crate) fn mark_engram_remote_writer(
+    inner: &mut StateInner,
+    index: usize,
+    workdirs: &EngramRemoteWriterWorkdirs,
+    act: EngramWriterAct<'_>,
+) {
+    let record = &mut inner.sessions[index];
+    let resolution = workdirs
+        .paths
+        .get(&record.session.workdir)
+        .cloned()
+        .unwrap_or(EngramWriterWorkdir::InconclusiveProxy);
+    let previous = record
+        .engram
+        .workdir_worktree
+        .replace((record.session.workdir.clone(), resolution));
+    engram_mark_checks_overlapped_by(inner, index, act);
+    inner.sessions[index].engram.workdir_worktree = previous;
+}
+
+/// Read unresolved locals and refresh proxies at check boundaries. A remote
+/// turn started by its owner has no local turn-start resolution. Its route
+/// or path may also have changed since the last check.
+fn engram_unresolved_writers(inner: &StateInner, except: usize) -> Vec<EngramWriterProbe> {
     inner
         .sessions
         .iter()
         .enumerate()
         .filter(|(other, record)| {
             *other != except
-                && record.remote_id.is_none()
                 && engram_session_in_turn(record)
-                && engram_session_worktree(record).is_none()
+                && (record.remote_id.is_some() || engram_session_worktree(record).is_none())
                 && engram_session_may_write(inner, *other)
         })
-        .map(|(_, record)| (record.session.id.clone(), record.session.workdir.clone()))
+        .map(|(_, record)| EngramWriterProbe::from_record(record))
         .collect()
 }
 
 /// Resolves on the file system, never under the state lock, the worktree of
 /// each workdir `engram_unresolved_writers` read.
 fn engram_resolve_writer_worktrees(
-    writers: Vec<(String, String)>,
-) -> Vec<(String, String, String)> {
+    writers: Vec<EngramWriterProbe>,
+    remotes: &RemoteRegistry,
+) -> Vec<(EngramWriterProbe, EngramWriterWorkdir)> {
+    let proxy_paths = probe_proxy_worktrees(
+        writers
+            .iter()
+            .filter(|writer| writer.remote_id.is_some())
+            .map(|writer| writer.workdir.clone())
+            .collect(),
+    );
     writers
         .into_iter()
-        .map(|(session_id, workdir)| {
-            let key = engram_worktree_root(FsPath::new(&workdir));
-            (session_id, workdir, key)
+        .map(|writer| {
+            let resolution = writer.resolve(remotes, &proxy_paths);
+            (writer, resolution)
         })
         .collect()
 }
 
 /// Keeps under the lock each worktree `engram_resolve_writer_worktrees`
 /// resolved, on a session that still exists and still has that workdir.
-fn engram_note_writer_worktrees(inner: &mut StateInner, resolved: Vec<(String, String, String)>) {
-    for (session_id, workdir, key) in resolved {
-        if let Some(index) = inner.find_session_index(&session_id) {
-            engram_note_session_worktree(
+fn engram_note_writer_worktrees(
+    inner: &mut StateInner,
+    resolved: impl IntoIterator<Item = (EngramWriterProbe, EngramWriterWorkdir)>,
+) {
+    for (writer, resolution) in resolved {
+        if let Some(index) = inner.find_session_index(&writer.session_id)
+            && inner.sessions[index].session.workdir == writer.workdir
+            && inner.sessions[index].remote_id == writer.remote_id
+            && same_writer_process(
+                inner.sessions[index].engram.remote_writer_process.as_ref(),
+                writer.writer_process.as_ref(),
+            )
+        {
+            // Local worktree resolution has to invalidate older queue
+            // selections. Remote probe metadata stays outside the proxy's
+            // published session revision.
+            let record = if writer.remote_id.is_none() {
                 inner
                     .session_mut_by_index(index)
-                    .expect("session index should be valid"),
-                &workdir,
-                key,
-            );
+                    .expect("session index should be valid")
+            } else {
+                &mut inner.sessions[index]
+            };
+            record.engram.workdir_worktree = Some((writer.workdir, resolution));
         }
     }
 }
@@ -1446,14 +1646,11 @@ impl AppState {
         // here off the lock, for overlap marking under it.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
         let worktrees = engram_command_worktrees(&workdir, &write_places, ran, loss.as_ref());
-        let resolved_writers = engram_resolve_writer_worktrees(unresolved_writers);
         let mediated = started.is_some();
         // A line no built-in recognises may be a declared test command of the
         // worktree it runs in (`engram_declared_tests.rs`), bound here at its
-        // start, off the lock. Only a worktree holding a declaration is read
-        // further. The other writers in a turn are not resolved for it first:
-        // one left unresolved counts in every worktree, which can only make
-        // the check unknown.
+        // start, off the lock. Resolve the writers once the declaration identifies
+        // a real check; skip the extra scan for other commands.
         let (mut declared, declaration_line) = if mediated && recognised.is_none() {
             engram_declared_start(
                 ran,
@@ -1466,6 +1663,17 @@ impl AppState {
         } else {
             (None, None)
         };
+        let unresolved_writers = if declared.is_some() {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            inner
+                .find_session_index(session_id)
+                .map(|index| engram_unresolved_writers(&inner, index))
+                .unwrap_or_default()
+        } else {
+            unresolved_writers
+        };
+        let resolved_writers =
+            engram_resolve_writer_worktrees(unresolved_writers, &self.remote_registry);
         let target = started.and_then(|started| {
             if let Some((command, target, _)) = &declared {
                 return Some((workdir.clone(), command.clone(), target.clone()));
@@ -2727,7 +2935,8 @@ impl AppState {
         // The session's worktree, resolved off the lock for overlap marking,
         // and those of the writers not resolved yet.
         let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
-        let resolved_writers = engram_resolve_writer_worktrees(unresolved_writers);
+        let resolved_writers =
+            engram_resolve_writer_worktrees(unresolved_writers, &self.remote_registry);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         // Before any writer is counted below, in this same hold of the lock.
         engram_note_writer_worktrees(&mut inner, resolved_writers);
@@ -3114,25 +3323,41 @@ impl AppState {
     /// command or edit since TermAl started (a chat-only turn) would
     /// otherwise count as writing anywhere. Called before a turn starts.
     pub(crate) fn note_engram_session_worktree_off_lock(&self, session_id: &str) {
-        let workdir = {
+        let writer = {
             let inner = self.inner.lock().expect("state mutex poisoned");
             let Some(index) = inner.find_session_index(session_id) else {
                 return;
             };
-            inner.sessions[index].session.workdir.clone()
+            EngramWriterProbe::from_record(&inner.sessions[index])
         };
-        let workdir_worktree = engram_worktree_root(FsPath::new(&workdir));
+        let resolved = engram_resolve_writer_worktrees(vec![writer], &self.remote_registry);
         let mut inner = self.inner.lock().expect("state mutex poisoned");
-        let Some(index) = inner.find_session_index(session_id) else {
-            return;
-        };
-        engram_note_session_worktree(
-            inner
-                .session_mut_by_index(index)
-                .expect("session index should be valid"),
-            &workdir,
-            workdir_worktree,
-        );
+        engram_note_writer_worktrees(&mut inner, resolved);
+    }
+
+    pub(crate) fn resolve_engram_remote_writer_workdirs(
+        &self,
+        remote_id: &str,
+        workdirs: impl IntoIterator<Item = String>,
+        writer_process: Option<&Arc<()>>,
+    ) -> EngramRemoteWriterWorkdirs {
+        let connection = writer_process
+            .and_then(|_| engram_remote_writer_connection(&self.remote_registry, remote_id));
+        let paths = probe_proxy_worktrees(workdirs.into_iter().collect())
+            .into_iter()
+            .map(|(path, probed)| {
+                let resolution = resolve_engram_remote_writer_workdir(
+                    Some(&probed),
+                    connection.as_ref(),
+                    writer_process,
+                );
+                (path, resolution)
+            })
+            .collect();
+        EngramRemoteWriterWorkdirs {
+            paths,
+            writer_process: writer_process.cloned(),
+        }
     }
 
     /// The agent reported a file edit in `session_id`: any check still open to

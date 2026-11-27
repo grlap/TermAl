@@ -522,29 +522,34 @@ pub(super) struct ParkedProcess {
 
 impl ParkedProcess {
     pub(super) fn spawn() -> Self {
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = Command::new("cmd");
-            command.args(["/D", "/C", "set /p fixture_blocked="]);
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = {
-            let mut command = Command::new("sh");
-            command.args(["-c", "read fixture_blocked"]);
-            command
-        };
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap();
+        let mut child = spawn_parked_child();
         let input = child.stdin.take().expect("parked fixture stdin");
         Self {
             process: Arc::new(SharedChild::new(child).unwrap()),
             _input: input,
         }
     }
+}
+
+/// The caller keeps the input pipe and reaps the child.
+pub(super) fn spawn_parked_child() -> std::process::Child {
+    #[cfg(windows)]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.args(["/D", "/C", "set /p fixture_blocked="]);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = Command::new("sh");
+        command.args(["-c", "read fixture_blocked"]);
+        command
+    };
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap()
 }
 
 impl Drop for ParkedProcess {

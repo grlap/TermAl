@@ -12,6 +12,74 @@
 // size threshold.
 
 use super::*;
+use crate::remote_routes::RemoteDeltaHydrationExpectation;
+
+pub(crate) fn remote_message_writer_act(message: &Message) -> Option<EngramWriterAct<'static>> {
+    match message {
+        Message::Command { .. } => Some(EngramWriterAct::UnreportedCommand),
+        Message::Diff { .. } | Message::FileChanges { .. } => Some(EngramWriterAct::Edit),
+        _ => None,
+    }
+}
+
+pub(crate) fn remote_delta_writer_act(event: &DeltaEvent) -> Option<EngramWriterAct<'static>> {
+    match event {
+        DeltaEvent::MessageCreated {
+            message, status, ..
+        }
+        | DeltaEvent::MessageUpdated {
+            message, status, ..
+        } => remote_message_hydration_writer_act(message, *status),
+        DeltaEvent::CommandUpdate { .. } => Some(EngramWriterAct::UnreportedCommand),
+        _ => None,
+    }
+}
+
+fn remote_message_hydration_writer_act(
+    message: &Message,
+    status: SessionStatus,
+) -> Option<EngramWriterAct<'static>> {
+    remote_message_writer_act(message)
+        .or_else(|| engram_writer_status_in_turn(status).then_some(EngramWriterAct::Presence))
+}
+
+fn remote_delta_writer_workdir(
+    inner: &StateInner,
+    remote_id: &str,
+    event: &DeltaEvent,
+) -> Option<String> {
+    let (session_id, status, wrote) = match event {
+        DeltaEvent::SessionCreated { session, .. }
+            if engram_writer_status_in_turn(session.status) =>
+        {
+            return engram_has_open_writer_checks(inner).then(|| session.workdir.clone());
+        }
+        DeltaEvent::MessageCreated {
+            session_id,
+            status,
+            message,
+            ..
+        }
+        | DeltaEvent::MessageUpdated {
+            session_id,
+            status,
+            message,
+            ..
+        } => (
+            session_id,
+            Some(*status),
+            remote_message_writer_act(message).is_some(),
+        ),
+        DeltaEvent::CommandUpdate { session_id, .. } => (session_id, None, true),
+        _ => return None,
+    };
+    let index = inner.find_remote_session_index(remote_id, session_id)?;
+    let record = &inner.sessions[index];
+    let entered = status.is_some_and(engram_writer_status_in_turn)
+        && !engram_writer_status_in_turn(record.session.status);
+    ((wrote || entered) && engram_has_open_writer_checks(inner))
+        .then(|| record.session.workdir.clone())
+}
 
 impl AppState {
     /// Commits state localized from a remote response while preserving a
@@ -140,7 +208,7 @@ impl AppState {
         remote_id: &str,
         event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
-        self.apply_remote_delta_event_with_expected_route(remote_id, None, None, None, event)
+        self.apply_remote_delta_event_with_expected_route(remote_id, None, None, None, None, event)
     }
 
     /// Applies a delta returned by a request while retaining the exact lease.
@@ -156,6 +224,7 @@ impl AppState {
             Some(&lease.pinned),
             Some(&lease.connection),
             Some(lease.state_continuity_generation),
+            lease.writer_process.as_ref(),
             event,
         )
     }
@@ -164,6 +233,7 @@ impl AppState {
         &self,
         expected_remote: &RemoteConfig,
         expected_connection: &RemoteConnection,
+        writer_process: Option<&Arc<()>>,
         event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
         self.apply_remote_delta_event_with_expected_route(
@@ -171,6 +241,7 @@ impl AppState {
             Some(expected_remote),
             Some(expected_connection),
             None,
+            writer_process,
             event,
         )
     }
@@ -181,6 +252,7 @@ impl AppState {
         expected_remote: Option<&RemoteConfig>,
         expected_connection: Option<&RemoteConnection>,
         expected_state_continuity_generation: Option<u64>,
+        writer_process: Option<&Arc<()>>,
         mut event: DeltaEvent,
     ) -> Result<(), anyhow::Error> {
         event.normalize_body_sequence_pair();
@@ -203,7 +275,7 @@ impl AppState {
             Ok(())
         };
         let remote_revision = delta_event_revision(&event);
-        let authority_generation = {
+        let (authority_generation, writer_path) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             ensure_expected_route(&inner)?;
             // Persistence debt belongs to the already-authoritative in-memory
@@ -213,13 +285,17 @@ impl AppState {
             if inner.should_skip_remote_applied_delta_revision(remote_id, remote_revision) {
                 return Ok(());
             }
-            expected_connection.map_or_else(
+            let generation = expected_connection.map_or_else(
                 || {
                     self.remote_registry
                         .config_generation
                         .load(Ordering::Acquire)
                 },
                 |connection| connection.authority_generation,
+            );
+            (
+                generation,
+                remote_delta_writer_workdir(&inner, remote_id, &event),
             )
         };
         let remote_delta_replay_key =
@@ -227,6 +303,8 @@ impl AppState {
         if self.should_skip_remote_applied_delta_replay(&remote_delta_replay_key) {
             return Ok(());
         }
+        let writer_workdirs =
+            self.resolve_engram_remote_writer_workdirs(remote_id, writer_path, writer_process);
         match event {
             DeltaEvent::SessionCreated {
                 session,
@@ -255,6 +333,14 @@ impl AppState {
                         &local_project_ids_by_remote_project_id,
                         session.project_id.as_deref(),
                     );
+                    let entered_turn = engram_writer_status_in_turn(session.status)
+                        && inner
+                            .find_remote_session_index(remote_id, &session_id)
+                            .is_none_or(|index| {
+                                let record = &inner.sessions[index];
+                                !engram_writer_status_in_turn(record.session.status)
+                                    || record.session.workdir != session.workdir
+                            });
                     let (local_session_id, changed) = ensure_remote_proxy_session_summary_record(
                         &mut inner,
                         remote_id,
@@ -275,6 +361,22 @@ impl AppState {
                         inner.note_remote_applied_revision(remote_id, remote_revision);
                         None
                     } else {
+                        note_engram_remote_writer_process(
+                            &mut inner.sessions[local_index],
+                            writer_process,
+                        );
+                        if entered_turn
+                            && engram_writer_status_in_turn(
+                                inner.sessions[local_index].session.status,
+                            )
+                        {
+                            mark_engram_remote_writer(
+                                &mut inner,
+                                local_index,
+                                &writer_workdirs,
+                                EngramWriterAct::Presence,
+                            );
+                        }
                         let local_record =
                             inner.sessions.get(local_index).cloned().ok_or_else(|| {
                                 anyhow!("local proxy session `{local_session_id}` not found")
@@ -338,8 +440,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_session_mutation_stamp,
+                        writer_act: remote_message_hydration_writer_act(&message, status),
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,
@@ -370,6 +476,11 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let writer_act = remote_message_writer_act(&message).or_else(|| {
+                        (engram_writer_status_in_turn(status)
+                            && !engram_writer_status_in_turn(inner.sessions[index].session.status))
+                        .then_some(EngramWriterAct::Presence)
+                    });
                     let (
                         local_session_id,
                         applied_message_index,
@@ -429,6 +540,7 @@ impl AppState {
                         };
                         record.session.preview = preview.clone();
                         record.session.status = status;
+                        note_engram_remote_writer_status(record, writer_process);
                         if let Some(queue) = session_queue.as_ref() {
                             record.session.pending_prompts = queue.pending_prompts.clone();
                             record.set_auto_dispatch_blocked(queue.queue_paused);
@@ -451,6 +563,9 @@ impl AppState {
                             record.mutation_stamp,
                         )
                     };
+                    if let Some(act) = writer_act {
+                        mark_engram_remote_writer(&mut inner, index, &writer_workdirs, act);
+                    }
                     let revision = self.commit_remote_delta_persisted_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
                     (
@@ -516,8 +631,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_session_mutation_stamp,
+                        writer_act: remote_message_hydration_writer_act(&message, status),
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,
@@ -548,6 +667,11 @@ impl AppState {
                     let index = inner
                         .find_remote_session_index(remote_id, &session_id)
                         .ok_or_else(|| anyhow!("remote session `{session_id}` not found"))?;
+                    let writer_act = remote_message_writer_act(&message).or_else(|| {
+                        (engram_writer_status_in_turn(status)
+                            && !engram_writer_status_in_turn(inner.sessions[index].session.status))
+                        .then_some(EngramWriterAct::Presence)
+                    });
                     let (
                         local_session_id,
                         applied_message_index,
@@ -576,6 +700,7 @@ impl AppState {
                         *existing_message = message.clone();
                         record.session.preview = preview.clone();
                         record.session.status = status;
+                        note_engram_remote_writer_status(record, writer_process);
                         record.apply_remote_body_sequence(
                             remote_session_seq,
                             remote_sequence_epoch.clone(),
@@ -590,6 +715,9 @@ impl AppState {
                             record.mutation_stamp,
                         )
                     };
+                    if let Some(act) = writer_act {
+                        mark_engram_remote_writer(&mut inner, index, &writer_workdirs, act);
+                    }
                     let revision = self.commit_remote_delta_persisted_locked(&mut inner)?;
                     inner.note_remote_applied_revision(remote_id, remote_revision);
                     (
@@ -636,8 +764,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_session_mutation_stamp,
+                        writer_act: None,
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,
@@ -794,8 +926,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_session_mutation_stamp,
+                        writer_act: None,
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,
@@ -931,8 +1067,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_session_mutation_stamp,
+                        writer_act: Some(EngramWriterAct::UnreportedCommand),
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,
@@ -1057,6 +1197,12 @@ impl AppState {
                             record.mutation_stamp,
                         )
                     };
+                    mark_engram_remote_writer(
+                        &mut inner,
+                        index,
+                        &writer_workdirs,
+                        EngramWriterAct::UnreportedCommand,
+                    );
                     let revision = if created_message.is_some() {
                         self.commit_remote_delta_persisted_locked(&mut inner)?
                     } else {
@@ -1142,8 +1288,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_session_mutation_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_session_mutation_stamp,
+                        writer_act: None,
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,
@@ -1331,8 +1481,12 @@ impl AppState {
                     &session_id,
                     authority_generation,
                     remote_revision,
-                    remote_message_count,
-                    remote_stamp,
+                    RemoteDeltaHydrationExpectation {
+                        message_count: remote_message_count,
+                        session_mutation_stamp: remote_stamp,
+                        writer_act: None,
+                        writer_process,
+                    },
                     expected_remote,
                     expected_connection,
                     expected_state_continuity_generation,

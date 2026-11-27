@@ -1175,6 +1175,28 @@ failure. The report logic is in `scripts/test-durations.mjs`.
 
 ### Credit for a background or detached gate
 
+Ordinary check overlap and local launcher custody count a proxy in a turn as a
+writer in any local worktree its path resolves to. If the path resolves to no
+local worktree, the proxy counts in every
+worktree unless its current live SSH child proves a single direct established
+connection to a non-local address. Windows reads the child's actual TCP peer
+when admitting the connection. The socket must match OpenSSH's direct
+connection startup report, and ports where that child accepts connections
+cannot supply proof. Checks and buffered observations use this proof only
+while the child that supplied the session metadata or observation is still
+installed and live. A summary reporting
+new transcript entries for an existing proxy counts as possible activity
+even if the proxy is already idle and the new bodies have yet to arrive.
+Scoped or link-local IPv6 peers, unreadable or
+ambiguous peers, and probes whose local path result is inconclusive keep the
+conservative count. Other platforms and unresolved local writers also keep it.
+A remote writing through a share mounted under another path, an SSH route
+forwarded back to the local SSH server, or a WSL2, VM or container guest
+reached at its own address is outside this proof's supported configurations.
+Admitted remote turn starts, commands and edit activity also reach the ordinary
+overlap fence while a check is open. Registered verification follows its
+committed-input source and claim checks described above.
+
 A full gate takes longer than a Claude tool call may run (10 minutes), so a
 session that needs the gate as evidence for an Engram item it holds launches
 it in the background, in the item's named source root, with committed input:

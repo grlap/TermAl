@@ -52,11 +52,86 @@
 // (pin tests).
 
 use super::*;
+use crate::remote_delta_apply::{remote_delta_writer_act, remote_message_writer_act};
+
+/// An admitted tail can contain a newly appended action or an update to a
+/// retained action. Hydrating an older, previously unloaded slot alone
+/// supplies no evidence that the action happened during the current check.
+fn remote_tail_writer_act(
+    record: &SessionRecord,
+    session: &Session,
+) -> Option<EngramWriterAct<'static>> {
+    let prior_count = session_message_count(record) as usize;
+    let start = (session.message_count as usize).saturating_sub(session.messages.len());
+    session
+        .messages
+        .iter()
+        .enumerate()
+        .find_map(|(offset, message)| {
+            let act = remote_message_writer_act(message)?;
+            let index = start + offset;
+            if index >= prior_count {
+                return Some(act);
+            }
+            let previous = record
+                .session
+                .messages
+                .get(index.checked_sub(record.message_start_index)?)?;
+            remote_writer_message_changed(previous, message).then_some(act)
+        })
+}
+
+fn remote_writer_message_changed(previous: &Message, incoming: &Message) -> bool {
+    if previous.id() != incoming.id() {
+        return true;
+    }
+    match (previous, incoming) {
+        (
+            Message::Command {
+                command: a,
+                output: a_out,
+                status: a_status,
+                ..
+            },
+            Message::Command {
+                command: b,
+                output: b_out,
+                status: b_status,
+                ..
+            },
+        ) => (a, a_out, a_status) != (b, b_out, b_status),
+        (
+            Message::Diff {
+                change_set_id: a_set,
+                file_path: a_path,
+                diff: a_diff,
+                change_type: a_type,
+                ..
+            },
+            Message::Diff {
+                change_set_id: b_set,
+                file_path: b_path,
+                diff: b_diff,
+                change_type: b_type,
+                ..
+            },
+        ) => (a_set, a_path, a_diff, a_type) != (b_set, b_path, b_diff, b_type),
+        (Message::FileChanges { files: a, .. }, Message::FileChanges { files: b, .. }) => {
+            a.len() != b.len()
+                || a.iter()
+                    .zip(b)
+                    .any(|(a, b)| a.path != b.path || a.kind != b.kind)
+        }
+        _ => true,
+    }
+}
 
 #[derive(Clone, Copy)]
-pub(crate) struct RemoteDeltaHydrationExpectation {
+pub(crate) struct RemoteDeltaHydrationExpectation<'a> {
     pub(crate) message_count: u32,
     pub(crate) session_mutation_stamp: Option<u64>,
+    pub(crate) writer_act: Option<EngramWriterAct<'static>>,
+    pub(crate) writer_process: Option<&'a Arc<()>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -526,6 +601,12 @@ impl AppState {
         remote_state: StateResponse,
         response_lease: &RemoteRequestLease,
     ) -> Result<(), ApiError> {
+        let writer_workdirs = self.prepare_engram_remote_snapshot_writers(
+            &target.remote.id,
+            &remote_state,
+            Some(&target.remote_session_id),
+            response_lease.writer_process.as_ref(),
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         self.ensure_remote_request_current_locked(&inner, response_lease)?;
         self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
@@ -540,6 +621,7 @@ impl AppState {
             &remote_state,
             Some(&target.remote_session_id),
             RemoteSnapshotApplyMode::GateBySnapshotRevision,
+            &writer_workdirs,
         ) {
             return Ok(());
         }
@@ -908,7 +990,7 @@ impl AppState {
         target: &RemoteSessionTarget,
         message_limit: usize,
         min_remote_revision: Option<u64>,
-        delta_expectation: Option<RemoteDeltaHydrationExpectation>,
+        delta_expectation: Option<RemoteDeltaHydrationExpectation<'_>>,
         request_timeout: Duration,
         expected_remote: Option<&RemoteConfig>,
         expected_connection: Option<&RemoteConnection>,
@@ -986,6 +1068,27 @@ impl AppState {
             return Err(self.prefer_current_remote_response_error(&response_lease, error));
         }
 
+        let delta_writer_act = delta_expectation.and_then(|expectation| expectation.writer_act);
+        let writer_path = ((delta_writer_act.is_some()
+            || engram_writer_status_in_turn(remote_response.session.status)
+            || remote_response
+                .session
+                .messages
+                .iter()
+                .any(|message| remote_message_writer_act(message).is_some()))
+            && engram_has_open_writer_checks(&self.inner.lock().expect("state mutex poisoned")))
+        .then(|| remote_response.session.workdir.clone());
+        let writer_process = match delta_expectation {
+            Some(expectation) => {
+                response_lease.writer_process_for_recovery(expectation.writer_process)
+            }
+            None => response_lease.writer_process.as_ref(),
+        };
+        let writer_workdirs = self.resolve_engram_remote_writer_workdirs(
+            &target.remote.id,
+            writer_path,
+            writer_process,
+        );
         let (revision, session) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             if let Some(expected_remote) = expected_remote {
@@ -1076,6 +1179,20 @@ impl AppState {
             )
             .map(LocalProjectId::into_inner)
             .or_else(|| inner.sessions[index].session.project_id.clone());
+            let entered = engram_writer_status_in_turn(remote_response.session.status)
+                && (!engram_writer_status_in_turn(inner.sessions[index].session.status)
+                    || inner.sessions[index].session.workdir != remote_response.session.workdir);
+            let writer_act = if engram_has_open_writer_checks(&inner) {
+                delta_writer_act
+                    .filter(|act| !matches!(act, EngramWriterAct::Presence))
+                    .or_else(|| {
+                        remote_tail_writer_act(&inner.sessions[index], &remote_response.session)
+                    })
+                    .or(delta_writer_act)
+                    .or(entered.then_some(EngramWriterAct::Presence))
+            } else {
+                None
+            };
             let session = {
                 let record = inner
                     .session_mut_by_index(index)
@@ -1086,8 +1203,12 @@ impl AppState {
                     local_project_id,
                     &remote_response.session,
                 );
+                note_engram_remote_writer_process(record, response_lease.writer_process.as_ref());
                 Self::wire_session_from_record(&self.server_instance_id, record)
             };
+            if let Some(act) = writer_act {
+                mark_engram_remote_writer(&mut inner, index, &writer_workdirs, act);
+            }
             let bounded_tail_materialized = remote_response.session.message_count == 0
                 || !remote_response.session.messages.is_empty();
             if bounded_tail_materialized {
@@ -1246,7 +1367,7 @@ impl AppState {
         event: &DeltaEvent,
     ) -> Result<bool, anyhow::Error> {
         self.repair_remote_session_tail_after_delta_error_with_authority(
-            remote_id, None, None, event,
+            remote_id, None, None, None, event,
         )
     }
 
@@ -1254,12 +1375,14 @@ impl AppState {
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
+        writer_process: Option<&Arc<()>>,
         event: &DeltaEvent,
     ) -> Result<bool, anyhow::Error> {
         self.repair_remote_session_tail_after_delta_error_with_authority(
             &remote.id,
             Some(remote),
             Some(connection),
+            writer_process,
             event,
         )
     }
@@ -1269,6 +1392,7 @@ impl AppState {
         remote_id: &str,
         expected_remote: Option<&RemoteConfig>,
         expected_connection: Option<&RemoteConnection>,
+        writer_process: Option<&Arc<()>>,
         event: &DeltaEvent,
     ) -> Result<bool, anyhow::Error> {
         let Some((remote_session_id, message_count, session_mutation_stamp)) =
@@ -1307,6 +1431,8 @@ impl AppState {
             Some(RemoteDeltaHydrationExpectation {
                 message_count,
                 session_mutation_stamp,
+                writer_act: remote_delta_writer_act(event),
+                writer_process,
             }),
             REMOTE_REQUEST_TIMEOUT,
             expected_remote,
@@ -1347,8 +1473,7 @@ impl AppState {
         remote_session_id: &str,
         authority_generation: u64,
         remote_revision: u64,
-        remote_message_count: u32,
-        remote_session_mutation_stamp: Option<u64>,
+        expectation: RemoteDeltaHydrationExpectation<'_>,
         expected_remote: Option<&RemoteConfig>,
         expected_connection: Option<&RemoteConnection>,
         expected_state_continuity_generation: Option<u64>,
@@ -1412,10 +1537,7 @@ impl AppState {
             &target,
             SESSION_TAIL_HYDRATION_MAX_MESSAGES,
             Some(remote_revision),
-            Some(RemoteDeltaHydrationExpectation {
-                message_count: remote_message_count,
-                session_mutation_stamp: remote_session_mutation_stamp,
-            }),
+            Some(expectation),
             REMOTE_REQUEST_TIMEOUT,
             expected_remote,
             expected_connection,
@@ -1507,6 +1629,12 @@ impl AppState {
                 &[],
                 None,
             )?;
+        let writer_workdirs = self.prepare_engram_remote_snapshot_writers(
+            &target.remote.id,
+            &remote_state,
+            None,
+            response_lease.writer_process.as_ref(),
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         self.ensure_remote_request_current_locked(&inner, &response_lease)?;
         self.retry_remote_delta_persist_if_dirty_locked(&mut inner)
@@ -1521,6 +1649,7 @@ impl AppState {
             &remote_state,
             None,
             RemoteSnapshotApplyMode::GateBySnapshotRevision,
+            &writer_workdirs,
         ) {
             note_remote_applied_state_snapshot_revision(
                 &mut inner,
@@ -1583,8 +1712,10 @@ impl AppState {
             None,
             None,
             None,
+            None,
             remote_state,
             mode,
+            None,
         )
     }
 
@@ -1592,6 +1723,7 @@ impl AppState {
         &self,
         remote: &RemoteConfig,
         connection: &RemoteConnection,
+        writer_process: Option<&Arc<()>>,
         remote_state: StateResponse,
         mode: RemoteSnapshotApplyMode,
     ) -> Result<(), ApiError> {
@@ -1600,11 +1732,14 @@ impl AppState {
             Some(remote),
             Some(connection),
             None,
+            writer_process,
             remote_state,
             mode,
+            None,
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn apply_remote_state_snapshot_for_request(
         &self,
         lease: &RemoteRequestLease,
@@ -1616,20 +1751,52 @@ impl AppState {
             Some(&lease.pinned),
             Some(&lease.connection),
             Some(lease.state_continuity_generation),
+            lease.writer_process.as_ref(),
             remote_state,
             mode,
+            None,
         )
     }
 
-    fn apply_remote_state_snapshot_with_authority(
+    pub(crate) fn apply_remote_state_snapshot_with_authority(
         &self,
         remote_id: &str,
         expected_remote: Option<&RemoteConfig>,
         expected_connection: Option<&RemoteConnection>,
         expected_state_continuity_generation: Option<u64>,
+        writer_process: Option<&Arc<()>>,
         remote_state: StateResponse,
         mode: RemoteSnapshotApplyMode,
+        recovered_event: Option<(&DeltaEvent, Option<&Arc<()>>)>,
     ) -> Result<(), ApiError> {
+        let writer_workdirs = self.prepare_engram_remote_snapshot_writers(
+            remote_id,
+            &remote_state,
+            None,
+            writer_process,
+        );
+        let recovered_write = recovered_event.and_then(|(event, _)| {
+            let (session_id, _, _) = remote_delta_session_transcript_metadata(event)?;
+            let revision = delta_event_revision(event);
+            let act = remote_delta_writer_act(event)?;
+            (remote_state.revision >= revision).then_some((session_id, revision, act))
+        });
+        let recovered_path = recovered_write.and_then(|(session_id, _, _)| {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            let index = inner.find_remote_session_index(remote_id, session_id)?;
+            let workdir = &inner.sessions[index].session.workdir;
+            (engram_has_open_writer_checks(&inner)
+                && remote_state
+                    .sessions
+                    .iter()
+                    .any(|s| s.id == session_id && &s.workdir == workdir))
+            .then(|| workdir.clone())
+        });
+        let recovered_workdirs = self.resolve_engram_remote_writer_workdirs(
+            remote_id,
+            recovered_path,
+            recovered_event.and_then(|(_, process)| process),
+        );
         let mut inner = self.inner.lock().expect("state mutex poisoned");
         if let Some(expected_remote) = expected_remote {
             self.ensure_remote_apply_authority_locked(
@@ -1643,7 +1810,25 @@ impl AppState {
         {
             connection.ensure_state_continuity_generation(generation)?;
         }
-        if !apply_remote_state_if_newer_locked(&mut inner, remote_id, &remote_state, None, mode) {
+        // A summary can advance the broad cut past a write-bearing delta
+        // without carrying its body. Fence the last known proxy before that
+        // admission, including when the snapshot removes it.
+        if let Some((session_id, revision, act)) = recovered_write
+            && !inner.should_skip_remote_applied_snapshot_revision(remote_id, remote_state.revision)
+            && !inner
+                .should_skip_remote_session_applied_delta_revision(remote_id, session_id, revision)
+            && let Some(index) = inner.find_remote_session_index(remote_id, session_id)
+        {
+            mark_engram_remote_writer(&mut inner, index, &recovered_workdirs, act);
+        }
+        if !apply_remote_state_if_newer_locked(
+            &mut inner,
+            remote_id,
+            &remote_state,
+            None,
+            mode,
+            &writer_workdirs,
+        ) {
             if expected_connection.is_some_and(|connection| {
                 connection
                     .event_stream_status

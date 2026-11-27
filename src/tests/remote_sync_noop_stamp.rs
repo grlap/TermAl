@@ -53,7 +53,14 @@ fn apply_snapshot(
 ) {
     let mut inner = state.inner.lock().expect("state mutex poisoned");
     assert!(
-        apply_remote_state_if_newer_locked(&mut inner, &remote.id, snapshot, None, mode),
+        apply_remote_state_if_newer_locked(
+            &mut inner,
+            &remote.id,
+            snapshot,
+            None,
+            mode,
+            &EngramRemoteWriterWorkdirs::default(),
+        ),
         "the snapshot is applied"
     );
     note_remote_applied_state_snapshot_revision(&mut inner, &remote.id, snapshot);

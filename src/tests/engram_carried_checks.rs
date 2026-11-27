@@ -4042,8 +4042,10 @@ fn another_sessions_background_work_fences_a_carried_gate_already_running_where_
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&other).expect("other session");
         let workdir = inner.sessions[index].session.workdir.clone();
-        inner.sessions[index].engram.workdir_worktree =
-            Some((workdir, engram_worktree_root(&elsewhere)));
+        inner.sessions[index].engram.workdir_worktree = Some((
+            workdir,
+            EngramWriterWorkdir::Worktree(engram_worktree_root(&elsewhere)),
+        ));
     }
     let stopped = ClaudeObservationProvenance {
         token: RuntimeToken::Claude("carried-other-extension-runtime".to_owned()),
@@ -4117,8 +4119,10 @@ fn other_claude_session_elsewhere(
         let mut inner = turn.state.inner.lock().expect("state mutex poisoned");
         let index = inner.find_session_index(&other).expect("other session");
         let workdir = inner.sessions[index].session.workdir.clone();
-        inner.sessions[index].engram.workdir_worktree =
-            Some((workdir, engram_worktree_root(&elsewhere)));
+        inner.sessions[index].engram.workdir_worktree = Some((
+            workdir,
+            EngramWriterWorkdir::Worktree(engram_worktree_root(&elsewhere)),
+        ));
     }
     let stopped = ClaudeObservationProvenance {
         token: RuntimeToken::Claude(format!("{label}-runtime")),

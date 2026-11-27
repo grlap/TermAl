@@ -223,6 +223,7 @@ fn sync_remote_state_inner(
     remote_id: &str,
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
+    writer_process: Option<&Arc<()>>,
 ) {
     // Mutation contract — this function mutates only these fields of
     // `StateInner`: `sessions` (via retain_sessions /
@@ -351,6 +352,7 @@ fn sync_remote_state_inner(
             local_project_id.map(LocalProjectId::into_inner),
             remote_session,
         );
+        note_engram_remote_writer_process(record, writer_process);
         if preserve_classification {
             record.session.mirrored_delegation_child = previous_classification;
         }
@@ -365,6 +367,7 @@ fn sync_remote_state_inner(
         pre_retain_rollback_state
     };
 
+    let before_orchestrator_sessions = inner.sessions.len();
     if let Err(err) = sync_remote_orchestrators_inner(
         inner,
         remote_id,
@@ -379,6 +382,13 @@ fn sync_remote_state_inner(
             "remote state warning> failed to sync remote orchestrators for `{remote_id}` at revision {}: {err:#}",
             remote_state.revision
         );
+    } else {
+        for index in before_orchestrator_sessions..inner.sessions.len() {
+            let record = &mut inner.sessions[index];
+            if record.remote_id.as_deref() == Some(remote_id) {
+                note_engram_remote_writer_process(record, writer_process);
+            }
+        }
     }
 }
 
@@ -483,12 +493,72 @@ pub(crate) enum RemoteSnapshotApplyMode {
     ForceAfterLaggedEvent,
 }
 
+fn remote_snapshot_new_writers<'a>(
+    inner: &StateInner,
+    remote_id: &str,
+    remote_state: &'a StateResponse,
+    focus: Option<&str>,
+) -> Vec<(&'a StateSessionSummary, EngramWriterAct<'static>)> {
+    if !engram_has_open_writer_checks(inner) {
+        return Vec::new();
+    }
+    remote_state
+        .sessions
+        .iter()
+        .filter_map(|session| {
+            if focus.is_some_and(|id| id != session.id) {
+                return None;
+            }
+            let prior = inner
+                .find_remote_session_index(remote_id, &session.id)
+                .map(|index| &inner.sessions[index]);
+            let act = if prior
+                .is_some_and(|record| session.message_count > session_message_count(record))
+            {
+                // Once the summary is applied, a tail can no longer tell
+                // these new slots from old history using the message count.
+                EngramWriterAct::RemoteTranscriptAdvance
+            } else if engram_writer_status_in_turn(session.status)
+                && prior.is_none_or(|record| {
+                    !engram_writer_status_in_turn(record.session.status)
+                        || record.session.workdir != session.workdir
+                })
+            {
+                EngramWriterAct::Presence
+            } else {
+                return None;
+            };
+            Some((session, act))
+        })
+        .collect()
+}
+
+impl AppState {
+    pub(crate) fn prepare_engram_remote_snapshot_writers(
+        &self,
+        remote_id: &str,
+        remote_state: &StateResponse,
+        focus: Option<&str>,
+        writer_process: Option<&Arc<()>>,
+    ) -> EngramRemoteWriterWorkdirs {
+        let paths = {
+            let inner = self.inner.lock().expect("state mutex poisoned");
+            remote_snapshot_new_writers(&inner, remote_id, remote_state, focus)
+                .into_iter()
+                .map(|(session, _)| session.workdir.clone())
+                .collect::<Vec<_>>()
+        };
+        self.resolve_engram_remote_writer_workdirs(remote_id, paths, writer_process)
+    }
+}
+
 pub(crate) fn apply_remote_state_if_newer_locked(
     inner: &mut StateInner,
     remote_id: &str,
     remote_state: &StateResponse,
     focus_remote_session_id: Option<&str>,
     mode: RemoteSnapshotApplyMode,
+    writer_workdirs: &EngramRemoteWriterWorkdirs,
 ) -> bool {
     let force_after_lagged = matches!(mode, RemoteSnapshotApplyMode::ForceAfterLaggedEvent);
     if force_after_lagged
@@ -504,7 +574,25 @@ pub(crate) fn apply_remote_state_if_newer_locked(
     {
         return false;
     }
-    sync_remote_state_inner(inner, remote_id, remote_state, focus_remote_session_id);
+    let new_writers =
+        remote_snapshot_new_writers(inner, remote_id, remote_state, focus_remote_session_id);
+    sync_remote_state_inner(
+        inner,
+        remote_id,
+        remote_state,
+        focus_remote_session_id,
+        writer_workdirs.writer_process.as_ref(),
+    );
+    // Observe only metadata that survived synchronization and rollback.
+    for (session, act) in new_writers {
+        if let Some(index) = inner.find_remote_session_index(remote_id, &session.id)
+            && inner.sessions[index].session.status == session.status
+            && inner.sessions[index].session.workdir == session.workdir
+            && session_message_count(&inner.sessions[index]) == session.message_count
+        {
+            mark_engram_remote_writer(inner, index, writer_workdirs, act);
+        }
+    }
     true
 }
 
@@ -649,6 +737,7 @@ pub(crate) fn apply_remote_session_summary_to_record(
 }
 
 fn finish_remote_session_record_refresh(record: &mut SessionRecord) {
+    note_engram_remote_writer_process(record, None);
     record.external_session_id = record.session.external_session_id.clone();
     sync_codex_thread_state(record);
     record.codex_approval_policy = record
@@ -836,6 +925,7 @@ pub(crate) fn ensure_remote_proxy_session_record(
     remote_session: &Session,
     local_project_id: Option<String>,
     update_existing: bool,
+    writer_process: Option<&Arc<()>>,
 ) -> (String, bool) {
     if let Some(index) = inner.find_remote_session_index(remote_id, &remote_session.id) {
         let local_session_id = inner.sessions[index].session.id.clone();
@@ -848,15 +938,18 @@ pub(crate) fn ensure_remote_proxy_session_record(
                 local_project_id,
                 remote_session,
             );
+            note_engram_remote_writer_process(&mut inner.sessions[index], writer_process);
             return (local_session_id, true);
         }
         return (local_session_id, false);
     }
 
-    (
-        upsert_remote_proxy_session_record(inner, remote_id, remote_session, local_project_id),
-        true,
-    )
+    let local_id =
+        upsert_remote_proxy_session_record(inner, remote_id, remote_session, local_project_id);
+    if let Some(index) = inner.find_session_index(&local_id) {
+        note_engram_remote_writer_process(&mut inner.sessions[index], writer_process);
+    }
+    (local_id, true)
 }
 
 /// Upserts a remote proxy from the canonical transcript-free state/delta
@@ -1440,12 +1533,16 @@ pub(crate) fn process_remote_event_stream(
     state: &AppState,
     remote: &RemoteConfig,
     connection: &RemoteConnection,
+    writer_process: Option<Arc<()>>,
     response: BlockingHttpResponse,
 ) -> Result<()> {
     let reader = BufReader::new(response);
     let mut event_name = String::new();
     let mut data_lines = Vec::new();
-    let mut recovery = RemoteEventStreamRecovery::default();
+    let mut recovery = RemoteEventStreamRecovery {
+        writer_process,
+        ..RemoteEventStreamRecovery::default()
+    };
     process_remote_event_stream_reader_with_authority(
         state,
         &remote.id,
@@ -1532,6 +1629,7 @@ pub(crate) fn process_remote_event_stream_reader_with_authority<R: BufRead>(
 pub(crate) struct RemoteEventStreamRecovery {
     force_next_state_after_lagged: bool,
     lagged_recovery_baseline_revision: u64,
+    writer_process: Option<Arc<()>>,
 }
 
 /// Dispatches remote event.
@@ -1658,6 +1756,8 @@ pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
                     remote_id,
                     bridge_authority,
                     force_lagged_recovery_state,
+                    None,
+                    None,
                 )?;
                 if let Some((remote, connection)) = bridge_authority {
                     state
@@ -1677,6 +1777,7 @@ pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
                     .apply_remote_state_snapshot_for_bridge(
                         remote,
                         connection,
+                        recovery.writer_process.as_ref(),
                         remote_payload.state,
                         if force_lagged_recovery_state {
                             RemoteSnapshotApplyMode::ForceAfterLaggedEvent
@@ -1704,7 +1805,12 @@ pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
             let delta = remote_summary_compat::decode_delta_event(&payload)
                 .with_context(|| format!("failed to decode remote delta event `{remote_id}`"))?;
             let apply_result = if let Some((remote, connection)) = bridge_authority {
-                state.apply_remote_delta_event_for_bridge(remote, connection, delta.clone())
+                state.apply_remote_delta_event_for_bridge(
+                    remote,
+                    connection,
+                    recovery.writer_process.as_ref(),
+                    delta.clone(),
+                )
             } else {
                 state.apply_remote_delta_event(remote_id, delta.clone())
             };
@@ -1717,7 +1823,10 @@ pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
                 }
                 let repair_result = if let Some((remote, connection)) = bridge_authority {
                     state.repair_remote_session_tail_after_delta_error_for_bridge(
-                        remote, connection, &delta,
+                        remote,
+                        connection,
+                        recovery.writer_process.as_ref(),
+                        &delta,
                     )
                 } else {
                     state.repair_remote_session_tail_after_delta_error(remote_id, &delta)
@@ -1730,6 +1839,8 @@ pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
                             remote_id,
                             bridge_authority,
                             false,
+                            Some(&delta),
+                            recovery.writer_process.as_ref(),
                         )?;
                     }
                     Err(repair_err) => {
@@ -1741,6 +1852,8 @@ pub(crate) fn dispatch_remote_event_with_recovery_and_authority(
                             remote_id,
                             bridge_authority,
                             false,
+                            Some(&delta),
+                            recovery.writer_process.as_ref(),
                         )?;
                     }
                 }
@@ -1837,6 +1950,8 @@ pub(crate) fn resync_remote_state_snapshot_with_authority(
     remote_id: &str,
     bridge_authority: Option<(&RemoteConfig, &RemoteConnection)>,
     force_lagged_recovery_state: bool,
+    recovered_event: Option<&DeltaEvent>,
+    original_writer_process: Option<&Arc<()>>,
 ) -> Result<()> {
     let remote = if let Some((remote, connection)) = bridge_authority {
         connection
@@ -1852,31 +1967,36 @@ pub(crate) fn resync_remote_state_snapshot_with_authority(
         .remote_registry
         .request_state_with_lease(&remote, Method::GET, "/api/state", &[], None)
         .map_err(|err| anyhow!(err.message))?;
-    if let Some((expected_remote, connection)) = bridge_authority {
-        state
-            .apply_remote_state_snapshot_for_bridge(
-                expected_remote,
-                connection,
-                full_state,
-                if force_lagged_recovery_state {
-                    RemoteSnapshotApplyMode::ForceAfterLaggedEvent
-                } else {
-                    RemoteSnapshotApplyMode::GateBySnapshotRevision
-                },
-            )
-            .map_err(|err| anyhow!(err.message))?;
+    let mode = if force_lagged_recovery_state {
+        RemoteSnapshotApplyMode::ForceAfterLaggedEvent
     } else {
-        state
-            .apply_remote_state_snapshot_for_request(
-                &response_lease,
-                full_state,
-                if force_lagged_recovery_state {
-                    RemoteSnapshotApplyMode::ForceAfterLaggedEvent
-                } else {
-                    RemoteSnapshotApplyMode::GateBySnapshotRevision
-                },
-            )
-            .map_err(|err| anyhow!(err.message))?;
-    }
+        RemoteSnapshotApplyMode::GateBySnapshotRevision
+    };
+    let (expected_remote, expected_connection, generation) = match bridge_authority {
+        Some((remote, connection)) => (remote, connection, None),
+        None => (
+            &response_lease.pinned,
+            response_lease.connection.as_ref(),
+            Some(response_lease.state_continuity_generation),
+        ),
+    };
+    let recovered_event = recovered_event.map(|event| {
+        (
+            event,
+            response_lease.writer_process_for_recovery(original_writer_process),
+        )
+    });
+    state
+        .apply_remote_state_snapshot_with_authority(
+            remote_id,
+            Some(expected_remote),
+            Some(expected_connection),
+            generation,
+            response_lease.writer_process.as_ref(),
+            full_state,
+            mode,
+            recovered_event,
+        )
+        .map_err(|err| anyhow!(err.message))?;
     Ok(())
 }

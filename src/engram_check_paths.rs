@@ -94,11 +94,13 @@ pub(crate) fn engram_path_within(path: &str, root: &str) -> bool {
 /// when a workdir does not exist (yet): the root is resolved on its own.
 pub(crate) fn engram_worktree_root_path(workdir: &FsPath) -> PathBuf {
     let path = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-    let root = path
-        .ancestors()
-        .find(|ancestor| ancestor.join(".git").exists())
-        .unwrap_or(&path);
+    let root = engram_worktree_ancestor(&path).unwrap_or(&path);
     std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
+}
+
+fn engram_worktree_ancestor(path: &FsPath) -> Option<&FsPath> {
+    path.ancestors()
+        .find(|ancestor| ancestor.join(".git").exists())
 }
 
 /// How long a worktree key is remembered, and how many are.

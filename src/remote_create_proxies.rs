@@ -300,6 +300,7 @@ impl AppState {
                 &remote_session,
                 Some(binding.local_project_id),
                 update_existing,
+                response_lease.writer_process.as_ref(),
             );
             if update_existing {
                 // When we refreshed from the POST, record its revision
@@ -414,6 +415,12 @@ impl AppState {
         // session creation.
         self.start_remote_event_bridge_for_lease(&response_lease)
             .map_err(remote_create_authority_error)?;
+        let writer_workdirs = self.prepare_engram_remote_snapshot_writers(
+            &binding.remote.id,
+            &remote_response.state,
+            None,
+            response_lease.writer_process.as_ref(),
+        );
         let (state, local_orchestrator) = {
             let mut inner = self.inner.lock().expect("state mutex poisoned");
             self.ensure_remote_create_request_current_locked(&inner, &response_lease)?;
@@ -436,6 +443,7 @@ impl AppState {
                 &remote_response.state,
                 None,
                 RemoteSnapshotApplyMode::GateBySnapshotRevision,
+                &writer_workdirs,
             );
             let remote_sessions_by_id = remote_response
                 .state
