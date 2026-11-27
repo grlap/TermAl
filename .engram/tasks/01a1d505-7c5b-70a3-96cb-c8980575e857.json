@@ -23,12 +23,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a18050-e7c3-7ba3-8406-492e7ae8a0fd",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a21b52-29cb-7342-a959-da5159cacab1",
+  "disposal_reason": "Its grandparent w-fd84f21f9a4b completed at 2026-11-27T04:32:54Z, which blocks execution under it. It continues as independent work so that its parent w-492e7ae8a0fd can be detached and closed on its own evaluation. Its own scope is unchanged.",
   "completion": null
 }

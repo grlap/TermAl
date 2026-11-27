@@ -22,12 +22,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "superseded",
   "parent_id": "01a1803c-a572-74e0-8240-fd84f21f9a4b",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
-  "superseded_by": null,
-  "disposal_reason": null,
+  "superseded_by": "01a21b52-3935-7572-be3a-46b20208a736",
+  "disposal_reason": "Parent w-fd84f21f9a4b completed at 2026-11-27T04:32:54Z (seal 19299b27), its evaluation citing this item's landed fix 1bf874d9. This item continues as independent work for its own closure evaluation, per Fable2 #6241 and Opus2 #3261. Its open optional children were detached first, as w-7e5c053ac105 and w-da5159cacab1.",
   "completion": null
 }
