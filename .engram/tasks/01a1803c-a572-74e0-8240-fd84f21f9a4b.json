@@ -2,9 +2,9 @@
   "id": "01a1803c-a572-74e0-8240-fd84f21f9a4b",
   "external_ref": null,
   "title": "Host panics building and writing a single buffer over 4 GiB (repr_windows.rs u32::MAX assert) on the live host",
-  "outcome": "Everything provable about the path that built a single >4 GiB buffer and passed it to a Windows write is recorded, and the exact historical endpoint, input and size are recorded as not provable. Every candidate component is fixed so that no unbounded single buffer can be built or written (chunked writes, bounded serialization), and a regression test guards it. Surviving the panic is not considered acceptable.",
+  "outcome": "The code path that built a single >4 GiB buffer and passed it to a Windows write is identified (component, input, size, time). It is fixed so no such buffer can be built or written, and a regression test guards it. Surviving the panic is not considered acceptable.",
   "acceptance": [
-    "A diagnosis note records what is proven about the >4 GiB write at 2026-10-28T01:12:25Z on instance f676e776 (the panic site in Hyper's write through the Windows repr_windows u32::MAX assertion, and the lifecycle panic record) and the components that could build such a buffer (unbounded HTTP JSON/SSE encoding and whole-history clones before pagination), with each inference marked as such. The exact historical endpoint, input and size are recorded as not provable from the retained evidence.",
+    "A diagnosis note names the exact component and call path that produced the >4 GiB buffer at 2026-10-28T01:12:25Z on instance f676e776, what input it was built from and how large it was, with evidence (source trace plus the lifecycle panic record and any correlating diagnostics). Inferences are marked as such.",
     "A fix lands that bounds or streams that output, so no single unbounded buffer is built or written, plus protection against recurrence (e.g. a size cap with a typed refusal, or chunked writes). Regression tests exercise the oversized input and show no panic and a bounded allocation.",
     "The full gate passes on the landed tree with a clean review pair. A post-restart observation on the installed build records no recurrence of the panic under ordinary load."
   ],
