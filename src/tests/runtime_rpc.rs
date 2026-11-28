@@ -323,6 +323,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -468,6 +469,7 @@ fn acp_prompt_command_keeps_writer_loop_responsive_while_waiting_for_response() 
         locked
             .remove(&request_id)
             .expect("prompt request sender should still be pending")
+            .sender
     };
     assert!(*turn_lifecycle.0.lock().unwrap());
     sender.send(Ok(json!({ "ok": true }))).unwrap();
@@ -505,7 +507,13 @@ fn fail_pending_acp_requests_releases_waiters() {
     pending_requests
         .lock()
         .expect("ACP pending requests mutex poisoned")
-        .insert("req-1".to_owned(), tx);
+        .insert(
+            "req-1".to_owned(),
+            AcpPendingResponder {
+                sender: tx,
+                gemini_config_session_id: None,
+            },
+        );
 
     fail_pending_acp_requests(&pending_requests, "Cursor ACP runtime exited.");
 

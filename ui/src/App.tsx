@@ -427,6 +427,8 @@ export default function App() {
     defaultGeminiModel,
     defaultKimiModel,
     setDefaultGeminiModel,
+    defaultGeminiEffort,
+    setDefaultGeminiEffort,
     setDefaultKimiModel,
     defaultKimiApprovalMode,
     setDefaultKimiApprovalMode,
@@ -982,6 +984,7 @@ export default function App() {
       setDefaultClaudeModel,
       setDefaultCursorModel,
       setDefaultGeminiModel,
+      setDefaultGeminiEffort,
       setDefaultKimiModel,
       setDefaultKimiApprovalMode,
       setDefaultKimiEffort,
@@ -1370,6 +1373,7 @@ export default function App() {
     defaultClaudeModel?: string;
     defaultCursorModel?: string;
     defaultGeminiModel?: string;
+    defaultGeminiEffort?: string;
     defaultKimiModel?: string;
     defaultKimiApprovalMode?: KimiApprovalMode;
     defaultKimiEffort?: string;
@@ -1468,6 +1472,11 @@ export default function App() {
 
     setDefaultCursorModel(nextValue);
     void persistAppPreferences({ defaultCursorModel: nextValue });
+  }
+
+  function handleDefaultGeminiEffortChange(nextValue: string) {
+    setDefaultGeminiEffort(nextValue);
+    void persistAppPreferences({ defaultGeminiEffort: nextValue });
   }
 
   function handleDefaultGeminiModelChange(nextValue: string) {
@@ -2360,6 +2369,8 @@ export default function App() {
         defaultCursorMode={defaultCursorMode}
         onChangeDefaultCursorMode={setDefaultCursorMode}
         defaultGeminiModel={defaultGeminiModel}
+        defaultGeminiEffort={defaultGeminiEffort}
+        handleDefaultGeminiEffortChange={handleDefaultGeminiEffortChange}
         defaultKimiModel={defaultKimiModel}
         defaultKimiApprovalMode={defaultKimiApprovalMode}
         handleDefaultKimiApprovalModeChange={handleDefaultKimiApprovalModeChange}

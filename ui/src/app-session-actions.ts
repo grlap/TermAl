@@ -453,6 +453,7 @@ export function useAppSessionActions(
     setWorkspace((current) =>
       applyControlPanelLayout(reconcileWorkspaceState(current, nextSessions)),
     );
+    return updatedSession;
   }
 
   function removeOptimisticPendingPrompt(sessionId: string, promptId: string) {
@@ -843,6 +844,8 @@ export function useAppSessionActions(
       return false;
     }
 
+    const geminiCloneEffort =
+      session.agent === "Gemini" ? session.geminiReasoning?.requested : undefined;
     let configuringCloneId: string | null = null;
     setIsCreating(true);
     try {
@@ -883,6 +886,10 @@ export function useAppSessionActions(
           session.agent === "Gemini"
             ? (session.geminiApprovalMode ?? defaultGeminiApprovalMode)
             : undefined,
+        geminiInheritedEffort:
+          session.agent === "Gemini"
+            ? session.geminiReasoning?.inherited ?? "auto"
+            : undefined,
         sandboxMode:
           session.agent === "Codex"
             ? (session.sandboxMode ?? undefined)
@@ -897,8 +904,8 @@ export function useAppSessionActions(
         return false;
       }
 
-      const preserveKimiEffort = session.agent === "Kimi";
-      if (preserveKimiEffort) {
+      const preserveEffort = session.agent === "Kimi" || geminiCloneEffort !== undefined;
+      if (preserveEffort) {
         // Set the synchronous action fence before adoption can expose a composer.
         configuringCloneId = created.sessionId;
         configuringClonedSessionIdsRef.current = setSessionFlag(
@@ -906,20 +913,31 @@ export function useAppSessionActions(
         );
         setUpdatingSessionIds(current => setSessionFlag(current, created.sessionId, true));
       }
-      const refreshOutcome = await openCreatedSession(created, targetPaneId, session.agent, preserveKimiEffort);
-      if (preserveKimiEffort) {
+      const refreshOutcome = await openCreatedSession(
+        created,
+        targetPaneId,
+        session.agent,
+        preserveEffort,
+      );
+      if (preserveEffort) {
         // A clone is a new provider session: discover its catalog instead of
         // trusting the source's cached options. Surface any failure, never
         // claim a successful clone that silently lost the explicit request.
         try {
           if (!isMountedRef.current) return false;
-          if (session.kimiEffort && refreshOutcome !== "refreshed") {
+          const needsCatalog =
+            geminiCloneEffort !== undefined
+              ? geminiCloneEffort !== "auto"
+              : Boolean(session.kimiEffort);
+          if (needsCatalog && refreshOutcome !== "refreshed") {
             throw new Error("Model discovery did not complete; refresh the clone's models while idle and retry its effort setting.");
           }
-          const configured = await updateSessionSettings(created.sessionId, {
-            // Explicit auto prevents inheriting a newer app default on clones.
-            kimiEffort: session.kimiEffort ?? "auto",
-          });
+          const configured = await updateSessionSettings(
+            created.sessionId,
+            geminiCloneEffort !== undefined
+              ? { geminiEffort: geminiCloneEffort }
+              : { kimiEffort: session.kimiEffort ?? "auto" },
+          );
           if (!isMountedRef.current) return false;
           adoptSessionActionState(created.sessionId, configured);
         } catch (error) {
@@ -1418,20 +1436,12 @@ export function useAppSessionActions(
       return;
     }
 
-    const optimisticSession = buildOptimisticSessionSettingsUpdate(
-      session,
-      field,
-      value,
-    );
-    const hasOptimisticUpdate = optimisticSession !== session;
+    setRequestError(null);
     const preOptimisticSession =
       sessionsRef.current.find((entry) => entry.id === sessionId) ?? null;
-
-    setRequestError(null);
-    if (hasOptimisticUpdate) {
-      updateSessionLocally(sessionId, current =>
-        buildOptimisticSessionSettingsUpdate(current, field, value));
-    }
+    const optimisticSession = updateSessionLocally(sessionId, (current) =>
+      buildOptimisticSessionSettingsUpdate(current, field, value),
+    );
     setUpdatingSessionIds((current) =>
       setSessionFlag(current, sessionId, true),
     );
@@ -1471,11 +1481,11 @@ export function useAppSessionActions(
       if (!isMountedRef.current) {
         return;
       }
-      if (hasOptimisticUpdate) {
+      if (preOptimisticSession && optimisticSession) {
         updateSessionLocally(sessionId, (current) =>
           rollbackOptimisticSessionSettingsUpdate(
             current,
-            session,
+            preOptimisticSession,
             optimisticSession,
           ),
         );

@@ -877,6 +877,66 @@ describe("session model refresh controls", () => {
     expect(onRequestModelOptions).toHaveBeenCalledWith("gemini-session");
   });
 
+  it("rediscovers Gemini capabilities when a restored session loses its live catalog", async () => {
+    const onRequestModelOptions = vi.fn().mockResolvedValue("refreshed");
+    const live = makeSession("gemini-restored", {
+      agent: "Gemini",
+      modelOptions: [{ label: "Auto", value: "auto" }],
+      geminiReasoning: { requested: "high", options: [{ label: "High", value: "high" }] },
+    });
+    const restored = { ...live, modelOptions: [], geminiReasoning: { requested: "high" } };
+    const card = (session: Session) => (
+      <GeminiPromptSettingsCard
+        paneId="pane-gemini"
+        session={session}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={onRequestModelOptions}
+        onSessionSettingsChange={() => {}}
+      />
+    );
+    const { rerender } = render(card(live));
+    expect(onRequestModelOptions).not.toHaveBeenCalled();
+    rerender(card(restored));
+    await waitFor(() => expect(onRequestModelOptions).toHaveBeenCalledWith(live.id));
+    rerender(card({ ...restored }));
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { reset: undefined, label: "Keep current provider setting" },
+    { reset: "auto", label: "Provider default" },
+    { reset: "default", label: "Provider default" },
+  ])("labels the Gemini default choice as $label for $reset", ({ reset, label }) => {
+    const onSessionSettingsChange = vi.fn();
+    render(
+      <GeminiPromptSettingsCard
+        paneId="pane-gemini"
+        session={makeSession("gemini-effort", {
+          agent: "Gemini",
+          modelOptions: [{ label: "Auto", value: "auto" }],
+          geminiReasoning: {
+            requested: "high",
+            current: "high",
+            options: [
+              { label: "High", value: "high" },
+              ...(reset ? [{ label: "Automatic", value: reset }] : []),
+            ],
+          },
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={onSessionSettingsChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Reasoning effort" }));
+    fireEvent.click(screen.getByRole("option", { name: label }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith("gemini-effort", "geminiEffort", "auto");
+  });
+
   it("shows inline refresh errors in the session card", () => {
     render(
       <GeminiPromptSettingsCard
