@@ -503,6 +503,86 @@ describe("useAppSessionActions", () => {
     expect(params.refs.configuringClonedSessionIdsRef.current[clone.id]).toBeUndefined();
   });
 
+  it.each([
+    { requested: "high", expected: "high", accepted: true },
+    { requested: "auto", expected: "auto", accepted: true },
+    { requested: "high", expected: "high", accepted: false },
+  ])("discovers and preserves Gemini clone effort $expected (accepted=$accepted)", async ({ requested, expected, accepted }) => {
+    const source = makeSession("gemini-source", {
+      agent: "Gemini",
+      geminiReasoning: { requested, inherited: "low" },
+    });
+    const clone = makeSession("gemini-clone", { agent: "Gemini" });
+    const create = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6, serverInstanceId: "server-a", session: clone, sessionId: clone.id,
+    });
+    let resolveRefresh!: (state: StateResponse) => void;
+    const refresh = vi.spyOn(api, "refreshSessionModelOptions").mockReturnValue(
+      new Promise<StateResponse>(resolve => { resolveRefresh = resolve; }),
+    );
+    const patch = vi.spyOn(api, "updateSessionSettings");
+    if (accepted) {
+      patch.mockResolvedValue({
+        ...makeStateResponse(8),
+        sessions: [{ ...clone, geminiReasoning: { requested: expected, inherited: "low" } }],
+      });
+    } else {
+      patch.mockRejectedValue(new Error("Gemini did not advertise this reasoning effort"));
+    }
+    const params = makeSessionActionsParams({ adoptState: vi.fn(() => true) });
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    const actions = useAppSessionActions(params);
+    const cloning = actions.handleCloneSessionFromExisting(source.id);
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ geminiInheritedEffort: "low" }));
+    expect(params.refs.configuringClonedSessionIdsRef.current[clone.id]).toBe(true);
+    expect(actions.handleSend(clone.id, "wait for Gemini settings")).toBe(false);
+    expect(patch).not.toHaveBeenCalled();
+    resolveRefresh({ ...makeStateResponse(7), sessions: [clone] });
+    await expect(cloning).resolves.toBe(accepted);
+    expect(patch).toHaveBeenCalledWith(clone.id, { geminiEffort: expected });
+    expect(params.refs.configuringClonedSessionIdsRef.current[clone.id]).toBeUndefined();
+    if (!accepted) {
+      expect(params.reportRequestError).toHaveBeenCalledWith(expect.objectContaining({
+        message: expect.stringContaining("Clone created, but its reasoning effort could not be preserved"),
+      }));
+    }
+  });
+
+  it("preserves the provider fallback for inherited Gemini effort when cloning", async () => {
+    const source = makeSession("gemini-source", {
+      agent: "Gemini",
+      geminiReasoning: {
+        inherited: "high",
+        current: "low",
+        options: [{ label: "Low", value: "low" }],
+      },
+    });
+    const clone = makeSession("gemini-clone", {
+      agent: "Gemini",
+      geminiReasoning: { inherited: "high" },
+    });
+    const create = vi.spyOn(api, "createSession").mockResolvedValue({
+      revision: 6, serverInstanceId: "server-a", session: clone, sessionId: clone.id,
+    });
+    const refresh = vi.spyOn(api, "refreshSessionModelOptions").mockResolvedValue({
+      ...makeStateResponse(7),
+      sessions: [{ ...clone, geminiReasoning: source.geminiReasoning }],
+    });
+    const patch = vi.spyOn(api, "updateSessionSettings").mockRejectedValue(
+      new Error("Gemini did not advertise this reasoning effort"),
+    );
+    const params = makeSessionActionsParams({ adoptState: vi.fn(() => true) });
+    params.lookups.sessionLookup = new Map([[source.id, source]]);
+    params.refs.sessionsRef.current = [source];
+    await expect(useAppSessionActions(params).handleCloneSessionFromExisting(source.id)).resolves.toBe(true);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ geminiInheritedEffort: "high" }));
+    await waitFor(() => expect(refresh).toHaveBeenCalledWith(clone.id));
+    expect(patch).not.toHaveBeenCalled();
+    expect(params.reportRequestError).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])("discovers and preserves explicit Kimi effort on clone (accepted=%s)", async (accepted) => {
     const source = makeSession("kimi-source", { agent: "Kimi", kimiEffort: "max" });
     const clone = makeSession("kimi-clone", { agent: "Kimi" });
@@ -2203,6 +2283,129 @@ describe("useAppSessionActions", () => {
 
     expect(params.refs.sessionsRef.current[0]?.reasoningEffort).toBe("medium");
     expect(params.refs.stateDiffBaselineRevisionRef.current).toBeNull();
+    expect(params.reportRequestError).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["geminiEffort", "low"],
+    ["model", "gemini-flash"],
+  ] as const)("rolls back a rejected Gemini %s change through the action", async (field, value) => {
+    const session = makeSession("gemini", {
+      agent: "Gemini",
+      model: "gemini-pro",
+      modelOptions: [{ label: "Flash", value: "gemini-flash" }],
+      geminiReasoning: {
+        requested: "high",
+        inherited: "auto",
+        current: "high",
+        options: [{ label: "High", value: "high" }, { label: "Low", value: "low" }],
+      },
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[session.id, session]]);
+    params.refs.sessionsRef.current = [session];
+    let optimistic: Session | undefined;
+    const patch = vi.spyOn(api, "updateSessionSettings").mockImplementation(async () => {
+      optimistic = params.refs.sessionsRef.current[0];
+      throw new Error("rejected Gemini settings");
+    });
+    await useAppSessionActions(params).handleSessionSettingsChange(session.id, field, value);
+    expect(patch).toHaveBeenCalledTimes(1);
+    if (field === "model") {
+      expect(optimistic?.model).toBe(value);
+      expect(optimistic?.geminiReasoning?.options).toBeUndefined();
+    } else {
+      expect(optimistic?.geminiReasoning?.requested).toBe(value);
+    }
+    expect(params.refs.sessionsRef.current[0]?.model).toBe(session.model);
+    expect(params.refs.sessionsRef.current[0]?.geminiReasoning).toEqual(session.geminiReasoning);
+    expect(params.reportRequestError).toHaveBeenCalled();
+  });
+
+  it("rolls back Gemini effort from the live ref and keeps later provider observations", async () => {
+    const rendered = makeSession("gemini", {
+      agent: "Gemini",
+      model: "gemini-pro",
+      geminiReasoning: {
+        requested: "high",
+        current: "high",
+        options: [{ label: "High", value: "high" }],
+      },
+    });
+    const live = {
+      ...rendered,
+      geminiReasoning: {
+        requested: "medium",
+        current: "medium",
+        options: [{ label: "Medium", value: "medium" }, { label: "Low", value: "low" }],
+      },
+    };
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[rendered.id, rendered]]);
+    params.refs.sessionsRef.current = [live];
+    let rejectPatch!: (error: Error) => void;
+    const patch = vi.spyOn(api, "updateSessionSettings").mockReturnValue(
+      new Promise<StateResponse>((_, reject) => { rejectPatch = reject; }),
+    );
+    const change = useAppSessionActions(params).handleSessionSettingsChange(rendered.id, "geminiEffort", "low");
+    expect(patch).toHaveBeenCalledWith(rendered.id, { geminiEffort: "low" });
+    const optimistic = params.refs.sessionsRef.current[0]!;
+    expect(optimistic.geminiReasoning).toEqual({ ...live.geminiReasoning, requested: "low" });
+    const latest = {
+      ...optimistic,
+      geminiReasoning: {
+        ...optimistic.geminiReasoning,
+        current: "high",
+        options: [{ label: "High", value: "high" }, { label: "Medium", value: "medium" }],
+      },
+    };
+    params.refs.sessionsRef.current = [latest];
+    rejectPatch(new Error("rejected Gemini settings"));
+    await change;
+    expect(params.refs.sessionsRef.current[0]?.geminiReasoning).toEqual({
+      ...latest.geminiReasoning,
+      requested: "medium",
+    });
+    expect(params.reportRequestError).toHaveBeenCalled();
+  });
+
+  it("preserves a newer Gemini model and its catalog when an optimistic model PATCH fails", async () => {
+    const previous = makeSession("gemini", {
+      agent: "Gemini",
+      model: "gemini-pro",
+      modelOptions: [{ label: "Flash", value: "gemini-flash" }],
+      geminiReasoning: {
+        requested: "high",
+        current: "high",
+        options: [{ label: "High", value: "high" }],
+      },
+    });
+    const params = makeSessionActionsParams();
+    params.lookups.sessionLookup = new Map([[previous.id, previous]]);
+    params.refs.sessionsRef.current = [previous];
+    let rejectPatch!: (error: Error) => void;
+    const patch = vi.spyOn(api, "updateSessionSettings").mockReturnValue(
+      new Promise<StateResponse>((_, reject) => { rejectPatch = reject; }),
+    );
+    const change = useAppSessionActions(params)
+      .handleSessionSettingsChange(previous.id, "model", "gemini-flash");
+    expect(patch).toHaveBeenCalledWith(previous.id, { model: "gemini-flash" });
+    expect(params.refs.sessionsRef.current[0]?.model).toBe("gemini-flash");
+    expect(params.refs.sessionsRef.current[0]?.geminiReasoning?.options).toBeUndefined();
+
+    const observed = {
+      ...params.refs.sessionsRef.current[0]!,
+      geminiReasoning: {
+        requested: "high",
+        current: "low",
+        options: [{ label: "Low", value: "low" }],
+      },
+    };
+    params.refs.sessionsRef.current = [observed];
+    rejectPatch(new Error("rejected Gemini model"));
+    await change;
+    expect(params.refs.sessionsRef.current[0]?.model).toBe("gemini-flash");
+    expect(params.refs.sessionsRef.current[0]?.geminiReasoning).toEqual(observed.geminiReasoning);
     expect(params.reportRequestError).toHaveBeenCalled();
   });
 

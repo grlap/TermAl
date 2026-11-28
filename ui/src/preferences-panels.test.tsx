@@ -205,10 +205,12 @@ function renderCursorPanel({
 function renderGeminiPanel({
   defaultModel = "default",
   onSelectModel = vi.fn(),
+  onSelectEffort = vi.fn(),
   sessions = [],
 }: {
   defaultModel?: string;
   onSelectModel?: (model: string) => void;
+  onSelectEffort?: (effort: string) => void;
   sessions?: ComponentProps<typeof GeminiPreferencesPanel>["sessions"];
 } = {}) {
   const props = {
@@ -216,11 +218,13 @@ function renderGeminiPanel({
     defaultGeminiModel: defaultModel,
     onSelectApprovalMode: vi.fn(),
     onSelectModel,
+    onSelectEffort,
     sessions,
   };
 
   return {
     onSelectModel,
+    onSelectEffort,
     ...render(<GeminiPreferencesPanel {...props} />),
   };
 }
@@ -586,4 +590,20 @@ describe("AgentDefaultModelControl", () => {
     expect(partitionedModes).toEqual([...ALL_CLAUDE_APPROVAL_MODES].sort());
     expect(new Set(partitionedModes).size).toBe(partitionedModes.length);
   });
+});
+
+it("Gemini Preferences offers the default model’s advertised reasoning choices", async () => {
+  const base = { emoji: "", agent: "Gemini" as const, workdir: "/tmp", status: "idle" as const, preview: "", messages: [] };
+  const { onSelectEffort } = renderGeminiPanel({
+    defaultModel: "gemini-pro",
+    sessions: [
+      { ...base, id: "pro", name: "Pro", model: "gemini-pro", geminiReasoning: { options: [{ label: "High", value: "high" }] } },
+      { ...base, id: "flash", name: "Flash", model: "gemini-flash", geminiReasoning: { options: [{ label: "Low", value: "low" }] } },
+    ],
+  });
+  fireEvent.click(screen.getByRole("combobox", { name: "Default Gemini reasoning effort" }));
+  expect(await screen.findByRole("option", { name: "Provider default" })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: "Low" })).toBeNull();
+  fireEvent.click(screen.getByRole("option", { name: "High" }));
+  expect(onSelectEffort).toHaveBeenCalledWith("high");
 });

@@ -23,6 +23,7 @@ pub(super) fn remote_settings_request(remotes: Vec<RemoteConfig>) -> UpdateAppSe
         default_opencode_approval_mode: None,
         default_kimi_approval_mode: None,
         default_kimi_effort: None,
+        default_gemini_effort: None,
         default_codex_model: None,
         default_claude_model: None,
         default_cursor_model: None,
@@ -205,6 +206,7 @@ fn local_session_rejects_project_deleted_during_readiness_preflight() {
 
     let error = match state.create_session_with_agent_setup_validator(
         CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -266,6 +268,7 @@ fn local_session_rejects_project_root_changed_during_readiness_preflight() {
 
     let error = match state.create_session_with_agent_setup_validator(
         CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -331,6 +334,7 @@ fn projectless_session_survives_unrelated_project_deletion_during_preflight() {
     let response = state
         .create_session_with_agent_setup_validator(
             CreateSessionRequest {
+                gemini_inherited_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -382,6 +386,7 @@ fn inferred_project_deletion_during_preflight_falls_back_to_projectless() {
     let response = state
         .create_session_with_agent_setup_validator(
             CreateSessionRequest {
+                gemini_inherited_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -435,6 +440,7 @@ fn inferred_project_root_drift_during_preflight_falls_back_to_projectless() {
     let response = state
         .create_session_with_agent_setup_validator(
             CreateSessionRequest {
+                gemini_inherited_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -529,6 +535,7 @@ fn remote_session_rejects_project_deleted_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -612,6 +619,7 @@ fn remote_session_persist_failure_still_claims_the_current_event_bridge() {
     state.persistence_path = Arc::new(failing_persistence_path.clone());
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -722,6 +730,7 @@ fn remote_session_create_publishes_prior_dirty_localization_recovery() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1046,6 +1055,7 @@ fn remote_session_rejects_project_rebound_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -1198,6 +1208,7 @@ fn remote_session_rejects_remote_removed_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -1371,6 +1382,7 @@ fn remote_session_rejects_endpoint_replaced_during_create_request() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -2091,6 +2103,7 @@ fn remote_session_lazy_binding_preserves_bad_request_when_project_is_deleted() {
     );
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -2427,6 +2440,7 @@ fn remote_session_create_is_rejected_after_post_decode_a_to_b_to_a_cycle() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -2534,6 +2548,7 @@ fn remote_session_create_does_not_claim_replacement_bridge_after_json_decode() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -2640,6 +2655,7 @@ fn malformed_remote_session_response_prefers_post_decode_cycle_conflict() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -2725,6 +2741,7 @@ fn malformed_remote_session_response_prefers_post_decode_removal_error() {
         .len();
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,

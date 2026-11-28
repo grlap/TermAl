@@ -1018,6 +1018,7 @@ pub(crate) fn localize_remote_session_summary(
         kimi_effort: remote_session.kimi_effort.clone(),
         kimi_current_effort: remote_session.kimi_current_effort.clone(),
         kimi_effort_options: remote_session.kimi_effort_options.clone(),
+        gemini_reasoning: remote_session.gemini_reasoning.clone(),
         kimi_approval_mode: remote_session.kimi_approval_mode,
         kimi_mode: remote_session.kimi_mode,
         kimi_current_mode: remote_session.kimi_current_mode.clone(),

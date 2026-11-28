@@ -374,7 +374,7 @@ pub(crate) enum AcpRuntimeCommand {
     Cancel,
     RefreshSessionConfig {
         command: AcpPromptCommand,
-        response_tx: Sender<std::result::Result<(), String>>,
+        response_tx: Sender<std::result::Result<(), AcpConfigRefreshError>>,
     },
     ApplyOpenCodeConfig {
         selections: OpenCodeConfigSelections,
@@ -515,6 +515,8 @@ pub(crate) struct AcpRuntimeState {
     pub(crate) capabilities: Option<AcpCapabilities>,
     pub(crate) current_session_id: Option<String>,
     pub(crate) is_loading_history: bool,
+    pub(crate) gemini_config: Option<Value>,
+    pub(crate) gemini_rejected_efforts: HashSet<String>,
     /// Recent OpenCode authority/config snapshots reconciled from unsolicited
     /// updates. A bounded history breaks both exact duplicate and alternating
     /// A/B/A notification cycles without permanently suppressing a later
@@ -745,9 +747,25 @@ pub(crate) enum DispatchTurnResult {
 
 pub(crate) type CodexPendingRequestMap =
     Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, CodexResponseError>>>>>;
-pub(crate) type AcpPendingRequestMap =
-    Arc<Mutex<HashMap<String, Sender<std::result::Result<Value, AcpResponseError>>>>>;
+pub(crate) type AcpPendingRequestMap = Arc<Mutex<HashMap<String, AcpPendingResponder>>>;
 pub(crate) type AcpTurnLifecycle = Arc<(Mutex<bool>, Condvar)>;
+
+pub(crate) struct AcpPendingResponder {
+    pub(crate) sender: Sender<std::result::Result<Value, AcpResponseError>>,
+    pub(crate) gemini_config_reply: Option<GeminiConfigReply>,
+}
+
+pub(crate) enum GeminiConfigReply {
+    NewSession,
+    Continuation(String),
+    Setter(String),
+}
+
+#[derive(Debug)]
+pub(crate) enum AcpConfigRefreshError {
+    Deferred,
+    Failed(String),
+}
 
 /// Represents the pending ACP JSON RPC request payload.
 pub(crate) struct PendingAcpJsonRpcRequest {

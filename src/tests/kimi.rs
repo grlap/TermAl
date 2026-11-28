@@ -1007,6 +1007,7 @@ impl Write for KimiReplyWriter {
                 .unwrap()
                 .remove(id)
                 .unwrap()
+                .sender
                 .send(self.error.clone().map_or_else(
                     || Ok(self.reply.clone()),
                     |error| Err(AcpResponseError::Transport(error)),
@@ -2112,7 +2113,6 @@ fn kimi_refresh_and_notifications_cannot_overwrite_a_concurrent_model_patch() {
 fn kimi_notification_extensions_do_not_change_existing_acp_adapters() {
     for (agent, acp) in [
         (Agent::Cursor, AcpAgent::Cursor),
-        (Agent::Gemini, AcpAgent::Gemini),
         (Agent::OpenCode, AcpAgent::OpenCode),
     ] {
         let state = test_app_state();
