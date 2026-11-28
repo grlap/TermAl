@@ -121,11 +121,11 @@ point the operator to `kimi login`.
 - **Who answers permission requests.** This depends on the session's TermAl
   policy, `kimiApprovalMode`, and on the delegation. See Approvals and mode,
   and Read-only delegation children.
-- **Kimi-specific notifications.** The singular `config_option_update`,
-  `current_mode_update` and partial-catalog preservation are Kimi-specific.
+- **ACP notifications.** Gemini and Kimi accept the singular
+  `config_option_update` spelling. Kimi also handles
+  `current_mode_update` and preserves partial catalogs.
   `current_mode_update` is recorded for display as `kimiCurrentMode`, and the
-  read-only gate also acts on it. Cursor, Gemini and OpenCode keep their
-  existing notification contracts.
+  read-only gate also acts on it.
   User Stop sends ACP cancellation, waits within the shared graceful-stop bound,
   then terminates the local process while preserving the external conversation ID.
 - Existing conversation IDs use advertised resume/load support. A failed

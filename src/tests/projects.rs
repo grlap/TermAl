@@ -76,6 +76,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
+            default_gemini_effort: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -119,6 +120,7 @@ fn creates_sessions_for_remote_projects_over_ssh() {
     assert_eq!(stored_project.remote_id, "ssh-lab");
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -170,6 +172,7 @@ fn creates_projects_and_assigns_sessions_to_them() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -215,6 +218,7 @@ fn deletes_projects_and_unassigns_existing_sessions() {
         .unwrap();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -315,6 +319,7 @@ fn rejects_session_workdirs_outside_the_selected_project() {
         .unwrap();
 
     let result = state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -390,6 +395,7 @@ fn resolves_requested_paths_inside_the_session_project_root() {
         .unwrap();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -460,6 +466,7 @@ fn allows_new_file_paths_inside_the_session_project_root() {
         .unwrap();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

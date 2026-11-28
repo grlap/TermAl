@@ -215,30 +215,18 @@ pub(crate) fn spawn_acp_runtime_with_environment(
                     AcpRuntimeCommand::RefreshSessionConfig {
                         command,
                         response_tx,
-                    } => {
-                        let refresh_result = handle_acp_session_config_refresh_for_runtime(
-                            &mut stdin,
-                            &writer_pending_requests,
-                            &writer_state,
-                            &writer_session_id,
-                            &writer_runtime_state,
-                            &writer_runtime_token,
-                            writer_engram_mcp.as_ref(),
-                            agent,
-                            command,
-                        )
-                        .map_err(|err| format!("{err:#}"));
-                        match refresh_result {
-                            Ok(()) => {
-                                let _ = response_tx.send(Ok(()));
-                                Ok(())
-                            }
-                            Err(detail) => {
-                                let _ = response_tx.send(Err(detail.clone()));
-                                Err(anyhow!(detail))
-                            }
-                        }
-                    }
+                    } => handle_acp_session_config_refresh_for_runtime(
+                        &mut stdin,
+                        &writer_pending_requests,
+                        &writer_state,
+                        &writer_session_id,
+                        &writer_runtime_state,
+                        &writer_runtime_token,
+                        writer_engram_mcp.as_ref(),
+                        agent,
+                        command,
+                        response_tx,
+                    ),
                     AcpRuntimeCommand::ApplyOpenCodeConfig {
                         selections,
                         execution_deadline,
@@ -839,8 +827,19 @@ pub(crate) fn wait_for_acp_turn_settle(
     !*active
 }
 
+#[derive(Debug)]
+pub(crate) struct GeminiConfigRefreshDeferred;
+
+impl std::fmt::Display for GeminiConfigRefreshDeferred {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Gemini session settings or turn state changed before model refresh")
+    }
+}
+
+impl std::error::Error for GeminiConfigRefreshDeferred {}
+
 /// Handles ACP session config refresh.
-fn handle_acp_session_config_refresh_for_runtime(
+pub(crate) fn handle_acp_session_config_refresh_for_runtime(
     writer: &mut impl Write,
     pending_requests: &AcpPendingRequestMap,
     state: &AppState,
@@ -850,8 +849,9 @@ fn handle_acp_session_config_refresh_for_runtime(
     runtime_engram_mcp: Option<&TermalDelegationMcpStdioConfig>,
     agent: AcpAgent,
     command: AcpPromptCommand,
+    response_tx: Sender<std::result::Result<(), AcpConfigRefreshError>>,
 ) -> Result<()> {
-    handle_acp_session_config_refresh_inner(
+    let result = handle_acp_session_config_refresh_inner(
         writer,
         pending_requests,
         state,
@@ -863,7 +863,25 @@ fn handle_acp_session_config_refresh_for_runtime(
         },
         agent,
         command,
-    )
+    );
+    match result {
+        Ok(()) => {
+            let _ = response_tx.send(Ok(()));
+            Ok(())
+        }
+        Err(error) if error.is::<GeminiConfigRefreshDeferred>() => {
+            let _ = response_tx.send(Err(AcpConfigRefreshError::Deferred));
+            Ok(())
+        }
+        Err(error) => {
+            let _ = response_tx.send(Err(AcpConfigRefreshError::Failed(format!("{error:#}"))));
+            if agent == AcpAgent::Gemini && !acp_error_is_transport_failure(&error) {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -898,14 +916,27 @@ pub(crate) fn handle_acp_session_config_refresh_inner(
     agent: AcpAgent,
     command: AcpPromptCommand,
 ) -> Result<()> {
-    if runtime_state
-        .lock()
-        .expect("ACP runtime state mutex poisoned")
-        .current_session_id
-        .is_some()
+    if agent == AcpAgent::Gemini {
+        let token = match &engram_mcp_source {
+            AcpEngramMcpSource::Runtime { token, .. } => Some(*token),
+            #[cfg(test)]
+            AcpEngramMcpSource::LiveState => None,
+        };
+        if let Some(token) = token
+            && !state.gemini_refresh_is_current(session_id, token, &command.model)
+        {
+            return Err(GeminiConfigRefreshDeferred.into());
+        }
+    }
+    if agent != AcpAgent::Gemini
+        && runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned")
+            .current_session_id
+            .is_some()
     {
         if !matches!(agent, AcpAgent::OpenCode | AcpAgent::Kimi) {
-            // Cursor and Gemini do not expose a live config-query method.
+            // Cursor does not expose a live config-query method.
             // Preserve their historical successful no-op; OpenCode and Kimi use the
             // controlled restart path in `refresh_session_model_options`.
             return Ok(());
@@ -941,7 +972,7 @@ fn ensure_acp_session_ready_for_runtime(
     agent: AcpAgent,
     command: &AcpPromptCommand,
 ) -> Result<String> {
-    ensure_acp_session_ready_inner(
+    let external_id = ensure_acp_session_ready_inner(
         writer,
         pending_requests,
         state,
@@ -954,7 +985,20 @@ fn ensure_acp_session_ready_for_runtime(
         agent,
         command,
         AcpSessionPurpose::Prompt,
-    )
+    )?;
+    if agent == AcpAgent::Gemini && command.resume_session_id.is_none() {
+        // Discovery can bind a provider session to this runtime. Persist it
+        // only once the first prompt has passed model and effort admission.
+        let outcome = state.set_external_session_id_if_runtime_matches(
+            session_id,
+            runtime_token,
+            external_id.clone(),
+        )?;
+        if outcome != RuntimeMatchOutcome::Applied {
+            bail!("Gemini runtime changed before its conversation could be saved");
+        }
+    }
+    Ok(external_id)
 }
 
 #[cfg(test)]
@@ -1007,6 +1051,24 @@ pub(crate) fn ensure_acp_session_ready_inner(
         )
     };
     if let Some(existing_session_id) = existing_session_id {
+        if agent == AcpAgent::Gemini {
+            let token = match &engram_mcp_source {
+                AcpEngramMcpSource::Runtime { token, .. } => Some(*token),
+                #[cfg(test)]
+                AcpEngramMcpSource::LiveState => None,
+            };
+            configure_gemini_acp_session(
+                writer,
+                pending_requests,
+                state,
+                session_id,
+                &existing_session_id,
+                runtime_state,
+                token,
+                &command.model,
+                purpose == AcpSessionPurpose::Prompt,
+            )?;
+        }
         return Ok(existing_session_id);
     }
     // The runtime snapshot carries identity even when Engram is disabled;
@@ -1101,7 +1163,7 @@ pub(crate) fn ensure_acp_session_ready_inner(
     let discovery_only = agent == AcpAgent::Cursor
         && purpose == AcpSessionPurpose::ConfigRefresh
         && resume_session_id.is_none();
-    if !discovery_only {
+    if !discovery_only && agent != AcpAgent::Gemini {
         state.set_external_session_id(session_id, external_session_id.clone())?;
         runtime_state
             .lock()
@@ -1157,6 +1219,24 @@ pub(crate) fn ensure_acp_session_ready_inner(
                 false,
             )?;
         }
+    } else if agent == AcpAgent::Gemini {
+        if purpose == AcpSessionPurpose::ConfigRefresh
+            && let Some(token) = source_runtime
+            && !state.gemini_refresh_is_current(session_id, token, &command.model)
+        {
+            return Err(GeminiConfigRefreshDeferred.into());
+        }
+        configure_gemini_acp_session(
+            writer,
+            pending_requests,
+            state,
+            session_id,
+            &external_session_id,
+            runtime_state,
+            source_runtime,
+            &command.model,
+            purpose == AcpSessionPurpose::Prompt,
+        )?;
     } else if agent == AcpAgent::OpenCode {
         reconcile_opencode_config(
             writer,
@@ -1350,19 +1430,28 @@ pub(crate) fn handle_acp_message(
     if let Some(response_id) = message.get("id") {
         if message.get("result").is_some() || message.get("error").is_some() {
             let key = acp_request_id_key(response_id);
-            let sender = pending_requests
+            let responder = pending_requests
                 .lock()
                 .expect("ACP pending requests mutex poisoned")
                 .remove(&key);
-            if let Some(sender) = sender {
+            if let Some(responder) = responder {
                 let response = if let Some(result) = message.get("result") {
-                    Ok(result.clone())
+                    if let Some(scope) = responder.gemini_config_reply {
+                        let mut runtime = runtime_state
+                            .lock()
+                            .expect("ACP runtime state mutex poisoned");
+                        runtime
+                            .receive_gemini_config_reply(scope, result)
+                            .map(|()| result.clone())
+                    } else {
+                        Ok(result.clone())
+                    }
                 } else {
                     Err(AcpResponseError::JsonRpc(parse_acp_json_rpc_error(
                         message.get("error").unwrap_or(&Value::Null),
                     )))
                 };
-                let _ = sender.send(response);
+                let _ = responder.sender.send(response);
             }
             return Ok(());
         }
@@ -1510,6 +1599,51 @@ pub(crate) fn handle_acp_message(
             before_fallback(state, session_id);
         }
         return handle_admitted_acp_request(message, input_tx, recorder, agent, cursor_mode);
+    }
+
+    if agent == AcpAgent::Gemini
+        && method == "session/update"
+        && let Some(update) = message.pointer("/params/update")
+        && update
+            .get("sessionUpdate")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| is_acp_config_update_kind(kind, agent))
+    {
+        let Some(external_id) = message.pointer("/params/sessionId").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        let mut runtime = runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned");
+        if !runtime.accepts_gemini_config_update(update) {
+            return Ok(());
+        }
+        if runtime.current_session_id.as_deref() == Some(external_id) {
+            runtime.store_gemini_config(update.clone());
+            return state.observe_gemini_acp_config(
+                session_id,
+                Some(runtime_token),
+                None,
+                update,
+                true,
+                &runtime.gemini_rejected_efforts,
+            );
+        }
+        if runtime.current_session_id.is_none()
+            && pending_requests
+                .lock()
+                .expect("ACP pending requests mutex poisoned")
+                .values()
+                .any(|pending| {
+                    matches!(&pending.gemini_config_reply,
+                        Some(GeminiConfigReply::Continuation(id)) if id == external_id)
+                })
+        {
+            // Keep scoped config during load without replaying transcript deltas.
+            // The writer publishes the catalog after continuation succeeds.
+            runtime.store_gemini_config(update.clone());
+        }
+        return Ok(());
     }
 
     handle_acp_notification(
@@ -1890,10 +2024,10 @@ pub(crate) fn handle_acp_notification(
 /// Both the reader-side OpenCode wake-up path and the writer-side dispatcher
 /// must use this predicate so a newly supported protocol spelling cannot wake
 /// only one half of the model-dependent config flow.
-/// Kimi's singular spelling is scoped to Kimi, not added to other adapters.
+/// Gemini and Kimi also use ACP's singular spelling.
 pub(crate) fn is_acp_config_update_kind(kind: &str, agent: AcpAgent) -> bool {
     matches!(kind, "config_options_update" | "config_update")
-        || (agent == AcpAgent::Kimi && kind == "config_option_update")
+        || (matches!(agent, AcpAgent::Gemini | AcpAgent::Kimi) && kind == "config_option_update")
 }
 
 /// Handles ACP session update.
@@ -2267,10 +2401,27 @@ pub(crate) fn start_acp_json_rpc_request(
 ) -> Result<PendingAcpJsonRpcRequest> {
     let request_id = Uuid::new_v4().to_string();
     let (tx, rx) = mpsc::channel();
+    let gemini_config_reply = if agent == AcpAgent::Gemini {
+        let session = params["sessionId"].as_str().map(str::to_owned);
+        match method {
+            "session/new" => Some(GeminiConfigReply::NewSession),
+            "session/load" | "session/resume" => session.map(GeminiConfigReply::Continuation),
+            "session/set_config_option" => session.map(GeminiConfigReply::Setter),
+            _ => None,
+        }
+    } else {
+        None
+    };
     pending_requests
         .lock()
         .expect("ACP pending requests mutex poisoned")
-        .insert(request_id.clone(), tx);
+        .insert(
+            request_id.clone(),
+            AcpPendingResponder {
+                sender: tx,
+                gemini_config_reply,
+            },
+        );
 
     if let Err(err) = write_acp_json_rpc_message(
         writer,
@@ -2377,7 +2528,7 @@ pub(crate) fn fail_pending_acp_requests(pending_requests: &AcpPendingRequestMap,
         .lock()
         .expect("ACP pending requests mutex poisoned")
         .drain()
-        .map(|(_, sender)| sender)
+        .map(|(_, responder)| responder.sender)
         .collect::<Vec<_>>();
 
     for sender in senders {

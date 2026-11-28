@@ -128,6 +128,8 @@ function createBaseProps(
     defaultCursorMode: CURSOR_MODE_OPTIONS[0].value,
     onChangeDefaultCursorMode: vi.fn(),
     defaultGeminiModel: "default",
+    defaultGeminiEffort: "auto",
+    handleDefaultGeminiEffortChange: vi.fn(),
     handleDefaultGeminiModelChange: vi.fn(),
     defaultKimiModel: "default",
     defaultKimiApprovalMode: "ask",

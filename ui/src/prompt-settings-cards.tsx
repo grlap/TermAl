@@ -950,6 +950,19 @@ export function GeminiPromptSettingsCard({
     session.status === "approval" ||
     session.status === "stopping";
 
+  const reasoning = session.geminiReasoning;
+  const supportsEffortReset = reasoning?.options?.some(
+    (option) => option.value === "auto" || option.value === "default",
+  );
+  const effortOptions = (reasoning?.options ?? []).filter(option =>
+    option.value !== "auto" && option.value !== "default",
+  );
+  const requestedEffort = reasoning?.requested ?? reasoning?.inherited ?? "auto";
+  const effortUnavailable = requestedEffort !== "auto" &&
+    !effortOptions.some(option => option.value === requestedEffort);
+  const currentEffort = reasoning?.options?.find(option => option.value === reasoning.current)?.label;
+  const hasEffortChoices = supportsEffortReset || effortOptions.length > 0;
+
   return (
     <article className="message-card prompt-settings-card">
       <div className="card-label">Session Settings</div>
@@ -994,6 +1007,34 @@ export function GeminiPromptSettingsCard({
           />
         </div>
         <div className="session-control-group">
+          <label className="session-control-label" htmlFor={`gemini-effort-${paneId}`}>
+            Reasoning effort
+          </label>
+          <ThemedCombobox
+            id={`gemini-effort-${paneId}`}
+            className="prompt-settings-select"
+            value={requestedEffort}
+            options={[
+              {
+                value: "auto",
+                label: supportsEffortReset
+                  ? "Provider default"
+                  : "Keep current provider setting",
+              },
+              ...effortOptions.map(option => ({ ...option, description: option.description ?? undefined })),
+              ...(effortUnavailable ? [{ value: requestedEffort, label: "Saved effort unavailable", disabled: true }] : []),
+            ]}
+            disabled={isUpdating || sessionBusy || (!hasEffortChoices && requestedEffort === "auto")}
+            onChange={value => void onSessionSettingsChange(session.id, "geminiEffort", value)}
+          />
+          <p className="session-control-hint">
+            {effortUnavailable ? "The saved effort is unavailable for this model."
+              : !hasEffortChoices ? "This model or runtime has not advertised reasoning choices."
+                : currentEffort ? `Gemini reports ${currentEffort}. Changes apply before the next prompt.`
+                  : "Changes apply before the next prompt."}
+          </p>
+        </div>
+        <div className="session-control-group">
           <label className="session-control-label" htmlFor={`gemini-approval-mode-${paneId}`}>
             Gemini approval mode
           </label>
@@ -1016,7 +1057,7 @@ export function GeminiPromptSettingsCard({
           {isRefreshingModelOptions
             ? "Loading Gemini's live model list for this session."
             : canChangeModel
-              ? "Model changes apply to the live Gemini session. You can still paste a full Gemini model id manually if the live list is behind."
+              ? "Model changes apply before the next Gemini prompt. You can still paste a full Gemini model id manually if the live list is behind."
               : "TermAl asks Gemini for its live model list when this session opens. New sessions use the configured app default model; set it to default to leave Gemini on Auto. You can still paste a full Gemini model id manually."}{" "}
           Default prompts for approval, Auto edit approves edit tools, YOLO approves all tools,
           and Plan stays read-only. Approval-mode changes apply on the next Gemini prompt.

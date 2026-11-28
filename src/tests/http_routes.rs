@@ -364,6 +364,7 @@ async fn get_session_route_returns_bounded_session_detail() {
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -417,6 +418,7 @@ async fn get_session_route_can_return_tail_only() {
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -499,6 +501,7 @@ async fn get_session_history_route_pages_large_transcript_by_message_id() {
     let _files = HttpRouteTestFiles::capture(&state);
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -872,6 +875,7 @@ async fn get_session_route_tail_limit_covering_transcript_preserves_loaded_flag(
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -936,6 +940,7 @@ async fn get_session_route_tail_returns_not_found_for_missing_or_hidden_sessions
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -992,6 +997,7 @@ async fn get_session_route_rejects_zero_tail_limit() {
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1036,6 +1042,7 @@ async fn get_session_route_rejects_tail_limit_above_cap() {
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1087,6 +1094,7 @@ async fn get_session_route_query_rejection_uses_api_error_envelope() {
     let app = app_router(state.clone());
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1133,6 +1141,7 @@ async fn snapshot_bearing_routes_include_message_count() {
     let _files = HttpRouteTestFiles::capture(&state);
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1223,6 +1232,7 @@ async fn targeted_session_tail_includes_pending_prompts_redacted_from_global_sta
     let _files = HttpRouteTestFiles::capture(&state);
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -3906,6 +3916,7 @@ async fn codex_thread_fork_route_returns_created_response() {
     let _files = HttpRouteTestFiles::capture(&state);
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

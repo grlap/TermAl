@@ -1,5 +1,6 @@
 import type {
   DelegationSummary,
+  GeminiReasoning,
   ApprovalMessage,
   CodexAppRequestMessage,
   CommandMessage,
@@ -241,6 +242,7 @@ function sameSessionSummary(previous: Session, next: Session) {
     previous.cursorMode === next.cursorMode &&
     previous.claudeApprovalMode === next.claudeApprovalMode &&
     previous.geminiApprovalMode === next.geminiApprovalMode &&
+    sameGeminiReasoning(previous.geminiReasoning, next.geminiReasoning) &&
     previous.opencodeModel === next.opencodeModel &&
     previous.opencodeApprovalMode === next.opencodeApprovalMode &&
     previous.opencodeEffort === next.opencodeEffort &&
@@ -663,6 +665,11 @@ function sameOptionalStringArray(
     return false;
   }
   return previous.every((value, index) => value === next[index]);
+}
+
+export function sameGeminiReasoning(previous?: GeminiReasoning, next?: GeminiReasoning): boolean {
+  return previous === next || (previous?.requested === next?.requested &&
+    previous?.inherited === next?.inherited && previous?.current === next?.current && sameModelOptions(previous?.options, next?.options));
 }
 
 function sameModelOptions(
