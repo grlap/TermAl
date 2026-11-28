@@ -1,0 +1,28 @@
+{
+  "id": "01a221ec-2e89-7bc3-80d4-725a9cf6d5cc",
+  "external_ref": null,
+  "title": "Automatically rediscover Gemini choices in a picker that is already open",
+  "outcome": "An already-open Gemini settings picker can request fresh capabilities after its catalog is invalidated, while keeping the manual refresh path and unavailable states accurate.",
+  "acceptance": [
+    "An already-open picker requests discovery when its formerly valid catalog is invalidated and the current session is eligible.",
+    "Ordinary updates with an unavailable catalog do not create repeated refreshes. Busy sessions respect the existing idle refresh boundary."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 3,
+  "labels": [
+    "gemini",
+    "preferences"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
