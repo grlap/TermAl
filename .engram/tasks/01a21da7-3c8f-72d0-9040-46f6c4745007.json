@@ -1,0 +1,38 @@
+{
+  "id": "01a21da7-3c8f-72d0-9040-46f6c4745007",
+  "external_ref": null,
+  "title": "Give Codex fixture completion one runtime identity comparison",
+  "outcome": "Make the wrong-runtime completion control exercise a canonical runtime identity check without changing receipt custody or other correlation checks.",
+  "acceptance": [
+    "The fixture derives the expected runtime from the accepted owner token and enforces the event comparison at one boundary.",
+    "An event with only a changed runtime returns the same bounded Conflict and leaves the live receipt unchanged, and a current exact event still completes."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "stage-b",
+    "testing"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1bfb2-6935-7022-b973-a15b23476aa3",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

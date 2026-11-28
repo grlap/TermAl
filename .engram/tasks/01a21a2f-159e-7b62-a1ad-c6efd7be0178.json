@@ -20,12 +20,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Landed the uniform typed 404 for authorized unknown native relay locators on page read, receipt acknowledgement, and exact message read, preserving original receipts and both cursors. All four acceptance criteria passed independently on clean 8fcc0fbd.",
+    "completed_at": "2026-11-27T14:40:56.252855500Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "merger2-da33-delivered-2026-11-28",
+    "revision_id": "4236b3541d514b9da2f144d6d0ebd734",
+    "previous": null,
+    "body_sha256": "c82e9a68a47981995ef5ddd8ad1bf7905ac608ebad927e474ad2fac6dab5b323",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-28T06:21:32.349645900Z"
+    }
+  },
+  "body": "Merger2 resumed ONLY da33 under Greg's word via Asistant96/message082b4272 (05:55:38Z), continuation98. Exact02a6d6f61052a57ebd38db7421c92597ab275c13/tree1b80e00a6939172f8728881d2d453b8654de6663 FF master and HTTPS push from8fcc0fbd; existing review873401be and FULLd4da06f1 retained, no test rerun. Release -j1 PASS06:15:26Z, installed06:16:05Z SHA2a3fcb31b49d298eff2c19f5ea198589e1b58eeb245c345d20d3753ec8bd0549; host NOT restarted byagent. Fresh postlanding Codex20942 evalb781af5b3/3, completed06:19:27Z seal373e9b53f0914a0f8a3b35cc23a00914. Local authorworktree, pair exports, helper and rawbuildlogs removed nonforced after verified recovery; testref deleted; shared main/installtarget retained. Prior-running backup target/release/termal.exe.pre-da33-20261128T061605Z.bak retained under openw-bebb/49109e2c for currentimage/rollback until nextsuccessfulrestart. Other jobs/queues remain HOLD; no broad stand-in authority. Separate Greg Gemini authorassignment routed to exact native Coord-WinB26 for Sol-WinB2, no centralspawn/cargo/masterauthority. Original Central standby memory remains correct outside this completed da33 exception. Remote cleanup released by native mail to Codex6 DL560 and Coord-WinB26, actual completion requires their receipts; no remote-shell fallback."
+}

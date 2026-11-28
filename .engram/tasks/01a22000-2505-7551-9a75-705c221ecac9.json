@@ -1,0 +1,31 @@
+{
+  "id": "01a22000-2505-7551-9a75-705c221ecac9",
+  "external_ref": null,
+  "title": "Render the Queue paused notice as one compact line with its existing action",
+  "outcome": "The Queue paused notice occupies one compact line while keeping the paused state readable and its existing action available.",
+  "acceptance": [
+    "The Queue paused notice renders as one compact line, with a readable paused-state label and the existing action available on the same line.",
+    "Long supporting text does not turn the notice into a tall card; any necessary full explanation remains accessible, and the action remains usable by keyboard and assistive technology.",
+    "The change preserves queue pause and resume behavior and the existing available action; behavior tests cover the compact rendering and action without testing repository source text."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 0,
+  "labels": [
+    "compact-status",
+    "greg-reported",
+    "queue",
+    "ui"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

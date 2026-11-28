@@ -1,0 +1,12 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "greg-gemini-reasoning-integration-neon-2026-11-28",
+  "head": {
+    "state": "active",
+    "chain": [
+      "088ac92a762b4f9da045b9fc422b744a",
+      "4380e8a7ce7341a385b47b27f2390183"
+    ]
+  }
+}
