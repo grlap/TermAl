@@ -1195,6 +1195,10 @@ impl PersistedSessionRecord {
         }
         if remote_proxy_identity.is_none() {
             session.pending_prompts.clear();
+            if session.agent == Agent::Gemini {
+                session.model_options.clear();
+                session.gemini_reasoning.clear_observation();
+            }
         } else {
             // Cached proxies only carry the owner's list classification.
             // Discard a stale native link without changing the transcript.

@@ -52,6 +52,7 @@ async fn read_only_delegation_blocks_write_capable_surfaces() {
         &created.delegation.child_session_id,
         UpdateSessionSettingsRequest {
             kimi_effort: None,
+            gemini_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -710,6 +711,7 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
                 session_id,
                 UpdateSessionSettingsRequest {
                     kimi_effort: None,
+                    gemini_effort: None,
                     opencode_approval_mode: None,
                     kimi_approval_mode: None,
                     kimi_mode: None,
@@ -733,6 +735,7 @@ async fn read_only_delegation_blocks_project_and_workdir_writes_with_parent_sess
         &created.delegation.child_session_id,
         UpdateSessionSettingsRequest {
             kimi_effort: None,
+            gemini_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

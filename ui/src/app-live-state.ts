@@ -275,6 +275,7 @@ export function useAppLiveState(
     setDefaultClaudeModel,
     setDefaultCursorModel,
     setDefaultGeminiModel,
+    setDefaultGeminiEffort,
     setDefaultKimiModel,
     setDefaultKimiApprovalMode,
     setDefaultKimiEffort,
@@ -1546,6 +1547,7 @@ export function useAppLiveState(
     setDefaultClaudeModel(preferences.defaultClaudeModel);
     setDefaultCursorModel(preferences.defaultCursorModel);
     setDefaultGeminiModel(preferences.defaultGeminiModel);
+    setDefaultGeminiEffort(preferences.defaultGeminiEffort);
     setDefaultKimiModel(preferences.defaultKimiModel);
     setDefaultKimiApprovalMode(preferences.defaultKimiApprovalMode);
     setDefaultKimiEffort(preferences.defaultKimiEffort);

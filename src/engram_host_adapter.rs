@@ -2857,7 +2857,13 @@ pub(crate) fn engram_actor_context(session: &Session) -> Option<String> {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty() && *value != "auto"),
-        Agent::Cursor | Agent::Gemini => None,
+        Agent::Gemini => session
+            .gemini_reasoning
+            .requested
+            .as_deref()
+            .or(session.gemini_reasoning.inherited.as_deref())
+            .filter(|value| !matches!(*value, "" | "auto" | "default")),
+        Agent::Cursor => None,
     };
     if let Some(reasoning) = reasoning {
         append_engram_actor_context_field(&mut context, "reasoning", reasoning);

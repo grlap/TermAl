@@ -130,7 +130,7 @@ function makeParams(): TestLiveStateParams {
     preferenceSetters: {
       setDefaultCodexModel: set, setDefaultCodexSandboxMode: set,
       setDefaultCodexApprovalPolicy: set, setDefaultClaudeModel: set,
-      setDefaultCursorModel: set, setDefaultGeminiModel: set, setDefaultOpenCodeModel: set,
+      setDefaultCursorModel: set, setDefaultGeminiModel: set, setDefaultGeminiEffort: set, setDefaultOpenCodeModel: set,
       setDefaultKimiModel: set,
       setDefaultKimiApprovalMode: set,
       setDefaultKimiEffort: set,

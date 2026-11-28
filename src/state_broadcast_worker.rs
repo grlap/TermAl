@@ -265,6 +265,7 @@ impl AppState {
             kimi_effort,
             kimi_current_effort,
             kimi_effort_options,
+            gemini_reasoning,
             kimi_approval_mode,
             kimi_mode,
             kimi_current_mode,
@@ -316,6 +317,7 @@ impl AppState {
         if !(kimi_effort == &session.kimi_effort
             && kimi_current_effort == &session.kimi_current_effort
             && kimi_effort_options == &session.kimi_effort_options
+            && gemini_reasoning == &session.gemini_reasoning
             && kimi_approval_mode == &session.kimi_approval_mode
             && kimi_mode == &session.kimi_mode
             && kimi_current_mode == &session.kimi_current_mode

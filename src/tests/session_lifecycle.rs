@@ -556,6 +556,7 @@ fn creates_claude_sessions_with_requested_plan_mode() {
 
     let response = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1376,6 +1377,7 @@ fn killing_shared_codex_session_does_not_reset_other_shared_sessions_when_interr
     let first_session_id = test_session_id(&state, Agent::Codex);
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

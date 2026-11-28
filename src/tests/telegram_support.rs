@@ -416,6 +416,7 @@ pub(super) fn create_telegram_settings_project_and_session(state: &AppState) -> 
         .expect("project should create");
     let session = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

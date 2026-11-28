@@ -1483,12 +1483,16 @@ export function CursorPreferencesPanel({
 export function GeminiPreferencesPanel({
   defaultGeminiApprovalMode,
   defaultGeminiModel,
+  defaultGeminiEffort = "auto",
+  onSelectEffort,
   onSelectApprovalMode,
   onSelectModel,
   sessions = [],
 }: {
   defaultGeminiApprovalMode: GeminiApprovalMode;
   defaultGeminiModel: string;
+  defaultGeminiEffort?: string;
+  onSelectEffort?: (value: string) => void;
   onSelectApprovalMode: (mode: GeminiApprovalMode) => void;
   onSelectModel: (model: string) => void;
   sessions?: readonly Session[];
@@ -1498,13 +1502,24 @@ export function GeminiPreferencesPanel({
     [defaultGeminiModel, sessions],
   );
 
+  const effortOptions = useMemo(() => {
+    const followsProvider = defaultGeminiModel === "default" || defaultGeminiModel === "auto";
+    const advertised = sessions
+      .filter(session => session.agent === "Gemini" && (followsProvider || session.model === defaultGeminiModel))
+      .flatMap(session => session.geminiReasoning?.options ?? [])
+      .filter(option => option.value !== "auto" && option.value !== "default");
+    return [...new Map(advertised.map(option => [option.value, option])).values()];
+  }, [defaultGeminiModel, sessions]);
+  const unavailableEffort = defaultGeminiEffort !== "auto" &&
+    !effortOptions.some(option => option.value === defaultGeminiEffort);
+
   return (
     <section className="settings-panel-stack">
       <div className="settings-panel-intro">
         <div>
           <p className="session-control-label">New Gemini sessions</p>
           <p className="settings-panel-copy">
-            Choose the default Gemini model and approval mode for sessions created in this window.
+            Choose the default model, reasoning effort, and approval mode for new Gemini sessions.
           </p>
         </div>
       </div>
@@ -1520,6 +1535,28 @@ export function GeminiPreferencesPanel({
             value={defaultGeminiModel}
             onChange={onSelectModel}
           />
+          <div className="session-control-group">
+            <label className="session-control-label" htmlFor="default-gemini-effort">
+              Default Gemini reasoning effort
+            </label>
+            <ThemedCombobox
+              id="default-gemini-effort"
+              className="prompt-settings-select"
+              value={defaultGeminiEffort}
+              options={[
+                { value: "auto", label: "Provider default" },
+                ...effortOptions.map(option => ({ ...option, description: option.description ?? undefined })),
+                ...(unavailableEffort ? [{ value: defaultGeminiEffort, label: "Saved effort unavailable", disabled: true }] : []),
+              ]}
+              disabled={!onSelectEffort || (effortOptions.length === 0 && !unavailableEffort)}
+              onChange={value => onSelectEffort?.(value)}
+            />
+            <p className="session-control-hint">
+              {unavailableEffort ? "Gemini has not advertised the saved effort for the default model. New sessions fall back when it is unavailable."
+                : effortOptions.length === 0 ? "Refresh a Gemini session's model options to discover reasoning choices."
+                  : "New sessions use this effort when their model supports it."}
+            </p>
+          </div>
           <div className="session-control-group">
             <label className="session-control-label" htmlFor="default-gemini-approval-mode">
               Default Gemini approvals

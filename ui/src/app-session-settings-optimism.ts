@@ -8,6 +8,7 @@ import {
   normalizedRequestedSessionModel,
 } from "./session-model-utils";
 import { codexFastModeAfterModelChange } from "./session-model-options";
+import { sameGeminiReasoning } from "./session-reconcile";
 import type {
   AgentType,
   ApprovalPolicy,
@@ -116,6 +117,9 @@ export function buildOptimisticSessionSettingsUpdate(
       };
     }
     case "Gemini": {
+      if (field === "geminiEffort") {
+        return { ...session, geminiReasoning: { ...session.geminiReasoning, requested: value as string } };
+      }
       const nextModel = normalizedModelValue ?? session.model;
       const nextGeminiApprovalMode =
         field === "geminiApprovalMode"
@@ -133,6 +137,9 @@ export function buildOptimisticSessionSettingsUpdate(
         ...session,
         model: nextModel,
         geminiApprovalMode: nextGeminiApprovalMode,
+        geminiReasoning: nextModel !== session.model
+          ? { requested: session.geminiReasoning?.requested, inherited: session.geminiReasoning?.inherited }
+          : session.geminiReasoning,
       };
     }
     case "Kimi": {
@@ -224,11 +231,31 @@ export function rollbackOptimisticSessionSettingsUpdate(
     changed = true;
   }
 
+  const previousGeminiRequest = previousSession.geminiReasoning?.requested;
+  const optimisticGeminiRequest = optimisticSession.geminiReasoning?.requested;
+  if (
+    previousGeminiRequest !== optimisticGeminiRequest &&
+    currentSession.geminiReasoning?.requested === optimisticGeminiRequest
+  ) {
+    nextSession.geminiReasoning = {
+      ...currentSession.geminiReasoning,
+      requested: previousGeminiRequest,
+    };
+    changed = true;
+  }
   if (
     currentSession.model === optimisticSession.model &&
-    currentSession.model !== previousSession.model
+    currentSession.model !== previousSession.model &&
+    (optimisticSession.agent !== "Gemini" ||
+      sameGeminiReasoning(
+        currentSession.geminiReasoning,
+        optimisticSession.geminiReasoning,
+      ))
   ) {
     nextSession.model = previousSession.model;
+    if (optimisticSession.agent === "Gemini") {
+      nextSession.geminiReasoning = previousSession.geminiReasoning;
+    }
     changed = true;
   }
   if (

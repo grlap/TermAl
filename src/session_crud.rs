@@ -1377,6 +1377,16 @@ impl AppState {
         mut validate_agent_session_setup: impl FnMut(Agent, &str) -> Result<(), String>,
     ) -> Result<CreateSessionResponse, ApiError> {
         let agent = request.agent.unwrap_or(Agent::Codex);
+        let gemini_inherited_effort = request
+            .gemini_inherited_effort
+            .as_deref()
+            .map(normalize_gemini_effort)
+            .transpose()?;
+        if gemini_inherited_effort.is_some() && agent != Agent::Gemini {
+            return Err(ApiError::bad_request(
+                "geminiInheritedEffort is only supported by Gemini",
+            ));
+        }
         if request.opencode_approval_mode.is_some() && agent != Agent::OpenCode {
             return Err(ApiError::bad_request(
                 "opencodeApprovalMode is only supported by OpenCode",
@@ -1468,10 +1478,19 @@ impl AppState {
         if let Some(project) = project.as_ref() {
             if project.remote_id != LOCAL_REMOTE_ID {
                 let mut remote_request = request;
-                remote_request.model = Some(requested_model.clone().unwrap_or_else(|| {
+                {
                     let inner = self.inner.lock().expect("state mutex poisoned");
-                    inner.preferences.default_model_for_agent(agent)
-                }));
+                    remote_request.model = Some(
+                        requested_model
+                            .unwrap_or_else(|| inner.preferences.default_model_for_agent(agent)),
+                    );
+                    if agent == Agent::Gemini {
+                        remote_request.gemini_inherited_effort =
+                            Some(gemini_inherited_effort.unwrap_or_else(|| {
+                                inner.preferences.default_gemini_effort.clone()
+                            }));
+                    }
+                }
                 return self.create_remote_session_proxy(remote_request, project.clone());
             }
             if !path_contains(&project.root_path, FsPath::new(&workdir)) {
@@ -1629,6 +1648,10 @@ impl AppState {
                 record.session.cursor_mode = Some(cursor_mode);
             }
         } else if record.session.agent.supports_gemini_approval_mode() {
+            if let Some(effort) = gemini_inherited_effort {
+                record.session.gemini_reasoning.inherited =
+                    (effort != GEMINI_PROVIDER_DEFAULT_EFFORT).then_some(effort);
+            }
             if let Some(gemini_approval_mode) = request.gemini_approval_mode {
                 record.session.gemini_approval_mode = Some(gemini_approval_mode);
             }
@@ -1700,6 +1723,11 @@ impl AppState {
         let normalized_remotes = request.remotes.map(normalize_remote_configs).transpose()?;
         // Also before any preference changes, so a rejected effort cannot
         // leave an earlier field of the same request applied.
+        let default_gemini_effort = request
+            .default_gemini_effort
+            .as_deref()
+            .map(normalize_gemini_effort)
+            .transpose()?;
         let default_kimi_effort = request
             .default_kimi_effort
             .as_deref()
@@ -1785,6 +1813,12 @@ impl AppState {
             }
         }
 
+        if let Some(effort) = default_gemini_effort {
+            if preferences.default_gemini_effort != effort {
+                preferences.default_gemini_effort = effort;
+                changed = true;
+            }
+        }
         if let Some(effort) = default_kimi_effort {
             if preferences.default_kimi_effort != effort {
                 preferences.default_kimi_effort = effort;
