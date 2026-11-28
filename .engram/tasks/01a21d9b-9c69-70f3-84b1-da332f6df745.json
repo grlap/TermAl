@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Delivered exact reviewed/gated candidate02a6d6f6 by fast-forward master and HTTPS push (push time recorded to minute). Installed Windows release at06:16:05Z, SHA2562a3fcb31b49d298eff2c19f5ea198589e1b58eeb245c345d20d3753ec8bd0549. Fresh independent postlanding evaluationb781af5b96cd43da9669ecf685b1a2c2 (Codex20942) passes3/3, no stale reason; originalfocusedLinux146/0 Windows140/0 and landingFULL evidence retained. Testrefdeleted/data2ced9376dsynced. No hostrestart; shared buildtarget retained; backupretention on openw-bebb. Cleanup and finaldataexport follow completion.",
+    "completed_at": "2026-11-28T06:19:27.708127700Z",
+    "actor": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

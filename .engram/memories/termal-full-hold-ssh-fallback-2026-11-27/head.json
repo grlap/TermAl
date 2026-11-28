@@ -3,12 +3,13 @@
   "project_id": "github.com/grlap/TermAl",
   "key": "termal-full-hold-ssh-fallback-2026-11-27",
   "head": {
-    "state": "active",
-    "chain": [
-      "c03690c1079643bcbf6778c23f12f8c8",
-      "b0f5bf09f18b498db0fef31bd0ed39e1",
-      "fb5c3395d8c843f588ff348ff0437b4b",
-      "d2002eeeddd245bfbc136a50f052aad5"
-    ]
+    "state": "tombstone",
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "retire attributed project memory",
+      "remembered_at": "2026-11-28T06:20:09.473111600Z"
+    }
   }
 }
