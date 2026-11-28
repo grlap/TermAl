@@ -177,6 +177,7 @@ fn acp_session_resume_loads_when_explicitly_advertised() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -364,6 +365,7 @@ fn acp_session_resume_prefers_resume_when_explicitly_supported() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -575,6 +577,7 @@ fn established_cursor_config_refresh_preserves_legacy_noop_contract() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -956,3 +959,296 @@ fn gemini_readiness_and_auth_do_not_consume_legacy_settings_or_dotenv() {
 
 #[path = "acp_gemini/permissions.rs"]
 mod permissions;
+
+fn gemini_reasoning_fixture(model: &str, effort: Option<&str>) -> Value {
+    let mut options = vec![json!({
+        "id": "model", "type": "select", "currentValue": model,
+        "options": [{"value": "gemini-pro", "name": "Gemini Pro"},
+                    {"value": "gemini-flash", "name": "Gemini Flash"},
+                    {"value": "auto", "name": "Auto"}]
+    })];
+    if let Some(effort) = effort {
+        options.push(json!({
+            "id": "reasoning-tier", "category": "thought_level", "type": "select",
+            "currentValue": effort,
+            "options": [{"value": "low", "name": "Low"}, {"value": "medium", "name": "Medium"},
+                        {"value": "high", "name": "High"}]
+        }));
+    }
+    json!({"sessionId": "agy-conversation", "configOptions": options})
+}
+
+#[test]
+fn gemini_reasoning_applies_preference_and_explicit_effort_through_acp() {
+    let state = test_app_state();
+    state
+        .update_app_settings(
+            serde_json::from_value(json!({"defaultGeminiEffort": "high"})).unwrap(),
+        )
+        .unwrap();
+    let created = state
+        .create_session_with_agent_setup_validator(
+            serde_json::from_value(json!({"agent": "Gemini", "model": "gemini-pro"})).unwrap(),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    let session_id = created.session_id;
+    let runtime = Arc::new(Mutex::new(AcpRuntimeState::default()));
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    let writer = SharedBufferWriter::default();
+    let start = |model: &str| {
+        let model = model.to_owned();
+        let runtime = runtime.clone();
+        let pending = pending.clone();
+        let mut writer = writer.clone();
+        let state = state.clone();
+        let session_id = session_id.clone();
+        std::thread::spawn(move || {
+            ensure_acp_session_ready(
+                &mut writer,
+                &pending,
+                &state,
+                &session_id,
+                &runtime,
+                AcpAgent::Gemini,
+                &AcpPromptCommand {
+                    cwd: state.default_workdir.clone(),
+                    model,
+                    prompt: String::new(),
+                    resume_session_id: None,
+                    cursor_mode: None,
+                    opencode_effort: None,
+                    opencode_mode: None,
+                },
+            )
+        })
+    };
+    let expect_request = |method, params: Value| {
+        let (id, response) = take_pending_acp_request(&pending);
+        let publication = phase_sync::PollGuard::new();
+        let request = loop {
+            if let Some(request) = writer
+                .contents()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .find(|request| request["id"].as_str() == Some(id.as_str()))
+            {
+                break request;
+            }
+            publication.wait("Gemini config request publication");
+        };
+        assert_eq!(request["method"], method);
+        if !params.is_null() {
+            assert_eq!(request["params"], params);
+        }
+        response
+    };
+    let read_request = |method, params, reply| {
+        expect_request(method, params).send(Ok(reply)).unwrap();
+    };
+    let initial = start("gemini-pro");
+    read_request(
+        "session/new",
+        Value::Null,
+        gemini_reasoning_fixture("gemini-pro", Some("low")),
+    );
+    read_request(
+        "session/set_config_option",
+        json!({"sessionId": "agy-conversation", "configId": "reasoning-tier", "value": "high"}),
+        gemini_reasoning_fixture("gemini-pro", Some("high")),
+    );
+    assert_eq!(initial.join().unwrap().unwrap(), "agy-conversation");
+
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({"geminiEffort": "low"})).unwrap(),
+        )
+        .unwrap();
+    let explicit = start("gemini-pro");
+    read_request(
+        "session/set_config_option",
+        json!({"sessionId": "agy-conversation", "configId": "reasoning-tier", "value": "low"}),
+        gemini_reasoning_fixture("gemini-pro", Some("low")),
+    );
+    explicit.join().unwrap().unwrap();
+    let current = state.get_session(&session_id).unwrap().session;
+    assert_eq!(current.gemini_reasoning.requested.as_deref(), Some("low"));
+    assert_eq!(current.gemini_reasoning.current.as_deref(), Some("low"));
+
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({"model": "gemini-flash"})).unwrap(),
+        )
+        .unwrap();
+    let changed_model = start("gemini-flash");
+    read_request(
+        "session/set_config_option",
+        json!({"sessionId": "agy-conversation", "configId": "model", "value": "gemini-flash"}),
+        gemini_reasoning_fixture("gemini-flash", None),
+    );
+    changed_model.join().unwrap().unwrap();
+    let current = state.get_session(&session_id).unwrap().session;
+    assert_eq!(current.gemini_reasoning.requested.as_deref(), Some("low"));
+    assert!(current.gemini_reasoning.current.is_none());
+    assert!(current.gemini_reasoning.options.is_empty());
+    assert_eq!(
+        writer.contents().lines().count(),
+        4,
+        "an unsupported effort emits no request"
+    );
+
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({"model": "auto"})).unwrap(),
+        )
+        .unwrap();
+    let automatic = start("auto");
+    read_request(
+        "session/set_config_option",
+        json!({"sessionId": "agy-conversation", "configId": "model", "value": "auto"}),
+        gemini_reasoning_fixture("auto", Some("low")),
+    );
+    automatic.join().unwrap().unwrap();
+    assert_eq!(state.get_session(&session_id).unwrap().session.model, "auto");
+
+    let (handle, _rx) = test_acp_runtime_handle(AcpAgent::Gemini, "agy-config-notification");
+    {
+        let mut inner = state.inner.lock().unwrap();
+        let index = inner.find_session_index(&session_id).unwrap();
+        inner.session_mut_by_index(index).unwrap().runtime = SessionRuntime::Acp(handle.clone());
+    }
+    state
+        .update_session_settings(
+            &session_id,
+            serde_json::from_value(json!({"geminiEffort": "high"})).unwrap(),
+        )
+        .unwrap();
+    let configuring = start("auto");
+    let params = json!({"sessionId": "agy-conversation", "configId": "reasoning-tier", "value": "high"});
+    let superseded_reply = expect_request("session/set_config_option", params.clone());
+    let mut update = gemini_reasoning_fixture("auto", Some("medium"));
+    update["sessionUpdate"] = json!("config_option_update");
+    handle_acp_message(
+        &json!({
+            "jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "agy-conversation", "update": update}
+        }),
+        &state,
+        &session_id,
+        &RuntimeToken::Acp(handle.runtime_id.clone()),
+        &pending,
+        &runtime,
+        &handle.input_tx,
+        &mut AcpTurnState::default(),
+        &mut SessionRecorder::new(state.clone(), session_id.clone()),
+        AcpAgent::Gemini,
+    )
+    .unwrap();
+    assert_eq!(
+        state.get_session(&session_id).unwrap().session.gemini_reasoning.current.as_deref(),
+        Some("medium")
+    );
+    superseded_reply
+        .send(Ok(gemini_reasoning_fixture("auto", Some("high"))))
+        .unwrap();
+    read_request(
+        "session/set_config_option",
+        params,
+        gemini_reasoning_fixture("auto", Some("high")),
+    );
+    configuring.join().unwrap().unwrap();
+    assert_eq!(
+        state.get_session(&session_id).unwrap().session.gemini_reasoning.current.as_deref(),
+        Some("high")
+    );
+}
+
+#[test]
+fn gemini_reasoning_preference_persists_and_only_applies_to_new_gemini_sessions() {
+    let state = test_app_state();
+    let create = |agent| {
+        state
+            .create_session_with_agent_setup_validator(
+                serde_json::from_value(json!({"agent": agent})).unwrap(),
+                |_, _| Ok(()),
+            )
+            .unwrap()
+            .session
+    };
+    let earlier = create("Gemini");
+    state
+        .update_app_settings(
+            serde_json::from_value(json!({
+                "defaultGeminiEffort": "high", "defaultCodexReasoningEffort": "low"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    let later = create("Gemini");
+    let codex = create("Codex");
+    let forwarded = state
+        .create_session_with_agent_setup_validator(
+            serde_json::from_value(json!({"agent": "Gemini", "geminiInheritedEffort": "low"}))
+                .unwrap(),
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    assert_eq!(forwarded.session.gemini_reasoning.inherited.as_deref(), Some("low"));
+    state
+        .observe_gemini_acp_config(
+            &later.id,
+            None,
+            Some(&later.model),
+            &gemini_reasoning_fixture(&later.model, Some("high")),
+            true,
+        )
+        .unwrap();
+    state
+        .update_session_settings(
+            &later.id,
+            serde_json::from_value(json!({"geminiEffort": "low"})).unwrap(),
+        )
+        .unwrap();
+    let tracker = load_state(state.persistence_path.as_path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(tracker.preferences.default_gemini_effort, "high");
+    assert_eq!(
+        tracker.preferences.default_codex_reasoning_effort,
+        CodexReasoningEffort::Low
+    );
+    assert!(
+        state
+            .get_session(&earlier.id)
+            .unwrap()
+            .session
+            .gemini_reasoning
+            .requested
+            .is_none()
+    );
+    assert_eq!(later.gemini_reasoning.inherited.as_deref(), Some("high"));
+    let restored = &tracker.sessions[tracker.find_session_index(&later.id).unwrap()];
+    assert!(matches!(&restored.runtime, SessionRuntime::None));
+    assert!(restored.session.model_options.is_empty());
+    assert_eq!(
+        restored.session.gemini_reasoning,
+        GeminiReasoning {
+            requested: Some("low".to_owned()),
+            inherited: Some("high".to_owned()),
+            ..GeminiReasoning::default()
+        }
+    );
+    assert!(codex.gemini_reasoning.is_empty());
+    assert_eq!(codex.reasoning_effort, Some(CodexReasoningEffort::Low));
+    assert!(
+        state
+            .update_session_settings(
+                &codex.id,
+                serde_json::from_value(json!({"geminiEffort": "auto"})).unwrap()
+            )
+            .is_err()
+    );
+}

@@ -3831,6 +3831,7 @@ fn telegram_settings_validation_does_not_partially_mutate_on_other_error_paths()
         create_telegram_settings_project_and_session(&state);
     let no_project_session_id = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

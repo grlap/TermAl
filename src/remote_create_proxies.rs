@@ -239,6 +239,7 @@ impl AppState {
                     "claudeApprovalMode": request.claude_approval_mode,
                     "claudeEffort": request.claude_effort,
                     "geminiApprovalMode": request.gemini_approval_mode,
+                    "geminiInheritedEffort": request.gemini_inherited_effort,
                     "opencodeApprovalMode": request.opencode_approval_mode,
                     "kimiApprovalMode": request.kimi_approval_mode,
                     "kimiMode": request.kimi_mode,

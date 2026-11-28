@@ -132,6 +132,7 @@ mod visible_session_hydration_error_tests {
 
         let local_session_id = state
             .create_session(CreateSessionRequest {
+                gemini_inherited_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -179,6 +180,7 @@ mod visible_session_hydration_error_tests {
             kimi_effort: None,
             kimi_current_effort: None,
             kimi_effort_options: Vec::new(),
+            gemini_reasoning: GeminiReasoning::default(),
             opencode_mode: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
@@ -266,6 +268,7 @@ mod visible_session_hydration_error_tests {
         let _persist_shutdown = PersistWorkerShutdown(&state);
         let session_id = state
             .create_session(CreateSessionRequest {
+                gemini_inherited_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -489,6 +492,7 @@ mod visible_session_hydration_error_tests {
         let _persist_shutdown = PersistWorkerShutdown(&state);
         let session_id = state
             .create_session(CreateSessionRequest {
+                gemini_inherited_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -712,6 +716,7 @@ impl AppState {
             kimi_effort: session.kimi_effort.clone(),
             kimi_current_effort: session.kimi_current_effort.clone(),
             kimi_effort_options: session.kimi_effort_options.clone(),
+            gemini_reasoning: session.gemini_reasoning.clone(),
             kimi_approval_mode: session.kimi_approval_mode,
             kimi_mode: session.kimi_mode,
             kimi_current_mode: session.kimi_current_mode.clone(),
@@ -800,6 +805,7 @@ impl AppState {
         debug_assert_eq!(summary.kimi_effort, full.kimi_effort);
         debug_assert_eq!(summary.kimi_current_effort, full.kimi_current_effort);
         debug_assert_eq!(summary.kimi_effort_options, full.kimi_effort_options);
+        debug_assert_eq!(summary.gemini_reasoning, full.gemini_reasoning);
         debug_assert_eq!(
             summary.opencode_current_effort,
             full.opencode_current_effort

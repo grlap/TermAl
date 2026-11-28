@@ -312,6 +312,7 @@ fn each_profile_keeps_its_own_app_server() {
 pub(super) fn codex_session_update(sandbox_mode: CodexSandboxMode) -> UpdateSessionSettingsRequest {
     UpdateSessionSettingsRequest {
         kimi_effort: None,
+        gemini_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,

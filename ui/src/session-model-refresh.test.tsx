@@ -877,6 +877,33 @@ describe("session model refresh controls", () => {
     expect(onRequestModelOptions).toHaveBeenCalledWith("gemini-session");
   });
 
+  it("rediscovers Gemini capabilities when a restored session loses its live catalog", async () => {
+    const onRequestModelOptions = vi.fn().mockResolvedValue("refreshed");
+    const live = makeSession("gemini-restored", {
+      agent: "Gemini",
+      modelOptions: [{ label: "Auto", value: "auto" }],
+      geminiReasoning: { requested: "high", options: [{ label: "High", value: "high" }] },
+    });
+    const restored = { ...live, modelOptions: [], geminiReasoning: { requested: "high" } };
+    const card = (session: Session) => (
+      <GeminiPromptSettingsCard
+        paneId="pane-gemini"
+        session={session}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={onRequestModelOptions}
+        onSessionSettingsChange={() => {}}
+      />
+    );
+    const { rerender } = render(card(live));
+    expect(onRequestModelOptions).not.toHaveBeenCalled();
+    rerender(card(restored));
+    await waitFor(() => expect(onRequestModelOptions).toHaveBeenCalledWith(live.id));
+    rerender(card({ ...restored }));
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+  });
+
   it("shows inline refresh errors in the session card", () => {
     render(
       <GeminiPromptSettingsCard

@@ -89,7 +89,9 @@ palette.
 
 ### Gemini
 
-- Model options come from the Gemini ACP session.
+- Model and reasoning choices come from the Antigravity CLI ACP session. Reasoning choices can vary by model and runtime version.
+- Preferences saves a Gemini reasoning default for new sessions. TermAl tries the explicit session choice first, then the inherited default if the model supports it, and otherwise leaves the provider’s setting in place.
+- Reasoning changes apply before the next prompt. Provider default uses the provider’s advertised automatic choice when available, and otherwise leaves its current setting alone.
 - Model selection is session-scoped and uses the live session model list.
 - Gemini approval mode is also session-scoped: `default`, `auto_edit`, `yolo`,
   or `plan`.

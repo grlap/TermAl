@@ -1474,6 +1474,7 @@ fn sample_remote_orchestrator_state(
                 kimi_effort: None,
                 kimi_current_effort: None,
                 kimi_effort_options: Vec::new(),
+                gemini_reasoning: GeminiReasoning::default(),
                 opencode_mode: agent
                     .supports_opencode_settings()
                     .then(|| OPENCODE_CONFIG_AUTO.to_owned()),
@@ -1616,6 +1617,7 @@ fn test_state_session_summary_from_session(session: &Session) -> StateSessionSum
         kimi_effort: session.kimi_effort.clone(),
         kimi_current_effort: session.kimi_current_effort.clone(),
         kimi_effort_options: session.kimi_effort_options.clone(),
+        gemini_reasoning: session.gemini_reasoning.clone(),
         kimi_approval_mode: session.kimi_approval_mode,
         kimi_mode: session.kimi_mode,
         kimi_current_mode: session.kimi_current_mode.clone(),
@@ -2768,6 +2770,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2799,6 +2802,7 @@ fn canonicalizes_session_model_updates_from_live_model_labels() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2833,6 +2837,7 @@ fn revisions_increase_for_visible_state_changes() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2857,6 +2862,7 @@ fn revisions_increase_for_visible_state_changes() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2882,6 +2888,7 @@ fn revisions_increase_for_visible_state_changes() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2910,6 +2917,7 @@ fn renames_sessions_via_settings_updates() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2933,6 +2941,7 @@ fn renames_sessions_via_settings_updates() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,

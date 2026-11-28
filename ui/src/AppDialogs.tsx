@@ -122,6 +122,8 @@ type AppDialogsProps = {
   defaultCursorMode: CursorMode;
   onChangeDefaultCursorMode: (nextValue: CursorMode) => void;
   defaultGeminiModel: string;
+  defaultGeminiEffort: string;
+  handleDefaultGeminiEffortChange: (value: string) => void;
   defaultKimiModel: string;
   defaultKimiApprovalMode: KimiApprovalMode;
   defaultKimiEffort: string;
@@ -414,6 +416,8 @@ export function AppDialogs({
   defaultCursorMode,
   onChangeDefaultCursorMode,
   defaultGeminiModel,
+  defaultGeminiEffort,
+  handleDefaultGeminiEffortChange,
   defaultKimiModel,
   defaultKimiApprovalMode,
   defaultKimiEffort,
@@ -1254,6 +1258,8 @@ export function AppDialogs({
                 <GeminiPreferencesPanel
                   defaultGeminiApprovalMode={defaultGeminiApprovalMode}
                   defaultGeminiModel={defaultGeminiModel}
+                  defaultGeminiEffort={defaultGeminiEffort}
+                  onSelectEffort={handleDefaultGeminiEffortChange}
                   onSelectApprovalMode={onChangeDefaultGeminiApprovalMode}
                   onSelectModel={handleDefaultGeminiModelChange}
                   sessions={sessions}

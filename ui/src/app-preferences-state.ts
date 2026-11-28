@@ -117,6 +117,7 @@ export function useAppPreferencesState(
   const [defaultClaudeModel, setDefaultClaudeModel] = useState("default");
   const [defaultCursorModel, setDefaultCursorModel] = useState("default");
   const [defaultGeminiModel, setDefaultGeminiModel] = useState("default");
+  const [defaultGeminiEffort, setDefaultGeminiEffort] = useState("auto");
   const [defaultKimiModel, setDefaultKimiModel] = useState("default");
   const [defaultKimiApprovalMode, setDefaultKimiApprovalMode] = useState<KimiApprovalMode>("ask");
   const [defaultKimiEffort, setDefaultKimiEffort] = useState("auto");
@@ -219,6 +220,8 @@ export function useAppPreferencesState(
     defaultGeminiModel,
     defaultKimiModel,
     setDefaultGeminiModel,
+    defaultGeminiEffort,
+    setDefaultGeminiEffort,
     setDefaultKimiModel,
     defaultKimiApprovalMode,
     setDefaultKimiApprovalMode,

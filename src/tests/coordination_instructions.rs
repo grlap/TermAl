@@ -9,6 +9,7 @@ fn guidance_session(agent: Agent) -> (AppState, String) {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

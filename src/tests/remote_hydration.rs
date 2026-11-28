@@ -2474,6 +2474,19 @@ fn remote_text_delta_targeted_hydration_accepts_newer_global_revision_with_match
 // built-in default when the local UI request omits `model`.
 #[test]
 fn remote_session_create_forwards_configured_default_model() {
+    assert_remote_session_create_forwards_defaults(Agent::Codex, "gpt-5.5", None);
+}
+
+#[test]
+fn gemini_reasoning_remote_create_forwards_controlling_default() {
+    assert_remote_session_create_forwards_defaults(Agent::Gemini, "gemini-pro", Some("high"));
+}
+
+fn assert_remote_session_create_forwards_defaults(
+    agent: Agent,
+    model: &str,
+    gemini_effort: Option<&str>,
+) {
     let captured_body = Arc::new(Mutex::new(None::<Value>));
     let captured_body_for_server = captured_body.clone();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener should bind");
@@ -2487,12 +2500,12 @@ fn remote_session_create_forwards_configured_default_model() {
         kimi_current_mode: None,
         id: "remote-session-default-model".to_owned(),
         name: "Remote Default Model".to_owned(),
-        emoji: Agent::Codex.avatar().to_owned(),
-        agent: Agent::Codex,
+        emoji: agent.avatar().to_owned(),
+        agent,
         workdir: "/remote/repo".to_owned(),
         project_id: Some("remote-project-default-model".to_owned()),
         remote_id: None,
-        model: "gpt-5.5".to_owned(),
+        model: model.to_owned(),
         model_options: Vec::new(),
         approval_policy: Some(default_codex_approval_policy()),
         reasoning_effort: Some(default_codex_reasoning_effort()),
@@ -2509,6 +2522,10 @@ fn remote_session_create_forwards_configured_default_model() {
         kimi_effort: None,
         kimi_current_effort: None,
         kimi_effort_options: Vec::new(),
+        gemini_reasoning: GeminiReasoning {
+            inherited: gemini_effort.map(str::to_owned),
+            ..GeminiReasoning::default()
+        },
         opencode_mode: None,
         opencode_current_mode: None,
         opencode_mode_options: Vec::new(),
@@ -2549,7 +2566,7 @@ fn remote_session_create_forwards_configured_default_model() {
         name: "SSH Default Model".to_owned(),
         transport: RemoteTransport::Ssh,
         enabled: true,
-        host: Some("example.com".to_owned()),
+        host: Some("127.0.0.1".to_owned()),
         port: Some(22),
         user: Some("alice".to_owned()),
     };
@@ -2558,10 +2575,11 @@ fn remote_session_create_forwards_configured_default_model() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
-            default_codex_model: Some("gpt-5.5".to_owned()),
+            default_gemini_effort: gemini_effort.map(str::to_owned),
+            default_codex_model: (agent == Agent::Codex).then(|| model.to_owned()),
             default_claude_model: None,
             default_cursor_model: None,
-            default_gemini_model: None,
+            default_gemini_model: (agent == Agent::Gemini).then(|| model.to_owned()),
             default_kimi_model: None,
             default_opencode_model: None,
             default_codex_reasoning_effort: None,
@@ -2612,12 +2630,14 @@ fn remote_session_create_forwards_configured_default_model() {
         }
     });
 
+    let ssh_starts = TEST_REMOTE_SSH_START_ATTEMPTS.with(std::cell::Cell::get);
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
-            agent: Some(Agent::Codex),
+            agent: Some(agent),
             name: Some("Remote Default Model".to_owned()),
             workdir: None,
             project_id: Some(local_project_id.clone()),
@@ -2632,7 +2652,9 @@ fn remote_session_create_forwards_configured_default_model() {
         })
         .unwrap();
 
-    assert_eq!(created.session.model, "gpt-5.5");
+    assert_eq!(TEST_REMOTE_SSH_START_ATTEMPTS.with(std::cell::Cell::get), ssh_starts);
+    assert_eq!(created.session.model, model);
+    assert_eq!(created.session.gemini_reasoning.inherited.as_deref(), gemini_effort);
     assert_eq!(
         created.session.project_id.as_deref(),
         Some(local_project_id.as_str())
@@ -2642,7 +2664,8 @@ fn remote_session_create_forwards_configured_default_model() {
         .expect("captured body mutex poisoned")
         .clone()
         .expect("remote create request should be captured");
-    assert_eq!(body["model"], Value::String("gpt-5.5".to_owned()));
+    assert_eq!(body["model"], model);
+    assert_eq!(body["geminiInheritedEffort"].as_str(), gemini_effort);
     assert_eq!(
         body["projectId"],
         Value::String("remote-project-default-model".to_owned())

@@ -73,6 +73,7 @@ export type SessionSettingsField =
   | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode"
+  | "geminiEffort"
   | "opencodeEffort"
   | "kimiEffort"
   | "opencodeMode";
