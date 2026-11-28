@@ -1,0 +1,15 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "central-c391-slot-2026-11-28",
+  "head": {
+    "state": "active",
+    "chain": [
+      "99ab3c2633964702a2e5af6416aea71a",
+      "e49e21f983104cd586bc634ed87b23ec",
+      "b2ebccf9e93b4f97a221860352717bb1",
+      "b3e3abc0ac514af3ab7f42e31c3c426e",
+      "3f83cb9d5c6a458b9337951e91614bfa"
+    ]
+  }
+}

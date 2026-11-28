@@ -1,0 +1,16 @@
+{
+  "format": "engram-project-memories-v1",
+  "project_id": "github.com/grlap/TermAl",
+  "key": "architect2-winb-gemini-data-reconciliation-2026-11-28",
+  "head": {
+    "state": "active",
+    "chain": [
+      "73ca93690aa44e7caf5c8fdb95c5d227",
+      "27a2d58ab3664974b64b4e05124d7777",
+      "2423697bd130408699bb22f60501080d",
+      "e59a45c181c044998c9025f7e08c9ed2",
+      "a8771d59dc8745d88ba772b71e0fc1c1",
+      "05ab82a1094b42e2bf391610b320a6ad"
+    ]
+  }
+}

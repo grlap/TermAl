@@ -1,0 +1,32 @@
+{
+  "id": "01a22113-9d60-7963-afd6-b86c8425cabe",
+  "external_ref": null,
+  "title": "Support Neon High as a native read-only reviewer alternative",
+  "outcome": "Neon High can participate in the native review workflow with an authenticated, retained structured result and an enforced read-only boundary, rather than only providing explorer prose.",
+  "acceptance": [
+    "A supported native Neon High review path records the actual provider/model, candidate/base and original result identity, and returns a validated structured reviewer result to its parent through the normal retained-result and completion flow.",
+    "The reviewer submission is bound to the authenticated child/delegation context and the read-only policy remains enforced; presentation text, arbitrary tool names, another child's identity or explorer prose cannot supply reviewer authority.",
+    "Behavior tests cover a completed Neon review, missing or invalid submission, wrong-child submission and safe identical retry/recovery; existing Codex, Claude and Kimi review behavior stays valid, and unsupported runtime capability is reported explicitly."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 2,
+  "labels": [
+    "delegation",
+    "gemini",
+    "greg-directed",
+    "neon",
+    "review"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

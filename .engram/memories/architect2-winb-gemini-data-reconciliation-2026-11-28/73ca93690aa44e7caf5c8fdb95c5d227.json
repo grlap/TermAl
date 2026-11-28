@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "architect2-winb-gemini-data-reconciliation-2026-11-28",
+    "revision_id": "73ca93690aa44e7caf5c8fdb95c5d227",
+    "previous": null,
+    "body_sha256": "b0d456a92cedb10cb976315a41a1f4903d2de0ee64b9779cbe9fabdfc5c2e390",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-28T08:35:46.040974800Z"
+    }
+  },
+  "body": "Bounded protocol consult assigned by Engram::Asistant mailbox-defeba53 #5 and Merger2 session-14549 #34/#35; Architect2 session-8983 only decides protocol, Coord-WinB native26 executes through Merger2. No operational claim or source work. Full original WinB note 6d766c2045dc42a3b950da7d374c7b4b read verbatim in Merger2 #37, work w-ddddf7a8b85b, UUID 01a220bd-69be-7692-a4be-ddddf7a8b85b, WinB store only. Actual: HEAD S85446e662962563c322f2079a8cdb85e9c8cbbfc, 10 unstaged/0 staged; one real C391 import exit3 (4 applied + exact c4a13cdf08cf/089221790b26 held local_planning_unpublished); one ordinary export exit0 already executed before withdrawal read, 9 task writes/0 removed, two completed projections 7e7c/bb989 plus seven new tasks, memory files unchanged. 35 public paths still absent; net vs public711b00aa 35D+7M+7A. Same 7e7c seal456f84f8a91d44168afd374c47525aa0. No E, revert, further import or push. Protocol STOP remains. Full #106/#107 confirm partial import support does not allow routine export after held result. Proposed separate recovery E checkpoint -> explicit forward reconciliation R restoring public35 while preserving completions/additions -> ordinary dry-run -> STOP is NOT yet GO. Read-only current Engram source prepare_folder_import/prove_export_commit suggests R need not adopt E as exact-export confirmation; ordinary import can use recorded source plus pending/own-written paths. This is an inference, not pinned C391 verification or test evidence. Engram::Merger11859 was asked to verify minimum route against C391 via mailbox-fb1cc035 #6/#7 (last message ff50e00a-cd0b-4a18-8ef6-c3b859173c6e); response pending. Merger2 #36 and Asistant #6 informed; all read incoming pages ACKed. Next: read Merger reply, decide one bounded recovery step and hand it to Merger2; never publish intermediate deletion state, import incomplete E just to confirm it, reset/rebuild, revise completed seals, release claims, blanket ours/theirs, or assume full sync PASS. Source repairs Gemini independent. Raw evidence retention owner Coord-WinB until data disposition."
+}

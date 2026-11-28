@@ -1,0 +1,24 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "central-c391-slot-2026-11-28",
+    "revision_id": "99ab3c2633964702a2e5af6416aea71a",
+    "previous": null,
+    "body_sha256": "851f7e32861656c5a6affed2028cf6f5776df326258230dc1aa1456c73f0659e",
+    "retiring_target": {
+      "kind": "external",
+      "project": "github.com/grlap/Engram",
+      "reference": "w-c39164e2c07b"
+    },
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6.1-sol;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-28T08:06:49.524134200Z"
+    }
+  },
+  "body": "ONE-TIME Central C391 build slot; not a permanent scheduler role. Greg via Asistant124/messagee2eca750 (08:02:09Z) „Legal nie pracuje. Znajdz zastępcę” and125/messagecfa19614 (08:03:35Z) „Na jakie potwierdzenie? Opus nie działa. Nie macie na co czekac” assigns Merger2/14549 this single admission. EngramMerger11859 request98/messageeafd016f says no build started. At08:05:45Z FV26,675,524/26,667,316KiB, Cfree295,810,433,024bytes; durablequeue/grants no otherCargo, no process listing; Legalidle perGreg. Current standing releasefloor20,971,520KiB from central-engram-release-build-floor-2026-11-15 r2. LAUNCH NOW native99/message20d3873e, stablekeymerger2-c391-release-slot-20261128T0806: existing exactC391 frozenrequest, ONE cargo build --release --bin engram -j1, normal locked/ownedtarget, window08:06–08:36UTC. ActualSTART/NO START/END waker11859 directlyto14549+Asistant15908. NO NEW Central LLMspawn/otherCargo untilEND; existing readonly Gemini reviewers20948+20949 continue. First1455/OOM/allocationerror stops, no retry; actualadmission/low/endFV andsource/artifacthash reported. No newinstall/restart/pushauthority or otherwork. Grant sent/queued, START not yet confirmed. Queuefiles .tmp/q8111/{central-queue,pending-queue}.txt updated. No duplicate grant while this admission outstanding."
+}

@@ -1,0 +1,20 @@
+{
+  "provenance": {
+    "format": "engram-project-memories-v1",
+    "project_id": "github.com/grlap/TermAl",
+    "key": "architect2-winb-gemini-data-reconciliation-2026-11-28",
+    "revision_id": "05ab82a1094b42e2bf391610b320a6ad",
+    "previous": "a8771d59dc8745d88ba772b71e0fc1c1",
+    "body_sha256": "9e4afe47817645756864c7c1b3f733f6cf9c64c5c00b9691346d10205b276a70",
+    "retiring_target": null,
+    "source_clear": false,
+    "source": {
+      "actor_id": "greg/codex",
+      "actor_kind": "agent",
+      "actor_context": "agent=codex;model=gpt-6-astra;reasoning=high",
+      "reason": "record attributed project memory",
+      "remembered_at": "2026-11-28T08:58:26.898485300Z"
+    }
+  },
+  "body": "COMPLETED bounded WinB data-recovery protocol consult, 2026-11-28. Architect2/8983 routing, EngramMerger11859 technical interpretation, Merger2/14549 data-owner handoff, Coord-WinB26 sole executor. No remaining Architect STOP or operational work assigned here. No Central import performed/claimed; no Gemini code landing claimed.\n\nFinal source: Coord-WinB directrelay mailbox071089bf #2/message4f9d43a8-933a-4b28-93d9-aeaf979173c3, created08:57:30Z, fully read+receiptACK. WinB original task w-ddddf7a8b85b UUID01a220bd-69be-7692-a4be-ddddf7a8b85b; finalnote e5bbad1cd4f04ef1ae32bb469fab9a79. Reported actual: ONE real ordinary import R174add0e2b3f0ae60e2214d969021f83daf26956 exit0 incremental, identical to accepted dry-run exceptdry_run flags:41applied (39restored+2formerlyheld),zeroheld/conflict/refusal,1068memoryduplicates,no newrevision/retirement. Same C391d6f4cf9e/buildb1ae75f0cad0. R confirmed/clean. HTTPSfetch public711b00aa13f59cd0cf21af09c13c37e88102fcb8 alreadyancestorR. Ordinaryexport exit0:5771tasks,0writes/removed,1068keys,zero withheld; onlyfolder_exchange changed. Final C6546e3ae1876abd2121e9a126e2efde50030f2e8/tree8c75751f8ea06ec71136afd86e12db9d950fc3a4/soleparentR. ConfirmimportC exit0 changed=false,0taskrows,1068duplicates. HTTPSFFpush only6546e3ae:refs/heads/engram-data exit0; independentls-remote matched exactC, WinBHEAD/remote clean. Runner-reported observation time09:56:47Z differs from Centralmailclock08:57Z; no cross-clock ordering inferred.\n\nPreserved publicfiles: netvs711b7A+3M(two completions+envelope),zeroD/zeromemoryfilechanges,243addedlines afterdisclosurescan. Seals7e7c456f84f8a91d44168afd374c47525aa0 andbb989bf56a2da164b414090010c4b47fdc16b plus original activeGeminiholderpeer-36c07681a72a155bd498c3d3 preserved. No incompleteEimport/rebuild/claimorsealmutation/codepush. Full original evidence retained onWinB under .evidence/c391-reconciliation-{r-real-import,ordinary-export,final-confirm-import}.json and final-net-from-public.diff, togetherwithS/E/Rreceipts,audit,diff. Retention ownerCoord26 for original openGemini task untildata/evidence needends; no cleanupbyArchitect.\n\nDecision trail: preserved S85446e662962563c322f2079a8cdb85e9c8cbbfc with already-appliedpartialimport/export. TechnicalMerger#10/message70a5c00e verified C391 supports ordinaryS→R plus retainedwrittenjournal withoutimporting incompleteE. Architect→Merger2#39/message8d23aedb authorized LOCALexactexportE2bc0495a56e936bb6b59e7073fbf28a90aa65ccb thenforwardR restoring35publicpaths+4individuallyresolvedpaths55bc/eca7/e638/c6ef, preserving2completed+7new;ONEdryrunSTOP. Dryrunexit0 permitted #41/message707ca299 ONErealimportR, matchingexit0 releases SPECIALrecoverySTOP toexistingMerger2ordinaryexchangeprocedure, no additionalpushauthority. Full historical constraints/results inrevisions1–5.\n\nCompletion reported toMerger2#45/message6c2766a9-3068-4e0c-8d0c-65fb2fe7dcf6 andAsistant#8/messagee75e04da-15cd-4281-821c-fdb731d50248. Existingdataowner owns any neededCentralexchange; no furtherArchitectapproval/test/evaluation added. This establishes WinB↔origin recovery/publication per executor evidence, not synchronization ofallhosts."
+}
