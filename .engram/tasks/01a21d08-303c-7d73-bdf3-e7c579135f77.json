@@ -1,0 +1,29 @@
+{
+  "id": "01a21d08-303c-7d73-bdf3-e7c579135f77",
+  "external_ref": null,
+  "title": "Clarify native relay recovery advice after confirmed home association loss",
+  "outcome": "Confirmed home association loss explains the observed participant row and gives recovery steps suited to the requested operation.",
+  "acceptance": [
+    "The local refusal accurately describes active participant evidence and the missing association without implying acknowledgement authority.",
+    "Remote advice distinguishes a page-read retry from receipt acknowledgement and describes the page read needed to recover a cold satellite route after replay.",
+    "The bounded relay reason and receipt and cursor protection remain in place."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "federation",
+    "mailbox"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

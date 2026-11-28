@@ -1,0 +1,30 @@
+{
+  "id": "01a21bb4-7e5a-77d2-be7e-cc9b62ed7736",
+  "external_ref": null,
+  "title": "Allow safe disposition progress when a long same-path retired-check census times out",
+  "outcome": "A same-path history that exhausts the blocker census budget has a supported way to make progress without a fresh registered check. Admission stays closed until the required evidence is determined.",
+  "acceptance": [
+    "Allow safe disposition progress when a long same-path retired-check census times out is done"
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "acceptance-evaluation",
+    "blocks-engram-p0",
+    "check-credit",
+    "cross-project",
+    "engram-host"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a20683-b4b5-7eb3-9aef-e638e92ffc11",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
