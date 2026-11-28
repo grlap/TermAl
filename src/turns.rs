@@ -427,6 +427,8 @@ pub(crate) struct AppPreferences {
     /// `auto` leaves new Kimi sessions on the CLI's current effort.
     #[serde(default = "default_kimi_effort_preference")]
     pub(crate) default_kimi_effort: String,
+    #[serde(default = "default_gemini_effort_preference")]
+    pub(crate) default_gemini_effort: String,
     #[serde(default = "default_codex_reasoning_effort")]
     pub(crate) default_codex_reasoning_effort: CodexReasoningEffort,
     #[serde(default = "default_claude_approval_mode")]
@@ -498,6 +500,7 @@ impl Default for AppPreferences {
             default_opencode_approval_mode: OpenCodeApprovalMode::Ask,
             default_kimi_approval_mode: KimiApprovalMode::Ask,
             default_kimi_effort: default_kimi_effort_preference(),
+            default_gemini_effort: default_gemini_effort_preference(),
             default_codex_reasoning_effort: default_codex_reasoning_effort(),
             default_claude_approval_mode: default_claude_approval_mode(),
             default_claude_effort: default_claude_effort(),

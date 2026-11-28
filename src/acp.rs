@@ -903,9 +903,10 @@ pub(crate) fn handle_acp_session_config_refresh_inner(
         .expect("ACP runtime state mutex poisoned")
         .current_session_id
         .is_some()
+        && agent != AcpAgent::Gemini
     {
         if !matches!(agent, AcpAgent::OpenCode | AcpAgent::Kimi) {
-            // Cursor and Gemini do not expose a live config-query method.
+            // Cursor does not expose a live config-query method.
             // Preserve their historical successful no-op; OpenCode and Kimi use the
             // controlled restart path in `refresh_session_model_options`.
             return Ok(());
@@ -1007,6 +1008,24 @@ pub(crate) fn ensure_acp_session_ready_inner(
         )
     };
     if let Some(existing_session_id) = existing_session_id {
+        if agent == AcpAgent::Gemini {
+            let token = match &engram_mcp_source {
+                AcpEngramMcpSource::Runtime { token, .. } => Some(*token),
+                #[cfg(test)]
+                AcpEngramMcpSource::LiveState => None,
+            };
+            configure_gemini_acp_session(
+                writer,
+                pending_requests,
+                state,
+                session_id,
+                &existing_session_id,
+                runtime_state,
+                token,
+                &command.model,
+                purpose == AcpSessionPurpose::Prompt,
+            )?;
+        }
         return Ok(existing_session_id);
     }
     // The runtime snapshot carries identity even when Engram is disabled;
@@ -1157,6 +1176,22 @@ pub(crate) fn ensure_acp_session_ready_inner(
                 false,
             )?;
         }
+    } else if agent == AcpAgent::Gemini {
+        runtime_state
+            .lock()
+            .expect("ACP runtime state mutex poisoned")
+            .gemini_config = Some(session_config);
+        configure_gemini_acp_session(
+            writer,
+            pending_requests,
+            state,
+            session_id,
+            &external_session_id,
+            runtime_state,
+            source_runtime,
+            &command.model,
+            purpose == AcpSessionPurpose::Prompt,
+        )?;
     } else if agent == AcpAgent::OpenCode {
         reconcile_opencode_config(
             writer,
@@ -1856,6 +1891,31 @@ pub(crate) fn handle_acp_notification(
                     true,
                 );
             }
+            if agent == AcpAgent::Gemini
+                && update
+                    .get("sessionUpdate")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| is_acp_config_update_kind(kind, agent))
+            {
+                let mut runtime = runtime_state
+                    .lock()
+                    .expect("ACP runtime state mutex poisoned");
+                if runtime.current_session_id.as_deref().is_some_and(|id| {
+                    message.pointer("/params/sessionId").and_then(Value::as_str) == Some(id)
+                }) && has_acp_config_option_list(update, "model")
+                {
+                    runtime.gemini_config = Some(update.clone());
+                    drop(runtime);
+                    return state.observe_gemini_acp_config(
+                        session_id,
+                        Some(runtime_token),
+                        None,
+                        update,
+                        true,
+                    );
+                }
+                return Ok(());
+            }
             if agent == AcpAgent::OpenCode
                 && update
                     .get("sessionUpdate")
@@ -1890,10 +1950,10 @@ pub(crate) fn handle_acp_notification(
 /// Both the reader-side OpenCode wake-up path and the writer-side dispatcher
 /// must use this predicate so a newly supported protocol spelling cannot wake
 /// only one half of the model-dependent config flow.
-/// Kimi's singular spelling is scoped to Kimi, not added to other adapters.
+/// Gemini and Kimi also use ACP's singular spelling.
 pub(crate) fn is_acp_config_update_kind(kind: &str, agent: AcpAgent) -> bool {
     matches!(kind, "config_options_update" | "config_update")
-        || (agent == AcpAgent::Kimi && kind == "config_option_update")
+        || (matches!(agent, AcpAgent::Gemini | AcpAgent::Kimi) && kind == "config_option_update")
 }
 
 /// Handles ACP session update.

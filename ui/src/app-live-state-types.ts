@@ -170,6 +170,7 @@ export type UseAppLiveStatePreferenceSetters = {
   setDefaultClaudeModel: Dispatch<SetStateAction<string>>;
   setDefaultCursorModel: Dispatch<SetStateAction<string>>;
   setDefaultGeminiModel: Dispatch<SetStateAction<string>>;
+  setDefaultGeminiEffort: Dispatch<SetStateAction<string>>;
   setDefaultKimiModel: Dispatch<SetStateAction<string>>;
   setDefaultKimiApprovalMode: Dispatch<SetStateAction<KimiApprovalMode>>;
   setDefaultKimiEffort: Dispatch<SetStateAction<string>>;

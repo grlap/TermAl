@@ -116,6 +116,9 @@ export function buildOptimisticSessionSettingsUpdate(
       };
     }
     case "Gemini": {
+      if (field === "geminiEffort") {
+        return { ...session, geminiReasoning: { ...session.geminiReasoning, requested: value as string } };
+      }
       const nextModel = normalizedModelValue ?? session.model;
       const nextGeminiApprovalMode =
         field === "geminiApprovalMode"
@@ -133,6 +136,9 @@ export function buildOptimisticSessionSettingsUpdate(
         ...session,
         model: nextModel,
         geminiApprovalMode: nextGeminiApprovalMode,
+        geminiReasoning: nextModel !== session.model
+          ? { requested: session.geminiReasoning?.requested, inherited: session.geminiReasoning?.inherited }
+          : session.geminiReasoning,
       };
     }
     case "Kimi": {
@@ -315,6 +321,12 @@ export function rollbackOptimisticSessionSettingsUpdate(
     nextSession.claudeEffort = previousSession.claudeEffort;
     changed = true;
   }
+  if (currentSession.geminiReasoning === optimisticSession.geminiReasoning &&
+      currentSession.geminiReasoning !== previousSession.geminiReasoning) {
+    nextSession.geminiReasoning = previousSession.geminiReasoning;
+    changed = true;
+  }
+
   if (
     currentSession.geminiApprovalMode === optimisticSession.geminiApprovalMode &&
     currentSession.geminiApprovalMode !== previousSession.geminiApprovalMode

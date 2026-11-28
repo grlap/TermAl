@@ -246,6 +246,12 @@ impl StateInner {
                     .filter(|effort| !effort.is_empty() && effort != "auto"),
                 kimi_current_effort: None,
                 kimi_effort_options: Vec::new(),
+                gemini_reasoning: GeminiReasoning {
+                    inherited: (agent == Agent::Gemini)
+                        .then(|| self.preferences.default_gemini_effort.clone())
+                        .filter(|value| value != GEMINI_PROVIDER_DEFAULT_EFFORT),
+                    ..GeminiReasoning::default()
+                },
                 kimi_approval_mode: (agent == Agent::Kimi)
                     .then_some(self.preferences.default_kimi_approval_mode),
                 kimi_mode: (agent == Agent::Kimi).then_some(KimiMode::Default),

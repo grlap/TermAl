@@ -4,6 +4,51 @@
 
 use super::*;
 
+pub(crate) const GEMINI_PROVIDER_DEFAULT_EFFORT: &str = "auto";
+const MAX_GEMINI_EFFORT_CHARS: usize = 128;
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GeminiReasoning {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) requested: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) inherited: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) current: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) options: Vec<SessionModelOption>,
+}
+
+impl GeminiReasoning {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.requested.is_none()
+            && self.inherited.is_none()
+            && self.current.is_none()
+            && self.options.is_empty()
+    }
+
+    pub(crate) fn clear_observation(&mut self) {
+        self.current = None;
+        self.options.clear();
+    }
+}
+
+pub(crate) fn default_gemini_effort_preference() -> String {
+    GEMINI_PROVIDER_DEFAULT_EFFORT.to_owned()
+}
+
+pub(crate) fn normalize_gemini_effort(value: &str) -> Result<String, ApiError> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.chars().count() > MAX_GEMINI_EFFORT_CHARS
+        || value.chars().any(char::is_control)
+    {
+        return Err(ApiError::bad_request("Invalid Gemini reasoning effort"));
+    }
+    Ok(value.to_owned())
+}
+
 pub(crate) fn resolve_gemini_executable() -> Option<PathBuf> {
     resolve_gemini_executable_with(
         std::env::var_os("PATH").as_deref(),
@@ -93,4 +138,209 @@ pub(crate) fn agy_auth_method_with(
                     .any(|method| method["id"].as_str() == Some(*id))
         })
         .map(|(id, _)| id.to_owned())
+}
+
+fn gemini_effort_config_id(config: &Value) -> Option<&str> {
+    let entries = config
+        .get("configOptions")
+        .or_else(|| config.get("config_options"))?
+        .as_array()?;
+    entries.iter().find_map(|entry| {
+        let id = entry.get("id")?.as_str()?;
+        let category = entry.get("category").and_then(Value::as_str);
+        let label = entry.get("name").and_then(Value::as_str);
+        (entry.get("type").and_then(Value::as_str) == Some("select")
+            && id.len() <= MAX_GEMINI_EFFORT_CHARS
+            && !id.is_empty()
+            && !id.chars().any(char::is_control)
+            && (category == Some("thought_level")
+                || label.is_some_and(|label| label.eq_ignore_ascii_case("Thinking level"))))
+        .then_some(id)
+    })
+}
+
+fn gemini_effort_observation(config: &Value) -> (Option<String>, Vec<SessionModelOption>) {
+    let Some(id) = gemini_effort_config_id(config) else {
+        return (None, Vec::new());
+    };
+    let options = acp_session_config_options(config, id, Some(MAX_GEMINI_EFFORT_CHARS));
+    let current = current_acp_config_option_value(config, id)
+        .filter(|value| options.iter().any(|option| &option.value == value));
+    (current, options)
+}
+
+fn gemini_model_is_provider_default(model: &str) -> bool {
+    matches!(model, "" | "default" | "auto")
+}
+
+pub(crate) fn configure_gemini_acp_session(
+    writer: &mut impl Write,
+    pending: &AcpPendingRequestMap,
+    state: &AppState,
+    session_id: &str,
+    external_id: &str,
+    runtime: &Arc<Mutex<AcpRuntimeState>>,
+    token: Option<&RuntimeToken>,
+    model: &str,
+    apply_effort: bool,
+) -> Result<()> {
+    let Some(mut config) = runtime
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .gemini_config
+        .clone()
+    else {
+        return Ok(());
+    };
+    let mut model_matches = gemini_model_is_provider_default(model)
+        || current_acp_config_option_value(&config, "model").as_deref() == Some(model);
+    if !model_matches {
+        if let Some(value) = matching_acp_config_option_value(&config, "model", model) {
+            config = set_gemini_acp_config(writer, pending, external_id, "model", &value)?;
+            model_matches = current_acp_config_option_value(&config, "model").as_deref()
+                == Some(value.as_str());
+        }
+    }
+    // Publish model-dependent choices before attempting the effort setter, so a
+    // refusal leaves users with the choices that Gemini actually advertised.
+    state.observe_gemini_acp_config(session_id, token, Some(model), &config, model_matches)?;
+    runtime
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .gemini_config = Some(config.clone());
+    if !apply_effort || !model_matches {
+        return Ok(());
+    }
+
+    let Some(id) = gemini_effort_config_id(&config) else {
+        return Ok(());
+    };
+    let Some((requested, inherited)) = state.gemini_requested_effort(session_id, token) else {
+        return Ok(());
+    };
+    let (current, options) = gemini_effort_observation(&config);
+    let find_effort = |value: &str| options.iter().find(|option| option.value == value);
+    let selected = if requested.as_deref() == Some(GEMINI_PROVIDER_DEFAULT_EFFORT) {
+        find_effort(GEMINI_PROVIDER_DEFAULT_EFFORT).or_else(|| find_effort("default"))
+    } else {
+        [requested.as_deref(), inherited.as_deref()]
+            .into_iter()
+            .flatten()
+            .find_map(find_effort)
+    };
+    let Some(selected) = selected.filter(|option| Some(&option.value) != current.as_ref()) else {
+        return Ok(());
+    };
+
+    let updated = set_gemini_acp_config(writer, pending, external_id, id, &selected.value)?;
+    let previous_model = current_acp_config_option_value(&config, "model");
+    let updated_model = current_acp_config_option_value(&updated, "model");
+    let same_model = previous_model == updated_model;
+    state.observe_gemini_acp_config(
+        session_id,
+        token,
+        updated_model.as_deref().or(Some(model)),
+        &updated,
+        same_model,
+    )?;
+    let acknowledged = gemini_effort_observation(&updated).0;
+    runtime
+        .lock()
+        .expect("ACP runtime state mutex poisoned")
+        .gemini_config = Some(updated);
+    if !same_model || acknowledged.as_ref() != Some(&selected.value) {
+        bail!("Gemini did not acknowledge the selected reasoning effort for this model");
+    }
+    Ok(())
+}
+
+fn set_gemini_acp_config(
+    writer: &mut impl Write,
+    pending: &AcpPendingRequestMap,
+    external_id: &str,
+    id: &str,
+    value: &str,
+) -> Result<Value> {
+    send_acp_json_rpc_request(
+        writer,
+        pending,
+        "session/set_config_option",
+        json!({"sessionId": external_id, "configId": id, "value": value}),
+        Duration::from_secs(15),
+        AcpAgent::Gemini,
+    )
+}
+
+impl AppState {
+    fn gemini_requested_effort(
+        &self,
+        session_id: &str,
+        token: Option<&RuntimeToken>,
+    ) -> Option<(Option<String>, Option<String>)> {
+        let inner = self.inner.lock().expect("state mutex poisoned");
+        let record = &inner.sessions[inner.find_session_index(session_id)?];
+        if token.is_some_and(|token| !record.runtime.matches_runtime_token(token)) {
+            return None;
+        }
+        let reasoning = &record.session.gemini_reasoning;
+        Some((reasoning.requested.clone(), reasoning.inherited.clone()))
+    }
+
+    pub(crate) fn observe_gemini_acp_config(
+        &self,
+        session_id: &str,
+        token: Option<&RuntimeToken>,
+        expected_model: Option<&str>,
+        config: &Value,
+        use_effort: bool,
+    ) -> Result<()> {
+        let current_model = current_acp_config_option_value(config, "model");
+        let has_model_choices = has_acp_config_option_list(config, "model");
+        let models = acp_model_options(config, AcpAgent::Gemini);
+        let (effort, choices) = if use_effort {
+            gemini_effort_observation(config)
+        } else {
+            (None, Vec::new())
+        };
+        let mut inner = self.inner.lock().expect("state mutex poisoned");
+        let Some(index) = inner.find_session_index(session_id) else {
+            return Ok(());
+        };
+        let record = &inner.sessions[index];
+        if record.session.agent != Agent::Gemini
+            || token.is_some_and(|token| !record.runtime.matches_runtime_token(token))
+            || expected_model.is_some_and(|model| model != record.session.model)
+        {
+            return Ok(());
+        }
+        let model = current_model.filter(|_| use_effort && expected_model.is_some());
+        let effort_matches = use_effort
+            && (expected_model.is_some()
+                || current_acp_config_option_value(config, "model").as_deref()
+                    == Some(record.session.model.as_str()));
+        if !effort_matches && expected_model.is_none() {
+            return Ok(());
+        }
+        let session = &record.session;
+        if model.as_ref().is_none_or(|model| model == &session.model)
+            && (!has_model_choices || models == session.model_options)
+            && effort == session.gemini_reasoning.current
+            && choices == session.gemini_reasoning.options
+        {
+            return Ok(());
+        }
+        let record = inner
+            .session_mut_by_index(index)
+            .expect("valid Gemini session index");
+        if let Some(model) = model {
+            record.session.model = model;
+        }
+        if has_model_choices {
+            record.session.model_options = models;
+        }
+        record.session.gemini_reasoning.current = effort;
+        record.session.gemini_reasoning.options = choices;
+        self.commit_locked(&mut inner)?;
+        Ok(())
+    }
 }

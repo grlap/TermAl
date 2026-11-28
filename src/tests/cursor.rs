@@ -1577,6 +1577,7 @@ fn updates_live_cursor_mode_on_active_acp_sessions() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,

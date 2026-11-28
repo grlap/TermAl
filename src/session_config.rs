@@ -71,7 +71,7 @@ impl AppState {
     /// - Cursor (ACP): model and `cursor_mode` propagate live via
     ///   `session/set_config_option` JSON-RPC messages queued for the
     ///   ACP writer.
-    /// - Gemini (ACP): model updates in place; approval-mode changes
+    /// - Gemini (ACP): model and reasoning updates apply before a prompt; approval-mode changes
     ///   flip `runtime_reset_required` for the next send.
     /// - Kimi (ACP): model changes restart the runtime; effort changes only
     ///   require rotation when an installed Engram actor context changes.
@@ -131,6 +131,41 @@ impl AppState {
                 matching_session_model_option_value(value, &record.session.model_options)
                     .unwrap_or_else(|| value.to_owned())
             });
+        let gemini_effort = request
+            .gemini_effort
+            .as_deref()
+            .map(normalize_gemini_effort)
+            .transpose()?;
+        if let Some(effort) = gemini_effort.as_deref() {
+            if record.session.agent != Agent::Gemini {
+                return Err(ApiError::bad_request(
+                    "geminiEffort is only supported by Gemini",
+                ));
+            }
+            if matches!(
+                record.session.status,
+                SessionStatus::Active | SessionStatus::Approval | SessionStatus::Stopping
+            ) {
+                return Err(ApiError::conflict(
+                    "Change Gemini reasoning effort between turns",
+                ));
+            }
+            if effort != GEMINI_PROVIDER_DEFAULT_EFFORT
+                && (requested_model
+                    .as_deref()
+                    .is_some_and(|model| model != record.session.model)
+                    || !record
+                        .session
+                        .gemini_reasoning
+                        .options
+                        .iter()
+                        .any(|option| option.value == effort))
+            {
+                return Err(ApiError::bad_request(
+                    "Gemini did not advertise this reasoning effort for the current model",
+                ));
+            }
+        }
         if request.kimi_effort.is_some() && record.session.agent != Agent::Kimi {
             return Err(ApiError::bad_request(
                 "kimiEffort is only supported by Kimi",
@@ -742,7 +777,13 @@ impl AppState {
             }
             agent if agent.supports_gemini_approval_mode() => {
                 if let Some(model) = requested_model.as_deref() {
-                    record.session.model = model.to_owned();
+                    if record.session.model != model {
+                        record.session.model = model.to_owned();
+                        record.session.gemini_reasoning.clear_observation();
+                    }
+                }
+                if let Some(effort) = gemini_effort {
+                    record.session.gemini_reasoning.requested = Some(effort);
                 }
                 if let Some(gemini_approval_mode) = request.gemini_approval_mode {
                     if record.session.gemini_approval_mode != Some(gemini_approval_mode) {

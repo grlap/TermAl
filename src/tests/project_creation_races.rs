@@ -23,6 +23,7 @@ pub(super) fn remote_settings_request(remotes: Vec<RemoteConfig>) -> UpdateAppSe
         default_opencode_approval_mode: None,
         default_kimi_approval_mode: None,
         default_kimi_effort: None,
+        default_gemini_effort: None,
         default_codex_model: None,
         default_claude_model: None,
         default_cursor_model: None,

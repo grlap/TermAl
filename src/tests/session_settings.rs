@@ -44,6 +44,7 @@ fn test_engram_mcp_installed_descriptor(session: &Session) -> EngramMcpInstalled
 fn remote_session_settings_payload_includes_agent_dependents_and_timeout_slack() {
     let payload = serde_json::to_value(UpdateSessionSettingsRequest {
         kimi_effort: None,
+        gemini_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -132,6 +133,7 @@ fn non_opencode_sessions_reject_opencode_effort() {
             &session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -426,6 +428,7 @@ fn offline_opencode_effort_and_mode_changes_do_not_claim_agent_effective_state()
             &session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -494,6 +497,7 @@ fn offline_opencode_model_and_effort_change_defers_effort_membership_validation(
             &session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -748,6 +752,7 @@ fn persists_app_settings_and_applies_them_to_new_sessions() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
+            default_gemini_effort: None,
             default_codex_model: Some("gpt-5.5".to_owned()),
             default_claude_model: Some("claude-sonnet-4-5".to_owned()),
             default_cursor_model: Some("cursor-premium".to_owned()),
@@ -1048,6 +1053,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
+            default_gemini_effort: None,
             default_codex_model: Some("gpt-5.5".to_owned()),
             default_claude_model: None,
             default_cursor_model: None,
@@ -1068,6 +1074,7 @@ fn default_model_preference_canonicalizes_default_sentinel_case() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
+            default_gemini_effort: None,
             default_codex_model: Some(" DEFAULT ".to_owned()),
             default_claude_model: None,
             default_cursor_model: None,
@@ -1254,6 +1261,7 @@ fn update_app_settings_request_for_agent_model(
         default_opencode_approval_mode: None,
         default_kimi_approval_mode: None,
         default_kimi_effort: None,
+        default_gemini_effort: None,
         default_codex_model: (agent == Agent::Codex).then(|| model.clone()),
         default_claude_model: (agent == Agent::Claude).then(|| model.clone()),
         default_cursor_model: (agent == Agent::Cursor).then(|| model.clone()),
@@ -1447,6 +1455,7 @@ fn updates_cursor_session_model_settings() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -1507,6 +1516,7 @@ fn updates_codex_session_model_settings_without_restarting_runtime() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -1575,6 +1585,7 @@ fn updates_codex_reasoning_effort_without_restarting_runtime() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -1684,6 +1695,7 @@ fn normalizes_codex_reasoning_effort_when_switching_models() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -1775,6 +1787,7 @@ fn rejects_unsupported_codex_reasoning_effort_for_selected_model() {
         &created.session_id,
         UpdateSessionSettingsRequest {
             kimi_effort: None,
+            gemini_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1862,6 +1875,7 @@ fn accepts_codex_max_and_ultra_reasoning_efforts_for_supporting_model() {
                 &created.session_id,
                 UpdateSessionSettingsRequest {
                     kimi_effort: None,
+                    gemini_effort: None,
                     opencode_approval_mode: None,
                     kimi_approval_mode: None,
                     kimi_mode: None,
@@ -2015,6 +2029,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         &created.session_id,
         UpdateSessionSettingsRequest {
             kimi_effort: None,
+            gemini_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2073,6 +2088,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2107,6 +2123,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2145,6 +2162,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2178,6 +2196,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2202,6 +2221,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2233,6 +2253,7 @@ fn codex_fast_mode_is_catalog_gated_and_clears_on_unsupported_model_switch() {
         &created.session_id,
         UpdateSessionSettingsRequest {
             kimi_effort: None,
+            gemini_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2309,6 +2330,7 @@ fn updates_claude_session_model_settings_without_restarting_runtime() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2399,6 +2421,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
             &claude.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2480,6 +2503,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
             &cursor.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2538,6 +2562,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
             &opencode_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2596,6 +2621,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
             &codex_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2660,6 +2686,7 @@ fn installed_engram_agent_runtimes_rotate_on_identity_changes() {
             &gemini_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2795,6 +2822,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
             &session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2864,6 +2892,7 @@ fn runtime_model_sync_preserves_the_installed_engram_actor_identity() {
             &session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -2951,6 +2980,7 @@ fn updating_running_claude_session_to_default_model_requires_restart() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -3045,6 +3075,7 @@ fn updates_claude_effort_and_marks_runtime_for_restart() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,

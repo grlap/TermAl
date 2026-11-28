@@ -1700,6 +1700,11 @@ impl AppState {
         let normalized_remotes = request.remotes.map(normalize_remote_configs).transpose()?;
         // Also before any preference changes, so a rejected effort cannot
         // leave an earlier field of the same request applied.
+        let default_gemini_effort = request
+            .default_gemini_effort
+            .as_deref()
+            .map(normalize_gemini_effort)
+            .transpose()?;
         let default_kimi_effort = request
             .default_kimi_effort
             .as_deref()
@@ -1785,6 +1790,12 @@ impl AppState {
             }
         }
 
+        if let Some(effort) = default_gemini_effort {
+            if preferences.default_gemini_effort != effort {
+                preferences.default_gemini_effort = effort;
+                changed = true;
+            }
+        }
         if let Some(effort) = default_kimi_effort {
             if preferences.default_kimi_effort != effort {
                 preferences.default_kimi_effort = effort;

@@ -366,6 +366,7 @@ function makeLiveStateParams(
       setDefaultClaudeModel: noopSetter,
       setDefaultCursorModel: noopSetter,
       setDefaultGeminiModel: noopSetter,
+      setDefaultGeminiEffort: noopSetter,
       setDefaultKimiModel: noopSetter,
       setDefaultKimiApprovalMode: noopSetter,
       setDefaultKimiEffort: noopSetter,

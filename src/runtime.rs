@@ -515,6 +515,7 @@ pub(crate) struct AcpRuntimeState {
     pub(crate) capabilities: Option<AcpCapabilities>,
     pub(crate) current_session_id: Option<String>,
     pub(crate) is_loading_history: bool,
+    pub(crate) gemini_config: Option<Value>,
     /// Recent OpenCode authority/config snapshots reconciled from unsolicited
     /// updates. A bounded history breaks both exact duplicate and alternating
     /// A/B/A notification cycles without permanently suppressing a later

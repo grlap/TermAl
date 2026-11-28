@@ -816,6 +816,8 @@ pub(crate) struct Session {
     pub(crate) kimi_current_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) kimi_effort_options: Vec<SessionModelOption>,
+    #[serde(default, skip_serializing_if = "GeminiReasoning::is_empty")]
+    pub(crate) gemini_reasoning: GeminiReasoning,
     /// TermAl's Kimi permission policy; None reads as `ask`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) kimi_approval_mode: Option<KimiApprovalMode>,
@@ -957,6 +959,7 @@ impl Session {
             kimi_effort: self.kimi_effort.clone(),
             kimi_current_effort: self.kimi_current_effort.clone(),
             kimi_effort_options: self.kimi_effort_options.clone(),
+            gemini_reasoning: self.gemini_reasoning.clone(),
             kimi_approval_mode: self.kimi_approval_mode.clone(),
             kimi_mode: self.kimi_mode.clone(),
             kimi_current_mode: self.kimi_current_mode.clone(),
@@ -1036,6 +1039,8 @@ pub(crate) struct StateSessionSummary {
     pub(crate) kimi_current_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) kimi_effort_options: Vec<SessionModelOption>,
+    #[serde(default, skip_serializing_if = "GeminiReasoning::is_empty")]
+    pub(crate) gemini_reasoning: GeminiReasoning,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) kimi_approval_mode: Option<KimiApprovalMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2626,6 +2631,7 @@ pub(crate) struct UpdateAppSettingsRequest {
     /// Kimi sessions when they are created.
     #[serde(default)]
     pub(crate) default_kimi_effort: Option<String>,
+    pub(crate) default_gemini_effort: Option<String>,
     #[serde(rename = "defaultOpenCodeApprovalMode")]
     pub(crate) default_opencode_approval_mode: Option<OpenCodeApprovalMode>,
     pub(crate) default_codex_model: Option<String>,
@@ -2998,6 +3004,8 @@ pub(crate) struct FollowupDelegationRequest {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UpdateSessionSettingsRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) gemini_effort: Option<String>,
     pub(crate) kimi_effort: Option<String>,
     #[serde(default)]
     pub(crate) kimi_approval_mode: Option<KimiApprovalMode>,

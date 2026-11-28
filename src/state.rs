@@ -2717,6 +2717,7 @@ impl SessionRecord {
         self.retained_dedicated_owners
             .retain(|owner| !owner.tree.is_confirmed());
         self.runtime = SessionRuntime::None;
+        self.session.gemini_reasoning.clear_observation();
         self.engram_mcp_installed = None;
         // A runtime-started turn ends with its runtime.
         self.unmediated_claude_turn = None;

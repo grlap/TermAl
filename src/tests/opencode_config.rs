@@ -906,6 +906,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,

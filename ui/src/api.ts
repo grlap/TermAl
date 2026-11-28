@@ -782,6 +782,7 @@ export function updateAppSettings(payload: {
   defaultKimiModel?: string;
   defaultKimiApprovalMode?: KimiApprovalMode;
   defaultKimiEffort?: string;
+  defaultGeminiEffort?: string;
   defaultOpenCodeModel?: string;
   defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort?: CodexReasoningEffort;
@@ -1285,6 +1286,7 @@ export function updateSessionSettings(
     cursorMode?: CursorMode;
     claudeApprovalMode?: ClaudeApprovalMode;
     geminiApprovalMode?: GeminiApprovalMode;
+    geminiEffort?: string;
     opencodeApprovalMode?: OpenCodeApprovalMode;
     opencodeEffort?: string;
     kimiEffort?: string;
