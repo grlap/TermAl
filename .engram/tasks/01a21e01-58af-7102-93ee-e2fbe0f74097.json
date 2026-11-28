@@ -1,0 +1,38 @@
+{
+  "id": "01a21e01-58af-7102-93ee-e2fbe0f74097",
+  "external_ref": null,
+  "title": "Compare dormant receiver transition identity independent of JSON member order",
+  "outcome": "Valid predecessor rows with different JSON member order can use the dormant full-to-compact transition with exact retained identity.",
+  "acceptance": [
+    "A disposable successor fixture accepts an equivalent reordered predecessor identity on a full-to-compact update and refuses a changed identity.",
+    "Identity comparison preserves exact unsigned generation values and canonical identity fields.",
+    "The correction stays in the dormant successor fixture and carries no live migration or retirement writer."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "coordination",
+    "cross-machine",
+    "delivery",
+    "design-needed",
+    "design-pending",
+    "direct-prompt",
+    "macos",
+    "operator-ui-works",
+    "programmatic-dispatch",
+    "regression-investigation",
+    "review-follow-up"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a1be84-282e-7281-bab2-d870259bd249",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
