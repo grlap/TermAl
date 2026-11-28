@@ -877,6 +877,60 @@ describe("session model refresh controls", () => {
     expect(onRequestModelOptions).toHaveBeenCalledWith("gemini-session");
   });
 
+  it("discovers Gemini capabilities on first open of a restored session", async () => {
+    const onRequestModelOptions = vi.fn().mockResolvedValue("refreshed");
+    const restored = makeSession("gemini-restored", {
+      agent: "Gemini",
+      geminiReasoning: { requested: "high" },
+    });
+    render(
+      <GeminiPromptSettingsCard
+        paneId="pane-gemini"
+        session={restored}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={onRequestModelOptions}
+        onSessionSettingsChange={() => {}}
+      />
+    );
+    await waitFor(() => expect(onRequestModelOptions).toHaveBeenCalledWith(restored.id));
+    expect(onRequestModelOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { reset: undefined, label: "Keep current provider setting" },
+    { reset: "auto", label: "Provider default" },
+    { reset: "default", label: "Provider default" },
+  ])("labels the Gemini default choice as $label for $reset", ({ reset, label }) => {
+    const onSessionSettingsChange = vi.fn();
+    render(
+      <GeminiPromptSettingsCard
+        paneId="pane-gemini"
+        session={makeSession("gemini-effort", {
+          agent: "Gemini",
+          modelOptions: [{ label: "Auto", value: "auto" }],
+          geminiReasoning: {
+            requested: "high",
+            current: "high",
+            options: [
+              { label: "High", value: "high" },
+              ...(reset ? [{ label: "Automatic", value: reset }] : []),
+            ],
+          },
+        })}
+        isUpdating={false}
+        isRefreshingModelOptions={false}
+        modelOptionsError={null}
+        onRequestModelOptions={() => {}}
+        onSessionSettingsChange={onSessionSettingsChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Reasoning effort" }));
+    fireEvent.click(screen.getByRole("option", { name: label }));
+    expect(onSessionSettingsChange).toHaveBeenCalledWith("gemini-effort", "geminiEffort", "auto");
+  });
+
   it("shows inline refresh errors in the session card", () => {
     render(
       <GeminiPromptSettingsCard

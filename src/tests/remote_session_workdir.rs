@@ -5,6 +5,7 @@ use super::*;
 
 fn request(project_id: String, workdir: String) -> CreateSessionRequest {
     CreateSessionRequest {
+        gemini_inherited_effort: None,
         agent: Some(Agent::Codex),
         name: Some("Remote directory".to_owned()),
         workdir: Some(workdir),

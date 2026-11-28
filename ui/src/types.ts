@@ -218,6 +218,7 @@ export type AppPreferences = {
   defaultKimiModel?: string;
   defaultKimiApprovalMode?: KimiApprovalMode;
   defaultKimiEffort?: string;
+  defaultGeminiEffort?: string;
   defaultOpenCodeModel?: string;
   defaultOpenCodeApprovalMode?: OpenCodeApprovalMode;
   defaultCodexReasoningEffort: CodexReasoningEffort;
@@ -390,6 +391,7 @@ export type Session = {
   cursorMode?: CursorMode | null;
   claudeApprovalMode?: ClaudeApprovalMode | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
+  geminiReasoning?: GeminiReasoning;
   opencodeModel?: string | null;
   opencodeApprovalMode?: OpenCodeApprovalMode | null;
   opencodeEffort?: string | null;
@@ -1469,6 +1471,7 @@ export type SessionSettingsField =
   | "claudeEffort"
   | "cursorMode"
   | "geminiApprovalMode"
+  | "geminiEffort"
   | "opencodeEffort"
   | "kimiEffort"
   | "opencodeMode";
@@ -1501,4 +1504,11 @@ export type BoardListPage = {
   entries: BoardEntry[];
   nextAfterKey?: string | null;
   unchanged: boolean;
+};
+
+export type GeminiReasoning = {
+  requested?: string;
+  inherited?: string;
+  current?: string;
+  options?: SessionModelOption[];
 };

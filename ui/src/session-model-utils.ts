@@ -165,6 +165,7 @@ export function resolveAppPreferences(preferences?: AppPreferences | null) {
     defaultKimiModel: preferences?.defaultKimiModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultKimiApprovalMode: preferences?.defaultKimiApprovalMode ?? "ask",
     defaultKimiEffort: preferences?.defaultKimiEffort ?? "auto",
+    defaultGeminiEffort: preferences?.defaultGeminiEffort ?? "auto",
     defaultOpenCodeModel: preferences?.defaultOpenCodeModel ?? DEFAULT_MODEL_PREFERENCE,
     defaultOpenCodeApprovalMode: preferences?.defaultOpenCodeApprovalMode ?? "ask",
     defaultCodexReasoningEffort:

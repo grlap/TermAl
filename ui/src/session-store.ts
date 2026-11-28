@@ -31,11 +31,13 @@ import type {
   CodexReasoningEffort,
   CursorMode,
   GeminiApprovalMode,
+  GeminiReasoning,
   Message,
   Session,
   SessionModelOption,
 } from "./types";
 import type { DraftImageAttachment } from "./app-utils";
+import { sameGeminiReasoning } from "./session-reconcile";
 
 export type ComposerDraftAttachment = Readonly<{
   byteSize: number;
@@ -59,6 +61,7 @@ export type ComposerSessionSnapshot = Readonly<{
   cursorMode?: CursorMode | null;
   draftAttachments: readonly ComposerDraftAttachment[];
   geminiApprovalMode?: GeminiApprovalMode | null;
+  geminiReasoning?: GeminiReasoning;
   opencodeModel?: string | null;
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
@@ -94,6 +97,7 @@ export type SessionSummarySnapshot = Readonly<{
   cursorMode?: CursorMode | null;
   externalSessionId?: string | null;
   geminiApprovalMode?: GeminiApprovalMode | null;
+  geminiReasoning?: GeminiReasoning;
   opencodeModel?: string | null;
   opencodeEffort?: string | null;
   opencodeCurrentEffort?: string | null;
@@ -515,6 +519,7 @@ function buildComposerSessionSnapshot(
     previous.cursorMode === session.cursorMode &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
+    sameGeminiReasoning(previous.geminiReasoning, session.geminiReasoning) &&
     previous.opencodeModel === session.opencodeModel &&
     previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
@@ -549,6 +554,7 @@ function buildComposerSessionSnapshot(
     cursorMode: session.cursorMode,
     draftAttachments: nextDraftAttachments,
     geminiApprovalMode: session.geminiApprovalMode,
+    geminiReasoning: session.geminiReasoning,
     opencodeModel: session.opencodeModel,
     opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,
@@ -708,6 +714,7 @@ function buildSessionSummarySnapshot(
     previous.cursorMode === session.cursorMode &&
     previous.claudeApprovalMode === session.claudeApprovalMode &&
     previous.geminiApprovalMode === session.geminiApprovalMode &&
+    sameGeminiReasoning(previous.geminiReasoning, session.geminiReasoning) &&
     previous.opencodeModel === session.opencodeModel &&
     previous.opencodeApprovalMode === session.opencodeApprovalMode &&
     previous.opencodeEffort === session.opencodeEffort &&
@@ -741,6 +748,7 @@ function buildSessionSummarySnapshot(
     cursorMode: session.cursorMode,
     externalSessionId: session.externalSessionId,
     geminiApprovalMode: session.geminiApprovalMode,
+    geminiReasoning: session.geminiReasoning,
     opencodeModel: session.opencodeModel,
     opencodeApprovalMode: session.opencodeApprovalMode,
     opencodeEffort: session.opencodeEffort,

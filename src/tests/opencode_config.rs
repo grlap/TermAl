@@ -45,6 +45,7 @@ fn receive_acp_frame(
         .expect("pending requests mutex poisoned")
         .remove(id)
         .expect("flushed frame must already own its response sender")
+        .sender
 }
 
 #[test]
@@ -116,6 +117,7 @@ fn opencode_session_new_reapplies_explicit_model_effort_then_mode_before_ready()
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -324,6 +326,7 @@ fn opencode_resume_survives_explicit_config_rejection() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -445,6 +448,7 @@ fn opencode_missing_explicit_config_resets_to_auto_with_visible_notice() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -567,6 +571,7 @@ fn opencode_generic_resume_error_preserves_continuity_without_fallback() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -676,6 +681,7 @@ fn opencode_structured_missing_session_error_preserves_continuity_after_failure(
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -802,6 +808,7 @@ fn opencode_prompt_dispatch_does_not_inject_repository_instruction_files() {
 
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -884,6 +891,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -906,6 +914,7 @@ fn opencode_config_update_queues_explicit_selection_reconciliation() {
             &created.session_id,
             UpdateSessionSettingsRequest {
                 kimi_effort: None,
+                gemini_effort: None,
                 opencode_approval_mode: None,
                 kimi_approval_mode: None,
                 kimi_mode: None,
@@ -978,6 +987,7 @@ fn opencode_model_only_config_payload_preserves_absent_effort_and_mode_state() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1089,6 +1099,7 @@ fn opencode_invalid_agent_current_values_are_not_persisted() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1182,6 +1193,7 @@ fn opencode_config_update_reconciliation_failure_is_visible_and_nonfatal() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1303,6 +1315,7 @@ fn opencode_config_rejection_reverts_to_current_without_failing_reconcile() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1415,6 +1428,7 @@ fn opencode_duplicate_config_update_is_reconciled_once() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1556,6 +1570,7 @@ fn opencode_config_transport_failure_remains_runtime_fatal() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1620,6 +1635,7 @@ fn opencode_live_config_commits_only_after_protocol_acknowledgement() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1753,6 +1769,7 @@ fn opencode_combined_model_and_effort_update_waits_for_model_specific_options() 
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -1914,6 +1931,7 @@ fn opencode_dependent_rejection_after_model_change_resets_only_that_selection() 
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2086,6 +2104,7 @@ fn opencode_model_change_resets_missing_carried_effort_to_auto() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2236,6 +2255,7 @@ fn opencode_post_model_options_timeout_resets_dependents_without_failing_writer(
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2360,6 +2380,7 @@ fn opencode_post_model_timeout_preserves_and_applies_reported_dependent() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2579,7 +2600,7 @@ fn acp_config_update_kinds_share_one_classification() {
         assert!(!is_acp_config_update_kind("mode_update", agent));
         assert_eq!(
             is_acp_config_update_kind("config_option_update", agent),
-            agent == AcpAgent::Kimi
+            matches!(agent, AcpAgent::Gemini | AcpAgent::Kimi)
         );
     }
 }
@@ -2665,6 +2686,7 @@ fn opencode_live_config_rejection_preserves_authority_and_runtime() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2775,6 +2797,7 @@ fn opencode_config_command_skips_apply_after_scheduling_waiter_expires() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2847,6 +2870,7 @@ fn opencode_config_command_rejects_expired_execution_after_start_authorization()
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -2929,6 +2953,7 @@ fn opencode_config_command_requires_post_start_authorization() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

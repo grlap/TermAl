@@ -179,6 +179,7 @@ fn lightweight_state_agent_setup_failure_seam_rejects_session_creation() {
         ));
 
     let error = match state.create_session(CreateSessionRequest {
+        gemini_inherited_effort: None,
         opencode_approval_mode: None,
         kimi_approval_mode: None,
         kimi_mode: None,
@@ -207,6 +208,7 @@ fn lightweight_state_session_setup_does_not_require_the_optional_cli() {
     let state = test_app_state();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,
@@ -337,6 +339,7 @@ fn update_app_settings_refreshes_invalidated_agent_readiness_cache() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
+            default_gemini_effort: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -463,6 +466,7 @@ fn update_app_settings_sse_matches_api_response() {
             default_opencode_approval_mode: None,
             default_kimi_approval_mode: None,
             default_kimi_effort: None,
+            default_gemini_effort: None,
             default_codex_model: None,
             default_claude_model: None,
             default_cursor_model: None,
@@ -517,6 +521,7 @@ fn create_session_refreshes_agent_readiness_cache() {
     let mut delta_events = state.subscribe_delta_events();
     let created = state
         .create_session(CreateSessionRequest {
+            gemini_inherited_effort: None,
             opencode_approval_mode: None,
             kimi_approval_mode: None,
             kimi_mode: None,

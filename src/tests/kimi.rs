@@ -1007,6 +1007,7 @@ impl Write for KimiReplyWriter {
                 .unwrap()
                 .remove(id)
                 .unwrap()
+                .sender
                 .send(self.error.clone().map_or_else(
                     || Ok(self.reply.clone()),
                     |error| Err(AcpResponseError::Transport(error)),

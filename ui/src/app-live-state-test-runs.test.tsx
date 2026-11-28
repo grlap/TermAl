@@ -47,7 +47,7 @@ function params(): TestLiveStateParams {
     },
     preferenceSetters: {
       setDefaultCodexModel: set, setDefaultCodexSandboxMode: set, setDefaultCodexApprovalPolicy: set,
-      setDefaultClaudeModel: set, setDefaultCursorModel: set, setDefaultGeminiModel: set, setDefaultKimiModel: set,
+      setDefaultClaudeModel: set, setDefaultCursorModel: set, setDefaultGeminiModel: set, setDefaultGeminiEffort: set, setDefaultKimiModel: set,
       setDefaultKimiApprovalMode: set, setDefaultKimiEffort: set,
       setDefaultOpenCodeModel: set, setDefaultOpenCodeApprovalMode: set, setDefaultCodexReasoningEffort: set,
       setDefaultClaudeApprovalMode: set, setDefaultClaudeEffort: set, setRemoteConfigs: set,
