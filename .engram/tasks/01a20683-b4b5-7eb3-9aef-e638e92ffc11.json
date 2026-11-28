@@ -20,19 +20,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "completed",
+  "lifecycle": "open",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": {
-    "summary": "Delivered on origin/master at 233e9bbed272c59881523f793ac1b2dc731ba91e. I verified the remote tip and measured the same clean source_id again in the named R19 worktree. Opus2 recorded the fast-forward in a2c824de48444e7fb18557bf25d0b19f (#3166). R19 carries the byte-identical R18 pair under verified adoption ef3e02d0ab854e9287e482090239cbd8. The exact DL560 C6 FULL test-2e449c97-59d8-4119-8844-70908a6d7c80 passed, with the three recorded source boundaries equal to the independent measurement (1310bc4da6b241adbdcacb16dc7aa38e). Independent acceptance 49f87a8a28d942cf8f61b3b841c26724 passed all three criteria on R19 at cut 770, revision 6. The archived full evaluator output has SHA-256 C9C52A6D86EE8F475D715ABD50EEB2817AAEE3D3B8FB8756A7472D3EA5C781A8. The R18 and R19 author refs were deleted and verified absent at 2026-11-27 13:24:40 UTC. Installation is queued in Opus2's coordinated batch. There is no installation or runtime criterion on this item.",
-    "completed_at": "2026-11-27T13:25:06.915806500Z",
-    "actor": {
-      "actor_id": "greg/codex",
-      "actor_kind": "agent"
-    }
-  }
+  "completion": null
 }

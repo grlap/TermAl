@@ -7,7 +7,7 @@
     "Terminal-artifact retention during a rescan performs no observation-by-terminal Cartesian scan under StateInner. Its additional association work is proportional to changed or unfinished exact artifact associations, and an unchanged pass performs no association matching for unrelated completed history.",
     "Exact run, owner, worktree, run-directory, request identity and terminal-result digest predicates remain enforced. Retention preserves original execution identity, provenance, durable terminal proof, persistence-failure retry, alias ordering and current evidence authority; it creates no verification or durability acknowledgement.",
     "Deterministic witness tests show that adding unrelated completed runs and observations leaves terminal-retention candidate/matcher visits unchanged, while matching unfinished associations settle correctly and wrong-owner, wrong-directory or wrong-request associations are refused. Existing publication, registration, compaction and persistence boundary guards remain green without weaker oracles.",
-    "A source inventory explicitly records all remaining history-sized work under the rescan commit guard, including summary projection, compacted-metadata processing, conditional persistence/publication and direct compaction selection. Post-fix runtime evidence from the candidate build's real rescan path, gathered by an in-process probe on a representative history (a standalone server is not required), distinguishes the cold first scan from subsequent idle backstop scans and reports the observed StateInner holds honestly; the parent live criterion remains unmet until its own observation passes."
+    "A source inventory explicitly records all remaining history-sized work under the rescan commit guard, including summary projection, compacted-metadata processing, conditional persistence/publication and direct compaction selection. Post-fix runtime evidence distinguishes the cold first scan from subsequent idle backstop scans and reports observed holds honestly; the parent live criterion remains unmet until its own observation passes."
   ],
   "acceptance_bindings": [],
   "evaluation_mode": null,
@@ -20,19 +20,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "completed",
+  "lifecycle": "open",
   "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": {
-    "summary": "Landed 009173adf18a0347014b8296867aec25cc5cad25. Terminal-artifact retention now selects indexed unfinished exact matches and pending native registrations while preserving ordering, proof and retry behavior. Fresh WHOLE-5 review a40170b0c89b48f6a89faf3562c3bae7, exact DL560 FULL test-f7fdae91-29bd-47f5-9392-1671c6ada739 528e9175d3e043b1a9e7df98bceba2cc, and post-landing independent evaluation 5d4dca3157434789b18a078b8eec9617 4/4 PASS at cut 667. The in-process probe on 48 artifacts and observations measured a 25,566 us cold commit hold and 1,150/1,052/1,097 us idle holds, with one cold retention match and zero idle matches. Install and restart pending. Parent live-host measurement remains open.",
-    "completed_at": "2026-11-27T09:56:40.509254600Z",
-    "actor": {
-      "actor_id": "greg/codex",
-      "actor_kind": "agent"
-    }
-  }
+  "completion": null
 }

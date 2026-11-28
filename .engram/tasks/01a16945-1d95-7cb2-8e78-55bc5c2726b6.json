@@ -21,19 +21,12 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "completed",
+  "lifecycle": "open",
   "parent_id": "01a16645-9cbd-74a3-8334-1e85dae945d4",
   "child_requirement": "optional",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": {
-    "summary": "Corrected the SQLite session storage guide to require complete metadata units even for empty current-format stores and limit the absence exception to supported migration of a proven uninitialized predecessor. Landed as exact ee4292c495f2704e7dace01e38e481f7f5552a09 on origin/master.",
-    "completed_at": "2026-11-27T08:25:28.385434500Z",
-    "actor": {
-      "actor_id": "greg/codex",
-      "actor_kind": "agent"
-    }
-  }
+  "completion": null
 }
