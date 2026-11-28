@@ -1,0 +1,31 @@
+{
+  "id": "01a21b84-461e-7563-90c2-f5942f93b443",
+  "external_ref": null,
+  "title": "Exercise guardian-loss recovery during launcher preflight and UI setup",
+  "outcome": "Exercise guardian-loss recovery during launcher preflight and UI setup",
+  "acceptance": [
+    "Deterministic fixtures exercise a missing native ledger during required preflight, an optional toolchain probe, and UI dependency setup.",
+    "Each fixture demonstrates that the running entry retains both owner identities for later recovery of the native cleanup ledger."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "task",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "recovery",
+    "test-launcher",
+    "test-reliability",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21a03-ec0e-7b61-9300-bb9897b72de0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

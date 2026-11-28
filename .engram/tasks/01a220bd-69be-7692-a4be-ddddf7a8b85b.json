@@ -1,0 +1,39 @@
+{
+  "id": "01a220bd-69be-7692-a4be-ddddf7a8b85b",
+  "external_ref": null,
+  "title": "Expose Gemini reasoning effort and a default Gemini reasoning level in TermAl",
+  "outcome": "TermAl users can choose a supported reasoning level for a Gemini session and set a default for future Gemini sessions in Preferences. Proposed precedence: explicit session selection, then a saved Gemini default when supported by the selected model/runtime, then Provider default. Existing Gemini sessions keep their explicit selections and existing settings load compatibly. The controls use the actual Gemini runtime integration and accurately represent unavailable choices.",
+  "acceptance": [
+    "Gemini’s session options offer only supported reasoning levels, including Provider default when available. A selected value reaches the actual Gemini provider integration at its supported lifecycle point. Model/runtime changes and unsupported values produce an accurate disabled or fallback state.",
+    "Preferences persist a Gemini-specific default for new Gemini sessions. Explicit per-session choices take precedence; unset or unsupported defaults follow the provider. Existing settings and the existing Codex default remain compatible.",
+    "Focused behavioural checks cover persistence, new-session precedence and fallback, and the provider request or argv/config path used by the implementation.",
+    "The exact committed candidate has a clean independent review pair under TermAl’s review rules and is handed to integration with focused check results, artifact locators, and any provider-support limitations."
+  ],
+  "acceptance_bindings": [
+    {
+      "criterion": 3,
+      "requirement": {
+        "check_kind": "test"
+      }
+    }
+  ],
+  "evaluation_mode": null,
+  "kind": "feature",
+  "priority": 1,
+  "labels": [
+    "gemini",
+    "preferences",
+    "reasoning-effort",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

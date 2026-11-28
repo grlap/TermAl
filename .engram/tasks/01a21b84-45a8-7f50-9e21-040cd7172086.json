@@ -1,0 +1,31 @@
+{
+  "id": "01a21b84-45a8-7f50-9e21-040cd7172086",
+  "external_ref": null,
+  "title": "Disarm launcher cancellation when a run awaits owner recovery",
+  "outcome": "Disarm launcher cancellation when a run awaits owner recovery",
+  "acceptance": [
+    "A launcher run deferred for native-owner cleanup no longer accepts a cancellation request with the former launch key.",
+    "The disarmed snapshot still preserves owner identity and permits later recovery of the native cleanup ledger."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cancellation",
+    "greg-reported",
+    "recovery",
+    "test-launcher",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21a03-ec0e-7b61-9300-bb9897b72de0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

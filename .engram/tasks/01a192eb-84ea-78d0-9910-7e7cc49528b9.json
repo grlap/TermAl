@@ -19,7 +19,7 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": "01a171bc-9eb2-7012-b3d2-e2972bb21221",
   "child_requirement": "required",
   "prerequisites": [
@@ -28,5 +28,12 @@
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "summary_snapshot and commit-path state cuts no longer project session summaries under StateInner. A cut captures the header, copy-on-write session rows and a projector handle under the lock. Captures queue in capture order, and the first consumer projects every live earlier capture in order through the unchanged single-slot summary cache, after release, so Arc identity and diffs match under-lock projection. Full mutable session scans use read-only predicates, so a pending cut no longer deep-copies unwritten rows. Replaced or evicted snapshots are disposed off the producer locks within a bound of 4. The capture queue compacts dead entries amortized. Landed by Opus2 as a fast-forward of master 995515bc to 61072da8 after a clean round-4 review pair, Windows FULL test-92368790 PASS on the exact source_id, and an independent acceptance PASS (delegation-af5e3187). Follow-ups: w-c4a13cdf08cf (TestRunHistoryProjection under StateInner), w-089221790b26 (snapshot_from_inner action responses), and Lows w-551bcce1ce44 and w-f32a20ebec30. Install pending at Central; a restart is worthwhile at the coordinators' moment.",
+    "completed_at": "2026-11-27T06:41:41.860421200Z",
+    "actor": {
+      "actor_id": "dev/claude",
+      "actor_kind": "agent"
+    }
+  }
 }

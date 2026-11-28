@@ -1,0 +1,30 @@
+{
+  "id": "01a21b48-3d51-7112-b8e2-c8e66ac80a86",
+  "external_ref": null,
+  "title": "Bound cancel CLI reads of launcher request and result artifacts",
+  "outcome": "Bound cancel CLI reads of launcher request and result artifacts",
+  "acceptance": [
+    "The cancel CLI reads request.json and results.json through bounded regular-file handles and promptly refuses oversized or nonregular artifacts.",
+    "A legitimate active run still accepts an authenticated cancellation request."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "cancellation",
+    "greg-reported",
+    "test-launcher",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21a03-ec0e-7b61-9300-bb9897b72de0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

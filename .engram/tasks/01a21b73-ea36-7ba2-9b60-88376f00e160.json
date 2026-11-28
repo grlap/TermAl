@@ -1,0 +1,30 @@
+{
+  "id": "01a21b73-ea36-7ba2-9b60-88376f00e160",
+  "external_ref": null,
+  "title": "Use the shared hang guard for launcher lifecycle witnesses",
+  "outcome": "Use the shared hang guard for launcher lifecycle witnesses",
+  "acceptance": [
+    "The Git Bash capture and detached cancellation witnesses wait for observable lifecycle events within the shared launcher helper guard.",
+    "The witnesses still detect missing output, missing cancellation, or a stuck process on the documented guard."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "test-launcher",
+    "test-reliability",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21a03-ec0e-7b61-9300-bb9897b72de0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

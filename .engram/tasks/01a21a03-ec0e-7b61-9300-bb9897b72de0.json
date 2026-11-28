@@ -19,12 +19,19 @@
   ],
   "assigned_to": null,
   "deferred_until": null,
-  "lifecycle": "open",
+  "lifecycle": "completed",
   "parent_id": null,
   "child_requirement": "required",
   "prerequisites": [],
   "blockers": [],
   "superseded_by": null,
   "disposal_reason": null,
-  "completion": null
+  "completion": {
+    "summary": "Shipped supported per-run launcher cancellation for an owner or coordinator, including a stall-scoped stop requiring a current episode. Native Windows jobs and POSIX process groups reap the owned process tree, terminal results distinguish confirmed cancellation from unresolved cleanup, and stall/advisory timing cannot fail progressing work. Exact exclusive Windows FULL passed and the independent evaluation passed all three criteria. Master was fast-forwarded to the exact gated commit and independently confirmed. Integration reports installation pending for its next batch and the running host still awaits Greg's restart.",
+    "completed_at": "2026-11-27T12:03:20.813530700Z",
+    "actor": {
+      "actor_id": "dev/codex",
+      "actor_kind": "agent"
+    }
+  }
 }

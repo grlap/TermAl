@@ -1,0 +1,30 @@
+{
+  "id": "01a21c5b-3ad7-7bf2-b938-cef9491148ff",
+  "external_ref": null,
+  "title": "Strip launcher cancellation keys from maintenance helper environments",
+  "outcome": "Manual notify and recover must not pass a run’s cancellation capability to the TermAl notification helper when an operator still has the key in the shell environment.",
+  "acceptance": [
+    "The launcher’s notify and recover commands keep inherited cancellation keys out of notification subprocess environments, including case variants on Windows.",
+    "Focused regressions exercise both maintenance paths and confirm the authorized cancel command can still consume its key."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 3,
+  "labels": [
+    "greg-reported",
+    "review-follow-up",
+    "test-launcher",
+    "winb"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": "01a21a03-ec0e-7b61-9300-bb9897b72de0",
+  "child_requirement": "optional",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}

@@ -1,0 +1,30 @@
+{
+  "id": "01a21c44-5391-7df1-a31e-ce4d71a17be5",
+  "external_ref": null,
+  "title": "A verification follow-up can report binding_deferred after the same run's settlement notice",
+  "outcome": "A test-run wait follow-up delivered after a verification record has settled describes the current settlement or explicitly marks the earlier pending decision as historical. The owning session can identify the record and its run without mistaking a stale wait snapshot for an unresolved verification.",
+  "acceptance": [
+    "For the reported run and wait, trace the source of the pending follow-up and settled notice using the available host or artifact evidence, and distinguish observed delivery order from any inferred queueing race.",
+    "When a run's verification follow-up was formed while binding was deferred but the same registration settles before the follow-up is delivered, the later prompt either names the settled record or clearly labels the pending statement as historical. A genuinely unresolved binding still reports its pending reason.",
+    "Behavioural regression coverage exercises the ordering on one run and verifies the record identity and outcome remain unchanged, while preserving the existing wait and settlement delivery behavior for still-pending runs."
+  ],
+  "acceptance_bindings": [],
+  "evaluation_mode": null,
+  "kind": "bug",
+  "priority": 2,
+  "labels": [
+    "notifications",
+    "test-runs",
+    "verification"
+  ],
+  "assigned_to": null,
+  "deferred_until": null,
+  "lifecycle": "open",
+  "parent_id": null,
+  "child_requirement": "required",
+  "prerequisites": [],
+  "blockers": [],
+  "superseded_by": null,
+  "disposal_reason": null,
+  "completion": null
+}
